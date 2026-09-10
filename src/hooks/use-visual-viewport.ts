@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 
 export function useVisualViewportHeight(active = true) {
-  const [box, setBox] = useState(() => ({
-    height: typeof window === "undefined" ? 800 : window.innerHeight,
-    offsetTop: 0,
-  }));
+  const [box, setBox] = useState({ height: 800, offsetTop: 0 });
 
   useEffect(() => {
     if (!active) return;

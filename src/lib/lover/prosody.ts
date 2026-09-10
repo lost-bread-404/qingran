@@ -13,7 +13,7 @@ export type CueWord = {
   end?: number;
 };
 
-export type CueKind = "嗯" | "啊" | "呜" | "嗷" | "哼";
+export type CueKind = "嗯" | "啊" | "呜" | "嗷" | "哼" | "哈";
 
 type Island = {
   start: number;
@@ -112,7 +112,7 @@ export function voicedIslands(frames: ProsodyFrame[]): Island[] {
   const islands: Island[] = [];
   let cur: ProsodyFrame[] = [];
   for (const frame of frames) {
-    const on = cur.length ? frame.rms >= 0.006 : frame.rms >= 0.01;
+    const on = cur.length ? frame.rms >= 0.004 : frame.rms >= 0.007;
     if (on) {
       cur.push(frame);
       continue;
@@ -124,6 +124,14 @@ export function voicedIslands(frames: ProsodyFrame[]): Island[] {
   }
   if (cur.length) pushIsland(islands, cur);
   return islands;
+}
+
+export function hasCueEnergy(frames: ProsodyFrame[]): boolean {
+  const islands = voicedIslands(frames);
+  if (!islands.length) return false;
+  const dur = islands.reduce((sum, island) => sum + Math.max(0, island.end - island.start), 0);
+  const peak = Math.max(0, ...frames.map((f) => f.rms));
+  return dur >= 0.1 && peak >= 0.018;
 }
 
 function pushIsland(islands: Island[], frames: ProsodyFrame[]) {
@@ -177,7 +185,18 @@ export function classifyCue(frames: ProsodyFrame[]): CueKind {
   const startHz = avg(stable.slice(0, Math.max(1, Math.ceil(stable.length / 3))));
   const endHz = avg(stable.slice(-Math.max(1, Math.ceil(stable.length / 3))));
   const rising = startHz > 80 && endHz / startHz >= 1.15 && dur >= 0.22;
+  const unvoicedRatio = 1 - voiced.length / Math.max(1, frames.length);
+  const breathy = unvoicedRatio >= 0.5 && peak >= 0.016 && (bright >= 0.16 || centroid >= 600);
+  const sob =
+    falling &&
+    dur >= 0.16 &&
+    midHz > 0 &&
+    midHz < 320 &&
+    bright < 0.36 &&
+    peak < 0.11;
 
+  if (breathy) return "哈";
+  if (sob) return "呜";
   if (bright >= 0.3 || centroid >= 980 || (peak >= 0.07 && centroid >= 720)) return "啊";
   if (hum && dur >= 0.12 && !falling) return "嗯";
   if (
@@ -213,7 +232,18 @@ export function cuesFromProsody(frames: ProsodyFrame[]): string {
   for (const island of islands) {
     const cue = classifyCue(island.frames);
     const dur = island.end - island.start;
-    const n = cue === "哼" || cue === "嗷" ? 1 : dur >= 0.7 ? 3 : dur >= 0.28 ? 2 : 1;
+    const n =
+      cue === "哼" || cue === "嗷"
+        ? 1
+        : cue === "哈"
+          ? dur >= 0.55
+            ? 2
+            : 1
+          : dur >= 0.7
+            ? 3
+            : dur >= 0.28
+              ? 2
+              : 1;
     parts.push(cue.repeat(n));
   }
   return parts.join("");

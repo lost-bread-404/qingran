@@ -61,7 +61,8 @@ export function startRecorder(recorder: MediaRecorder, timeslice = 250) {
 export function micAudioConstraints(): MediaTrackConstraints {
   return {
     echoCancellation: true,
-    noiseSuppression: true,
+    // Keep breaths, sobs, and quiet cues — noise suppression wipes them.
+    noiseSuppression: false,
     autoGainControl: false,
     channelCount: 1,
   };

@@ -18,8 +18,8 @@ import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 
 export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing";
 
-const SPEECH_ON = 0.012;
-const SPEECH_HOLD = 0.007;
+const SPEECH_ON = 0.008;
+const SPEECH_HOLD = 0.005;
 const MIN_SPEECH_MS = 40;
 const SILENCE_MS = 2200;
 const FFT_SIZE = 2048;

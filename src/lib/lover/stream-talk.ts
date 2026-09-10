@@ -186,7 +186,7 @@ class LiveTts {
         for (const delta of this.queued) this.send(delta);
         this.queued = [];
       });
-      socket.on("message", (raw) => this.onMessage(raw));
+      socket.on("message", (raw: WebSocket.RawData) => this.onMessage(raw));
       socket.on("error", () => {
         this.failed = true;
         this.finishSocket();

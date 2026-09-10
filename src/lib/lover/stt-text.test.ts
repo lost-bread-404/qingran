@@ -12,7 +12,7 @@ import {
   shapeCueProsody,
   stripMarks,
 } from "./stt-text.ts";
-import type { ProsodyFrame } from "./prosody.ts";
+import { classifyCue, cuesFromProsody, type ProsodyFrame } from "./prosody.ts";
 
 function frame(partial: Partial<ProsodyFrame> & Pick<ProsodyFrame, "t" | "rms">): ProsodyFrame {
   return {
@@ -156,11 +156,65 @@ test("recoverCues does not invent 啊 or 嗷 over STT", () => {
   const ah = Array.from({ length: 8 }, (_, i) =>
     frame({ t: i * 0.04, rms: 0.09, centroid: 1300, bright: 0.42, hz: 240 }),
   );
-  assert.equal(recoverCues("", ah), "");
   assert.equal(recoverCues("嗯", ah), "嗯");
   assert.equal(recoverCues("哼，我才不要", ah), "哼，我才不要");
   assert.equal(finishHeard("嗯", "", undefined, ah).includes("啊") && pickTranscript("嗯", "") === "嗯", false);
   assert.equal(stripMarks(finishHeard("嗯", "", undefined, ah)), "嗯");
+});
+
+test("empty STT recovers cute / cry / pant from audio", () => {
+  const ah = Array.from({ length: 8 }, (_, i) =>
+    frame({ t: i * 0.04, rms: 0.09, centroid: 1300, bright: 0.42, hz: 240 }),
+  );
+  assert.match(recoverCues("", ah), /啊/);
+  assert.match(stripMarks(finishHeard("", "", undefined, ah)), /啊/);
+
+  const cry = Array.from({ length: 14 }, (_, i) =>
+    frame({
+      t: i * 0.04,
+      rms: 0.07 - i * 0.003,
+      hz: 190,
+      clarity: 0.88,
+      centroid: 520,
+      bright: 0.14,
+    }),
+  );
+  assert.equal(classifyCue(cry), "呜");
+  assert.match(cuesFromProsody(cry), /呜/);
+  assert.match(recoverCues("", cry), /呜/);
+  assert.match(stripMarks(finishHeard("", "", undefined, cry)), /呜/);
+
+  const pant: ProsodyFrame[] = [];
+  for (let burst = 0; burst < 3; burst += 1) {
+    const t0 = burst * 0.45;
+    for (let i = 0; i < 6; i += 1) {
+      pant.push(
+        frame({
+          t: t0 + i * 0.04,
+          rms: 0.04,
+          hz: 0,
+          clarity: 0.3,
+          centroid: 1400,
+          bright: 0.28,
+        }),
+      );
+    }
+    pant.push(frame({ t: t0 + 0.3, rms: 0.002, hz: 0, clarity: 0, centroid: 0, bright: 0 }));
+  }
+  assert.equal(classifyCue(pant.slice(0, 6)), "哈");
+  assert.match(cuesFromProsody(pant), /哈/);
+  assert.match(recoverCues("", pant), /哈/);
+  assert.match(stripMarks(finishHeard("", "", undefined, pant)), /哈/);
+});
+
+test("latin ASR guesses of vocalizations become 语气词", () => {
+  assert.equal(stripMarks(restoreSpeechText("ahh")), "啊");
+  assert.equal(stripMarks(restoreSpeechText("hmm")), "嗯");
+  assert.equal(stripMarks(restoreSpeechText("woo")), "呜");
+  assert.equal(stripMarks(restoreSpeechText("ha ha")), "哈哈");
+  assert.equal(stripMarks(restoreSpeechText("抽泣")), "呜呜");
+  assert.equal(stripMarks(restoreSpeechText("喘气")), "哈");
+  assert.equal(pickTranscript("sob", ""), "呜呜");
 });
 
 test("leading 哼 is left to STT, not rewritten by pitch", () => {
