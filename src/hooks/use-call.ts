@@ -1,0 +1,473 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  blobToBase64,
+  acquireMic,
+  currentMic,
+  getSpeechRecognitionCtor,
+  micUsable,
+  pauseMic,
+  pickRecorderMime,
+  setMicEnabled,
+  startRecorder,
+  usesBrowserStt,
+  type SpeechRecognitionLike,
+} from "@/lib/lover/audio";
+import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
+import { transcribeVoice } from "@/lib/lover/server";
+import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
+
+export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing";
+
+const SPEECH_ON = 0.012;
+const SPEECH_HOLD = 0.007;
+const MIN_SPEECH_MS = 40;
+const SILENCE_MS = 2200;
+const FFT_SIZE = 2048;
+
+type Options = {
+  onUtterance: (text: string) => Promise<void>;
+  prompt?: string;
+};
+
+export function useCall({ onUtterance, prompt }: Options) {
+  const [active, setActive] = useState(false);
+  const [phase, setPhase] = useState<CallPhase>("idle");
+  const [level, setLevel] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  const liveRef = useRef(false);
+  const deafRef = useRef(true);
+  const phaseRef = useRef<CallPhase>("idle");
+  const streamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const speechStartRef = useRef(0);
+  const lastVoiceRef = useRef(0);
+  const rafRef = useRef(0);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const onUtteranceRef = useRef(onUtterance);
+  const promptRef = useRef(prompt ?? "");
+  const noiseFloorRef = useRef(0.008);
+  const recRef = useRef<SpeechRecognitionLike | null>(null);
+  const finalTextRef = useRef("");
+  const interimRef = useRef("");
+  const framesRef = useRef<ProsodyFrame[]>([]);
+  const pitchTickRef = useRef(0);
+
+  useEffect(() => {
+    onUtteranceRef.current = onUtterance;
+  }, [onUtterance]);
+  useEffect(() => {
+    promptRef.current = prompt ?? "";
+  }, [prompt]);
+
+  const setPhaseBoth = (next: CallPhase) => {
+    phaseRef.current = next;
+    setPhase(next);
+  };
+
+  const teardownMedia = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+    try {
+      sourceRef.current?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    sourceRef.current = null;
+    analyserRef.current = null;
+    try {
+      recorderRef.current?.state === "recording" && recorderRef.current.stop();
+    } catch {
+      /* ignore */
+    }
+    recorderRef.current = null;
+    chunksRef.current = [];
+    pauseMic();
+    try {
+      ctxRef.current?.close();
+    } catch {
+      /* ignore */
+    }
+    ctxRef.current = null;
+    try {
+      recRef.current?.abort();
+    } catch {
+      /* ignore */
+    }
+    recRef.current = null;
+    finalTextRef.current = "";
+    interimRef.current = "";
+    setLevel(0);
+  }, []);
+
+  const hangup = useCallback(() => {
+    liveRef.current = false;
+    deafRef.current = true;
+    setActive(false);
+    setPhaseBoth("idle");
+    teardownMedia();
+    try {
+      void wakeLockRef.current?.release();
+    } catch {
+      /* ignore */
+    }
+    wakeLockRef.current = null;
+  }, [teardownMedia]);
+
+  const beginUtterance = useCallback(() => {
+    const stream = streamRef.current;
+    if (!stream || recorderRef.current) return;
+    chunksRef.current = [];
+    const mime = pickRecorderMime();
+    const recorder = mime
+      ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 128000 })
+      : new MediaRecorder(stream);
+    recorder.ondataavailable = (ev) => {
+      if (ev.data.size > 0) chunksRef.current.push(ev.data);
+    };
+    recorderRef.current = recorder;
+    try {
+      startRecorder(recorder);
+    } catch {
+      recorderRef.current = null;
+      return;
+    }
+    speechStartRef.current = performance.now();
+    lastVoiceRef.current = speechStartRef.current;
+    framesRef.current = [];
+    pitchTickRef.current = 0;
+    setPhaseBoth("speaking-you");
+  }, []);
+
+  const collectRecording = useCallback(async () => {
+    const recorder = recorderRef.current;
+    const mime = recorder?.mimeType || pickRecorderMime() || "audio/webm";
+    return new Promise<Blob | null>((resolve) => {
+      if (!recorder || recorder.state === "inactive") {
+        const parts = chunksRef.current.filter((b) => b.size > 0);
+        resolve(parts.length ? new Blob(parts, { type: mime }) : null);
+        return;
+      }
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        const parts = chunksRef.current.filter((b) => b.size > 0);
+        resolve(parts.length ? new Blob(parts, { type: mime }) : null);
+      };
+      const timer = window.setTimeout(finish, 1600);
+      recorder.onstop = () => {
+        window.clearTimeout(timer);
+        finish();
+      };
+      try {
+        recorder.stop();
+      } catch {
+        window.clearTimeout(timer);
+        finish();
+      }
+    });
+  }, []);
+
+  const flushUtterance = useCallback(async () => {
+    if (phaseRef.current !== "speaking-you") return;
+    setPhaseBoth("transcribing");
+    deafRef.current = true;
+    await new Promise((resolve) => window.setTimeout(resolve, 280));
+    const liveText = (finalTextRef.current || interimRef.current).trim();
+    const frames = framesRef.current.slice();
+    const blob = await collectRecording();
+    recorderRef.current = null;
+    chunksRef.current = [];
+    setMicEnabled(streamRef.current, false);
+    if (!liveRef.current) return;
+    finalTextRef.current = "";
+    interimRef.current = "";
+
+    let heard = "";
+    let words: { text?: string; start?: number; end?: number }[] = [];
+    if (blob && blob.size >= 40) {
+      try {
+        const result = await transcribeVoice({
+          data: {
+            audioBase64: await blobToBase64(blob),
+            mimeType: blob.type || "audio/webm",
+            prompt: promptRef.current,
+          },
+        });
+        if (result.ok) {
+          heard = result.text.trim();
+          words = result.words ?? [];
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    heard = finishHeard(heard, liveText, words, frames);
+    if (!liveRef.current) return;
+    if (!heard) {
+      setError("我没听清，再说一遍。");
+      deafRef.current = false;
+      setMicEnabled(streamRef.current, true);
+      setPhaseBoth("listening");
+      return;
+    }
+    setError(null);
+    setPhaseBoth("listening");
+    try {
+      await onUtteranceRef.current(heard);
+    } catch {
+      if (liveRef.current) {
+        deafRef.current = false;
+        setMicEnabled(streamRef.current, true);
+        setPhaseBoth("listening");
+      }
+    }
+  }, [collectRecording]);
+
+  const tick = useCallback(() => {
+    if (!liveRef.current) return;
+    const analyser = analyserRef.current;
+    if (analyser) {
+      const frame = sampleProsody(
+        analyser,
+        ctxRef.current?.sampleRate ?? 44100,
+        (performance.now() - speechStartRef.current) / 1000,
+        pitchTickRef.current % 2 === 0,
+      );
+      if (phaseRef.current === "speaking-you") {
+        pitchTickRef.current += 1;
+        framesRef.current.push(frame);
+      }
+      const rms = frame.rms;
+      noiseFloorRef.current = noiseFloorRef.current * 0.97 + rms * 0.03;
+      const floor = Math.max(0.006, noiseFloorRef.current);
+      const rising = rms > Math.max(SPEECH_ON, floor * 1.85);
+      setLevel(Math.min(1, rms * 8));
+      if (!deafRef.current && phaseRef.current === "listening" && rising) {
+        beginUtterance();
+      } else if (phaseRef.current === "speaking-you") {
+        const now = performance.now();
+        const voiced = rms > SPEECH_HOLD;
+        if (voiced) lastVoiceRef.current = now;
+        const spoken = now - speechStartRef.current;
+        const quiet = now - lastVoiceRef.current;
+        if (spoken >= MIN_SPEECH_MS && quiet >= SILENCE_MS && !voiced) {
+          void flushUtterance();
+        }
+      }
+    }
+    rafRef.current = requestAnimationFrame(tick);
+  }, [beginUtterance, flushUtterance]);
+
+  const startSpeechRec = () => {
+    if (!usesBrowserStt()) return;
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) return;
+    if (recRef.current) {
+      try {
+        recRef.current.start();
+      } catch {
+        /* already started */
+      }
+      return;
+    }
+    const rec = new Ctor();
+    rec.lang = "zh-CN";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.maxAlternatives = 3;
+    rec.onresult = (ev) => {
+      if (!liveRef.current || deafRef.current) return;
+      let addition = "";
+      let live = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
+        const piece = ev.results[i];
+        if (!piece) continue;
+        const alts: string[] = [];
+        for (let n = 0; n < piece.length; n += 1) alts.push(piece[n]?.transcript ?? "");
+        const alt = pickSpokenAlt(alts);
+        if (piece.isFinal) addition += alt;
+        else live += alt;
+      }
+      if (addition.trim()) finalTextRef.current = mergeSpeech(finalTextRef.current, addition);
+      const committed = finalTextRef.current;
+      const shown = live.trim()
+        ? mergeSpeech(committed, live)
+        : committed || live;
+      interimRef.current = shown.trim();
+    };
+    rec.onend = () => {
+      if (liveRef.current && !deafRef.current) {
+        try {
+          rec.start();
+        } catch {
+          /* Chrome restarts noisily */
+        }
+      }
+    };
+    recRef.current = rec;
+    try {
+      rec.start();
+    } catch {
+      /* already started */
+    }
+  };
+
+  const start = useCallback(async () => {
+    if (liveRef.current) return;
+    setError(null);
+    try {
+      const stream = await acquireMic();
+      streamRef.current = stream;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      const ctx = AudioCtx ? new AudioCtx() : null;
+      if (ctx?.state === "suspended") await ctx.resume();
+      if (ctx) {
+        ctxRef.current = ctx;
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = FFT_SIZE;
+        analyser.smoothingTimeConstant = 0.35;
+        source.connect(analyser);
+        sourceRef.current = source;
+        analyserRef.current = analyser;
+      }
+    } catch {
+      setError("麦克风被关掉了。打开权限再通话。");
+      hangup();
+      return;
+    }
+    liveRef.current = true;
+    deafRef.current = false;
+    setActive(true);
+    setPhaseBoth("listening");
+    setMicEnabled(streamRef.current, true);
+    startSpeechRec();
+    rafRef.current = requestAnimationFrame(tick);
+    try {
+      wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? null;
+    } catch {
+      /* ignore */
+    }
+  }, [hangup, tick]);
+
+  const deafen = useCallback(() => {
+    if (!liveRef.current) return;
+    deafRef.current = true;
+    setMicEnabled(streamRef.current, false);
+    if (phaseRef.current === "speaking-you") {
+      try {
+        recorderRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
+      recorderRef.current = null;
+      chunksRef.current = [];
+    }
+    setPhaseBoth("listening");
+  }, []);
+
+  const hear = useCallback(() => {
+    if (!liveRef.current) return;
+    deafRef.current = false;
+    setMicEnabled(streamRef.current, true);
+    setPhaseBoth("listening");
+    finalTextRef.current = "";
+    interimRef.current = "";
+    startSpeechRec();
+  }, []);
+
+  const revive = useCallback(async (opts?: { gesture?: boolean }) => {
+    if (!liveRef.current) return;
+    try {
+      if (ctxRef.current?.state === "closed") ctxRef.current = null;
+      else if (ctxRef.current?.state === "suspended") await ctxRef.current.resume();
+    } catch {
+      /* ignore */
+    }
+
+    let stream = currentMic() || (micUsable(streamRef.current) ? streamRef.current : null);
+    if (!micUsable(stream)) {
+      if (!opts?.gesture) return;
+      try {
+        stream = await acquireMic();
+      } catch {
+        setError("麦克风被关掉了。点电话再开一次。");
+        return;
+      }
+    }
+    streamRef.current = stream;
+
+    const AudioCtx =
+      window.AudioContext ||
+      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!ctxRef.current && AudioCtx) ctxRef.current = new AudioCtx();
+    try {
+      if (ctxRef.current?.state === "suspended") await ctxRef.current.resume();
+    } catch {
+      /* ignore */
+    }
+    if (ctxRef.current && stream) {
+      try {
+        sourceRef.current?.disconnect();
+      } catch {
+        /* ignore */
+      }
+      try {
+        const source = ctxRef.current.createMediaStreamSource(stream);
+        const analyser = ctxRef.current.createAnalyser();
+        analyser.fftSize = FFT_SIZE;
+        analyser.smoothingTimeConstant = 0.35;
+        source.connect(analyser);
+        sourceRef.current = source;
+        analyserRef.current = analyser;
+      } catch {
+        /* iOS can reject a second source until the next gesture */
+      }
+    }
+
+    if (phaseRef.current === "speaking-you") {
+      try {
+        recorderRef.current?.state === "recording" && recorderRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+      recorderRef.current = null;
+      chunksRef.current = [];
+      setPhaseBoth("listening");
+    }
+
+    if (!deafRef.current) {
+      setMicEnabled(streamRef.current, true);
+      startSpeechRec();
+    }
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    try {
+      wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? wakeLockRef.current;
+    } catch {
+      /* ignore */
+    }
+  }, [tick]);
+
+  useEffect(() => () => hangup(), [hangup]);
+
+  return {
+    active,
+    phase,
+    level,
+    error,
+    start,
+    hangup,
+    deafen,
+    hear,
+    revive,
+  };
+}
