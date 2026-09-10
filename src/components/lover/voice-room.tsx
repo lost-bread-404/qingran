@@ -340,24 +340,36 @@ export function VoiceRoom() {
       let gotAudio = false;
       const clips: Uint8Array<ArrayBuffer>[] = [];
       let clipMime = "audio/pcm;rate=24000";
-      let paint = 0;
       let persistAt = 0;
+      let paintHandle = 0;
+      let latestDisplay = "";
       const persistReply = (text: string) => {
         const display = stripSpeechTags(text);
         inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
         if (!display) return;
         void appendRoomMessage({ data: { ...reply, text: display } });
       };
-      const paintText = (text: string, force = false) => {
-        const display = stripSpeechTags(text);
-        const now = Date.now();
-        inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
-        if (!force && now - paint < 80) return;
-        paint = now;
+      const flushPaint = () => {
+        paintHandle = 0;
+        const display = latestDisplay;
         setMessages((prev) =>
           prev.map((m) => (m.id === reply.id ? { ...m, text: display } : m)),
         );
-        if (force || now - persistAt > 400) {
+      };
+      const paintText = (text: string, force = false) => {
+        const display = stripSpeechTags(text);
+        inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
+        latestDisplay = display;
+        if (force) {
+          if (paintHandle) cancelAnimationFrame(paintHandle);
+          paintHandle = 0;
+          flushPaint();
+          persistReply(text);
+          return;
+        }
+        if (!paintHandle) paintHandle = requestAnimationFrame(flushPaint);
+        const now = Date.now();
+        if (now - persistAt > 400) {
           persistAt = now;
           persistReply(text);
         }
@@ -376,6 +388,11 @@ export function VoiceRoom() {
             if (event.t === "text") {
               full += event.d;
               paintText(full);
+              return;
+            }
+            if (event.t === "text_end") {
+              full = event.speech || full;
+              paintText(full, true);
               return;
             }
             if (event.t === "done") {

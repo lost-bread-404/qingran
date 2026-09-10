@@ -12,7 +12,7 @@ import {
   shapeCueProsody,
   stripMarks,
 } from "./stt-text.ts";
-import { classifyCue, cuesFromProsody, type ProsodyFrame } from "./prosody.ts";
+import { classifyCue, cuesFromProsody, voicedIslands, type ProsodyFrame } from "./prosody.ts";
 
 function frame(partial: Partial<ProsodyFrame> & Pick<ProsodyFrame, "t" | "rms">): ProsodyFrame {
   return {
@@ -228,6 +228,93 @@ test("leading 哼 is left to STT, not rewritten by pitch", () => {
   const frames = [...heng, ...hush, ...speech];
   assert.equal(refineCueWords("嗯，我才不要", frames), "嗯，我才不要");
   assert.equal(refineCueWords("哼，我才不要", frames), "哼，我才不要");
+});
+
+function hush(t: number): ProsodyFrame {
+  return frame({ t, rms: 0.0015, hz: 0, clarity: 0, centroid: 0, bright: 0 });
+}
+
+function burst(t0: number, n: number, shape: Partial<ProsodyFrame> = {}): ProsodyFrame[] {
+  const out: ProsodyFrame[] = [];
+  for (let i = 0; i < n; i += 1) {
+    out.push(
+      frame({
+        rms: 0.05,
+        hz: 200,
+        clarity: 0.9,
+        centroid: 900,
+        bright: 0.3,
+        ...shape,
+        t: t0 + i * 0.04,
+      }),
+    );
+  }
+  return out;
+}
+
+test("complex moan / sob / pant sequence is not crushed to one keyword", () => {
+  const ahGlide = burst(0, 8, { centroid: 1200, bright: 0.42, hz: 180 });
+  ahGlide.forEach((f, i) => {
+    f.hz = 170 + i * 14;
+    f.rms = 0.055;
+  });
+  const ahFade = burst(0.55, 8, { centroid: 1100, bright: 0.38, hz: 220 });
+  ahFade.forEach((f, i) => {
+    f.rms = 0.07 - i * 0.006;
+  });
+  const sob = burst(1.15, 10, { centroid: 500, bright: 0.12, hz: 190, clarity: 0.88 });
+  sob.forEach((f, i) => {
+    f.rms = 0.07 - i * 0.004;
+  });
+  const hit = burst(1.75, 4, { centroid: 1300, bright: 0.45, hz: 240, rms: 0.12 });
+  const ng1 = burst(2.15, 7, { centroid: 480, bright: 0.1, hz: 160, clarity: 0.9, rms: 0.035 });
+  ng1.forEach((f, i) => {
+    f.rms = 0.04 - i * 0.003;
+  });
+  const ng2 = burst(2.65, 7, { centroid: 500, bright: 0.11, hz: 155, clarity: 0.9, rms: 0.034 });
+  ng2.forEach((f, i) => {
+    f.rms = 0.038 - i * 0.003;
+  });
+  const ng3 = burst(3.15, 9, { centroid: 520, bright: 0.12, hz: 150, clarity: 0.9 });
+  ng3.forEach((f, i) => {
+    f.hz = 150 + i * 8;
+    f.rms = 0.04;
+  });
+  const frames = [
+    ...ahGlide,
+    hush(0.42),
+    ...ahFade,
+    hush(0.98),
+    ...sob,
+    hush(1.62),
+    ...hit,
+    hush(1.98),
+    ...ng1,
+    hush(2.5),
+    ...ng2,
+    hush(3.0),
+    ...ng3,
+  ];
+
+  const track = cuesFromProsody(frames);
+  assert.ok(voicedIslands(frames).length >= 5, `islands=${voicedIslands(frames).length} track=${track}`);
+  assert.match(track, /啊/);
+  assert.match(track, /呜/);
+  assert.match(track, /嗯/);
+  assert.ok(stripMarks(track).length >= 6, track);
+
+  const crushed = finishHeard("啊", "", undefined, frames);
+  assert.ok(stripMarks(crushed).length >= 6, crushed);
+  assert.match(crushed, /啊/);
+  assert.match(crushed, /呜/);
+  assert.match(crushed, /嗯/);
+  assert.notEqual(stripMarks(crushed), "啊");
+  assert.match(crushed, /[～…！]/);
+});
+
+test("real words are not replaced by a moan track", () => {
+  const ah = burst(0, 8, { centroid: 1300, bright: 0.42, hz: 240 });
+  assert.equal(stripMarks(finishHeard("嗯，我想你了", "", undefined, ah)), "嗯我想你了");
 });
 
 
