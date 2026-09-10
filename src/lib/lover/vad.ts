@@ -1,7 +1,5 @@
 export const MIN_SPEECH_MS = 220;
-export const SILENCE_MS = 1200;
-export const TEXT_SILENCE_MS = 1000;
-export const MAX_UTTER_MS = 10_000;
+export const SILENCE_MS = 2000;
 export const VOICE_SPIKE_MS = 80;
 export const LISTEN_WARMUP_MS = 380;
 
@@ -44,9 +42,7 @@ export type EndpointInput = {
 
 export function shouldEndUtterance(input: EndpointInput) {
   const spoken = input.now - input.startAt;
-  if (spoken >= MAX_UTTER_MS) return true;
   if (spoken < MIN_SPEECH_MS) return false;
-  if (input.hasText && input.lastTextAt >= input.startAt && input.now - input.lastTextAt >= TEXT_SILENCE_MS) return true;
   if (input.voiced) return false;
-  return input.now - input.lastVoiceAt >= (input.hasText ? TEXT_SILENCE_MS : SILENCE_MS);
+  return input.now - input.lastVoiceAt >= SILENCE_MS;
 }
