@@ -140,7 +140,7 @@ function softenCue(raw: string): string {
 function mapVocalization(core: string): string | null {
   if (!core) return null;
   if (/^(抽泣|哭|哭声|抽噎|啜泣|呜咽)$/.test(core)) return "呜呜";
-  if (/^(喘气|喘息|气声|吸气)$/.test(core)) return "哈";
+  if (/^(喘气|喘息|气声|吸气)$/.test(core)) return "啊";
   const latin = core.replace(/[^A-Za-z]/g, "").toLowerCase();
   if (!latin) return null;
   const leftover = core.replace(/[A-Za-z]/g, "");
@@ -150,6 +150,7 @@ function mapVocalization(core: string): string | null {
 }
 
 function mapLatinCues(s: string): string | null {
+  if (/^(ha){2,}$/.test(s)) return "哈".repeat(Math.min(4, Math.round(s.length / 2)));
   const tokens = s.match(
     /(?:miao+|meow+|sob+|crying|cry|sniffle|sniff+|pant+|huff+|phew|awoo+|woo+|wu+|ooh+|ahh+|aha+|ha+|hmm+|hnn+|mhm+|mmhm+|uhhuh|hum+|hmph+|heng+|ng+|en+|uh+|er+|um+|oh+|ao+|aa+h*|[hm]+)/g,
   );
@@ -163,11 +164,9 @@ function mapLatinCues(s: string): string | null {
 function mapOneLatinCue(s: string): string | null {
   if (/^(miao+|meow+)$/.test(s)) return "喵";
   if (/^(sob+|cry|crying|sniff+|sniffle)$/.test(s)) return "呜呜";
-  if (/^(pant+|huff+|phew)$/.test(s)) return "哈";
-  if (/^(ha)+$/.test(s) || /^h+a+$/.test(s)) {
-    const n = /^(ha)+$/.test(s) ? s.length / 2 : s.length >= 4 ? 2 : 1;
-    return "哈".repeat(Math.min(4, Math.max(1, Math.round(n))));
-  }
+  if (/^(pant+|huff+|phew)$/.test(s)) return "啊";
+  if (/^(ha){2,}$/.test(s)) return "哈".repeat(Math.min(4, s.length / 2));
+  if (/^ha$/.test(s) || /^h+a+$/.test(s)) return "啊";
   if (/^(ah)+$/.test(s)) return "啊".repeat(Math.min(4, Math.max(1, s.length / 2)));
   if (/^a+h*$/.test(s)) return "啊".repeat(s.length >= 6 ? 3 : s.length >= 4 ? 2 : 1);
   if (/^(woo+|wu+|ooh+)$/.test(s)) return "呜".repeat(s.length >= 6 ? 3 : s.length >= 4 ? 2 : 1);
@@ -459,6 +458,7 @@ export function recoverCues(stt: string, frames?: ProsodyFrame[]): string {
   }
   if (!isMostlyFiller(existing) && leftoverMeaning(existing)) return existing;
   if (!fromAudio) return existing;
+  if (/^哈+$/.test(stripMarks(existing)) && !/^哈+$/.test(stripMarks(fromAudio))) return fromAudio;
   if (islands.length >= 3) return fromAudio;
   if (islands.length >= 2 && stripMarks(existing).length <= 4) return fromAudio;
   return existing;

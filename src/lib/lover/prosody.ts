@@ -217,32 +217,35 @@ export function classifyCue(frames: ProsodyFrame[]): CueKind {
   const endHz = avg(stable.slice(-Math.max(1, Math.ceil(stable.length / 3))));
   const rising = startHz > 80 && endHz / startHz >= 1.15 && dur >= 0.22;
   const unvoicedRatio = 1 - voiced.length / Math.max(1, frames.length);
-  const breathy = unvoicedRatio >= 0.5 && peak >= 0.016 && (bright >= 0.16 || centroid >= 600);
-  const sob =
+  const closed = (centroid > 0 && centroid < 740 && bright < 0.22) || hum;
+  const open = bright >= 0.26 || centroid >= 920 || (peak >= 0.06 && centroid >= 700);
+  const laugh =
+    unvoicedRatio >= 0.72 &&
+    dur <= 0.16 &&
+    peak >= 0.1 &&
+    bright >= 0.34 &&
+    centroid >= 1200 &&
+    !falling;
+
+  if (
     falling &&
     dur >= 0.16 &&
-    midHz > 0 &&
-    midHz < 320 &&
+    peak < 0.12 &&
     bright < 0.36 &&
-    peak < 0.11;
-
-  if (breathy) return "哈";
-  if (sob) return "呜";
-  if (bright >= 0.3 || centroid >= 980 || (peak >= 0.07 && centroid >= 720)) return "啊";
-  if (hum && dur >= 0.12 && !falling) return "嗯";
-  if (
-    dur <= 0.38 &&
-    peak < 0.085 &&
-    centroid < 1000 &&
-    bright < 0.32 &&
-    !hum &&
-    (clarity < 0.8 || falling || dur <= 0.18)
+    !open
   ) {
-    return "哼";
+    if (midHz > 80 && midHz < 310) return "呜";
+    if (unvoicedRatio >= 0.4 && centroid > 0 && centroid < 880) return "呜";
   }
+  if (closed && !open) {
+    if (dur <= 0.16 && peak < 0.065 && !hum) return "哼";
+    return "嗯";
+  }
+  if (laugh) return "哈";
+  if (rising && open && peak >= 0.05 && dur >= 0.22) return "嗷";
+  if (open || unvoicedRatio >= 0.4) return "啊";
   if (hum || (bright < 0.2 && centroid < 720 && peak < 0.055 && rms < 0.04)) return "嗯";
-  if (centroid < 1080 && bright < 0.38) return "呜";
-  if (rising && (bright >= 0.25 || centroid >= 850) && peak >= 0.04) return "嗷";
+  if (centroid < 1080 && bright < 0.38 && falling) return "呜";
   return "啊";
 }
 
@@ -275,8 +278,8 @@ export function cuesFromProsody(frames: ProsodyFrame[]): string {
 
 function cueRepeat(kind: CueKind, dur: number) {
   if (kind === "哼" || kind === "嗷") return 1;
-  if (kind === "哈") return dur >= 0.38 ? 2 : 1;
+  if (kind === "哈") return dur >= 0.28 ? 2 : 1;
   if (kind === "呜") return dur >= 0.2 ? 2 : 1;
-  if (dur >= 0.5) return 2;
+  if (dur >= 0.28) return 2;
   return 1;
 }

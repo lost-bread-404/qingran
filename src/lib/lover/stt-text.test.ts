@@ -185,8 +185,8 @@ test("empty STT recovers cute / cry / pant from audio", () => {
   assert.match(stripMarks(finishHeard("", "", undefined, cry)), /呜/);
 
   const pant: ProsodyFrame[] = [];
-  for (let burst = 0; burst < 3; burst += 1) {
-    const t0 = burst * 0.45;
+  for (let burstN = 0; burstN < 3; burstN += 1) {
+    const t0 = burstN * 0.45;
     for (let i = 0; i < 6; i += 1) {
       pant.push(
         frame({
@@ -201,10 +201,12 @@ test("empty STT recovers cute / cry / pant from audio", () => {
     }
     pant.push(frame({ t: t0 + 0.3, rms: 0.002, hz: 0, clarity: 0, centroid: 0, bright: 0 }));
   }
-  assert.equal(classifyCue(pant.slice(0, 6)), "哈");
-  assert.match(cuesFromProsody(pant), /哈/);
-  assert.match(recoverCues("", pant), /哈/);
-  assert.match(stripMarks(finishHeard("", "", undefined, pant)), /哈/);
+  assert.equal(classifyCue(pant.slice(0, 6)), "啊");
+  assert.match(cuesFromProsody(pant), /啊/);
+  assert.doesNotMatch(cuesFromProsody(pant), /哈/);
+  assert.match(recoverCues("", pant), /啊/);
+  assert.match(stripMarks(finishHeard("", "", undefined, pant)), /啊/);
+  assert.doesNotMatch(stripMarks(finishHeard("哈哈哈哈", "", undefined, pant)), /哈/);
 });
 
 test("latin ASR guesses of vocalizations become 语气词", () => {
@@ -213,7 +215,8 @@ test("latin ASR guesses of vocalizations become 语气词", () => {
   assert.equal(stripMarks(restoreSpeechText("woo")), "呜");
   assert.equal(stripMarks(restoreSpeechText("ha ha")), "哈哈");
   assert.equal(stripMarks(restoreSpeechText("抽泣")), "呜呜");
-  assert.equal(stripMarks(restoreSpeechText("喘气")), "哈");
+  assert.equal(stripMarks(restoreSpeechText("喘气")), "啊");
+  assert.equal(stripMarks(restoreSpeechText("pant")), "啊");
   assert.equal(pickTranscript("sob", ""), "呜呜");
 });
 
@@ -310,6 +313,7 @@ test("complex moan / sob / pant sequence is not crushed to one keyword", () => {
   assert.match(crushed, /嗯/);
   assert.notEqual(stripMarks(crushed), "啊");
   assert.match(crushed, /[～…！]/);
+  assert.doesNotMatch(crushed, /哈/);
 });
 
 test("real words are not replaced by a moan track", () => {
