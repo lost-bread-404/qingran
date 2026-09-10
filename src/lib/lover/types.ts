@@ -2,7 +2,7 @@ export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "steer" | "setting";
 
-export const CONTEXT_WINDOW = 60;
+export { CONTEXT_WINDOW } from "./memory/types";
 
 export type Profile = {
   systemPrompt: string;
@@ -20,13 +20,6 @@ export type ChatMessage = {
   createdAt: number;
   kind?: MessageKind;
   scanned?: boolean;
-};
-
-export type Memory = {
-  id: string;
-  text: string;
-  createdAt: number;
-  updatedAt: number;
 };
 
 export const DEFAULT_SYSTEM_PROMPT = `你就是清然。正在和 Rosie 语音通话。

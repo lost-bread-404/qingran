@@ -1,11 +1,8 @@
 import WebSocket from "ws";
-import { buildSystemPrompt, formatClock } from "./prompt";
 import { spokenForTts } from "./speech-tags";
 import { ttsRequestBody } from "./tts";
-import type { ChatMessage, Memory, Profile } from "./types";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
-const MAX_HISTORY = 60;
 const MAX_INPUT = 2000;
 const PCM_MIME = "audio/pcm;rate=24000";
 
@@ -17,11 +14,7 @@ export type TalkStreamEvent =
 
 export type TalkStreamInput = {
   text: string;
-  profile: Profile;
-  history: ChatMessage[];
-  memories: Memory[];
-  nowMs?: number;
-  timeZone?: string;
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
 };
 
 type Emit = (event: TalkStreamEvent) => void;
@@ -39,13 +32,9 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     return;
   }
 
-  const timeZone = data.timeZone || "UTC";
-  const clock = formatClock(data.nowMs || Date.now(), timeZone);
-  const system = buildSystemPrompt(data.profile, data.memories, clock, timeZone);
-  const history = data.history.slice(-MAX_HISTORY).map((m) => ({
-    role: m.role,
-    content: m.text,
-  }));
+  const packed = data.messages.length
+    ? data.messages
+    : [{ role: "user" as const, content: say }];
   const tts = new LiveTts(apiKey, emit);
 
   const res = await fetch("https://api.x.ai/v1/chat/completions", {
@@ -59,11 +48,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       temperature: 0.85,
       max_tokens: 550,
       stream: true,
-      messages: [
-        { role: "system", content: system },
-        ...history,
-        { role: "user", content: say },
-      ],
+      messages: packed,
     }),
     signal: AbortSignal.timeout(28_000),
   });

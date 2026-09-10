@@ -10,7 +10,6 @@ import { useCall } from "@/hooks/use-call";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { base64ToBytes, concatBytes } from "@/lib/lover/audio";
-import { addManualMemory, mergeFacts, replaceMemories, updateMemory } from "@/lib/lover/memory";
 import { dropIncompleteReplies } from "@/lib/lover/pair-messages";
 import {
   enqueuePlayback,
@@ -29,21 +28,26 @@ import {
   clearRoomMessages,
   deleteRoomMessages,
   loadRoom,
-  markRoomMessagesScanned,
-  saveRoomMemories,
   saveRoomProfile,
   updateRoomMessage,
 } from "@/lib/lover/room";
-import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
+import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { newId } from "@/lib/lover/storage";
 import { streamTalk } from "@/lib/lover/talk-client";
+import {
+  addClosedMemory,
+  editMemoryItem,
+  loadMemoryBoard,
+  removeMemoryItem,
+  tickMemoryBoard,
+} from "@/lib/lover/memory/api";
+import type { MemoryBoard } from "@/lib/lover/memory/types";
 import {
   CONTEXT_WINDOW,
   DEFAULT_PROFILE,
   lockedProfile,
   type ChatMessage,
-  type Memory,
   type Profile,
   type SessionStatus,
 } from "@/lib/lover/types";
@@ -62,7 +66,11 @@ function lastUserSay(messages: ChatMessage[]): ChatMessage | null {
 export function VoiceRoom() {
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [memories, setMemories] = useState<Memory[]>([]);
+  const [board, setBoard] = useState<MemoryBoard>({
+    portrait: "",
+    openEvent: null,
+    items: [],
+  });
   const [hydrated, setHydrated] = useState(false);
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [draft, setDraft] = useState("");
@@ -73,13 +81,11 @@ export function VoiceRoom() {
   const [editDraft, setEditDraft] = useState("");
   const busyRef = useRef(false);
   const turnRef = useRef(0);
-  const memoriesRef = useRef<Memory[]>([]);
   const profileRef = useRef(profile);
   const chatRef = useRef<ChatMessage[]>([]);
   const settingsOpenRef = useRef(false);
   const holdingRef = useRef(false);
   const finishingHoldRef = useRef(false);
-  const rememberLockRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const pendingIdsRef = useRef(new Set<string>());
   const inflightRef = useRef<{ id: string; createdAt: number; text: string } | null>(null);
@@ -94,9 +100,6 @@ export function VoiceRoom() {
   useEffect(() => {
     profileRef.current = profile;
   }, [profile]);
-  useEffect(() => {
-    memoriesRef.current = memories;
-  }, [memories]);
   useEffect(() => {
     chatRef.current = messages;
   }, [messages]);
@@ -129,8 +132,17 @@ export function VoiceRoom() {
         if (cancelled) return;
         setProfile(lockedProfile(room.profile));
         setMessages(room.messages);
-        setMemories(room.memories);
+        setBoard({
+          portrait: room.portrait,
+          openEvent: room.openEvent,
+          items: room.items,
+        });
         setHydrated(true);
+        void tickMemoryBoard({
+          data: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" },
+        }).then(() => {
+          void loadMemoryBoard().then(setBoard);
+        });
       })
       .catch(() => {
         if (cancelled) return;
@@ -148,19 +160,6 @@ export function VoiceRoom() {
     }, 400);
     return () => window.clearTimeout(timer);
   }, [hydrated, profile]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    const timer = window.setTimeout(() => {
-      void saveRoomMemories({ data: memories });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [hydrated, memories]);
-
-  useEffect(() => {
-    if (!hydrated || !profile.autoRemember) return;
-    void sweepOverflow();
-  }, [hydrated, messages.length, profile.autoRemember, profile.memoryCursor]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -219,53 +218,6 @@ export function VoiceRoom() {
       document.removeEventListener("touchstart", onGesture, { capture: true } as EventListenerOptions);
     };
   }, []);
-
-  async function sweepOverflow() {
-    if (rememberLockRef.current || !profileRef.current.autoRemember) return;
-    rememberLockRef.current = true;
-    try {
-      while (profileRef.current.autoRemember) {
-        const chat = chatRef.current;
-        const overflowAt = Math.max(0, chat.length - CONTEXT_WINDOW);
-        if (overflowAt === 0) break;
-        const overflow = chat.slice(0, overflowAt).filter((m) => !m.scanned);
-        if (overflow.length < 10) break;
-        const batch = overflow.slice(0, 24);
-        const result = await rememberOverflow({
-          data: {
-            overflow: batch,
-            lookahead: chat.slice(overflowAt, overflowAt + 10),
-            memories: memoriesRef.current,
-          },
-        });
-        if (!result.consumedIds.length) break;
-        const marked = new Set(result.consumedIds);
-        const nextChat = chatRef.current.map((m) =>
-          marked.has(m.id) ? { ...m, scanned: true } : m,
-        );
-        chatRef.current = nextChat;
-        setMessages(nextChat);
-        void markRoomMessagesScanned({ data: { ids: result.consumedIds } });
-        const cursor = result.consumedIds[result.consumedIds.length - 1];
-        if (cursor) {
-          const nextProfile = lockedProfile({ ...profileRef.current, memoryCursor: cursor });
-          profileRef.current = nextProfile;
-          setProfile(nextProfile);
-        }
-        if (result.fact) {
-          const nextMem = mergeFacts(
-            memoriesRef.current,
-            [result.fact],
-            result.at || Date.now(),
-          );
-          memoriesRef.current = nextMem;
-          setMemories(nextMem);
-        }
-      }
-    } finally {
-      rememberLockRef.current = false;
-    }
-  }
 
   function resumeCallListen(turn: number) {
     if (!callActiveRef.current) return;
@@ -368,7 +320,6 @@ export function VoiceRoom() {
             text: say,
             profile: lockedProfile(profileRef.current),
             history,
-            memories: memoriesRef.current,
             nowMs: Date.now(),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
           },
@@ -397,6 +348,11 @@ export function VoiceRoom() {
               } else if (display && !profileRef.current.muted) {
                 void playFull(reply.id, full, turn);
               }
+              void tickMemoryBoard({
+                data: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" },
+              }).then(() => {
+                void loadMemoryBoard().then(setBoard);
+              });
               return;
             }
             if (turn !== turnRef.current) return;
@@ -619,7 +575,7 @@ export function VoiceRoom() {
             <div>
               <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
               <p className="text-xs text-subtle">
-                {call.active ? "通话中" : memories.length > 0 ? `记得 ${memories.length} 件事` : "在"}
+                {call.active ? "通话中" : "在"}
               </p>
             </div>
           </div>
@@ -774,25 +730,27 @@ export function VoiceRoom() {
 
         <SettingsDrawer
           open={settingsOpen}
-          onOpenChange={setSettingsOpen}
+          onOpenChange={(next) => {
+            setSettingsOpen(next);
+            if (next) void loadMemoryBoard().then(setBoard);
+          }}
           profile={profile}
-          memories={memories}
+          board={board}
           onSave={(next) => setProfile(lockedProfile(next))}
-          onAddMemory={(text) => setMemories((list) => addManualMemory(list, text))}
-          onUpdateMemory={(id, text) => setMemories((list) => updateMemory(list, id, text))}
-          onDeleteMemory={(id) => setMemories((list) => list.filter((m) => m.id !== id))}
-          onConsolidateMemories={async () => {
-            const result = await consolidateMemories({
-              data: {
-                memories: memoriesRef.current,
-                nowMs: Date.now(),
-                timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-              },
+          onAddMemory={(text) => {
+            void addClosedMemory({ data: { text } }).then(() => {
+              void loadMemoryBoard().then(setBoard);
             });
-            if (!result.ok || result.facts.length === 0) return;
-            const next = replaceMemories(result.facts);
-            memoriesRef.current = next;
-            setMemories(next);
+          }}
+          onUpdateMemory={(item, text) => {
+            void editMemoryItem({ data: { id: item.id, layer: item.layer, text } }).then(() => {
+              void loadMemoryBoard().then(setBoard);
+            });
+          }}
+          onDeleteMemory={(item) => {
+            void removeMemoryItem({ data: { id: item.id, layer: item.layer } }).then(() => {
+              void loadMemoryBoard().then(setBoard);
+            });
           }}
           onClearChat={() => {
             setMessages([]);

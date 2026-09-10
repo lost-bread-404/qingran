@@ -1,4 +1,4 @@
-import type { ChatMessage, Memory, Profile } from "./types";
+import type { ChatMessage, Profile } from "./types";
 
 export type TalkStreamEvent =
   | { t: "text"; d: string }
@@ -10,7 +10,6 @@ export type TalkClientInput = {
   text: string;
   profile: Profile;
   history: ChatMessage[];
-  memories: Memory[];
   nowMs?: number;
   timeZone?: string;
 };

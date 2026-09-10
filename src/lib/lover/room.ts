@@ -1,25 +1,26 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import {
-  applyMemoryCursor,
-  lockedProfile,
-  type ChatMessage,
-  type Memory,
-  type MessageKind,
-  type Profile,
-} from "./types";
+  loadBoard,
+  decodeStoredMessage,
+  encodeStoredMessage,
+  withCursor,
+} from "./memory/store";
+import type { MemoryBoard } from "./memory/types";
+import { lockedProfile, type ChatMessage, type Profile } from "./types";
 import { sortConversation } from "./pair-messages";
 
 type Room = {
   profile: Profile;
   messages: ChatMessage[];
-  memories: Memory[];
-};
+} & MemoryBoard;
 
 const EMPTY_ROOM: Room = {
   profile: lockedProfile(),
   messages: [],
-  memories: [],
+  portrait: "",
+  openEvent: null,
+  items: [],
 };
 
 export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
@@ -33,42 +34,29 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
       role: ChatMessage["role"];
       body: string;
       created_at: number;
+      scanned: boolean | null;
     }>`
-      select id, role, body, created_at
+      select id, role, body, created_at, scanned
       from qingran_messages
       order by created_at asc,
         case when role = 'user' then 0 else 1 end asc,
         id asc
-    `;
-    const memories = await sql<{
-      id: string;
-      body: string;
-      created_at: number;
-      updated_at: number;
-    }>`
-      select id, body, created_at, updated_at
-      from qingran_memories
-      order by updated_at asc
     `;
 
     const raw = profileRow?.data;
     const stored =
       typeof raw === "string" ? (safeJson(raw) as Partial<Profile> | null) : raw;
     const profile = lockedProfile(stored ?? {});
+    const board = await loadBoard();
     return {
       profile,
       messages: sortConversation(
-        applyMemoryCursor(
-          messages.map((m) => decodeStoredMessage(m)),
+        withCursor(
+          messages.map((m) => decodeStoredMessage({ ...m, scanned: Boolean(m.scanned) })),
           profile.memoryCursor,
         ),
       ),
-      memories: memories.map((m) => ({
-        id: m.id,
-        text: m.body,
-        createdAt: Number(m.created_at),
-        updatedAt: Number(m.updated_at),
-      })),
+      ...board,
     } satisfies Room;
   } catch {
     return EMPTY_ROOM;
@@ -94,34 +82,17 @@ export const appendRoomMessage = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const sql = await getSql();
     await sql`
-      insert into qingran_messages (id, role, body, created_at)
-      values (${data.id}, ${data.role}, ${encodeStoredMessage(data).slice(0, 4000)}, ${data.createdAt})
+      insert into qingran_messages (id, role, body, created_at, scanned)
+      values (
+        ${data.id},
+        ${data.role},
+        ${encodeStoredMessage(data).slice(0, 4000)},
+        ${data.createdAt},
+        ${Boolean(data.scanned)}
+      )
       on conflict (id) do update
         set body = excluded.body
     `;
-    await sql`
-      delete from qingran_messages
-      where id in (
-        select id from qingran_messages
-        order by created_at desc
-        offset 240
-      )
-    `;
-    return { ok: true as const };
-  });
-
-export const saveRoomMemories = createServerFn({ method: "POST" })
-  .validator((input: Memory[]) => input)
-  .handler(async ({ data }) => {
-    const sql = await getSql();
-    const list = data.slice(-80);
-    await sql`delete from qingran_memories`;
-    for (const m of list) {
-      await sql`
-        insert into qingran_memories (id, body, created_at, updated_at)
-        values (${m.id}, ${m.text.slice(0, 240)}, ${m.createdAt}, ${m.updatedAt})
-      `;
-    }
     return { ok: true as const };
   });
 
@@ -162,57 +133,10 @@ export const markRoomMessagesScanned = createServerFn({ method: "POST" })
     if (!data.ids.length) return { ok: true as const };
     const sql = await getSql();
     for (const id of data.ids) {
-      const rows = await sql<{ body: string }>`
-        select body from qingran_messages where id = ${id}
-      `;
-      const body = rows[0]?.body;
-      if (!body || body.startsWith("⟦已扫⟧")) continue;
-      await sql`
-        update qingran_messages
-        set body = ${`⟦已扫⟧${body}`.slice(0, 4000)}
-        where id = ${id}
-      `;
+      await sql`update qingran_messages set scanned = true where id = ${id}`;
     }
     return { ok: true as const };
   });
-
-function encodeStoredMessage(msg: ChatMessage): string {
-  let text = msg.text;
-  if (msg.kind === "steer") text = `⟦走向⟧${text}`;
-  else if (msg.kind === "setting") text = `⟦设定⟧${text}`;
-  if (msg.scanned) text = `⟦已扫⟧${text}`;
-  return text;
-}
-
-function decodeStoredMessage(row: {
-  id: string;
-  role: ChatMessage["role"];
-  body: string;
-  created_at: number;
-}): ChatMessage {
-  let text = row.body;
-  let scanned = false;
-  let kind: MessageKind | undefined;
-  if (text.startsWith("⟦已扫⟧")) {
-    scanned = true;
-    text = text.slice(4);
-  }
-  if (text.startsWith("⟦走向⟧")) {
-    kind = "steer";
-    text = text.slice(4);
-  } else if (text.startsWith("⟦设定⟧")) {
-    kind = "setting";
-    text = text.slice(4);
-  }
-  return {
-    id: row.id,
-    role: row.role === "assistant" ? "assistant" : "user",
-    text,
-    createdAt: Number(row.created_at),
-    kind,
-    scanned: scanned || undefined,
-  };
-}
 
 function safeJson(raw: string): unknown {
   try {

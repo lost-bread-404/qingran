@@ -3,19 +3,19 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { DEFAULT_SYSTEM_PROMPT, type Memory, type Profile } from "@/lib/lover/types";
+import type { MemoryBoard, MemoryItem } from "@/lib/lover/memory/types";
+import { DEFAULT_SYSTEM_PROMPT, type Profile } from "@/lib/lover/types";
 import { cn } from "@/lib/utils";
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   profile: Profile;
-  memories: Memory[];
+  board: MemoryBoard;
   onSave: (next: Profile) => void;
   onAddMemory: (text: string) => void;
-  onUpdateMemory: (id: string, text: string) => void;
-  onDeleteMemory: (id: string) => void;
-  onConsolidateMemories: () => Promise<void>;
+  onUpdateMemory: (item: MemoryItem, text: string) => void;
+  onDeleteMemory: (item: MemoryItem) => void;
   onClearChat: () => void;
 };
 
@@ -23,12 +23,11 @@ export function SettingsDrawer({
   open,
   onOpenChange,
   profile,
-  memories,
+  board,
   onSave,
   onAddMemory,
   onUpdateMemory,
   onDeleteMemory,
-  onConsolidateMemories,
   onClearChat,
 }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
@@ -36,7 +35,6 @@ export function SettingsDrawer({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [tab, setTab] = useState<"prompt" | "memory">("prompt");
-  const [consolidating, setConsolidating] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -55,6 +53,9 @@ export function SettingsDrawer({
 
   if (!open) return null;
 
+  const patterns = board.items.filter((item) => item.layer === "l3");
+  const events = board.items.filter((item) => item.layer !== "l3");
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg">
       <header className="flex shrink-0 items-center gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
@@ -68,7 +69,7 @@ export function SettingsDrawer({
         </button>
         <div className="min-w-0 flex-1">
           <p className="font-display text-lg font-medium tracking-tight">清然</p>
-          <p className="text-xs text-subtle">改 prompt 或记忆，点保存才生效。</p>
+          <p className="text-xs text-subtle">宪章在 Prompt。记忆由后台整理，不写进人设。</p>
         </div>
         <Button type="button" size="pill" onClick={save}>
           保存
@@ -103,13 +104,33 @@ export function SettingsDrawer({
             onChange={(e) => setDraft(e.target.value)}
             maxLength={8000}
             className="min-h-0 flex-1 resize-none font-mono leading-relaxed"
-            placeholder="写给模型的 system prompt"
+            placeholder="写给模型的 system prompt（宪章）"
           />
-          <p className="mt-2 text-xs text-subtle">记忆会另外附上，不用写进这段。</p>
+          <p className="mt-2 text-xs text-subtle">这段是宪章，优先级最高。记忆系统不会改它。</p>
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
-          <div className="mx-auto flex w-full max-w-md flex-col gap-4">
+          <div className="mx-auto flex w-full max-w-md flex-col gap-5">
+            <section className="flex flex-col gap-2">
+              <p className="text-xs text-subtle">活画像</p>
+              {board.portrait.trim() ? (
+                <p className="whitespace-pre-wrap rounded-md bg-surface-2 px-3 py-2 text-sm leading-relaxed">
+                  {board.portrait}
+                </p>
+              ) : (
+                <p className="text-sm text-subtle">还没有。聊过一段时间后由后台整页重写，不追加。</p>
+              )}
+            </section>
+
+            {board.openEvent ? (
+              <section className="flex flex-col gap-2">
+                <p className="text-xs text-subtle">未结束（未入库）</p>
+                <p className="rounded-md bg-surface-2 px-3 py-2 text-sm leading-relaxed text-muted">
+                  {board.openEvent.draft}
+                </p>
+              </section>
+            ) : null}
+
             <form
               className="flex gap-2"
               onSubmit={(e) => {
@@ -123,77 +144,68 @@ export function SettingsDrawer({
               <Input
                 value={newFact}
                 onChange={(e) => setNewFact(e.target.value)}
-                placeholder="记下大事"
-                maxLength={120}
+                placeholder="记下已经结束的事"
+                maxLength={200}
               />
               <Button type="submit" size="pill" disabled={!newFact.trim()}>
                 记下
               </Button>
             </form>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={memories.length < 2 || consolidating}
-              onClick={() => {
-                setConsolidating(true);
-                void onConsolidateMemories().finally(() => setConsolidating(false));
-              }}
-            >
-              {consolidating ? "正在整理…" : "把碎记忆收成关键事件"}
-            </Button>
-            {memories.length === 0 ? (
-              <p className="text-sm text-subtle">还没有。只记会改往后相处的事。</p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {memories
-                  .slice()
-                  .reverse()
-                  .map((m) => (
-                    <li key={m.id} className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
-                      {editingId === m.id ? (
-                        <Input
-                          autoFocus
-                          value={editDraft}
-                          onChange={(e) => setEditDraft(e.target.value)}
-                          onBlur={() => {
-                            if (editingId) onUpdateMemory(editingId, editDraft);
-                            setEditingId(null);
-                          }}
-                          className="flex-1"
-                        />
-                      ) : (
-                        <span className="flex-1 leading-relaxed">
-                          <span className="mr-2 text-[11px] text-subtle">
-                            {formatMemoryTime(m.createdAt)}
-                          </span>
-                          {m.text}
-                        </span>
-                      )}
-                      {editingId === m.id ? null : (
-                        <button
-                          type="button"
-                          aria-label="改"
-                          onClick={() => {
-                            setEditingId(m.id);
-                            setEditDraft(m.text);
-                          }}
-                          className="mt-0.5 text-subtle hover:text-fg"
-                        >
-                          <Pencil className="size-4" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        aria-label="忘掉"
-                        onClick={() => onDeleteMemory(m.id)}
-                        className="mt-0.5 text-subtle hover:text-fg"
-                      >
-                        <X className="size-4" />
-                      </button>
-                    </li>
+
+            {patterns.length > 0 ? (
+              <section className="flex flex-col gap-2">
+                <p className="text-xs text-subtle">规律</p>
+                <ul className="flex flex-col gap-2">
+                  {patterns.map((item) => (
+                    <MemoryRow
+                      key={item.id}
+                      item={item}
+                      editing={editingId === item.id}
+                      editDraft={editDraft}
+                      onEditDraft={setEditDraft}
+                      onEditStart={() => {
+                        setEditingId(item.id);
+                        setEditDraft(item.text);
+                      }}
+                      onEditEnd={() => {
+                        if (editingId) onUpdateMemory(item, editDraft);
+                        setEditingId(null);
+                      }}
+                      onDelete={() => onDeleteMemory(item)}
+                    />
                   ))}
-              </ul>
-            )}
+                </ul>
+              </section>
+            ) : null}
+
+            <section className="flex flex-col gap-2">
+              <p className="text-xs text-subtle">已结束的事</p>
+              {events.length === 0 ? (
+                <p className="text-sm text-subtle">还没有入库的事件。未结束的事不会被切成一天一条。</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {events.map((item) => (
+                    <MemoryRow
+                      key={item.id}
+                      item={item}
+                      editing={editingId === item.id}
+                      editDraft={editDraft}
+                      onEditDraft={setEditDraft}
+                      onEditStart={() => {
+                        setEditingId(item.id);
+                        setEditDraft(item.text);
+                      }}
+                      onEditEnd={() => {
+                        if (editingId) onUpdateMemory(item, editDraft);
+                        setEditingId(null);
+                      }}
+                      onDelete={() => onDeleteMemory(item)}
+                    />
+                  ))}
+                </ul>
+              )}
+            </section>
+
             <Button variant="outline" onClick={onClearChat}>
               清空对话
             </Button>
@@ -201,6 +213,67 @@ export function SettingsDrawer({
         </div>
       )}
     </div>
+  );
+}
+
+function MemoryRow({
+  item,
+  editing,
+  editDraft,
+  onEditDraft,
+  onEditStart,
+  onEditEnd,
+  onDelete,
+}: {
+  item: MemoryItem;
+  editing: boolean;
+  editDraft: string;
+  onEditDraft: (text: string) => void;
+  onEditStart: () => void;
+  onEditEnd: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <li className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
+      {editing ? (
+        <Input
+          autoFocus
+          value={editDraft}
+          onChange={(e) => onEditDraft(e.target.value)}
+          onBlur={onEditEnd}
+          className="flex-1"
+        />
+      ) : (
+        <span className="flex-1 leading-relaxed">
+          <span className="mr-2 text-[11px] text-subtle">
+            {item.layer === "l3"
+              ? item.status === "dormant"
+                ? "休眠"
+                : "有效"
+              : formatMemoryTime(item.startedAt)}
+          </span>
+          {item.text}
+        </span>
+      )}
+      {editing ? null : (
+        <button
+          type="button"
+          aria-label="改"
+          onClick={onEditStart}
+          className="mt-0.5 text-subtle hover:text-fg"
+        >
+          <Pencil className="size-4" />
+        </button>
+      )}
+      <button
+        type="button"
+        aria-label="忘掉"
+        onClick={onDelete}
+        className="mt-0.5 text-subtle hover:text-fg"
+      >
+        <X className="size-4" />
+      </button>
+    </li>
   );
 }
 
