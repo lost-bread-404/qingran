@@ -597,7 +597,7 @@ export function VoiceRoom() {
           ? "她在想"
           : status === "speaking"
             ? "清然在说 · 点灯可打断"
-            : "你说，说完停两秒"
+            : "你说，说完停一下"
     : "";
 
   return (
@@ -749,7 +749,7 @@ export function VoiceRoom() {
                     ? status === "speaking"
                       ? "点灯打断 · 点按钮挂断"
                       : call.phase === "speaking-you"
-                        ? "说完停两秒再发给她"
+                        ? "说完停一下就会发给她"
                         : call.error || "通话中"
                     : recording
                       ? voice.interim.trim() || "松开发送"

@@ -15,13 +15,17 @@ import {
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { transcribeVoice } from "@/lib/lover/server";
 import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
+import {
+  LISTEN_WARMUP_MS,
+  isHoldVoiced,
+  isSpeechStart,
+  nextFloor,
+  shouldEndUtterance,
+  VOICE_SPIKE_MS,
+} from "@/lib/lover/vad";
 
 export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing";
 
-const SPEECH_ON = 0.008;
-const SPEECH_HOLD = 0.005;
-const MIN_SPEECH_MS = 40;
-const SILENCE_MS = 2200;
 const FFT_SIZE = 2048;
 
 type Options = {
@@ -43,6 +47,9 @@ export function useCall({ onUtterance, prompt }: Options) {
   const chunksRef = useRef<Blob[]>([]);
   const speechStartRef = useRef(0);
   const lastVoiceRef = useRef(0);
+  const voiceBurstAtRef = useRef(0);
+  const lastTextAtRef = useRef(0);
+  const listenReadyAtRef = useRef(0);
   const rafRef = useRef(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -136,8 +143,15 @@ export function useCall({ onUtterance, prompt }: Options) {
       recorderRef.current = null;
       return;
     }
-    speechStartRef.current = performance.now();
-    lastVoiceRef.current = speechStartRef.current;
+    const now = performance.now();
+    speechStartRef.current = now;
+    lastVoiceRef.current = now;
+    voiceBurstAtRef.current = now;
+    if (!lastTextAtRef.current || now - lastTextAtRef.current > 400) {
+      finalTextRef.current = "";
+      interimRef.current = "";
+      lastTextAtRef.current = 0;
+    }
     framesRef.current = [];
     pitchTickRef.current = 0;
     setPhaseBoth("speaking-you");
@@ -165,6 +179,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         finish();
       };
       try {
+        recorder.requestData?.();
         recorder.stop();
       } catch {
         window.clearTimeout(timer);
@@ -173,11 +188,27 @@ export function useCall({ onUtterance, prompt }: Options) {
     });
   }, []);
 
+  const abortUtterance = useCallback(() => {
+    try {
+      recorderRef.current?.state === "recording" && recorderRef.current.stop();
+    } catch {
+      /* ignore */
+    }
+    recorderRef.current = null;
+    chunksRef.current = [];
+    framesRef.current = [];
+    finalTextRef.current = "";
+    interimRef.current = "";
+    lastTextAtRef.current = 0;
+    listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
+    setPhaseBoth("listening");
+  }, []);
+
   const flushUtterance = useCallback(async () => {
     if (phaseRef.current !== "speaking-you") return;
     setPhaseBoth("transcribing");
     deafRef.current = true;
-    await new Promise((resolve) => window.setTimeout(resolve, 280));
+    await new Promise((resolve) => window.setTimeout(resolve, 180));
     const liveText = (finalTextRef.current || interimRef.current).trim();
     const frames = framesRef.current.slice();
     const blob = await collectRecording();
@@ -187,6 +218,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     if (!liveRef.current) return;
     finalTextRef.current = "";
     interimRef.current = "";
+    lastTextAtRef.current = 0;
 
     let heard = "";
     let words: { text?: string; start?: number; end?: number }[] = [];
@@ -213,6 +245,7 @@ export function useCall({ onUtterance, prompt }: Options) {
       setError("我没听清，再说一遍。");
       deafRef.current = false;
       setMicEnabled(streamRef.current, true);
+      listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
       setPhaseBoth("listening");
       return;
     }
@@ -224,6 +257,7 @@ export function useCall({ onUtterance, prompt }: Options) {
       if (liveRef.current) {
         deafRef.current = false;
         setMicEnabled(streamRef.current, true);
+        listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
         setPhaseBoth("listening");
       }
     }
@@ -232,37 +266,67 @@ export function useCall({ onUtterance, prompt }: Options) {
   const tick = useCallback(() => {
     if (!liveRef.current) return;
     const analyser = analyserRef.current;
+    const now = performance.now();
     if (analyser) {
+      const speaking = phaseRef.current === "speaking-you";
       const frame = sampleProsody(
         analyser,
         ctxRef.current?.sampleRate ?? 44100,
-        (performance.now() - speechStartRef.current) / 1000,
+        (now - speechStartRef.current) / 1000,
         pitchTickRef.current % 2 === 0,
       );
-      if (phaseRef.current === "speaking-you") {
+      if (speaking) {
         pitchTickRef.current += 1;
         framesRef.current.push(frame);
       }
       const rms = frame.rms;
-      noiseFloorRef.current = noiseFloorRef.current * 0.97 + rms * 0.03;
-      const floor = Math.max(0.006, noiseFloorRef.current);
-      const rising = rms > Math.max(SPEECH_ON, floor * 1.85);
+      noiseFloorRef.current = nextFloor(noiseFloorRef.current, rms, speaking);
+      const floor = noiseFloorRef.current;
+      const rising = isSpeechStart(rms, floor, frame.clarity, frame.bright);
       setLevel(Math.min(1, rms * 8));
-      if (!deafRef.current && phaseRef.current === "listening" && rising) {
+      if (
+        !deafRef.current &&
+        phaseRef.current === "listening" &&
+        now >= listenReadyAtRef.current &&
+        rising
+      ) {
         beginUtterance();
-      } else if (phaseRef.current === "speaking-you") {
-        const now = performance.now();
-        const voiced = rms > SPEECH_HOLD;
-        if (voiced) lastVoiceRef.current = now;
-        const spoken = now - speechStartRef.current;
-        const quiet = now - lastVoiceRef.current;
-        if (spoken >= MIN_SPEECH_MS && quiet >= SILENCE_MS && !voiced) {
-          void flushUtterance();
+      } else if (speaking) {
+        const voiced = isHoldVoiced(rms, floor);
+        if (voiced) {
+          if (!voiceBurstAtRef.current) voiceBurstAtRef.current = now;
+          if (now - voiceBurstAtRef.current >= VOICE_SPIKE_MS) lastVoiceRef.current = now;
+        } else {
+          voiceBurstAtRef.current = 0;
+        }
+        const hasText = Boolean((finalTextRef.current || interimRef.current).trim());
+        if (
+          shouldEndUtterance({
+            now,
+            startAt: speechStartRef.current,
+            lastVoiceAt: lastVoiceRef.current,
+            voiced,
+            hasText,
+            lastTextAt: lastTextAtRef.current,
+          })
+        ) {
+          const spoken = now - speechStartRef.current;
+          if (!hasText && spoken < 500) abortUtterance();
+          else void flushUtterance();
         }
       }
+    } else if (phaseRef.current === "speaking-you") {
+      shouldEndUtterance({
+        now,
+        startAt: speechStartRef.current,
+        lastVoiceAt: lastVoiceRef.current,
+        voiced: false,
+        hasText: Boolean((finalTextRef.current || interimRef.current).trim()),
+        lastTextAt: lastTextAtRef.current,
+      }) && void flushUtterance();
     }
     rafRef.current = requestAnimationFrame(tick);
-  }, [beginUtterance, flushUtterance]);
+  }, [abortUtterance, beginUtterance, flushUtterance]);
 
   const startSpeechRec = () => {
     if (!usesBrowserStt()) return;
@@ -300,6 +364,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         ? mergeSpeech(committed, live)
         : committed || live;
       interimRef.current = shown.trim();
+      if ((addition || live).trim()) lastTextAtRef.current = performance.now();
     };
     rec.onend = () => {
       if (liveRef.current && !deafRef.current) {
@@ -346,6 +411,8 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     liveRef.current = true;
     deafRef.current = false;
+    noiseFloorRef.current = 0.008;
+    listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
     setActive(true);
     setPhaseBoth("listening");
     setMicEnabled(streamRef.current, true);
@@ -381,6 +448,8 @@ export function useCall({ onUtterance, prompt }: Options) {
     setPhaseBoth("listening");
     finalTextRef.current = "";
     interimRef.current = "";
+    lastTextAtRef.current = 0;
+    listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
     startSpeechRec();
   }, []);
 
@@ -446,6 +515,7 @@ export function useCall({ onUtterance, prompt }: Options) {
 
     if (!deafRef.current) {
       setMicEnabled(streamRef.current, true);
+      listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
       startSpeechRec();
     }
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
