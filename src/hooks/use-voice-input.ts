@@ -6,6 +6,8 @@ import {
   isAppleTouch,
   pauseMic,
   pickRecorderMime,
+  primeAudioSession,
+  resumeOrReplaceContext,
   startRecorder,
   stopRecognition,
   usesBrowserStt,
@@ -83,21 +85,17 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
   useEffect(() => () => teardownMedia(), [teardownMedia]);
 
-  const startPulse = useCallback((stream: MediaStream) => {
+  const startPulse = useCallback(async (stream: MediaStream) => {
     framesRef.current = [];
     const t0 = performance.now();
-    const Ctor =
-      window.AudioContext ||
-      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctor) return;
-    const ctx = new Ctor();
+    const ctx = await resumeOrReplaceContext(null);
+    if (!ctx) return;
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
     analyser.smoothingTimeConstant = 0.2;
     source.connect(analyser);
     analyseRef.current = { ctx, source };
-    const data = new Uint8Array(analyser.fftSize);
     let n = 0;
     const tick = () => {
       const frame = sampleProsody(analyser, ctx.sampleRate, (performance.now() - t0) / 1000, n % 2 === 0);
@@ -117,6 +115,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
     interimRef.current = "";
     finalTextRef.current = "";
     chunksRef.current = [];
+    primeAudioSession();
 
     if (!recorderSupported && !speechSupported) {
       setMicReady(false);
@@ -126,11 +125,12 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
     try {
       if (recorderSupported) {
-        const stream = await acquireMic();
+        const stream = await acquireMic({ force: isAppleTouch() });
         if (session !== sessionRef.current) return;
         mediaRef.current = stream;
         setMicReady(true);
-        startPulse(stream);
+        await startPulse(stream);
+        if (session !== sessionRef.current) return;
 
         const mime = pickRecorderMime();
         const recorder = mime
@@ -183,19 +183,29 @@ export function useVoiceInput({ lang, prompt }: Options) {
         }
       };
       rec.onend = () => {
-        if (recordingRef.current && session === sessionRef.current && !isAppleTouch()) {
-          try {
-            rec.start();
-          } catch {
-            /* Chrome restarts noisily */
-          }
+        if (recordingRef.current && session === sessionRef.current) {
+          window.setTimeout(() => {
+            if (!recordingRef.current || session !== sessionRef.current) return;
+            try {
+              rec.start();
+            } catch {
+              /* Chrome restarts noisily */
+            }
+          }, isAppleTouch() ? 160 : 0);
         }
       };
       recRef.current = rec;
       try {
         rec.start();
       } catch {
-        /* already started */
+        window.setTimeout(() => {
+          if (!recordingRef.current || session !== sessionRef.current) return;
+          try {
+            rec.start();
+          } catch {
+            /* already started */
+          }
+        }, 180);
       }
     }
 
@@ -255,7 +265,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
     setStatus("idle");
     return heard;
-  }, [lang, status, teardownMedia]);
+  }, [status, teardownMedia]);
 
   const cancel = useCallback(() => {
     stopLockRef.current = false;

@@ -1,3 +1,5 @@
+import { resumeAudioContext } from "@/lib/lover/audio-session";
+
 const SILENCE =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
@@ -16,14 +18,34 @@ const liveSources = new Set<AudioBufferSourceNode>();
 const sampleQueue: Float32Array[] = [];
 let idleWaiters: Array<() => void> = [];
 
+function audioCtor() {
+  return (
+    window.AudioContext ||
+    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  );
+}
+
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
-  const Ctor =
-    window.AudioContext ||
-    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  const Ctor = audioCtor();
   if (!Ctor) return null;
-  if (ctx && ctx.state === "closed") ctx = null;
+  if (ctx && (ctx.state as string) === "closed") ctx = null;
   if (!ctx) ctx = new Ctor();
+  return ctx;
+}
+
+function replaceCtx() {
+  if (ctx) {
+    try {
+      void ctx.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  ctx = null;
+  const Ctor = typeof window === "undefined" ? null : audioCtor();
+  if (!Ctor) return null;
+  ctx = new Ctor();
   return ctx;
 }
 
@@ -98,7 +120,7 @@ export async function unlockPlayback() {
   const el = getPlaybackElement();
   const audioCtx = getCtx();
   try {
-    if (audioCtx?.state === "suspended") await audioCtx.resume();
+    if (audioCtx) await resumeAudioContext(audioCtx);
   } catch {
     /* ignore */
   }
@@ -127,26 +149,33 @@ export function stopPlayback() {
 }
 
 export async function resumeAudio() {
-  const audioCtx = getCtx();
+  let audioCtx = getCtx();
+  if (!audioCtx) return;
+  let ok = false;
   try {
-    if (audioCtx?.state === "suspended") await audioCtx.resume();
+    ok = await resumeAudioContext(audioCtx);
   } catch {
-    /* ignore */
+    ok = false;
   }
-  if (!audioCtx || audioCtx.state === "closed") return;
-  if (audioCtx.state === "running") {
-    try {
-      getPlaybackElement().muted = false;
-    } catch {
-      /* ignore */
+  if (!ok) {
+    killSources();
+    audioCtx = replaceCtx();
+    if (audioCtx) {
+      try {
+        ok = await resumeAudioContext(audioCtx);
+      } catch {
+        ok = audioCtx.state === "running";
+      }
     }
-    return;
   }
   try {
-    if (audioCtx.state === "suspended") await audioCtx.resume();
+    const el = getPlaybackElement();
+    el.muted = false;
+    el.volume = 1;
   } catch {
     /* ignore */
   }
+  if (!audioCtx || audioCtx.state !== "running") return;
   try {
     const frames = Math.max(1, Math.floor(audioCtx.sampleRate * 0.04));
     const buffer = audioCtx.createBuffer(1, frames, audioCtx.sampleRate);
@@ -154,13 +183,6 @@ export async function resumeAudio() {
     src.buffer = buffer;
     src.connect(audioCtx.destination);
     src.start();
-  } catch {
-    /* ignore */
-  }
-  try {
-    const el = getPlaybackElement();
-    el.muted = false;
-    el.volume = 1;
   } catch {
     /* ignore */
   }
@@ -246,7 +268,7 @@ function flushScheduled(gen: number) {
   const audioCtx = getCtx();
   if (!audioCtx || gen !== playGen) return;
   try {
-    if (audioCtx.state === "suspended") void audioCtx.resume();
+    if (audioContextNeedsResumeLocal(audioCtx.state)) void audioCtx.resume();
   } catch {
     /* ignore */
   }
@@ -263,6 +285,11 @@ function flushScheduled(gen: number) {
     buffer.getChannelData(0).set(chunk);
     scheduleBuffer(buffer, audioCtx, gen);
   }
+}
+
+function audioContextNeedsResumeLocal(state: AudioContextState) {
+  const value = state as string;
+  return value === "suspended" || value === "interrupted";
 }
 
 function scheduleBuffer(buffer: AudioBuffer, audioCtx: AudioContext, gen: number) {
@@ -285,7 +312,7 @@ async function decodeBytes(bytes: Uint8Array<ArrayBuffer>): Promise<AudioBuffer 
   const audioCtx = getCtx();
   if (!audioCtx) return null;
   try {
-    if (audioCtx.state === "suspended") await audioCtx.resume();
+    await resumeAudioContext(audioCtx);
     const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
     return await audioCtx.decodeAudioData(copy);
   } catch {

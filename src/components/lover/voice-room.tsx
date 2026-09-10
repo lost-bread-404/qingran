@@ -37,6 +37,7 @@ import {
 import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { newId } from "@/lib/lover/storage";
+import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import {
   CONTEXT_WINDOW,
@@ -190,33 +191,27 @@ export function VoiceRoom() {
       });
     };
     const wake = () => {
-      if (document.visibilityState === "hidden") {
-        persistInflight();
-        return;
-      }
       void kickAudio();
       reviveRef.current();
     };
-    const onHide = () => persistInflight();
     const onGesture = () => {
       void kickAudio();
       reviveRef.current(true);
     };
-    document.addEventListener("visibilitychange", wake);
-    window.addEventListener("pageshow", wake);
-    window.addEventListener("focus", wake);
-    window.addEventListener("pagehide", onHide);
-    window.addEventListener("beforeunload", onHide);
+    const stopLife = listenAppLifecycle({
+      onForeground: wake,
+      onBackground: persistInflight,
+    });
+    window.addEventListener("beforeunload", persistInflight);
     document.addEventListener("pointerdown", onGesture, { capture: true });
     document.addEventListener("touchstart", onGesture, { capture: true });
+    document.addEventListener("click", onGesture, { capture: true });
     return () => {
-      document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("pageshow", wake);
-      window.removeEventListener("focus", wake);
-      window.removeEventListener("pagehide", onHide);
-      window.removeEventListener("beforeunload", onHide);
+      stopLife();
+      window.removeEventListener("beforeunload", persistInflight);
       document.removeEventListener("pointerdown", onGesture, { capture: true } as EventListenerOptions);
       document.removeEventListener("touchstart", onGesture, { capture: true } as EventListenerOptions);
+      document.removeEventListener("click", onGesture, { capture: true } as EventListenerOptions);
     };
   }, []);
 
@@ -605,6 +600,23 @@ export function VoiceRoom() {
       className="room-bg fixed inset-x-0 flex flex-col overflow-hidden"
       style={{ top: viewport.offsetTop, height: viewport.height }}
     >
+      {call.active && call.needsTap ? (
+        <button
+          type="button"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-bg/85 px-8 text-center"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void kickAudio();
+            void unlockPlayback();
+            void call.revive({ gesture: true });
+          }}
+        >
+          <div className="lamp-orb size-14 rounded-full" aria-hidden />
+          <p className="mt-5 font-display text-xl">我在</p>
+          <p className="mt-2 text-sm text-subtle">点一下，接着说</p>
+        </button>
+      ) : null}
       <div className="mx-auto flex h-full min-h-0 w-full max-w-lg flex-col overflow-hidden">
         <header className="relative z-10 flex shrink-0 items-center justify-between bg-bg/80 px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm">
           <div className="flex items-center gap-3">

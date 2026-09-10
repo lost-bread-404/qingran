@@ -16,7 +16,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts src/lib/lover/speech-tags.test.ts src/lib/lover/stt-text.test.ts src/lib/lover/pair-messages.test.ts src/lib/lover/vad.test.ts",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts src/lib/lover/speech-tags.test.ts src/lib/lover/stt-text.test.ts src/lib/lover/pair-messages.test.ts src/lib/lover/vad.test.ts src/lib/lover/audio-session.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

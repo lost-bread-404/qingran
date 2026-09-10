@@ -3,15 +3,21 @@ import {
   blobToBase64,
   acquireMic,
   currentMic,
+  getAudioSession,
   getSpeechRecognitionCtor,
+  isAppleTouch,
   micUsable,
+  onMicEvent,
   pauseMic,
   pickRecorderMime,
+  primeAudioSession,
+  resumeOrReplaceContext,
   setMicEnabled,
   startRecorder,
   usesBrowserStt,
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
+import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { transcribeVoice } from "@/lib/lover/server";
 import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
@@ -27,6 +33,7 @@ import {
 export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing";
 
 const FFT_SIZE = 2048;
+const REVIVE_GAPS = [80, 280, 800];
 
 type Options = {
   onUtterance: (text: string) => Promise<void>;
@@ -38,6 +45,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const [phase, setPhase] = useState<CallPhase>("idle");
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [needsTap, setNeedsTap] = useState(false);
 
   const liveRef = useRef(false);
   const deafRef = useRef(true);
@@ -63,6 +71,9 @@ export function useCall({ onUtterance, prompt }: Options) {
   const interimRef = useRef("");
   const framesRef = useRef<ProsodyFrame[]>([]);
   const pitchTickRef = useRef(0);
+  const revivingRef = useRef(false);
+  const tickRef = useRef<() => void>(() => undefined);
+  const fromBackgroundRef = useRef(false);
 
   useEffect(() => {
     onUtteranceRef.current = onUtterance;
@@ -95,17 +106,17 @@ export function useCall({ onUtterance, prompt }: Options) {
     chunksRef.current = [];
     pauseMic();
     try {
-      ctxRef.current?.close();
-    } catch {
-      /* ignore */
-    }
-    ctxRef.current = null;
-    try {
       recRef.current?.abort();
     } catch {
       /* ignore */
     }
     recRef.current = null;
+    try {
+      void ctxRef.current?.close();
+    } catch {
+      /* ignore */
+    }
+    ctxRef.current = null;
     finalTextRef.current = "";
     interimRef.current = "";
     setLevel(0);
@@ -115,6 +126,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     liveRef.current = false;
     deafRef.current = true;
     setActive(false);
+    setNeedsTap(false);
     setPhaseBoth("idle");
     teardownMedia();
     try {
@@ -328,18 +340,42 @@ export function useCall({ onUtterance, prompt }: Options) {
     rafRef.current = requestAnimationFrame(tick);
   }, [abortUtterance, beginUtterance, flushUtterance]);
 
-  const startSpeechRec = () => {
+  tickRef.current = tick;
+
+  const hookAnalyser = (stream: MediaStream, ctx: AudioContext) => {
+    try {
+      sourceRef.current?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    analyser.smoothingTimeConstant = 0.35;
+    source.connect(analyser);
+    sourceRef.current = source;
+    analyserRef.current = analyser;
+  };
+
+  const startSpeechRec = (replace = false) => {
     if (!usesBrowserStt()) return;
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) return;
-    if (recRef.current) {
+    if (recRef.current && !replace) {
       try {
         recRef.current.start();
       } catch {
-        /* already started */
+        /* already started, or the instance died */
       }
       return;
     }
+    try {
+      recRef.current?.abort();
+    } catch {
+      /* ignore */
+    }
+    recRef.current = null;
+
     const rec = new Ctor();
     rec.lang = "zh-CN";
     rec.continuous = true;
@@ -360,49 +396,160 @@ export function useCall({ onUtterance, prompt }: Options) {
       }
       if (addition.trim()) finalTextRef.current = mergeSpeech(finalTextRef.current, addition);
       const committed = finalTextRef.current;
-      const shown = live.trim()
-        ? mergeSpeech(committed, live)
-        : committed || live;
+      const shown = live.trim() ? mergeSpeech(committed, live) : committed || live;
       interimRef.current = shown.trim();
       if ((addition || live).trim()) lastTextAtRef.current = performance.now();
     };
+    rec.onerror = (ev) => {
+      if (ev.error === "not-allowed") {
+        setNeedsTap(true);
+        setError("麦克风被关掉了。点一下继续。");
+      }
+    };
     rec.onend = () => {
-      if (liveRef.current && !deafRef.current) {
+      if (!liveRef.current || deafRef.current) return;
+      if (recRef.current !== rec) return;
+      window.setTimeout(() => {
+        if (!liveRef.current || deafRef.current) return;
+        if (recRef.current !== rec) return;
         try {
           rec.start();
         } catch {
-          /* Chrome restarts noisily */
+          startSpeechRec(true);
         }
-      }
+      }, isAppleTouch() ? 160 : 0);
     };
     recRef.current = rec;
     try {
       rec.start();
     } catch {
-      /* already started */
+      window.setTimeout(() => {
+        if (!liveRef.current || deafRef.current) return;
+        if (recRef.current !== rec) return;
+        try {
+          rec.start();
+        } catch {
+          setNeedsTap(true);
+        }
+      }, 180);
     }
   };
+
+  const mediaHealthy = () => {
+    const ctx = ctxRef.current;
+    return micUsable(streamRef.current) && Boolean(ctx && ctx.state === "running" && analyserRef.current);
+  };
+
+  const reviveOnce = async (opts?: { gesture?: boolean }) => {
+    if (!liveRef.current) return false;
+    primeAudioSession();
+
+    try {
+      ctxRef.current = await resumeOrReplaceContext(ctxRef.current);
+    } catch {
+      /* ignore */
+    }
+
+    let stream = currentMic() || (micUsable(streamRef.current) ? streamRef.current : null);
+    const dead = !micUsable(stream);
+    const replace = dead || Boolean(!opts?.gesture && isAppleTouch() && fromBackgroundRef.current);
+    if (dead || replace) {
+      try {
+        stream = await acquireMic({ force: true });
+      } catch {
+        return false;
+      }
+    }
+    if (!stream) return false;
+    streamRef.current = stream;
+
+    if (!ctxRef.current || (ctxRef.current.state as string) === "closed") {
+      ctxRef.current = await resumeOrReplaceContext(null);
+    }
+    if (ctxRef.current && stream) {
+      try {
+        hookAnalyser(stream, ctxRef.current);
+      } catch {
+        ctxRef.current = await resumeOrReplaceContext(null);
+        if (ctxRef.current) {
+          try {
+            hookAnalyser(stream, ctxRef.current);
+          } catch {
+            return false;
+          }
+        }
+      }
+    }
+
+    if (phaseRef.current === "speaking-you") {
+      try {
+        recorderRef.current?.state === "recording" && recorderRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+      recorderRef.current = null;
+      chunksRef.current = [];
+      setPhaseBoth("listening");
+    }
+
+    if (!deafRef.current) {
+      setMicEnabled(streamRef.current, true);
+      listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
+      startSpeechRec(replace);
+    }
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tickRef.current);
+    try {
+      wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? wakeLockRef.current;
+    } catch {
+      /* ignore */
+    }
+    return mediaHealthy();
+  };
+
+  const revive = useCallback(async (opts?: { gesture?: boolean }) => {
+    if (!liveRef.current) return;
+    if (revivingRef.current && !opts?.gesture) return;
+    revivingRef.current = true;
+    try {
+      if (!opts?.gesture) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      let ok = await reviveOnce(opts);
+      if (!opts?.gesture) {
+        for (const gap of REVIVE_GAPS) {
+          if (!liveRef.current || ok) break;
+          await new Promise((resolve) => window.setTimeout(resolve, gap));
+          if (!liveRef.current) return;
+          ok = await reviveOnce(opts);
+        }
+      }
+      if (!liveRef.current) return;
+      if (ok) {
+        fromBackgroundRef.current = false;
+        setNeedsTap(false);
+        setError(null);
+      } else {
+        setNeedsTap(true);
+      }
+    } finally {
+      revivingRef.current = false;
+    }
+  }, []);
 
   const start = useCallback(async () => {
     if (liveRef.current) return;
     setError(null);
+    setNeedsTap(false);
+    primeAudioSession();
     try {
-      const stream = await acquireMic();
+      const stream = await acquireMic({ force: true });
       streamRef.current = stream;
-      const AudioCtx =
-        window.AudioContext ||
-        (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      const ctx = AudioCtx ? new AudioCtx() : null;
-      if (ctx?.state === "suspended") await ctx.resume();
+      const ctx = await resumeOrReplaceContext(null);
       if (ctx) {
         ctxRef.current = ctx;
-        const source = ctx.createMediaStreamSource(stream);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = FFT_SIZE;
-        analyser.smoothingTimeConstant = 0.35;
-        source.connect(analyser);
-        sourceRef.current = source;
-        analyserRef.current = analyser;
+        hookAnalyser(stream, ctx);
       }
     } catch {
       setError("麦克风被关掉了。打开权限再通话。");
@@ -416,7 +563,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     setActive(true);
     setPhaseBoth("listening");
     setMicEnabled(streamRef.current, true);
-    startSpeechRec();
+    startSpeechRec(true);
     rafRef.current = requestAnimationFrame(tick);
     try {
       wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? null;
@@ -450,82 +597,51 @@ export function useCall({ onUtterance, prompt }: Options) {
     interimRef.current = "";
     lastTextAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
-    startSpeechRec();
+    startSpeechRec(true);
   }, []);
 
-  const revive = useCallback(async (opts?: { gesture?: boolean }) => {
-    if (!liveRef.current) return;
+  useEffect(() => {
+    if (!active) return;
+    const stopMicWatch = onMicEvent((event) => {
+      if (!liveRef.current) return;
+      if (event === "ended" || event === "mute") void revive();
+      if (event === "unmute") void revive();
+    });
+    const stopLife = listenAppLifecycle({
+      onForeground: () => {
+        if (liveRef.current) void revive();
+      },
+      onBackground: () => {
+        fromBackgroundRef.current = true;
+      },
+    });
+    const session = getAudioSession();
+    const onSession = () => {
+      if (!liveRef.current) return;
+      if (session?.state === "interrupted") setNeedsTap(true);
+      else void revive();
+    };
+    session?.addEventListener?.("statechange", onSession);
+    const devices = navigator.mediaDevices;
+    const onDevice = () => {
+      if (liveRef.current) void revive();
+    };
     try {
-      if (ctxRef.current?.state === "closed") ctxRef.current = null;
-      else if (ctxRef.current?.state === "suspended") await ctxRef.current.resume();
+      devices?.addEventListener?.("devicechange", onDevice);
     } catch {
       /* ignore */
     }
-
-    let stream = currentMic() || (micUsable(streamRef.current) ? streamRef.current : null);
-    if (!micUsable(stream)) {
-      if (!opts?.gesture) return;
+    return () => {
+      stopMicWatch();
+      stopLife();
+      session?.removeEventListener?.("statechange", onSession);
       try {
-        stream = await acquireMic();
-      } catch {
-        setError("麦克风被关掉了。点电话再开一次。");
-        return;
-      }
-    }
-    streamRef.current = stream;
-
-    const AudioCtx =
-      window.AudioContext ||
-      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!ctxRef.current && AudioCtx) ctxRef.current = new AudioCtx();
-    try {
-      if (ctxRef.current?.state === "suspended") await ctxRef.current.resume();
-    } catch {
-      /* ignore */
-    }
-    if (ctxRef.current && stream) {
-      try {
-        sourceRef.current?.disconnect();
+        devices?.removeEventListener?.("devicechange", onDevice);
       } catch {
         /* ignore */
       }
-      try {
-        const source = ctxRef.current.createMediaStreamSource(stream);
-        const analyser = ctxRef.current.createAnalyser();
-        analyser.fftSize = FFT_SIZE;
-        analyser.smoothingTimeConstant = 0.35;
-        source.connect(analyser);
-        sourceRef.current = source;
-        analyserRef.current = analyser;
-      } catch {
-        /* iOS can reject a second source until the next gesture */
-      }
-    }
-
-    if (phaseRef.current === "speaking-you") {
-      try {
-        recorderRef.current?.state === "recording" && recorderRef.current.stop();
-      } catch {
-        /* ignore */
-      }
-      recorderRef.current = null;
-      chunksRef.current = [];
-      setPhaseBoth("listening");
-    }
-
-    if (!deafRef.current) {
-      setMicEnabled(streamRef.current, true);
-      listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
-      startSpeechRec();
-    }
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(tick);
-    try {
-      wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? wakeLockRef.current;
-    } catch {
-      /* ignore */
-    }
-  }, [tick]);
+    };
+  }, [active, revive]);
 
   useEffect(() => () => hangup(), [hangup]);
 
@@ -534,6 +650,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     phase,
     level,
     error,
+    needsTap,
     start,
     hangup,
     deafen,
