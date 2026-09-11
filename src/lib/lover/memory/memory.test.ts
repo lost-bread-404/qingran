@@ -297,10 +297,11 @@ test("A/B/C prompt builders keep the contract the model must fill", () => {
   );
 });
 
-test("A/B/C system prompts stay out of the role and off the calendar", () => {
+test("A/B/C system prompts keep only the hard constraints", () => {
   assert.match(PROMPT_A_SYSTEM, /不扮演/);
   assert.match(PROMPT_A_SYSTEM, /跨夜/);
-  assert.doesNotMatch(PROMPT_A_SYSTEM, /不要分析人格/);
-  assert.match(PROMPT_C_SYSTEM, /也不改清然的人设/);
-  assert.match(PROMPT_C_SYSTEM, /不要用诊断标签/);
+  assert.match(PROMPT_A_SYSTEM, /没结束/);
+  assert.match(PROMPT_C_SYSTEM, /不要改清然的人设/);
+  assert.match(PROMPT_C_SYSTEM, /dormant/);
+  assert.doesNotMatch(PROMPT_A_SYSTEM + PROMPT_B_SYSTEM + PROMPT_C_SYSTEM, /诊断标签|宣读记忆|不要编造|不要写清然该怎样|不要分析人格/);
 });
