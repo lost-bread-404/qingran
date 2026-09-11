@@ -39,13 +39,13 @@ test("listen claims the call session, speak and yield mix so alarms can ring", (
   assert.equal(sessionTypeFor("yield"), "ambient");
 });
 
-test("live unmuted tracks are usable", () => {
+test("live tracks are usable even when iOS starts them muted", () => {
   assert.equal(micTrackUsable({ readyState: "live", muted: false }), true);
-  assert.equal(micTrackUsable({ readyState: "live", muted: true }), false);
+  assert.equal(micTrackUsable({ readyState: "live", muted: true }), true);
   assert.equal(micTrackUsable({ readyState: "ended", muted: false }), false);
 });
 
-test("muted or inactive streams are not reused after iOS backgrounds the app", () => {
+test("ended or inactive streams are not reused", () => {
   const live = {
     active: true,
     getAudioTracks: () => [{ readyState: "live", muted: false }],
@@ -59,7 +59,7 @@ test("muted or inactive streams are not reused after iOS backgrounds the app", (
     getAudioTracks: () => [{ readyState: "ended", muted: false }],
   };
   assert.equal(micStreamUsable(live), true);
-  assert.equal(micStreamUsable(muted), false);
+  assert.equal(micStreamUsable(muted), true);
   assert.equal(micStreamUsable(ended), false);
   assert.equal(micStreamUsable(null), false);
 });

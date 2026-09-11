@@ -24,7 +24,8 @@ export function sessionTypeFor(kind: AudioSessionKind) {
 }
 
 export function micTrackUsable(track: { readyState: string; muted: boolean }) {
-  return track.readyState === "live" && !track.muted;
+  // iOS often delivers live tracks already muted; they still count as ours.
+  return track.readyState === "live";
 }
 
 export function micStreamUsable(

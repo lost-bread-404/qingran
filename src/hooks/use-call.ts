@@ -5,6 +5,7 @@ import {
   currentMic,
   getSpeechRecognitionCtor,
   isAppleTouch,
+  micFailHint,
   micUsable,
   onMicEvent,
   releaseMic,
@@ -513,7 +514,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     rec.onerror = (ev) => {
       if (ev.error === "not-allowed") {
         setNeedsTap(true);
-        setError("麦克风被关掉了。点一下继续。");
+        setError("点一下，打开麦克风");
       }
     };
     rec.onend = () => {
@@ -674,16 +675,19 @@ export function useCall({ onUtterance, prompt }: Options) {
     restingRef.current = false;
     interruptedRef.current = false;
     try {
-      const stream = await acquireMic({ force: true });
+      const stream = await acquireMic();
       streamRef.current = stream;
       const ctx = await resumeOrReplaceContext(null);
       if (ctx) {
         ctxRef.current = ctx;
         hookAnalyser(stream, ctx);
       }
-    } catch {
-      setError("麦克风被关掉了。打开权限再通话。");
-      hangup();
+    } catch (err) {
+      teardownMedia();
+      liveRef.current = false;
+      setActive(false);
+      setNeedsTap(true);
+      setError(micFailHint(err));
       return;
     }
     liveRef.current = true;
@@ -700,7 +704,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     } catch {
       /* ignore */
     }
-  }, [hangup, tick]);
+  }, [teardownMedia, tick]);
 
   const deafen = useCallback(() => {
     if (!liveRef.current) return;
@@ -738,8 +742,11 @@ export function useCall({ onUtterance, prompt }: Options) {
     const stopMicWatch = onMicEvent((event) => {
       if (!liveRef.current) return;
       if (interruptedRef.current || restingRef.current || pageIsHidden()) return;
-      if (event === "ended" || event === "mute") void revive();
-      if (event === "unmute") void revive();
+      if (event === "ended") void revive();
+      if (event === "mute") {
+        setMicEnabled(streamRef.current, true);
+        if (fromBackgroundRef.current) void revive();
+      }
     });
     const stopLife = listenAppLifecycle({
       onForeground: () => {

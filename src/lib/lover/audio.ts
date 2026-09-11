@@ -129,6 +129,32 @@ export function currentMic(): MediaStream | null {
   return micUsable(sharedMic) ? sharedMic : null;
 }
 
+function getMicKeepAlive(): HTMLAudioElement | null {
+  if (typeof document === "undefined") return null;
+  const existing = document.getElementById("qingran-mic") as HTMLAudioElement | null;
+  if (existing) return existing;
+  const el = document.createElement("audio");
+  el.id = "qingran-mic";
+  el.setAttribute("playsinline", "true");
+  el.setAttribute("webkit-playsinline", "true");
+  el.muted = true;
+  el.autoplay = true;
+  el.style.display = "none";
+  document.body.appendChild(el);
+  return el;
+}
+
+function keepMicHot(stream: MediaStream) {
+  const el = getMicKeepAlive();
+  if (!el) return;
+  try {
+    if (el.srcObject !== stream) el.srcObject = stream;
+    void el.play();
+  } catch {
+    /* ignore */
+  }
+}
+
 function bindTrackWatchers(stream: MediaStream) {
   for (const track of stream.getAudioTracks()) {
     track.addEventListener("mute", () => emitMicEvent("mute"));
@@ -141,12 +167,18 @@ function bindTrackWatchers(stream: MediaStream) {
 }
 
 async function requestMic(): Promise<MediaStream> {
+  const tryGet = (audio: boolean | MediaTrackConstraints) =>
+    navigator.mediaDevices.getUserMedia({ audio });
   try {
-    return await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints() });
+    return await tryGet(micAudioConstraints());
   } catch (err) {
     const name = (err as { name?: string }).name;
-    if (name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError") {
-      return await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (
+      name === "OverconstrainedError" ||
+      name === "ConstraintNotSatisfiedError" ||
+      name === "NotReadableError"
+    ) {
+      return await tryGet(true);
     }
     throw err;
   }
@@ -160,12 +192,52 @@ function dropMic(stream: MediaStream | null) {
       /* ignore */
     }
   });
+  const el =
+    typeof document === "undefined"
+      ? null
+      : (document.getElementById("qingran-mic") as HTMLAudioElement | null);
+  if (el) {
+    try {
+      el.srcObject = null;
+      el.load();
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
+export function micFailHint(err: unknown) {
+  const name = (err as { name?: string } | null)?.name ?? "";
+  if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
+    return "系统设置里打开麦克风，再点这里";
+  }
+  return "点一下，打开麦克风";
+}
+
+let acquireChain: Promise<unknown> = Promise.resolve();
+
 export async function acquireMic(opts?: { force?: boolean }): Promise<MediaStream> {
+  const run = acquireChain.then(
+    () => acquireMicInner(opts),
+    () => acquireMicInner(opts),
+  );
+  acquireChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function acquireMicInner(opts?: { force?: boolean }): Promise<MediaStream> {
+  claimListenSession();
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+
   if (!opts?.force && sharedMic) {
     if (micUsable(sharedMic)) {
       setMicEnabled(sharedMic, true);
+      keepMicHot(sharedMic);
       claimListenSession();
       return sharedMic;
     }
@@ -173,6 +245,7 @@ export async function acquireMic(opts?: { force?: boolean }): Promise<MediaStrea
       sharedMic.active && sharedMic.getAudioTracks().some((track) => track.readyState === "live");
     if (stillLive) {
       setMicEnabled(sharedMic, true);
+      keepMicHot(sharedMic);
       await new Promise((resolve) => window.setTimeout(resolve, 60));
       if (micUsable(sharedMic)) {
         claimListenSession();
@@ -188,6 +261,8 @@ export async function acquireMic(opts?: { force?: boolean }): Promise<MediaStrea
 
   sharedMic = await requestMic();
   bindTrackWatchers(sharedMic);
+  setMicEnabled(sharedMic, true);
+  keepMicHot(sharedMic);
   claimListenSession();
   return sharedMic;
 }

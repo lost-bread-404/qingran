@@ -4,6 +4,7 @@ import {
   acquireMic,
   getSpeechRecognitionCtor,
   isAppleTouch,
+  pauseMic,
   pickRecorderMime,
   releaseMic,
   resumeOrReplaceContext,
@@ -55,9 +56,9 @@ export function useVoiceInput({ lang, prompt }: Options) {
     promptRef.current = prompt ?? "";
   }, [prompt]);
 
-  const teardownMedia = useCallback(() => {
+  const stopCapture = useCallback((release: boolean) => {
     recordingRef.current = false;
-    sessionRef.current += 1;
+    if (release) sessionRef.current += 1;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
     setLevel(0);
@@ -67,7 +68,8 @@ export function useVoiceInput({ lang, prompt }: Options) {
       /* ignore */
     }
     recorderRef.current = null;
-    releaseMic();
+    if (release) releaseMic();
+    else pauseMic();
     try {
       recRef.current?.abort();
     } catch {
@@ -81,8 +83,12 @@ export function useVoiceInput({ lang, prompt }: Options) {
       /* ignore */
     }
     analyseRef.current = null;
-    setAudioSessionKind("yield");
+    if (release) setAudioSessionKind("yield");
   }, []);
+
+  const teardownMedia = useCallback(() => {
+    stopCapture(true);
+  }, [stopCapture]);
 
   useEffect(() => () => teardownMedia(), [teardownMedia]);
 
@@ -125,7 +131,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
     try {
       if (recorderSupported) {
-        const stream = await acquireMic({ force: isAppleTouch() });
+        const stream = await acquireMic();
         if (session !== sessionRef.current) return;
         mediaRef.current = stream;
         setMicReady(true);
@@ -145,7 +151,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
       }
     } catch {
       setMicReady(false);
-      setError("麦克风被关掉了。打开权限，或先打字。");
+      setError("点一下，打开麦克风");
       return;
     }
 
@@ -227,7 +233,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
     const frames = framesRef.current.slice();
 
     const blob = await collectRecording(session);
-    teardownMedia();
+    stopCapture(false);
 
     let heard = "";
     let words: { text?: string; start?: number; end?: number }[] = [];
@@ -265,7 +271,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
     setStatus("idle");
     return heard;
-  }, [status, teardownMedia]);
+  }, [status, stopCapture]);
 
   const cancel = useCallback(() => {
     stopLockRef.current = false;

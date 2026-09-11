@@ -7,6 +7,7 @@ import { Transcript } from "@/components/lover/transcript";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useCall } from "@/hooks/use-call";
+import { useMicGate } from "@/hooks/use-mic-gate";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { base64ToBytes, concatBytes } from "@/lib/lover/audio";
@@ -88,9 +89,15 @@ export function VoiceRoom() {
   const hearRef = useRef<() => void>(() => undefined);
   const deafenRef = useRef<() => void>(() => undefined);
   const reviveRef = useRef<(gesture?: boolean) => void>(() => undefined);
+  const connectMicRef = useRef<() => Promise<boolean>>(async () => false);
   const spokenCacheRef = useRef(new Map<string, { bytes: Uint8Array<ArrayBuffer>; mimeType: string }>());
   const viewport = useVisualViewportHeight();
+  const mic = useMicGate();
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
+
+  useEffect(() => {
+    connectMicRef.current = mic.connect;
+  }, [mic.connect]);
 
   useEffect(() => {
     profileRef.current = profile;
@@ -192,11 +199,13 @@ export function VoiceRoom() {
     };
     const wake = () => {
       if (audioSessionIsInterrupted()) return;
+      void connectMicRef.current();
       void kickAudio();
       reviveRef.current();
     };
     const onGesture = () => {
       if (audioSessionIsInterrupted()) return;
+      void connectMicRef.current();
       void kickAudio();
       reviveRef.current(true);
     };
@@ -472,7 +481,8 @@ export function VoiceRoom() {
     reviveRef.current = (gesture?: boolean) => {
       void call.revive(gesture ? { gesture: true } : undefined);
     };
-  }, [call.active, call.hear, call.deafen, call.revive]);
+    if (!call.active) void mic.connect();
+  }, [call.active, call.hear, call.deafen, call.revive, mic.connect]);
 
   const finishHold = useCallback(async () => {
     if (finishingHoldRef.current) return;
@@ -495,6 +505,11 @@ export function VoiceRoom() {
     if (voice.status === "transcribing") return;
     if (status === "thinking" || status === "speaking") return;
     holdingRef.current = true;
+    const ok = await mic.connect();
+    if (!ok) {
+      holdingRef.current = false;
+      return;
+    }
     const starting = voice.start();
     try {
       window.scrollTo(0, 0);
@@ -515,7 +530,7 @@ export function VoiceRoom() {
     setStatus("recording");
     await starting;
     if (!holdingRef.current) await finishHold();
-  }, [finishHold, status, voice]);
+  }, [finishHold, mic.connect, status, voice]);
 
   const holdEnd = useCallback(() => {
     holdingRef.current = false;
@@ -529,8 +544,11 @@ export function VoiceRoom() {
       turnRef.current += 1;
       busyRef.current = false;
       setStatus("idle");
+      void mic.connect();
       return;
     }
+    const ok = await mic.connect();
+    if (!ok) return;
     if (voice.status === "recording") voice.cancel();
     if (!isPlaybackUnlocked()) await unlockPlayback();
     stopPlayback();
@@ -621,22 +639,40 @@ export function VoiceRoom() {
       className="room-bg fixed inset-x-0 flex flex-col overflow-hidden"
       style={{ top: viewport.offsetTop, height: viewport.height }}
     >
-      {call.active && call.needsTap && !call.interrupted ? (
-        <button
-          type="button"
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-bg/85 px-8 text-center"
-          onPointerDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            void kickAudio();
-            void unlockPlayback();
-            void call.revive({ gesture: true });
-          }}
-        >
-          <div className="lamp-orb size-14 rounded-full" aria-hidden />
-          <p className="mt-5 font-display text-xl">我在</p>
-          <p className="mt-2 text-sm text-subtle">点一下，接着说</p>
-        </button>
+      {(mic.blocked || (call.needsTap && !call.interrupted)) && !composerOpen ? (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-bg/85 px-8 text-center">
+          <button
+            type="button"
+            className="flex flex-col items-center"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              void (async () => {
+                const ok = await mic.connect();
+                void kickAudio();
+                void unlockPlayback();
+                if (call.active) void call.revive({ gesture: true });
+                if (ok) setBanner(null);
+              })();
+            }}
+          >
+            <div className="lamp-orb size-14 rounded-full" aria-hidden />
+            <p className="mt-5 font-display text-xl">我在</p>
+            <p className="mt-2 text-sm text-subtle">{mic.blocked ? mic.hint : "点一下，接着说"}</p>
+          </button>
+          <button
+            type="button"
+            className="mt-8 text-xs text-muted underline-offset-4 hover:underline"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              mic.dismiss();
+              setComposerOpen(true);
+            }}
+          >
+            先打字
+          </button>
+        </div>
       ) : null}
       <div className="mx-auto flex h-full min-h-0 w-full max-w-lg flex-col overflow-hidden">
         <header className="relative z-10 flex shrink-0 items-center justify-between bg-bg/80 px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm">

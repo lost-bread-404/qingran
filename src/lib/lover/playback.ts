@@ -160,7 +160,6 @@ function prepSpeak() {
 }
 
 export async function unlockPlayback() {
-  prepSpeak();
   const el = getPlaybackElement();
   const audioCtx = getCtx();
   try {
@@ -195,7 +194,6 @@ export function stopPlayback() {
 }
 
 export async function resumeAudio() {
-  prepSpeak();
   let audioCtx = getCtx();
   if (!audioCtx) return;
   let ok = false;
