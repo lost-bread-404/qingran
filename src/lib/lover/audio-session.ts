@@ -123,33 +123,7 @@ export async function resumeAudioContext(ctx: AudioContext): Promise<boolean> {
       /* iOS sometimes rejects until a later turn */
     }
   }
-  if (ctx.state !== "running") return false;
-  const apple =
-    typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
-  if (!apple) return true;
-
-  const t0 = ctx.currentTime;
-  await new Promise<void>((resolve) => {
-    window.setTimeout(resolve, 48);
-  });
-  if ((ctx.state as string) === "closed") return false;
-  if (ctx.currentTime > t0 + 0.0001) return true;
-
-  try {
-    await ctx.suspend();
-  } catch {
-    /* ignore */
-  }
-  try {
-    await ctx.resume();
-  } catch {
-    /* ignore */
-  }
-  const t1 = ctx.currentTime;
-  await new Promise<void>((resolve) => {
-    window.setTimeout(resolve, 48);
-  });
-  return ctx.state === "running" && ctx.currentTime > t1 + 0.0001;
+  return ctx.state === "running";
 }
 
 export function listenAudioSession(handlers: {

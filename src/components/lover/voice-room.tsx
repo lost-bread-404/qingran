@@ -523,28 +523,6 @@ export function VoiceRoom() {
     await call.start();
   }
 
-  function bargeIn() {
-    if (!call.active) return;
-    if (status !== "speaking" && status !== "thinking") return;
-    stopPlayback();
-    turnRef.current += 1;
-    busyRef.current = false;
-    const cur = inflightRef.current;
-    const display = cur ? stripSpeechTags(cur.text) : "";
-    if (cur && display) {
-      void appendRoomMessage({
-        data: {
-          id: cur.id,
-          role: "assistant",
-          text: display,
-          createdAt: cur.createdAt,
-        },
-      });
-    }
-    setStatus("idle");
-    call.hear();
-  }
-
   async function submitComposer() {
     const say = draft.trim();
     if (!say) return;
@@ -593,7 +571,7 @@ export function VoiceRoom() {
         : status === "thinking"
           ? "她在想"
           : status === "speaking"
-            ? "清然在说 · 点灯可打断"
+            ? "清然在说"
             : "你说，说完停两秒"
     : "";
 
@@ -611,7 +589,6 @@ export function VoiceRoom() {
                 status === "idle" && !recording && !call.active && "lamp-breathe",
               )}
               aria-hidden
-              onClick={bargeIn}
             />
             <div>
               <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
@@ -744,7 +721,7 @@ export function VoiceRoom() {
                 <p className="min-h-4 max-w-xs text-center text-xs text-subtle">
                   {call.active
                     ? status === "speaking"
-                      ? "点灯打断 · 点按钮挂断"
+                      ? "点按钮挂断"
                       : call.phase === "speaking-you"
                         ? "说完停两秒再发给她"
                         : "通话中"

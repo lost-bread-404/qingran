@@ -51,15 +51,40 @@ function applyVoiceGain(node: GainNode, audioCtx: AudioContext) {
 function getOutput(audioCtx: AudioContext): AudioNode {
   if (masterIn && masterGain && masterCtx === audioCtx) {
     applyVoiceGain(masterGain, audioCtx);
+    armVoiceElement(audioCtx);
     return masterIn;
   }
   const gain = audioCtx.createGain();
   applyVoiceGain(gain, audioCtx);
-  gain.connect(audioCtx.destination);
+  const dest = audioCtx.createMediaStreamDestination();
+  gain.connect(dest);
   masterIn = gain;
   masterGain = gain;
   masterCtx = audioCtx;
+  voiceDest = dest;
+  armVoiceElement(audioCtx);
   return gain;
+}
+
+let voiceDest: MediaStreamAudioDestinationNode | null = null;
+
+function armVoiceElement(audioCtx: AudioContext) {
+  const el = getPlaybackElement();
+  try {
+    el.muted = false;
+    el.volume = 1;
+    el.autoplay = true;
+    if (voiceDest && el.srcObject !== voiceDest.stream) {
+      el.srcObject = voiceDest.stream;
+    }
+    if (el.paused) void el.play().catch(() => undefined);
+  } catch {
+    try {
+      masterGain?.connect(audioCtx.destination);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 function replaceCtx() {
@@ -74,6 +99,7 @@ function replaceCtx() {
   masterIn = null;
   masterGain = null;
   masterCtx = null;
+  voiceDest = null;
   const Ctor = typeof window === "undefined" ? null : audioCtor();
   if (!Ctor) return null;
   ctx = new Ctor();
@@ -87,6 +113,7 @@ export function getPlaybackElement(): HTMLAudioElement {
   el.id = "qingran-voice";
   el.setAttribute("playsinline", "true");
   el.setAttribute("webkit-playsinline", "true");
+  el.autoplay = true;
   el.preload = "auto";
   el.style.display = "none";
   document.body.appendChild(el);
@@ -149,35 +176,41 @@ function resetStream() {
 
 function prepSpeak() {
   setAudioSessionKind("speak");
+  pauseHoldLoop();
   try {
-    const el = getPlaybackElement();
-    el.volume = VOICE_GAIN;
-    el.muted = false;
+    const audioCtx = getCtx();
+    if (audioCtx) armVoiceElement(audioCtx);
   } catch {
     /* ignore */
   }
 }
 
 export async function unlockPlayback() {
-  const el = getPlaybackElement();
   const audioCtx = getCtx();
   try {
-    if (audioCtx) await resumeAudioContext(audioCtx);
+    if (audioCtx) await audioCtx.resume();
   } catch {
     /* ignore */
   }
+  if (audioCtx) getOutput(audioCtx);
+  if (unlocked) return;
+  const el = document.createElement("audio");
+  el.setAttribute("playsinline", "true");
+  el.muted = true;
+  el.volume = 0;
   try {
-    el.muted = true;
-    el.volume = 0;
     el.src = SILENCE;
     const play = el.play();
     if (play) await play;
   } catch {
     /* ignore */
   } finally {
-    clearElement(el);
-    el.muted = false;
-    el.volume = VOICE_GAIN;
+    try {
+      el.pause();
+      el.src = "";
+    } catch {
+      /* ignore */
+    }
     unlocked = true;
   }
 }
@@ -186,10 +219,6 @@ export function stopPlayback() {
   playGen += 1;
   resetStream();
   wakeIdle();
-  const el = getPlaybackElement();
-  clearElement(el);
-  el.muted = false;
-  el.volume = VOICE_GAIN;
 }
 
 let holdUrl: string | null = null;
@@ -269,35 +298,68 @@ export function startCallHold() {
   holdPlaying = true;
   setAudioSessionKind("listen");
   claimMediaSession();
+  if (isSpeaking()) {
+    keepPlaybackAlive();
+    return;
+  }
+  playHoldLoop();
+}
+
+export function stopCallHold() {
+  holdPlaying = false;
+  releaseMediaSession();
+  pauseHoldLoop();
+}
+
+export function isCallHoldPlaying() {
+  return holdPlaying;
+}
+
+export function keepPlaybackAlive() {
+  const audioCtx = getCtx();
+  if (audioCtx && audioContextNeedsResumeLocal(audioCtx.state)) {
+    try {
+      void audioCtx.resume();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (isSpeaking()) {
+    try {
+      if (audioCtx) armVoiceElement(audioCtx);
+    } catch {
+      /* ignore */
+    }
+    claimMediaSession();
+    return;
+  }
+  if (holdPlaying) playHoldLoop();
+}
+
+function isSpeaking() {
+  return liveSources.size > 0 || inFlight > 0 || (startedClock && !ended) || sampleQueue.length > 0;
+}
+
+function pauseHoldLoop() {
+  try {
+    const el = getHoldElement();
+    el.pause();
+  } catch {
+    /* ignore */
+  }
+}
+
+function playHoldLoop() {
   const el = getHoldElement();
   try {
     el.loop = true;
     el.muted = false;
     el.volume = 0.01;
     if (!el.src) el.src = quietLoopUrl();
-    const play = el.play();
-    if (play) void play.catch(() => undefined);
+    if (el.paused) void el.play().catch(() => undefined);
   } catch {
     /* ignore */
   }
-  const audioCtx = getCtx();
-  if (audioCtx) void resumeAudioContext(audioCtx);
-}
-
-export function stopCallHold() {
-  holdPlaying = false;
-  releaseMediaSession();
-  try {
-    const el = getHoldElement();
-    el.pause();
-    el.muted = true;
-  } catch {
-    /* ignore */
-  }
-}
-
-export function isCallHoldPlaying() {
-  return holdPlaying;
 }
 
 
@@ -311,6 +373,7 @@ export async function resumeAudio() {
     ok = false;
   }
   if (!ok) {
+    if (isSpeaking()) return;
     killSources();
     audioCtx = replaceCtx();
     if (audioCtx) {
@@ -452,7 +515,7 @@ function scheduleBuffer(buffer: AudioBuffer, audioCtx: AudioContext, gen: number
   src.buffer = buffer;
   src.connect(getOutput(audioCtx));
   const now = audioCtx.currentTime;
-  if (nextStart < now + 0.005) nextStart = now + 0.005;
+  if (nextStart < now + 0.02) nextStart = now + 0.02;
   src.start(nextStart);
   nextStart += buffer.duration;
   liveSources.add(src);
@@ -466,7 +529,7 @@ async function decodeBytes(bytes: Uint8Array<ArrayBuffer>): Promise<AudioBuffer 
   const audioCtx = getCtx();
   if (!audioCtx) return null;
   try {
-    await resumeAudioContext(audioCtx);
+    await audioCtx.resume();
     const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
     return await audioCtx.decodeAudioData(copy);
   } catch {
@@ -475,7 +538,10 @@ async function decodeBytes(bytes: Uint8Array<ArrayBuffer>): Promise<AudioBuffer 
 }
 
 function maybeWakeIdle() {
-  if (ended && inFlight === 0 && sampleQueue.length === 0 && liveSources.size === 0) wakeIdle();
+  if (ended && inFlight === 0 && sampleQueue.length === 0 && liveSources.size === 0) {
+    wakeIdle();
+    if (holdPlaying) playHoldLoop();
+  }
 }
 
 function wakeIdle() {

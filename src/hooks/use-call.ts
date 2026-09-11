@@ -25,7 +25,7 @@ import {
   resumeAudioContext,
 } from "@/lib/lover/audio-session";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
-import { startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
+import { keepPlaybackAlive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
 import { transcribeVoice } from "@/lib/lover/server";
 import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import {
@@ -116,6 +116,7 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   const keepAlive = () => {
     claimListenSession();
+    keepPlaybackAlive();
     startCallHold();
     const ctx = ctxRef.current;
     if (ctx && audioContextNeedsResume(ctx.state)) {
@@ -532,7 +533,6 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     recorderRef.current = null;
     chunksRef.current = [];
-    keepAlive();
     if (phaseRef.current === "speaking-you") setPhaseBoth("listening");
   }, []);
 
@@ -566,7 +566,17 @@ export function useCall({ onUtterance, prompt }: Options) {
           }
         })();
       }
-      if (event === "mute" || event === "unmute") keepAlive();
+      if (event === "mute" || event === "unmute") {
+        keepPlaybackAlive();
+        const ctx = ctxRef.current;
+        if (ctx && audioContextNeedsResume(ctx.state)) {
+          try {
+            void ctx.resume();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
     });
     const stopLife = listenAppLifecycle({
       onForeground: () => {
