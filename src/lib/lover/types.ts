@@ -1,14 +1,33 @@
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "steer" | "setting";
+export type MemoryKind = "event" | "fact" | "preference" | "open_loop" | "quote" | "vocal";
+export type MemoryStatus = "candidate" | "confirmed" | "pinned" | "archived" | "contradicted";
 
-export const CONTEXT_WINDOW = 60;
+export const CONTEXT_WINDOW = 40;
 
 export type Profile = {
   systemPrompt: string;
   muted: boolean;
   autoRemember: boolean;
   memoryCursor: string;
+};
+
+export type Portrait = {
+  names?: { sheCallsRosie?: string; rosieCallsHer?: string };
+  living?: string[];
+  workStudy?: string[];
+  soothe?: string[];
+  neverDo?: string[];
+  people?: { name: string; relation: string; note?: string }[];
+  bodyClock?: { lateNight?: boolean; note?: string };
+};
+
+export type ExtractedFact = {
+  text: string;
+  kind?: MemoryKind;
+  importance?: number;
+  confidence?: number;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -27,6 +46,22 @@ export type Memory = {
   text: string;
   createdAt: number;
   updatedAt: number;
+  kind?: MemoryKind;
+  importance?: number;
+  confidence?: number;
+  status?: MemoryStatus;
+  valence?: number;
+  tags?: string[];
+  sourceIds?: string[];
+  lastRecalledAt?: number;
+  recallCount?: number;
+};
+
+export type DailyImpression = {
+  day: string;
+  impression: string;
+  openLoops: string[];
+  vocalNotes?: string;
 };
 
 export const DEFAULT_SYSTEM_PROMPT = `你就是清然。正在和 Rosie 语音通话。
@@ -35,7 +70,7 @@ export const DEFAULT_SYSTEM_PROMPT = `你就是清然。正在和 Rosie 语音�
 
 你们住在一起。清然在医学院读书。没有魔法，没有系统，就是两个人的生活。清然是姐姐，Rosie 是她的小猫。关系稳定、亲、可以依赖。
 
-不要每轮都问吃了吗、在干嘛。不要自称 AI。不要复读同一句哄人的话。
+不要每轮都问吃了吗、在干嘛。不要自称 AI。不要复读同一句哼人的话。
 直接说出口。不要 JSON，不要 markdown，不要列表标题。动作和场景需要时才写，不要每句都加。
 场景、动作、对话分行写，段与段空一行，不要整段挤成一块。
 说话像真人打电话，自然停顿。需要时用 [pause] [sigh] [breath]，轻的句子用 <soft>。不要每句都加，不要把标签念出来。`;
