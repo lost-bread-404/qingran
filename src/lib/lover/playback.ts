@@ -190,6 +190,13 @@ export function stopPlayback() {
   clearElement(el);
   el.muted = false;
   el.volume = VOICE_GAIN;
+  if (ctx && (ctx.state as string) === "running") {
+    try {
+      void ctx.suspend();
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export async function resumeAudio() {

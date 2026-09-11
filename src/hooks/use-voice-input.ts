@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   blobToBase64,
-  acquireMic,
+  acquireMicFromGesture,
   getSpeechRecognitionCtor,
   isAppleTouch,
   pauseMic,
@@ -131,7 +131,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
     try {
       if (recorderSupported) {
-        const stream = await acquireMic();
+        const stream = await acquireMicFromGesture();
         if (session !== sessionRef.current) return;
         mediaRef.current = stream;
         setMicReady(true);

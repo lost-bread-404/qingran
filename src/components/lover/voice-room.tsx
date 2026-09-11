@@ -17,7 +17,6 @@ import {
   enqueuePlayback,
   getPlaybackElement,
   isPlaybackUnlocked,
-  kickAudio,
   playMp3Bytes,
   resumeAudio,
   sealPlayback,
@@ -38,7 +37,7 @@ import {
 import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { newId } from "@/lib/lover/storage";
-import { listenAppLifecycle, audioSessionIsInterrupted } from "@/lib/lover/audio-session";
+import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import {
   CONTEXT_WINDOW,
@@ -89,10 +88,11 @@ export function VoiceRoom() {
   const hearRef = useRef<() => void>(() => undefined);
   const deafenRef = useRef<() => void>(() => undefined);
   const reviveRef = useRef<(gesture?: boolean) => void>(() => undefined);
-  const connectMicRef = useRef<() => Promise<boolean>>(async () => false);
+  const connectMicRef = useRef<(mode?: { gesture?: boolean }) => Promise<boolean>>(async () => false);
+  const needsMicRef = useRef(false);
   const spokenCacheRef = useRef(new Map<string, { bytes: Uint8Array<ArrayBuffer>; mimeType: string }>());
   const viewport = useVisualViewportHeight();
-  const mic = useMicGate();
+  const mic = useMicGate({ pausedRef: callActiveRef });
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
 
   useEffect(() => {
@@ -198,31 +198,35 @@ export function VoiceRoom() {
       });
     };
     const wake = () => {
-      if (audioSessionIsInterrupted()) return;
+      if (callActiveRef.current) {
+        reviveRef.current();
+        return;
+      }
       void connectMicRef.current();
-      void kickAudio();
-      reviveRef.current();
     };
     const onGesture = () => {
-      if (audioSessionIsInterrupted()) return;
-      void connectMicRef.current();
-      void kickAudio();
-      reviveRef.current(true);
+      if (callActiveRef.current) {
+        if (needsMicRef.current) reviveRef.current(true);
+        return;
+      }
+      if (needsMicRef.current) void connectMicRef.current({ gesture: true });
     };
     const stopLife = listenAppLifecycle({
       onForeground: wake,
-      onBackground: persistInflight,
+      onBackground: () => {
+        persistInflight();
+        stopPlayback();
+        turnRef.current += 1;
+        busyRef.current = false;
+        setStatus((s) => (s === "speaking" || s === "thinking" ? "idle" : s));
+      },
     });
     window.addEventListener("beforeunload", persistInflight);
     document.addEventListener("pointerdown", onGesture, { capture: true });
-    document.addEventListener("touchstart", onGesture, { capture: true });
-    document.addEventListener("click", onGesture, { capture: true });
     return () => {
       stopLife();
       window.removeEventListener("beforeunload", persistInflight);
       document.removeEventListener("pointerdown", onGesture, { capture: true } as EventListenerOptions);
-      document.removeEventListener("touchstart", onGesture, { capture: true } as EventListenerOptions);
-      document.removeEventListener("click", onGesture, { capture: true } as EventListenerOptions);
     };
   }, []);
 
@@ -479,10 +483,11 @@ export function VoiceRoom() {
     hearRef.current = call.hear;
     deafenRef.current = call.deafen;
     reviveRef.current = (gesture?: boolean) => {
-      void call.revive(gesture ? { gesture: true } : undefined);
+      void call.revive(gesture ? { gesture: true } : { immediate: true });
     };
+    needsMicRef.current = Boolean(mic.blocked || call.needsTap || call.resting || call.interrupted);
     if (!call.active) void mic.connect();
-  }, [call.active, call.hear, call.deafen, call.revive, mic.connect]);
+  }, [call.active, call.hear, call.deafen, call.revive, call.needsTap, call.resting, call.interrupted, mic.connect, mic.blocked]);
 
   const finishHold = useCallback(async () => {
     if (finishingHoldRef.current) return;
@@ -505,7 +510,7 @@ export function VoiceRoom() {
     if (voice.status === "transcribing") return;
     if (status === "thinking" || status === "speaking") return;
     holdingRef.current = true;
-    const ok = await mic.connect();
+    const ok = await mic.connect({ gesture: true });
     if (!ok) {
       holdingRef.current = false;
       return;
@@ -547,7 +552,7 @@ export function VoiceRoom() {
       void mic.connect();
       return;
     }
-    const ok = await mic.connect();
+    const ok = await mic.connect({ gesture: true });
     if (!ok) return;
     if (voice.status === "recording") voice.cancel();
     if (!isPlaybackUnlocked()) await unlockPlayback();
@@ -639,21 +644,15 @@ export function VoiceRoom() {
       className="room-bg fixed inset-x-0 flex flex-col overflow-hidden"
       style={{ top: viewport.offsetTop, height: viewport.height }}
     >
-      {(mic.blocked || (call.needsTap && !call.interrupted)) && !composerOpen ? (
+      {(mic.blocked || call.needsTap) && !composerOpen ? (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-bg/85 px-8 text-center">
           <button
             type="button"
             className="flex flex-col items-center"
             onPointerDown={(e) => {
               e.preventDefault();
-              e.stopPropagation();
-              void (async () => {
-                const ok = await mic.connect();
-                void kickAudio();
-                void unlockPlayback();
-                if (call.active) void call.revive({ gesture: true });
-                if (ok) setBanner(null);
-              })();
+              if (call.active) void call.revive({ gesture: true, reclaim: true });
+              else void mic.connect({ gesture: true });
             }}
           >
             <div className="lamp-orb size-14 rounded-full" aria-hidden />

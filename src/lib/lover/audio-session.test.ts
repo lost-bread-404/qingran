@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   audioContextNeedsResume,
+  createAppLifecycleGate,
   isInterruptedState,
   micStreamHearing,
   micStreamUsable,
@@ -69,4 +70,20 @@ test("ended streams are not reused; muted live streams are not yet hearing", () 
   assert.equal(micStreamHearing(live), true);
   assert.equal(micStreamHearing(muted), false);
   assert.equal(micStreamHearing(ended), false);
+});
+
+test("app lifecycle only emits when actually leaving or returning", () => {
+  const gate = createAppLifecycleGate(false);
+  assert.equal(gate.notify(false), null);
+  assert.equal(gate.notify(true), "background");
+  assert.equal(gate.notify(true), null);
+  assert.equal(gate.notify(false), "foreground");
+  assert.equal(gate.notify(false), null);
+  assert.equal(gate.inBackground, false);
+});
+
+test("starting already hidden does not emit a fake return on the first hide", () => {
+  const gate = createAppLifecycleGate(true);
+  assert.equal(gate.notify(true), null);
+  assert.equal(gate.notify(false), "foreground");
 });

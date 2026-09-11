@@ -12,7 +12,23 @@ export function sessionIsActive(state?: string | null) {
 }
 
 export function pageIsHidden() {
-  return typeof document !== "undefined" && document.visibilityState === "hidden";
+  if (typeof document === "undefined") return false;
+  const doc = document as Document & { webkitHidden?: boolean; webkitVisibilityState?: string };
+  if (document.visibilityState === "hidden") return true;
+  if (doc.webkitVisibilityState === "hidden") return true;
+  if (doc.webkitHidden === true) return true;
+  return false;
+}
+
+export function isStandalonePwa() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const nav = navigator as Navigator & { standalone?: boolean };
+  if (nav.standalone) return true;
+  try {
+    return window.matchMedia("(display-mode: standalone)").matches;
+  } catch {
+    return false;
+  }
 }
 
 export type AudioSessionKind = "listen" | "speak" | "yield";
@@ -24,7 +40,6 @@ export function sessionTypeFor(kind: AudioSessionKind) {
 }
 
 export function micTrackUsable(track: { readyState: string; muted: boolean }) {
-  // iOS often delivers live tracks already muted; they can be unmuted.
   return track.readyState === "live";
 }
 
@@ -149,37 +164,64 @@ export function listenAudioSession(handlers: {
   return () => session.removeEventListener?.("statechange", onState);
 }
 
+export type LifecyclePhase = "foreground" | "background" | null;
+
+export function createAppLifecycleGate(startHidden: boolean) {
+  let inBackground = startHidden;
+  return {
+    get inBackground() {
+      return inBackground;
+    },
+    notify(hiddenNow: boolean): LifecyclePhase {
+      if (hiddenNow === inBackground) return null;
+      inBackground = hiddenNow;
+      return hiddenNow ? "background" : "foreground";
+    },
+  };
+}
+
 export function listenAppLifecycle(handlers: {
   onForeground?: () => void;
   onBackground?: () => void;
 }) {
   if (typeof document === "undefined") return () => undefined;
 
-  const onForeground = () => {
-    if (document.visibilityState === "hidden") return;
-    handlers.onForeground?.();
+  const gate = createAppLifecycleGate(pageIsHidden());
+
+  const emit = (phase: LifecyclePhase) => {
+    if (phase === "background") handlers.onBackground?.();
+    if (phase === "foreground") handlers.onForeground?.();
   };
-  const onBackground = () => handlers.onBackground?.();
+
+  const goBackground = () => emit(gate.notify(true));
+  const goForeground = () => emit(gate.notify(false));
+
   const onVisibility = () => {
-    if (document.visibilityState === "hidden") onBackground();
-    else onForeground();
+    if (pageIsHidden()) goBackground();
+    else goForeground();
+  };
+
+  const onBlur = () => {
+    if (pageIsHidden() || isStandalonePwa()) goBackground();
   };
 
   document.addEventListener("visibilitychange", onVisibility);
   document.addEventListener("webkitvisibilitychange", onVisibility);
-  document.addEventListener("freeze", onBackground);
-  document.addEventListener("resume", onForeground);
-  window.addEventListener("pageshow", onForeground);
-  window.addEventListener("pagehide", onBackground);
-  window.addEventListener("focus", onForeground);
+  document.addEventListener("freeze", goBackground);
+  document.addEventListener("resume", goForeground);
+  window.addEventListener("pageshow", goForeground);
+  window.addEventListener("pagehide", goBackground);
+  window.addEventListener("blur", onBlur);
+  window.addEventListener("focus", goForeground);
 
   return () => {
     document.removeEventListener("visibilitychange", onVisibility);
     document.removeEventListener("webkitvisibilitychange", onVisibility);
-    document.removeEventListener("freeze", onBackground);
-    document.removeEventListener("resume", onForeground);
-    window.removeEventListener("pageshow", onForeground);
-    window.removeEventListener("pagehide", onBackground);
-    window.removeEventListener("focus", onForeground);
+    document.removeEventListener("freeze", goBackground);
+    document.removeEventListener("resume", goForeground);
+    window.removeEventListener("pageshow", goForeground);
+    window.removeEventListener("pagehide", goBackground);
+    window.removeEventListener("blur", onBlur);
+    window.removeEventListener("focus", goForeground);
   };
 }

@@ -78,6 +78,7 @@ export function micAudioConstraints(): MediaTrackConstraints {
 }
 
 let sharedMic: MediaStream | null = null;
+let micGen = 0;
 const micListeners = new Set<(event: "mute" | "unmute" | "ended") => void>();
 
 export function onMicEvent(listener: (event: "mute" | "unmute" | "ended") => void) {
@@ -178,10 +179,31 @@ export function micFailHint(err: unknown) {
   if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
     return "系统设置里打开麦克风，再点这里";
   }
+  if (name === "AbortError") return "点一下，打开麦克风";
   return "点一下，打开麦克风";
 }
 
 let acquireChain: Promise<unknown> = Promise.resolve();
+
+function beginMicRequest(): Promise<MediaStream> {
+  const gen = ++micGen;
+  if (sharedMic) {
+    dropMic(sharedMic);
+    sharedMic = null;
+  }
+  claimListenSession();
+  return requestMic().then((stream) => {
+    if (gen !== micGen) {
+      dropMic(stream);
+      throw new DOMException("superseded", "AbortError");
+    }
+    sharedMic = stream;
+    bindTrackWatchers(stream);
+    setMicEnabled(stream, true);
+    claimListenSession();
+    return stream;
+  });
+}
 
 export async function acquireMic(opts?: { force?: boolean }): Promise<MediaStream> {
   const run = acquireChain.then(
@@ -197,51 +219,54 @@ export async function acquireMic(opts?: { force?: boolean }): Promise<MediaStrea
 
 async function acquireMicInner(opts?: { force?: boolean }): Promise<MediaStream> {
   claimListenSession();
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => resolve());
+  if (!opts?.force && sharedMic && micUsable(sharedMic)) {
+    setMicEnabled(sharedMic, true);
+    claimListenSession();
+    return sharedMic;
+  }
+  return beginMicRequest();
+}
+
+export function acquireMicFromGesture(): Promise<MediaStream> {
+  const pending = beginMicRequest();
+  acquireChain = pending.then(
+    () => undefined,
+    () => undefined,
+  );
+  return pending.then(async (stream) => {
+    await waitUntilHearing(stream, 360);
+    return stream;
   });
-
-  if (!opts?.force && sharedMic) {
-    if (micUsable(sharedMic)) {
-      setMicEnabled(sharedMic, true);
-      claimListenSession();
-      return sharedMic;
-    }
-    const stillLive =
-      sharedMic.active && sharedMic.getAudioTracks().some((track) => track.readyState === "live");
-    if (stillLive) {
-      setMicEnabled(sharedMic, true);
-      await new Promise((resolve) => window.setTimeout(resolve, 60));
-      if (micUsable(sharedMic)) {
-        claimListenSession();
-        return sharedMic;
-      }
-    }
-  }
-
-  if (sharedMic) {
-    dropMic(sharedMic);
-    sharedMic = null;
-  }
-
-  sharedMic = await requestMic();
-  bindTrackWatchers(sharedMic);
-  setMicEnabled(sharedMic, true);
-  claimListenSession();
-  return sharedMic;
 }
 
 export async function waitUntilHearing(stream: MediaStream | null, ms = 240) {
   if (!stream) return false;
   setMicEnabled(stream, true);
   if (micHearing(stream)) return true;
-  const t0 = performance.now();
-  while (performance.now() - t0 < ms) {
-    await new Promise((resolve) => window.setTimeout(resolve, 32));
-    setMicEnabled(stream, true);
-    if (micHearing(stream)) return true;
-  }
-  return micHearing(stream);
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      for (const track of stream.getAudioTracks()) {
+        track.removeEventListener("unmute", onUnmute);
+      }
+      resolve(ok);
+    };
+    const onUnmute = () => {
+      setMicEnabled(stream, true);
+      if (micHearing(stream)) finish(true);
+    };
+    for (const track of stream.getAudioTracks()) {
+      track.addEventListener("unmute", onUnmute);
+    }
+    const timer = window.setTimeout(() => {
+      setMicEnabled(stream, true);
+      finish(micHearing(stream));
+    }, ms);
+  });
 }
 
 export function pauseMic() {
@@ -249,6 +274,7 @@ export function pauseMic() {
 }
 
 export function releaseMic() {
+  micGen += 1;
   dropMic(sharedMic);
   sharedMic = null;
   yieldAudioSession();
@@ -264,6 +290,20 @@ export function setMicEnabled(stream: MediaStream | null, enabled: boolean) {
   });
 }
 
+export function createAudioContext(): AudioContext | null {
+  const Ctor =
+    window.AudioContext ||
+    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return null;
+  const next = new Ctor();
+  try {
+    void next.resume();
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
 export async function resumeOrReplaceContext(ctx: AudioContext | null): Promise<AudioContext | null> {
   if (ctx && (ctx.state as string) !== "closed") {
     const ok = await resumeAudioContext(ctx);
@@ -274,17 +314,7 @@ export async function resumeOrReplaceContext(ctx: AudioContext | null): Promise<
       /* ignore */
     }
   }
-  const Ctor =
-    window.AudioContext ||
-    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctor) return null;
-  const next = new Ctor();
-  try {
-    await next.resume();
-  } catch {
-    /* ignore */
-  }
-  return next;
+  return createAudioContext();
 }
 
 export { getAudioSession, claimListenSession, yieldAudioSession, resumeAudioContext };
