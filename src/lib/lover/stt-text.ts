@@ -140,7 +140,7 @@ function softenCue(raw: string): string {
 function mapVocalization(core: string): string | null {
   if (!core) return null;
   if (/^(抽泣|哭|哭声|抽噎|啜泣|呜咽)$/.test(core)) return "呜呜";
-  if (/^(喘气|喘息|气声|吸气)$/.test(core)) return "哈";
+  if (/^(喘气|喘息|气声|吸气)$/.test(core)) return "啊";
   const latin = core.replace(/[^A-Za-z]/g, "").toLowerCase();
   if (!latin) return null;
   const leftover = core.replace(/[A-Za-z]/g, "");
@@ -150,16 +150,26 @@ function mapVocalization(core: string): string | null {
 }
 
 function mapLatinCues(s: string): string | null {
+  if (/^(ha){2,}$/.test(s)) return "哈".repeat(Math.min(4, Math.round(s.length / 2)));
+  const tokens = s.match(
+    /(?:miao+|meow+|sob+|crying|cry|sniffle|sniff+|pant+|huff+|phew|awoo+|woo+|wu+|ooh+|ahh+|aha+|ha+|hmm+|hnn+|mhm+|mmhm+|uhhuh|hum+|hmph+|heng+|ng+|en+|uh+|er+|um+|oh+|ao+|aa+h*|[hm]+)/g,
+  );
+  if (tokens && tokens.length >= 2) {
+    const mapped = tokens.map((token) => mapOneLatinCue(token)).filter(Boolean);
+    if (mapped.length >= 2) return mapped.join("");
+  }
+  return mapOneLatinCue(s);
+}
+
+function mapOneLatinCue(s: string): string | null {
   if (/^(miao+|meow+)$/.test(s)) return "喵";
   if (/^(sob+|cry|crying|sniff+|sniffle)$/.test(s)) return "呜呜";
-  if (/^(pant+|huff+|phew)$/.test(s)) return "哈";
-  if (/^(ha)+$/.test(s) || /^h+a+$/.test(s)) {
-    const n = /^(ha)+$/.test(s) ? s.length / 2 : s.length >= 4 ? 2 : 1;
-    return "哈".repeat(Math.min(4, Math.max(1, Math.round(n))));
-  }
+  if (/^(pant+|huff+|phew)$/.test(s)) return "啊";
+  if (/^(ha){2,}$/.test(s)) return "哈".repeat(Math.min(4, s.length / 2));
+  if (/^ha$/.test(s) || /^h+a+$/.test(s)) return "啊";
   if (/^(ah)+$/.test(s)) return "啊".repeat(Math.min(4, Math.max(1, s.length / 2)));
   if (/^a+h*$/.test(s)) return "啊".repeat(s.length >= 6 ? 3 : s.length >= 4 ? 2 : 1);
-  if (/^(woo+|wu+|ooh+)$/.test(s)) return "呜".repeat(s.length >= 6 ? 3 : 1);
+  if (/^(woo+|wu+|ooh+)$/.test(s)) return "呜".repeat(s.length >= 6 ? 3 : s.length >= 4 ? 2 : 1);
   if (/^(awoo+|ao+)$/.test(s)) return "嗷";
   if (/^(hum+|hmph+|heng+)$/.test(s)) return "哼";
   if (/^(m+|hmm+|hnn+|mhm+|mmhm+|uhhuh|un+|ng+|en+)$/.test(s)) {
@@ -439,9 +449,19 @@ export function pickTranscript(server: string, browser: string): string {
 
 export function recoverCues(stt: string, frames?: ProsodyFrame[]): string {
   const existing = stt.trim();
-  if (existing) return existing;
-  if (!frames?.length || !hasCueEnergy(frames)) return "";
-  return cuesFromProsody(frames);
+  if (!frames?.length) return existing;
+  const islands = voicedIslands(frames);
+  const fromAudio = islands.length ? cuesFromProsody(frames) : "";
+  if (!existing) {
+    if (!hasCueEnergy(frames)) return "";
+    return fromAudio;
+  }
+  if (!isMostlyFiller(existing) && leftoverMeaning(existing)) return existing;
+  if (!fromAudio) return existing;
+  if (/^哈+$/.test(stripMarks(existing)) && !/^哈+$/.test(stripMarks(fromAudio))) return fromAudio;
+  if (islands.length >= 3) return fromAudio;
+  if (islands.length >= 2 && stripMarks(existing).length <= 4) return fromAudio;
+  return existing;
 }
 
 export function refineCueWords(
@@ -460,6 +480,10 @@ export function finishHeard(
 ): string {
   const picked = pickTranscript(server, browser);
   const recovered = recoverCues(picked, frames);
+  const islands = frames?.length ? voicedIslands(frames) : [];
+  if (isMostlyFiller(recovered) && islands.length >= 2) {
+    return keepCuePunct(recovered) || recovered;
+  }
   return shapeCueProsody(shapeSajiaoTail(recovered, frames), words, frames);
 }
 

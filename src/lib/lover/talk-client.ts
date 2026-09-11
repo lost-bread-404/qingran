@@ -2,6 +2,7 @@ import type { ChatMessage, Memory, Profile } from "./types";
 
 export type TalkStreamEvent =
   | { t: "text"; d: string }
+  | { t: "text_end"; speech: string }
   | { t: "audio"; i: number; b: string; m: string }
   | { t: "done"; speech: string }
   | { t: "err"; m: string };
@@ -34,6 +35,15 @@ export async function streamTalk(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
+  const audioWait: TalkStreamEvent[] = [];
+  let audioTimer = 0;
+
+  const flushAudio = () => {
+    audioTimer = 0;
+    const batch = audioWait.splice(0);
+    for (const event of batch) onEvent(event);
+  };
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -45,11 +55,20 @@ export async function streamTalk(
       if (!line) continue;
       const payload = line.slice(5).trim();
       if (!payload) continue;
+      let event: TalkStreamEvent;
       try {
-        onEvent(JSON.parse(payload) as TalkStreamEvent);
+        event = JSON.parse(payload) as TalkStreamEvent;
       } catch {
-        /* ignore */
+        continue;
       }
+      if (event.t === "audio") {
+        audioWait.push(event);
+        if (!audioTimer) audioTimer = window.setTimeout(flushAudio, 0);
+        continue;
+      }
+      onEvent(event);
     }
   }
+  if (audioTimer) window.clearTimeout(audioTimer);
+  flushAudio();
 }

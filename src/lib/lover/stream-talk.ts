@@ -11,6 +11,7 @@ const PCM_MIME = "audio/pcm;rate=24000";
 
 export type TalkStreamEvent =
   | { t: "text"; d: string }
+  | { t: "text_end"; speech: string }
   | { t: "audio"; i: number; b: string; m: string }
   | { t: "done"; speech: string }
   | { t: "err"; m: string };
@@ -111,9 +112,12 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
         first = false;
       }
     }
+    // Let the SSE socket flush text before the next LLM chunk / TTS audio.
+    await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   if (pending.trim()) tts.push(pending);
+  emit({ t: "text_end", speech: full.trim() });
   await tts.finish();
 
   const speech = full.trim();
@@ -132,8 +136,9 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
 function shouldSendDelta(text: string, first: boolean): boolean {
   if (!text.trim()) return false;
-  if (text.length >= (first ? 8 : 16)) return true;
-  if (/[。！？!?…，,、\n]/.test(text) && text.length >= (first ? 4 : 8)) return true;
+  if (/[。！？!?]\s*$/.test(text) && text.trim().length >= (first ? 6 : 8)) return true;
+  if (/[…]\s*$/.test(text) && text.trim().length >= (first ? 10 : 14)) return true;
+  if (text.length >= (first ? 28 : 42)) return true;
   return false;
 }
 
@@ -156,6 +161,8 @@ class LiveTts {
   private waitDone: Promise<void>;
   private resolveDone = () => undefined as void;
   private rejectDone = (_err: Error) => undefined as void;
+  private audioQueue: Array<{ b: string; m: string }> = [];
+  private draining = false;
 
   constructor(
     private apiKey: string,
@@ -261,8 +268,8 @@ class LiveTts {
     }
     if (event.type === "audio.delta" && event.delta) {
       this.gotAudio = true;
-      this.emit({ t: "audio", i: this.seq, b: event.delta, m: PCM_MIME });
-      this.seq += 1;
+      this.audioQueue.push({ b: event.delta, m: PCM_MIME });
+      this.drainAudio();
       return;
     }
     if (event.type === "audio.done") {
@@ -273,6 +280,22 @@ class LiveTts {
       this.failed = true;
       this.finishSocket();
     }
+  }
+
+  private drainAudio() {
+    if (this.draining) return;
+    this.draining = true;
+    const pump = () => {
+      const next = this.audioQueue.shift();
+      if (!next) {
+        this.draining = false;
+        return;
+      }
+      this.emit({ t: "audio", i: this.seq, b: next.b, m: next.m });
+      this.seq += 1;
+      setImmediate(pump);
+    };
+    setImmediate(pump);
   }
 
   private finishSocket() {

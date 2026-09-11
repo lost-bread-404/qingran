@@ -37,12 +37,12 @@ test("hold uses the floor so room noise is not treated as speech", () => {
   assert.ok(holdThreshold(floor) > floor);
 });
 
-test("silence after speech ends the turn", () => {
+test("silence after two seconds ends the turn", () => {
   assert.equal(
     shouldEndUtterance({
-      now: 2500,
+      now: 3500,
       startAt: 0,
-      lastVoiceAt: 1200,
+      lastVoiceAt: 1400,
       voiced: false,
       hasText: false,
       lastTextAt: 0,
@@ -51,17 +51,31 @@ test("silence after speech ends the turn", () => {
   );
 });
 
-test("stuck ambient energy still ends once speech text goes idle", () => {
+test("a one-second pause is not enough to send", () => {
   assert.equal(
     shouldEndUtterance({
-      now: 2400,
+      now: 2500,
       startAt: 0,
-      lastVoiceAt: 2400,
+      lastVoiceAt: 1400,
+      voiced: false,
+      hasText: true,
+      lastTextAt: 1400,
+    }),
+    false,
+  );
+});
+
+test("speech text going idle does not cut a live turn", () => {
+  assert.equal(
+    shouldEndUtterance({
+      now: 8000,
+      startAt: 0,
+      lastVoiceAt: 8000,
       voiced: true,
       hasText: true,
-      lastTextAt: 1300,
+      lastTextAt: 2000,
     }),
-    true,
+    false,
   );
 });
 
@@ -93,16 +107,16 @@ test("a short click is not flushed as an utterance", () => {
   );
 });
 
-test("a very long turn is force-ended", () => {
+test("a long turn is not force-ended while you are still talking", () => {
   assert.equal(
     shouldEndUtterance({
-      now: 12_000,
+      now: 30_000,
       startAt: 0,
-      lastVoiceAt: 12_000,
+      lastVoiceAt: 30_000,
       voiced: true,
-      hasText: false,
-      lastTextAt: 0,
+      hasText: true,
+      lastTextAt: 29_000,
     }),
-    true,
+    false,
   );
 });

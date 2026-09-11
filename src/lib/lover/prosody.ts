@@ -109,21 +109,21 @@ export function sampleProsody(
 }
 
 export function voicedIslands(frames: ProsodyFrame[]): Island[] {
-  const islands: Island[] = [];
+  const coarse: Island[] = [];
   let cur: ProsodyFrame[] = [];
   for (const frame of frames) {
-    const on = cur.length ? frame.rms >= 0.004 : frame.rms >= 0.007;
+    const on = cur.length ? frame.rms >= 0.0038 : frame.rms >= 0.0065;
     if (on) {
       cur.push(frame);
       continue;
     }
     if (cur.length) {
-      pushIsland(islands, cur);
+      pushIsland(coarse, cur);
       cur = [];
     }
   }
-  if (cur.length) pushIsland(islands, cur);
-  return islands;
+  if (cur.length) pushIsland(coarse, cur);
+  return coarse.flatMap(splitDips);
 }
 
 export function hasCueEnergy(frames: ProsodyFrame[]): boolean {
@@ -137,8 +137,39 @@ export function hasCueEnergy(frames: ProsodyFrame[]): boolean {
 function pushIsland(islands: Island[], frames: ProsodyFrame[]) {
   const start = frames[0]?.t ?? 0;
   const end = frames[frames.length - 1]?.t ?? start;
-  if (end - start < 0.05) return;
+  if (end - start < 0.04) return;
   islands.push({ start, end, frames });
+}
+
+function splitDips(island: Island): Island[] {
+  const frames = island.frames;
+  if (frames.length < 8) return [island];
+  const peak = Math.max(...frames.map((f) => f.rms), 0);
+  const cut = Math.max(0.0042, peak * 0.34);
+  const cuts: number[] = [];
+  let lowStart = -1;
+  for (let i = 0; i < frames.length; i += 1) {
+    const frame = frames[i]!;
+    if (frame.rms < cut) {
+      if (lowStart < 0) lowStart = i;
+      continue;
+    }
+    if (lowStart >= 0) {
+      const dip = frame.t - (frames[lowStart]?.t ?? frame.t);
+      if (dip >= 0.055 && lowStart > 0) cuts.push(lowStart);
+      lowStart = -1;
+    }
+  }
+  if (!cuts.length) return [island];
+  const parts: Island[] = [];
+  let from = 0;
+  for (const at of cuts) {
+    pushIsland(parts, frames.slice(from, at));
+    from = at;
+    while (from < frames.length && (frames[from]?.rms ?? 0) < cut) from += 1;
+  }
+  pushIsland(parts, frames.slice(from));
+  return parts.length ? parts : [island];
 }
 
 function avg(values: number[]) {
@@ -186,32 +217,35 @@ export function classifyCue(frames: ProsodyFrame[]): CueKind {
   const endHz = avg(stable.slice(-Math.max(1, Math.ceil(stable.length / 3))));
   const rising = startHz > 80 && endHz / startHz >= 1.15 && dur >= 0.22;
   const unvoicedRatio = 1 - voiced.length / Math.max(1, frames.length);
-  const breathy = unvoicedRatio >= 0.5 && peak >= 0.016 && (bright >= 0.16 || centroid >= 600);
-  const sob =
+  const closed = (centroid > 0 && centroid < 740 && bright < 0.22) || hum;
+  const open = bright >= 0.26 || centroid >= 920 || (peak >= 0.06 && centroid >= 700);
+  const laugh =
+    unvoicedRatio >= 0.72 &&
+    dur <= 0.16 &&
+    peak >= 0.1 &&
+    bright >= 0.34 &&
+    centroid >= 1200 &&
+    !falling;
+
+  if (
     falling &&
     dur >= 0.16 &&
-    midHz > 0 &&
-    midHz < 320 &&
+    peak < 0.12 &&
     bright < 0.36 &&
-    peak < 0.11;
-
-  if (breathy) return "哈";
-  if (sob) return "呜";
-  if (bright >= 0.3 || centroid >= 980 || (peak >= 0.07 && centroid >= 720)) return "啊";
-  if (hum && dur >= 0.12 && !falling) return "嗯";
-  if (
-    dur <= 0.38 &&
-    peak < 0.085 &&
-    centroid < 1000 &&
-    bright < 0.32 &&
-    !hum &&
-    (clarity < 0.8 || falling || dur <= 0.18)
+    !open
   ) {
-    return "哼";
+    if (midHz > 80 && midHz < 310) return "呜";
+    if (unvoicedRatio >= 0.4 && centroid > 0 && centroid < 880) return "呜";
   }
+  if (closed && !open) {
+    if (dur <= 0.16 && peak < 0.065 && !hum) return "哼";
+    return "嗯";
+  }
+  if (laugh) return "哈";
+  if (rising && open && peak >= 0.05 && dur >= 0.22) return "嗷";
+  if (open || unvoicedRatio >= 0.4) return "啊";
   if (hum || (bright < 0.2 && centroid < 720 && peak < 0.055 && rms < 0.04)) return "嗯";
-  if (centroid < 1080 && bright < 0.38) return "呜";
-  if (rising && (bright >= 0.25 || centroid >= 850) && peak >= 0.04) return "嗷";
+  if (centroid < 1080 && bright < 0.38 && falling) return "呜";
   return "啊";
 }
 
@@ -229,22 +263,23 @@ export function cuesFromProsody(frames: ProsodyFrame[]): string {
   const islands = voicedIslands(frames);
   if (!islands.length) return "";
   const parts: string[] = [];
-  for (const island of islands) {
+  for (let i = 0; i < islands.length; i += 1) {
+    const island = islands[i]!;
     const cue = classifyCue(island.frames);
     const dur = island.end - island.start;
-    const n =
-      cue === "哼" || cue === "嗷"
-        ? 1
-        : cue === "哈"
-          ? dur >= 0.55
-            ? 2
-            : 1
-          : dur >= 0.7
-            ? 3
-            : dur >= 0.28
-              ? 2
-              : 1;
-    parts.push(cue.repeat(n));
+    const n = cueRepeat(cue, dur);
+    let mark = markForFrames(island.frames);
+    const next = islands[i + 1];
+    if (!mark && next && next.start - island.end >= 0.1) mark = "…";
+    parts.push(`${cue.repeat(n)}${mark}`);
   }
   return parts.join("");
+}
+
+function cueRepeat(kind: CueKind, dur: number) {
+  if (kind === "哼" || kind === "嗷") return 1;
+  if (kind === "哈") return dur >= 0.28 ? 2 : 1;
+  if (kind === "呜") return dur >= 0.2 ? 2 : 1;
+  if (dur >= 0.28) return 2;
+  return 1;
 }

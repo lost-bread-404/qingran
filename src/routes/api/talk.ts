@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { lockedProfile, type ChatMessage, type Memory, type Profile } from "@/lib/lover/types";
-import { runTalkStream, type TalkStreamInput } from "@/lib/lover/stream-talk";
+import { runTalkStream, type TalkStreamEvent, type TalkStreamInput } from "@/lib/lover/stream-talk";
+
+const SSE_PAD = 2048;
 
 export const Route = createFileRoute("/api/talk")({
   server: {
@@ -16,8 +18,13 @@ export const Route = createFileRoute("/api/talk")({
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
           async start(controller) {
-            const send = (event: unknown) => {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+            const send = (event: TalkStreamEvent) => {
+              let frame = `data: ${JSON.stringify(event)}\n\n`;
+              if (event.t === "text" || event.t === "text_end") {
+                const pad = Math.max(0, SSE_PAD - frame.length);
+                if (pad) frame += `:${" ".repeat(pad)}\n\n`;
+              }
+              controller.enqueue(encoder.encode(frame));
             };
             try {
               const input: TalkStreamInput = {

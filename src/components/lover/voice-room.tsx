@@ -337,24 +337,36 @@ export function VoiceRoom() {
       let gotAudio = false;
       const clips: Uint8Array<ArrayBuffer>[] = [];
       let clipMime = "audio/pcm;rate=24000";
-      let paint = 0;
       let persistAt = 0;
+      let paintHandle = 0;
+      let latestDisplay = "";
       const persistReply = (text: string) => {
         const display = stripSpeechTags(text);
         inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
         if (!display) return;
         void appendRoomMessage({ data: { ...reply, text: display } });
       };
-      const paintText = (text: string, force = false) => {
-        const display = stripSpeechTags(text);
-        const now = Date.now();
-        inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
-        if (!force && now - paint < 80) return;
-        paint = now;
+      const flushPaint = () => {
+        paintHandle = 0;
+        const display = latestDisplay;
         setMessages((prev) =>
           prev.map((m) => (m.id === reply.id ? { ...m, text: display } : m)),
         );
-        if (force || now - persistAt > 400) {
+      };
+      const paintText = (text: string, force = false) => {
+        const display = stripSpeechTags(text);
+        inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
+        latestDisplay = display;
+        if (force) {
+          if (paintHandle) cancelAnimationFrame(paintHandle);
+          paintHandle = 0;
+          flushPaint();
+          persistReply(text);
+          return;
+        }
+        if (!paintHandle) paintHandle = requestAnimationFrame(flushPaint);
+        const now = Date.now();
+        if (now - persistAt > 400) {
           persistAt = now;
           persistReply(text);
         }
@@ -373,6 +385,11 @@ export function VoiceRoom() {
             if (event.t === "text") {
               full += event.d;
               paintText(full);
+              return;
+            }
+            if (event.t === "text_end") {
+              full = event.speech || full;
+              paintText(full, true);
               return;
             }
             if (event.t === "done") {
@@ -596,7 +613,7 @@ export function VoiceRoom() {
             ? "清然在说 · 点灯可打断"
             : call.resting || call.interrupted
               ? "我在"
-              : "你说，说完停一下"
+              : "你说，说完停两秒"
     : "";
 
   return (
@@ -765,7 +782,7 @@ export function VoiceRoom() {
                     ? status === "speaking"
                       ? "点灯打断 · 点按钮挂断"
                       : call.phase === "speaking-you"
-                        ? "说完停一下就会发给她"
+                        ? "说完停两秒再发给她"
                         : call.resting || call.interrupted
                           ? "闹钟可以响 · 回来点一下就能接着说"
                           : call.error || "通话中"
