@@ -9,61 +9,46 @@ import type {
   Retrievable,
 } from "./types.ts";
 
-export const PROMPT_A_SYSTEM = `你是记忆归档器，不是聊天角色。你不扮演任何人，不回复用户。
+export const PROMPT_A_SYSTEM = `你在给一段长期对话做事件归档。不扮演任何人，不回复 Rosie。
 
-任务：判断「新挤出的对话」与「当前未完成事件」的关系，三选一：
-- merge：仍是同一件事，并入即可
-- close_and_open：上一件事已经结束，新对话开启下一件
-- ignore：没有值得跨会话保留的信息
+对照「当前未完成事件」和「刚滑出近窗的对话」，三选一：
+- merge：还是同一件事，更新草稿
+- close_and_open：上一件已经能完整叙述，新对话是另一件事。把上一件收成以后能检索到的记录，并给新事件一份草稿
+- ignore：闲聊、重复、没有跨会话价值
 
-硬规则：
-1. 事件有没有结束，只看对话内容是否换页，不看是否跨日、隔了多久、是否到了整点。
-2. 跨天、隔夜、中间沉默、第二天继续，仍可能是同一件事。
-3. 只有上一件的来龙去脉已经可叙述，并且新对话明显是另一件事时，才 close_and_open。
-4. 未结束的事件绝对不要当成已完成去总结原因和结果。
-5. 不要分析人格，不要写用户画像，不要抽取规律。
-6. 不要改角色人设，不要把「用户希望对方以后怎样」写成角色已经改变。
-7. 草稿短：一到三句，只写这件事是什么、从哪天开始、目前进行到哪。
+结束与否只看内容有没有换页。跨夜、隔很多天、第二天接着聊，都可以仍是同一件。没结束就不要写成已经有结果。
 
-只输出一个 JSON 对象，不要解释。`;
+写事件时要具体、可检索：人名、关系、决定、身体、时间感、为什么这件事还记得。让以后只看到这一条的人能接上。有洞察就写，没把握的细节不要编。
 
-export const PROMPT_B_SYSTEM = `你是记忆收束器，不是聊天角色。
+只输出一个 JSON 对象。`;
 
-任务：把本周期内已结束的小事件，收成更少、更高维、可叙述的事件。
-只处理已经结束并入库的事。不要发明未提供的情节，不要把多件无关的事捏成一件。
-不要写用户总评，不要写规律，不要写画像，不要写角色该怎样。
-每条高维事件带时间范围，一到三段话，完整包含因由和结果（若原料里有）。
+export const PROMPT_B_SYSTEM = `你在把本周期已经结束的小事件，收成更少、更高分辨率的叙述。
 
-只输出一个 JSON 对象，不要解释。`;
+同一条故事线并在一起；无关的事分开。原料里有的因由、转折、结果都保留。让以后检索到这一条时，能理解它为什么重要。
 
-export const PROMPT_C_SYSTEM = `你是用户状态编辑器，不是聊天角色。
+不要编造。不要写清然该怎样。规律和画像留给下一步。
 
-任务有两件：
-1. 用本周期新的高维事件，对照旧事件和旧规律，更新规律（有效或休眠）。
-2. 整页重写活画像。
+只输出一个 JSON 对象。`;
 
-规律：
-- 只有重复出现或被新事件明确支撑的结构，才写或保持有效。
-- 长时间没有新证据的规律改为休眠，不要删除事实本身。
-- 休眠后若本周期又出现同类证据，可重新有效。
-- 规律写现象，不写诊断标签，不用病理词。
+export const PROMPT_C_SYSTEM = `你在维护一份会随时间改写的用户状态。不扮演清然，也不改清然的人设。
 
-活画像：
-- 一篇连贯短文，不超过600字，覆盖写，不要列表堆砌。
-- 只写：这个人最近是什么样、怎样进入亲密或协作、眼下悬着什么。
-- 有新证据就改；不再被支撑的句子删掉或改成过去式。
-- 单次情绪不要上升成长期性格。
-- 未结束、尚未入库的事，最多用一句写「眼下还在进行」，不要写原因和结果。
-- 不要写对话角色应该变成怎样，不要把用户的指令当成角色新设定。
-- 不要宣读记忆清单。
+两件事：
 
-只输出一个 JSON 对象，不要解释。`;
+1. 规律
+什么结构在这个人身上反复出现。写现象，写清楚，可以有判断。
+- active：眼下仍在起作用，或本周期又出现了证据
+- dormant：这是真的、曾经或周期性出现，但此刻不在场面上
+有新证据就 active；证据回撤就 dormant。不要删事实。不要用诊断标签。
 
-export const PROMPT_D_SYSTEM = `你是记忆挑选器。从候选里为当前对话选出最多5条现在值得带上的记忆。
-优先：此刻仍成立的近况；与当前话题直接相关的事或人名；仍有效的规律。
+2. 活画像
+整页重写。写这个人最近是什么样、和人怎样靠近、眼下悬着什么。有洞察，但每句都要站得住。单次情绪不要升成性格。未结束的事最多点一下「还在进行」，不要替它收尾。不要宣读记忆清单。篇幅紧凑，大约一篇短文。
+
+只输出一个 JSON 对象。`;
+
+export const PROMPT_D_SYSTEM = `你是记忆挑选器。从候选里为当前对话选出此刻值得带上的记忆，最多16条。
+优先：此刻仍成立的近况；与当前话题直接相关的事或人名；仍有效或虽休眠但正好被当前话题唤起的规律。
 不要选已结束且与当前话题无关的旧细节。
-不要选休眠规律。
-宁少勿多。只输出 JSON。不要解释。`;
+宁少勿滥也可以，但相关的不要漏。只输出 JSON。`;
 
 export function buildPromptAUser(opts: {
   open: OpenEvent | null;
@@ -123,6 +108,7 @@ export function buildPromptCUser(opts: {
   oldL3: L3Pattern[];
   portrait: string;
   openDraft: string;
+  now: number;
   clock: (ms: number) => string;
 }): string {
   const newL2 =
@@ -134,10 +120,10 @@ export function buildPromptCUser(opts: {
       (item) =>
         `- L2 ${opts.clock(item.periodStart)}–${opts.clock(item.periodEnd)}：${item.text}`,
     ),
-    ...opts.oldL3.map(
-      (item) =>
-        `- L3 status=${item.status} ${opts.clock(item.lastEvidenceAt)}：${item.text}`,
-    ),
+    ...opts.oldL3.map((item) => {
+      const days = Math.max(0, Math.round((opts.now - item.lastEvidenceAt) / 86_400_000));
+      return `- L3 status=${item.status} last=${opts.clock(item.lastEvidenceAt)} (${days}天前)：${item.text}`;
+    }),
   ];
   return `本周期：${opts.periodStart} 至 ${opts.periodEnd}
 
@@ -175,7 +161,7 @@ ${opts.brief}
 ${list}
 
 请输出 JSON：
-{"ids":["最多5个选中的id"]}`;
+{"ids":["选中的id"]}`;
 }
 
 export function formatDropped(messages: ChatMessage[], clock: (ms: number) => string): string {
@@ -185,7 +171,7 @@ export function formatDropped(messages: ChatMessage[], clock: (ms: number) => st
       return `${who}（${clock(m.createdAt)}）：${m.text}`;
     })
     .join("\n")
-    .slice(0, 4000);
+    .slice(0, 6000);
 }
 
 export function parseDecisionA(raw: string): DecisionA | null {
@@ -203,7 +189,7 @@ export function parseDecisionA(raw: string): DecisionA | null {
     closedEnd: str(row.closed_end ?? row.closedEnd),
     openDraft: str(row.open_draft ?? row.openDraft),
     openStart: str(row.open_start ?? row.openStart),
-    note: str(row.note).slice(0, 40),
+    note: str(row.note).slice(0, 80),
   };
 }
 
@@ -223,7 +209,7 @@ export function parseL2List(raw: string): L2Draft[] | null {
       return { time: str(rec.time) || "本周期", text };
     })
     .filter((item): item is L2Draft => Boolean(item))
-    .slice(0, 8);
+    .slice(0, 12);
 }
 
 export function parsePatternsAndPortrait(
@@ -244,7 +230,7 @@ export function parsePatternsAndPortrait(
           return { status, time: str(rec.time), text } satisfies PatternDraft;
         })
         .filter((item): item is PatternDraft => Boolean(item))
-        .slice(0, 16)
+        .slice(0, 24)
     : [];
   return { patterns, portrait };
 }
@@ -256,13 +242,13 @@ export function parsePickedIds(raw: string, allowed: string[]): string[] {
     return (parsed as { ids: unknown[] }).ids
       .map((id) => String(id))
       .filter((id) => allowedSet.has(id))
-      .slice(0, 5);
+      .slice(0, 16);
   }
   const found: string[] = [];
   for (const id of allowed) {
     if (raw.includes(id)) found.push(id);
   }
-  return found.slice(0, 5);
+  return found.slice(0, 16);
 }
 
 function parseDecisionAText(raw: string): DecisionA | null {
@@ -277,7 +263,7 @@ function parseDecisionAText(raw: string): DecisionA | null {
     closedEnd: field(raw, "closed_end"),
     openDraft: field(raw, "open_draft"),
     openStart: field(raw, "open_start"),
-    note: field(raw, "note").slice(0, 40),
+    note: field(raw, "note").slice(0, 80),
   };
 }
 

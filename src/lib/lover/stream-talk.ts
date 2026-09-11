@@ -1,4 +1,6 @@
 import WebSocket from "ws";
+import { stripSpeakerPrefix } from "./memory/pack";
+import type { PackedChatMessage } from "./memory/types";
 import { spokenForTts } from "./speech-tags";
 import { ttsRequestBody } from "./tts";
 
@@ -14,7 +16,7 @@ export type TalkStreamEvent =
 
 export type TalkStreamInput = {
   text: string;
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  messages: PackedChatMessage[];
 };
 
 type Emit = (event: TalkStreamEvent) => void;
@@ -34,7 +36,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   const packed = data.messages.length
     ? data.messages
-    : [{ role: "user" as const, content: say }];
+    : [{ role: "user" as const, name: "Rosie", content: `Rosie：${say}` }];
   const tts = new LiveTts(apiKey, emit);
 
   const res = await fetch("https://api.x.ai/v1/chat/completions", {
@@ -89,7 +91,20 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       if (!token) continue;
       full += token;
       pending += token;
-      emit({ t: "text", d: token });
+      if (first && looksLikePartialPrefix(pending)) continue;
+      if (first) {
+        const stripped = stripSpeakerPrefix(pending);
+        if (stripped !== pending) {
+          pending = stripped;
+          full = stripSpeakerPrefix(full);
+          if (!pending) continue;
+          emit({ t: "text", d: pending });
+        } else {
+          emit({ t: "text", d: token });
+        }
+      } else {
+        emit({ t: "text", d: token });
+      }
       if (shouldSendDelta(pending, first)) {
         tts.push(pending);
         pending = "";
@@ -101,7 +116,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   if (pending.trim()) tts.push(pending);
   await tts.finish();
 
-  const speech = full.trim();
+  const speech = stripSpeakerPrefix(full.trim());
   if (!speech) {
     emit({ t: "err", m: "她好像走神了，再说一次。" });
     return;
@@ -120,6 +135,12 @@ function shouldSendDelta(text: string, first: boolean): boolean {
   if (text.length >= (first ? 8 : 16)) return true;
   if (/[。！？!?…，,、\n]/.test(text) && text.length >= (first ? 4 : 8)) return true;
   return false;
+}
+
+function looksLikePartialPrefix(text: string): boolean {
+  const t = text.trimStart();
+  if (!t) return true;
+  return ["清然：", "清然:", "Rosie：", "Rosie:"].some((prefix) => prefix.startsWith(t) && t.length < prefix.length);
 }
 
 function toSpokenDelta(text: string) {

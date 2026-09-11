@@ -1,8 +1,6 @@
-import {
-  MAX_CANDIDATES,
-  PATTERN_DORMANT_MS,
-  type Retrievable,
-} from "./types.ts";
+import { MAX_CANDIDATES, type Retrievable } from "./types.ts";
+
+const DAY = 86_400_000;
 
 const STOP = new Set([
   "我",
@@ -77,7 +75,6 @@ const STOP = new Set([
   "可以",
   "知道",
   "觉得",
-  "一下",
   "the",
   "and",
   "you",
@@ -91,13 +88,15 @@ export function extractKeywords(text: string): string[] {
     if (!STOP.has(word)) out.add(word);
   }
   const cjk = [...lower].filter((ch) => /\p{Script=Han}/u.test(ch));
-  for (let i = 0; i < cjk.length - 1; i += 1) {
-    const gram = cjk[i]! + cjk[i + 1]!;
-    if (!STOP.has(gram) && !STOP.has(cjk[i]!) && !STOP.has(cjk[i + 1]!)) {
+  for (const n of [2, 3, 4]) {
+    for (let i = 0; i <= cjk.length - n; i += 1) {
+      const gram = cjk.slice(i, i + n).join("");
+      if (STOP.has(gram)) continue;
+      if ([...gram].every((ch) => STOP.has(ch))) continue;
       out.add(gram);
     }
   }
-  return [...out].slice(0, 40);
+  return [...out].slice(0, 64);
 }
 
 export function retrieveCandidates(opts: {
@@ -110,21 +109,50 @@ export function retrieveCandidates(opts: {
   const terms = extractKeywords(opts.query);
   if (terms.length === 0) return [];
 
-  const matched: Retrievable[] = [];
+  const scored: Array<{ item: Retrievable; score: number }> = [];
   for (const item of opts.items) {
-    if (item.layer === "l3") {
-      if (item.status !== "active") continue;
-      if (opts.now - item.endedAt > PATTERN_DORMANT_MS) continue;
-    }
-    const hay = item.text.toLowerCase();
-    if (!terms.some((term) => hay.includes(term))) continue;
-    matched.push(item);
+    const score = relevance(item, terms, opts.now);
+    if (score <= 0) continue;
+    scored.push({ item, score });
   }
 
-  matched.sort((a, b) => b.endedAt - a.endedAt || b.startedAt - a.startedAt);
-  return matched.slice(0, limit);
+  scored.sort((a, b) => b.score - a.score || b.item.endedAt - a.item.endedAt);
+  const picked: Retrievable[] = [];
+  for (const row of scored) {
+    if (picked.some((item) => nearDuplicate(item.text, row.item.text))) continue;
+    picked.push(row.item);
+    if (picked.length >= limit) break;
+  }
+  return picked;
 }
 
 export function buildQuery(userText: string, recent: string[]): string {
-  return [userText, ...recent.slice(-6)].filter(Boolean).join("\n");
+  return [userText, ...recent.slice(-8)].filter(Boolean).join("\n");
+}
+
+function relevance(item: Retrievable, terms: string[], now: number): number {
+  const hay = item.text.toLowerCase();
+  let hits = 0;
+  for (const term of terms) {
+    if (hay.includes(term)) hits += term.length >= 3 ? 2 : 1;
+  }
+  if (hits === 0) return 0;
+
+  let score = hits * 10;
+  if (item.layer === "l3") score += 5;
+  else if (item.layer === "l2") score += 3;
+  if (item.status === "active") score += 2;
+  const age = Math.max(0, now - item.endedAt);
+  if (age < 14 * DAY) score += 4;
+  else if (age < 90 * DAY) score += 2;
+  else if (age < 365 * DAY) score += 1;
+  return score;
+}
+
+function nearDuplicate(a: string, b: string): boolean {
+  const na = a.replace(/[^\u4e00-\u9fffa-zA-Z0-9]/g, "").toLowerCase();
+  const nb = b.replace(/[^\u4e00-\u9fffa-zA-Z0-9]/g, "").toLowerCase();
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  return na.includes(nb) || nb.includes(na);
 }

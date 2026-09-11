@@ -1,6 +1,6 @@
 import { formatClock } from "../prompt";
 import type { ChatMessage } from "../types";
-import { buildMainMessages, countChars } from "./pack";
+import { buildMainMessages, clipPortrait, countChars } from "./pack";
 import {
   PROMPT_A_SYSTEM,
   PROMPT_B_SYSTEM,
@@ -39,6 +39,7 @@ import {
   MAX_MAIN_MEMORIES,
   MAX_PORTRAIT_CHARS,
   type MainPackInput,
+  type PackedChatMessage,
   type PackedMemory,
 } from "./types";
 
@@ -54,16 +55,12 @@ export async function assembleMainPack(opts: {
   userText: string;
   nowMs: number;
   timeZone: string;
-}): Promise<{ messages: Array<{ role: "system" | "user" | "assistant"; content: string }>; stats: Record<string, number> }> {
+}): Promise<{ messages: PackedChatMessage[]; stats: Record<string, number> }> {
   const clock = (ms: number) => formatClock(ms, opts.timeZone);
-  const [portrait, openEvent, items] = await Promise.all([
-    loadPortrait(),
-    loadOpenEvent(),
-    loadRetrievable(),
-  ]);
+  const [portrait, items] = await Promise.all([loadPortrait(), loadRetrievable()]);
   const query = buildQuery(
     opts.userText,
-    opts.history.slice(-6).map((m) => m.text),
+    opts.history.slice(-8).map((m) => m.text),
   );
   const candidates = retrieveCandidates({
     query,
@@ -73,6 +70,7 @@ export async function assembleMainPack(opts: {
   const memories: PackedMemory[] = candidates.slice(0, MAX_MAIN_MEMORIES).map((item) => ({
     time: clock(item.startedAt),
     text: item.text,
+    dormant: item.layer === "l3" && item.status === "dormant",
   }));
   const history = opts.history.slice(-(CONTEXT_WINDOW - 1)).map((m) => ({
     role: m.role,
@@ -83,7 +81,6 @@ export async function assembleMainPack(opts: {
     clock: clock(opts.nowMs),
     portrait,
     memories,
-    openHappening: Boolean(openEvent),
     history,
     userText: opts.userText.trim(),
   };
@@ -129,8 +126,9 @@ async function processDropped(timeZone: string): Promise<void> {
   const result = await chatJson({
     system: PROMPT_A_SYSTEM,
     user: buildPromptAUser({ open, dropped, clock }),
-    maxTokens: 400,
-    timeoutMs: 18_000,
+    maxTokens: 800,
+    timeoutMs: 20_000,
+    temperature: 0.2,
   });
   if (!result.ok) {
     await appendLog("a_fail", result.error);
@@ -154,7 +152,7 @@ async function processDropped(timeZone: string): Promise<void> {
     const points = appendPoints(open?.points ?? "", dropped, clock);
     await saveOpenEvent({
       startedAt,
-      draft: (decision.openDraft || open?.draft || "").slice(0, 400),
+      draft: (decision.openDraft || open?.draft || "").slice(0, 800),
       points,
     });
     await markScanned(ids);
@@ -177,7 +175,7 @@ async function processDropped(timeZone: string): Promise<void> {
     openDraft
       ? {
           startedAt: parseMaybeTime(decision.openStart, dropped[0]!.createdAt),
-          draft: openDraft.slice(0, 400),
+          draft: openDraft.slice(0, 800),
           points: appendPoints("", dropped, clock),
         }
       : null,
@@ -232,8 +230,9 @@ async function collapseL2(opts: {
   const result = await chatJson({
     system: PROMPT_B_SYSTEM,
     user: buildPromptBUser(opts),
-    maxTokens: 900,
-    timeoutMs: 22_000,
+    maxTokens: 1200,
+    timeoutMs: 24_000,
+    temperature: 0.3,
   });
   if (!result.ok) throw new Error(result.error);
   const list = parseL2List(result.text);
@@ -275,10 +274,12 @@ async function rewriteState(opts: {
       oldL3,
       portrait,
       openDraft: open?.draft ?? "",
+      now: opts.now,
       clock: opts.clock,
     }),
-    maxTokens: 1400,
-    timeoutMs: 28_000,
+    maxTokens: 2000,
+    timeoutMs: 30_000,
+    temperature: 0.4,
   });
   if (!result.ok) throw new Error(result.error);
   const parsed = parsePatternsAndPortrait(result.text);
@@ -286,10 +287,12 @@ async function rewriteState(opts: {
     await appendLog("c_parse_fail", result.text.slice(0, 80));
     return;
   }
-  if (countChars(parsed.portrait) > MAX_PORTRAIT_CHARS) {
-    await appendLog("portrait_too_long", String(countChars(parsed.portrait)));
-  } else if (parsed.portrait.trim()) {
-    await savePortrait(parsed.portrait.trim());
+  if (parsed.portrait.trim()) {
+    const portrait = clipPortrait(parsed.portrait, MAX_PORTRAIT_CHARS);
+    if (countChars(parsed.portrait) > MAX_PORTRAIT_CHARS) {
+      await appendLog("portrait_clipped", String(countChars(parsed.portrait)));
+    }
+    if (portrait) await savePortrait(portrait);
   }
   if (parsed.patterns.length) {
     await replaceL3(parsed.patterns, opts.now);
@@ -319,6 +322,7 @@ async function chatJson(opts: {
   user: string;
   maxTokens: number;
   timeoutMs: number;
+  temperature: number;
 }): Promise<ChatJsonResult> {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) return { ok: false, error: "no-key" };
@@ -331,7 +335,7 @@ async function chatJson(opts: {
       },
       body: JSON.stringify({
         model: FAST_MODEL,
-        temperature: 0,
+        temperature: opts.temperature,
         max_tokens: opts.maxTokens,
         response_format: { type: "json_object" },
         messages: [
@@ -352,4 +356,3 @@ async function chatJson(opts: {
     return { ok: false, error: String(error).slice(0, 80) };
   }
 }
-

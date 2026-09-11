@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { labelChatMessage } from "@/lib/lover/memory/pack";
 import { runTalkStream, type TalkStreamInput } from "@/lib/lover/stream-talk";
 import { lockedProfile, type ChatMessage, type Profile } from "@/lib/lover/types";
 
@@ -46,11 +47,8 @@ export const Route = createFileRoute("/api/talk")({
               } catch {
                 messages = [
                   { role: "system", content: profile.systemPrompt },
-                  ...history.slice(-19).map((m) => ({
-                    role: m.role,
-                    content: m.text,
-                  })),
-                  { role: "user", content: text },
+                  ...history.slice(-19).map((m) => labelChatMessage(m.role, m.text)),
+                  labelChatMessage("user", text),
                 ];
               }
               await runTalkStream({ text, messages }, send);

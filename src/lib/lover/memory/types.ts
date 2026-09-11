@@ -1,9 +1,11 @@
 export const CONTEXT_WINDOW = 20;
-export const MAX_MAIN_MEMORIES = 5;
-export const MAX_CANDIDATES = 8;
-export const MAX_PORTRAIT_CHARS = 600;
-export const PATTERN_DORMANT_MS = 30 * 86_400_000;
+export const MAX_MAIN_MEMORIES = 16;
+export const MAX_CANDIDATES = 24;
+export const MAX_PORTRAIT_CHARS = 900;
 export const DROPPED_PACK_LIMIT = 30;
+
+export const USER_SPEAKER = "Rosie";
+export const ASSISTANT_SPEAKER = "清然";
 
 export type PatternStatus = "active" | "dormant";
 export type MemoryLayer = "l1" | "l2" | "l3";
@@ -66,6 +68,18 @@ export type Retrievable = {
 export type PackedMemory = {
   time: string;
   text: string;
+  dormant?: boolean;
+};
+
+export type ChatTurn = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type PackedChatMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+  name?: string;
 };
 
 export type MainPackInput = {
@@ -73,8 +87,7 @@ export type MainPackInput = {
   clock: string;
   portrait: string;
   memories: PackedMemory[];
-  openHappening: boolean;
-  history: Array<{ role: "user" | "assistant"; content: string }>;
+  history: ChatTurn[];
   userText: string;
 };
 

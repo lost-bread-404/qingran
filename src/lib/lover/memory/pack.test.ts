@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildMainMessages, countChars, packMemoryBlock, packStatusBlock } from "./pack.ts";
+import {
+  buildMainMessages,
+  clipPortrait,
+  countChars,
+  packMemoryBlock,
+  packStatusBlock,
+  stripSpeakerPrefix,
+} from "./pack.ts";
 import { retrieveCandidates, extractKeywords } from "./retrieve.ts";
 import { parseDecisionA, parseL2List, parsePatternsAndPortrait, parsePickedIds } from "./prompts.ts";
 import type { Retrievable } from "./types.ts";
@@ -11,7 +18,6 @@ test("charter is the first system message and later text is separate", () => {
     clock: "2026年9月10日 周四 19:00",
     portrait: "最近有点累，说话少。",
     memories: [{ time: "9月8日", text: "林泽从房子里搬了出去。" }],
-    openHappening: true,
     history: [{ role: "user", content: "在吗" }],
     userText: "口腔溃疡好了。",
   });
@@ -20,21 +26,26 @@ test("charter is the first system message and later text is separate", () => {
   assert.equal(messages[1]?.role, "system");
   assert.match(messages[1]?.content ?? "", /\[状态\]/);
   assert.match(messages[1]?.content ?? "", /最近有点累/);
-  assert.match(messages[1]?.content ?? "", /未结束的事正在发生/);
+  assert.doesNotMatch(messages[1]?.content ?? "", /未结束的事/);
   assert.match(messages[1]?.content ?? "", /林泽/);
   assert.doesNotMatch(messages[0]?.content ?? "", /林泽/);
-  assert.equal(messages.at(-1)?.content, "口腔溃疡好了。");
+  assert.equal(messages.at(-1)?.name, "Rosie");
+  assert.equal(messages.at(-1)?.content, "Rosie：口腔溃疡好了。");
+  assert.equal(messages[2]?.content, "Rosie：在吗");
 });
 
 test("empty portrait and memories omit those sections", () => {
-  assert.equal(packStatusBlock("", false), null);
+  assert.equal(packStatusBlock(""), null);
   assert.equal(packMemoryBlock([]), null);
+  assert.match(
+    packMemoryBlock([{ time: "8月", text: "口腔溃疡会复发。", dormant: true }]) ?? "",
+    /休眠/,
+  );
   const messages = buildMainMessages({
     charter: "宪章",
     clock: "现在",
     portrait: "",
     memories: [],
-    openHappening: false,
     history: [],
     userText: "嗨",
   });
@@ -44,27 +55,37 @@ test("empty portrait and memories omit those sections", () => {
   assert.doesNotMatch(messages[1]?.content ?? "", /\[状态\]/);
 });
 
-test("retrieve never dumps the whole library and skips dormant patterns", () => {
+test("retrieve keeps dormant hits and can return more than five", () => {
   const items: Retrievable[] = [
     { id: "1", layer: "l1", text: "林泽从房子里搬了出去。", startedAt: 1, endedAt: 2, status: "active" },
     { id: "2", layer: "l1", text: "去年去过一次超市。", startedAt: 1, endedAt: 1, status: "active" },
     {
       id: "3",
       layer: "l3",
-      text: "近期容易反复口腔溃疡。",
+      text: "口腔溃疡一熬夜就成片。",
       startedAt: 1,
-      endedAt: Date.now(),
+      endedAt: Date.now() - 40 * 86_400_000,
       status: "dormant",
     },
     {
       id: "4",
       layer: "l3",
-      text: "近期容易反复口腔溃疡。",
+      text: "她和林泽分开后还是会问房子的事。",
       startedAt: 1,
       endedAt: Date.now(),
       status: "active",
     },
   ];
+  for (let i = 0; i < 20; i += 1) {
+    items.push({
+      id: `hit-${i}`,
+      layer: "l1",
+      text: `林泽相关的旧细节${i}`,
+      startedAt: 1,
+      endedAt: 10 + i,
+      status: "active",
+    });
+  }
   for (let i = 0; i < 40; i += 1) {
     items.push({
       id: `old-${i}`,
@@ -80,11 +101,12 @@ test("retrieve never dumps the whole library and skips dormant patterns", () => 
     items,
     now: Date.now(),
   });
-  assert.ok(hit.length <= 8);
+  assert.ok(hit.length > 5);
+  assert.ok(hit.length <= 24);
   assert.ok(hit.some((item) => item.id === "1"));
-  assert.ok(hit.some((item) => item.id === "4"));
-  assert.ok(!hit.some((item) => item.id === "3"));
+  assert.ok(hit.some((item) => item.id === "3"));
   assert.ok(!hit.some((item) => item.text.includes("无关旧账")));
+  assert.ok(!hit.some((item) => item.id === "2"));
 });
 
 test("empty small talk extracts no usable keywords so nothing is sent", () => {
@@ -121,7 +143,7 @@ note: 续`);
   assert.match(lines?.openDraft ?? "", /溃疡/);
 });
 
-test("parse B none and C portrait failure path helpers", () => {
+test("parse B none and C portrait helpers", () => {
   assert.deepEqual(parseL2List("L2: none"), []);
   assert.deepEqual(parseL2List('{"l2":[]}'), []);
   const c = parsePatternsAndPortrait(
@@ -129,6 +151,8 @@ test("parse B none and C portrait failure path helpers", () => {
   );
   assert.equal(c?.patterns[0]?.status, "dormant");
   assert.equal(c?.portrait, "最近平静。");
-  assert.ok(countChars("最近平静。") < 600);
+  assert.ok(countChars("最近平静。") < 900);
   assert.deepEqual(parsePickedIds('{"ids":["a","nope"]}', ["a", "b"]), ["a"]);
+  assert.equal(stripSpeakerPrefix("清然：在。"), "在。");
+  assert.equal(clipPortrait("最近平静。", 900), "最近平静。");
 });

@@ -88,7 +88,7 @@ export async function insertL1(event: Omit<L1Event, "id" | "createdAt"> & { id?:
     id: event.id || newId(),
     startedAt: event.startedAt,
     endedAt: event.endedAt,
-    text: event.text.slice(0, 600),
+    text: event.text.slice(0, 900),
     createdAt: Date.now(),
   };
   await sql`
@@ -200,7 +200,7 @@ export async function replaceL3(patterns: PatternDraft[], now: number): Promise<
   const existing = await loadL3();
   const used = new Set<string>();
   for (const pattern of patterns) {
-    const text = pattern.text.slice(0, 400);
+    const text = pattern.text.slice(0, 600);
     if (!text) continue;
     const found = existing.find((item) => similarText(item.text, text) && !used.has(item.id));
     const evidence = parseLooseTime(pattern.time, now);
