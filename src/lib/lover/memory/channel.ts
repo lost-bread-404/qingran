@@ -60,7 +60,7 @@ export async function assembleMainPack(opts: {
   const [portrait, items] = await Promise.all([loadPortrait(), loadRetrievable()]);
   const query = buildQuery(
     opts.userText,
-    opts.history.slice(-8).map((m) => m.text),
+    opts.history.filter((m) => m.role === "user").slice(-2).map((m) => m.text),
   );
   const candidates = retrieveCandidates({
     query,

@@ -1,6 +1,6 @@
 export const CONTEXT_WINDOW = 20;
-export const MAX_MAIN_MEMORIES = 16;
-export const MAX_CANDIDATES = 24;
+export const MAX_MAIN_MEMORIES = 8;
+export const MAX_CANDIDATES = 8;
 export const MAX_PORTRAIT_CHARS = 900;
 export const DROPPED_PACK_LIMIT = 30;
 

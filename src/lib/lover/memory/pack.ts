@@ -63,7 +63,7 @@ export function packStatusBlock(portrait: string): string | null {
 export function packMemoryBlock(memories: PackedMemory[]): string | null {
   if (memories.length === 0) return null;
   const lines = memories
-    .slice(0, 16)
+    .slice(0, 8)
     .map((item) => {
       const tag = item.dormant ? "休眠 " : "";
       return `${item.time} ${tag}${item.text}`.replace(/\s+/g, " ").trim();

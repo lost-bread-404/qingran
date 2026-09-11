@@ -55,7 +55,7 @@ test("empty portrait and memories omit those sections", () => {
   assert.doesNotMatch(messages[1]?.content ?? "", /\[状态\]/);
 });
 
-test("retrieve keeps dormant hits and can return more than five", () => {
+test("retrieve uses BM25, keeps dormant hits, and refuses junk", () => {
   const items: Retrievable[] = [
     { id: "1", layer: "l1", text: "林泽从房子里搬了出去。", startedAt: 1, endedAt: 2, status: "active" },
     { id: "2", layer: "l1", text: "去年去过一次超市。", startedAt: 1, endedAt: 1, status: "active" },
@@ -90,7 +90,7 @@ test("retrieve keeps dormant hits and can return more than five", () => {
     items.push({
       id: `old-${i}`,
       layer: "l1",
-      text: `无关旧账${i}`,
+      text: `无关旧账${i}吃饭散步`,
       startedAt: 1,
       endedAt: i,
       status: "active",
@@ -101,31 +101,48 @@ test("retrieve keeps dormant hits and can return more than five", () => {
     items,
     now: Date.now(),
   });
-  assert.ok(hit.length > 5);
-  assert.ok(hit.length <= 24);
-  assert.ok(hit.some((item) => item.id === "1"));
+  assert.ok(hit.length >= 2);
+  assert.ok(hit.length <= 8);
+  assert.ok(hit.some((item) => item.text.includes("林泽")));
   assert.ok(hit.some((item) => item.id === "3"));
   assert.ok(!hit.some((item) => item.text.includes("无关旧账")));
   assert.ok(!hit.some((item) => item.id === "2"));
+  assert.ok(hit.filter((item) => item.id.startsWith("hit-")).length <= 2);
 });
 
 test("empty small talk extracts no usable keywords so nothing is sent", () => {
   assert.deepEqual(extractKeywords("嗯。"), []);
+  const items: Retrievable[] = [
+    {
+      id: "1",
+      layer: "l1",
+      text: "林泽搬走了。",
+      startedAt: 1,
+      endedAt: Date.now(),
+      status: "active",
+    },
+  ];
   const hit = retrieveCandidates({
     query: "嗯。",
-    items: [
-      {
-        id: "1",
-        layer: "l1",
-        text: "林泽搬走了。",
-        startedAt: 1,
-        endedAt: Date.now(),
-        status: "active",
-      },
-    ],
+    items,
     now: Date.now(),
   });
   assert.equal(hit.length, 0);
+  assert.equal(
+    retrieveCandidates({
+      query: "吃饭了吗",
+      items: Array.from({ length: 12 }, (_, i) => ({
+        id: `food-${i}`,
+        layer: "l1" as const,
+        text: `无关旧账${i}吃饭散步`,
+        startedAt: 1,
+        endedAt: i,
+        status: "active" as const,
+      })),
+      now: Date.now(),
+    }).length,
+    0,
+  );
 });
 
 test("parse Prompt A json and line format", () => {
