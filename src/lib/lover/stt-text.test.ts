@@ -255,7 +255,7 @@ function burst(t0: number, n: number, shape: Partial<ProsodyFrame> = {}): Prosod
   return out;
 }
 
-test("complex moan / sob / pant sequence is not crushed to one keyword", () => {
+test("STT phones are kept; laugh and cry come from the sound itself", () => {
   const ahGlide = burst(0, 8, { centroid: 1200, bright: 0.42, hz: 180 });
   ahGlide.forEach((f, i) => {
     f.hz = 170 + i * 14;
@@ -299,21 +299,41 @@ test("complex moan / sob / pant sequence is not crushed to one keyword", () => {
     ...ng3,
   ];
 
-  const track = cuesFromProsody(frames);
-  assert.ok(voicedIslands(frames).length >= 5, `islands=${voicedIslands(frames).length} track=${track}`);
-  assert.match(track, /啊/);
-  assert.match(track, /呜/);
-  assert.match(track, /嗯/);
-  assert.ok(stripMarks(track).length >= 6, track);
+  assert.ok(voicedIslands(frames).length >= 5, `islands=${voicedIslands(frames).length}`);
 
-  const crushed = finishHeard("啊", "", undefined, frames);
-  assert.ok(stripMarks(crushed).length >= 6, crushed);
-  assert.match(crushed, /啊/);
-  assert.match(crushed, /呜/);
-  assert.match(crushed, /嗯/);
-  assert.notEqual(stripMarks(crushed), "啊");
-  assert.match(crushed, /[～…！]/);
-  assert.doesNotMatch(crushed, /哈/);
+  const fromAh = finishHeard("啊", "", undefined, frames);
+  assert.match(fromAh, /啊/);
+  assert.doesNotMatch(fromAh, /哈/);
+  assert.notEqual(stripMarks(fromAh), "啊");
+  assert.match(fromAh, /[～…！]/);
+
+  const heard = finishHeard("啊啊呜呜嗯嗯", "", undefined, frames);
+  assert.match(stripMarks(heard), /啊/);
+  assert.match(stripMarks(heard), /呜/);
+  assert.match(stripMarks(heard), /嗯/);
+});
+
+test("laughter is transcribed as 哈, not 啊", () => {
+  const frames: ProsodyFrame[] = [];
+  for (let p = 0; p < 6; p += 1) {
+    const t0 = p * 0.24;
+    for (let i = 0; i < 3; i += 1) {
+      frames.push(
+        frame({
+          t: t0 + i * 0.04,
+          rms: 0.06,
+          hz: 0,
+          clarity: 0.32,
+          centroid: 1600,
+          bright: 0.34,
+        }),
+      );
+    }
+    frames.push(hush(t0 + 0.16));
+  }
+  const heard = finishHeard("啊", "", undefined, frames);
+  assert.match(heard, /哈/);
+  assert.doesNotMatch(heard, /啊|嗯|呜/);
 });
 
 test("real words are not replaced by a moan track", () => {

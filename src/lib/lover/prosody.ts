@@ -15,7 +15,7 @@ export type CueWord = {
 
 export type CueKind = "嗯" | "啊" | "呜" | "嗷" | "哼" | "哈";
 
-type Island = {
+export type Island = {
   start: number;
   end: number;
   frames: ProsodyFrame[];
