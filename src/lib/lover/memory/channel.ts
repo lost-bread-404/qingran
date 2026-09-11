@@ -1,5 +1,6 @@
 import { formatClock } from "../prompt";
 import type { ChatMessage } from "../types";
+import { planDecisionA } from "./apply";
 import { buildMainMessages, clipPortrait, countChars } from "./pack";
 import {
   PROMPT_A_SYSTEM,
@@ -8,7 +9,6 @@ import {
   buildPromptAUser,
   buildPromptBUser,
   buildPromptCUser,
-  formatDropped,
   parseDecisionA,
   parseL2List,
   parseMaybeTime,
@@ -140,48 +140,22 @@ async function processDropped(timeZone: string): Promise<void> {
     return;
   }
 
-  const ids = dropped.map((m) => m.id);
-  if (decision.decision === "ignore") {
-    await markScanned(ids);
-    await appendLog("ignore", decision.note, { n: ids.length });
-    return;
-  }
-
-  if (decision.decision === "merge") {
-    const startedAt = parseMaybeTime(decision.openStart, open?.startedAt || dropped[0]!.createdAt);
-    const points = appendPoints(open?.points ?? "", dropped, clock);
-    await saveOpenEvent({
-      startedAt,
-      draft: (decision.openDraft || open?.draft || "").slice(0, 800),
-      points,
-    });
-    await markScanned(ids);
-    await appendLog("merge", decision.note, { n: ids.length });
-    return;
-  }
-
-  const closedText = decision.closedEvent.trim() || open?.draft.trim() || "";
-  if (closedText && (open || closedText)) {
-    const startedAt = parseMaybeTime(decision.closedStart, open?.startedAt || dropped[0]!.createdAt);
-    const endedAt = parseMaybeTime(decision.closedEnd, dropped.at(-1)?.createdAt || Date.now());
+  const plan = planDecisionA({ decision, dropped, open, clock });
+  if (plan.closed) {
     await insertL1({
-      startedAt,
-      endedAt: Math.max(endedAt, startedAt),
-      text: closedText,
+      startedAt: plan.closed.startedAt,
+      endedAt: plan.closed.endedAt,
+      text: plan.closed.text,
     });
   }
-  const openDraft = decision.openDraft.trim();
-  await saveOpenEvent(
-    openDraft
-      ? {
-          startedAt: parseMaybeTime(decision.openStart, dropped[0]!.createdAt),
-          draft: openDraft.slice(0, 800),
-          points: appendPoints("", dropped, clock),
-        }
-      : null,
-  );
-  await markScanned(ids);
-  await appendLog("close_and_open", decision.note, { n: ids.length, closed: Boolean(closedText) });
+  if (plan.open !== "keep") {
+    await saveOpenEvent(plan.open);
+  }
+  await markScanned(plan.scannedIds);
+  await appendLog(plan.logKind, plan.note, {
+    n: plan.scannedIds.length,
+    closed: Boolean(plan.closed),
+  });
 }
 
 async function maybeInterval(timeZone: string): Promise<void> {
@@ -297,11 +271,6 @@ async function rewriteState(opts: {
   if (parsed.patterns.length) {
     await replaceL3(parsed.patterns, opts.now);
   }
-}
-
-function appendPoints(prev: string, dropped: ChatMessage[], clock: (ms: number) => string): string {
-  const extra = formatDropped(dropped, clock);
-  return `${prev}\n${extra}`.trim().slice(-2000);
 }
 
 function dayKey(ms: number, timeZone: string): string {
