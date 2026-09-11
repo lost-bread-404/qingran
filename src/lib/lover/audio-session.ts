@@ -2,6 +2,27 @@ export function audioContextNeedsResume(state: string) {
   return state === "suspended" || state === "interrupted";
 }
 
+export function isInterruptedState(state?: string | null) {
+  if (!state) return false;
+  return state === "interrupted" || state.startsWith("interrupted");
+}
+
+export function sessionIsActive(state?: string | null) {
+  return state === "active";
+}
+
+export function pageIsHidden() {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
+export type AudioSessionKind = "listen" | "speak" | "yield";
+
+export function sessionTypeFor(kind: AudioSessionKind) {
+  if (kind === "listen") return "play-and-record";
+  // Ambient mixes with Sleep Cycle / other alarms. Playback would duck them.
+  return "ambient";
+}
+
 export function micTrackUsable(track: { readyState: string; muted: boolean }) {
   return track.readyState === "live" && !track.muted;
 }
@@ -28,14 +49,37 @@ export function getAudioSession(): NavAudioSession | null {
   return (navigator as Navigator & { audioSession?: NavAudioSession }).audioSession ?? null;
 }
 
-export function primeAudioSession() {
+export function audioSessionIsInterrupted() {
+  return isInterruptedState(getAudioSession()?.state);
+}
+
+export function setAudioSessionKind(kind: AudioSessionKind) {
   const session = getAudioSession();
   if (!session) return;
   try {
-    session.type = "play-and-record";
+    session.type = sessionTypeFor(kind);
+    if (kind === "yield") {
+      try {
+        session.type = "auto";
+      } catch {
+        /* keep ambient */
+      }
+    }
   } catch {
     /* older WebKit */
   }
+}
+
+export function claimListenSession() {
+  setAudioSessionKind("listen");
+}
+
+export function yieldAudioSession() {
+  setAudioSessionKind("yield");
+}
+
+export function primeAudioSession() {
+  claimListenSession();
 }
 
 export async function resumeAudioContext(ctx: AudioContext): Promise<boolean> {
@@ -74,6 +118,20 @@ export async function resumeAudioContext(ctx: AudioContext): Promise<boolean> {
     window.setTimeout(resolve, 48);
   });
   return ctx.state === "running" && ctx.currentTime > t1 + 0.0001;
+}
+
+export function listenAudioSession(handlers: {
+  onInterrupted?: () => void;
+  onActive?: () => void;
+}) {
+  const session = getAudioSession();
+  if (!session?.addEventListener) return () => undefined;
+  const onState = () => {
+    if (isInterruptedState(session.state)) handlers.onInterrupted?.();
+    else if (sessionIsActive(session.state)) handlers.onActive?.();
+  };
+  session.addEventListener("statechange", onState);
+  return () => session.removeEventListener?.("statechange", onState);
 }
 
 export function listenAppLifecycle(handlers: {

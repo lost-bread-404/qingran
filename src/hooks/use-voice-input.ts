@@ -4,15 +4,15 @@ import {
   acquireMic,
   getSpeechRecognitionCtor,
   isAppleTouch,
-  pauseMic,
   pickRecorderMime,
-  primeAudioSession,
+  releaseMic,
   resumeOrReplaceContext,
   startRecorder,
   stopRecognition,
   usesBrowserStt,
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
+import { setAudioSessionKind } from "@/lib/lover/audio-session";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { transcribeVoice } from "@/lib/lover/server";
 import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
@@ -67,7 +67,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
       /* ignore */
     }
     recorderRef.current = null;
-    pauseMic();
+    releaseMic();
     try {
       recRef.current?.abort();
     } catch {
@@ -81,6 +81,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
       /* ignore */
     }
     analyseRef.current = null;
+    setAudioSessionKind("yield");
   }, []);
 
   useEffect(() => () => teardownMedia(), [teardownMedia]);
@@ -115,7 +116,6 @@ export function useVoiceInput({ lang, prompt }: Options) {
     interimRef.current = "";
     finalTextRef.current = "";
     chunksRef.current = [];
-    primeAudioSession();
 
     if (!recorderSupported && !speechSupported) {
       setMicReady(false);

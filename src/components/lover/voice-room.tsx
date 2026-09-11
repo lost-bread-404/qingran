@@ -37,7 +37,7 @@ import {
 import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { newId } from "@/lib/lover/storage";
-import { listenAppLifecycle } from "@/lib/lover/audio-session";
+import { listenAppLifecycle, audioSessionIsInterrupted } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import {
   CONTEXT_WINDOW,
@@ -191,10 +191,12 @@ export function VoiceRoom() {
       });
     };
     const wake = () => {
+      if (audioSessionIsInterrupted()) return;
       void kickAudio();
       reviveRef.current();
     };
     const onGesture = () => {
+      if (audioSessionIsInterrupted()) return;
       void kickAudio();
       reviveRef.current(true);
     };
@@ -592,7 +594,9 @@ export function VoiceRoom() {
           ? "她在想"
           : status === "speaking"
             ? "清然在说 · 点灯可打断"
-            : "你说，说完停一下"
+            : call.resting || call.interrupted
+              ? "我在"
+              : "你说，说完停一下"
     : "";
 
   return (
@@ -600,7 +604,7 @@ export function VoiceRoom() {
       className="room-bg fixed inset-x-0 flex flex-col overflow-hidden"
       style={{ top: viewport.offsetTop, height: viewport.height }}
     >
-      {call.active && call.needsTap ? (
+      {call.active && call.needsTap && !call.interrupted ? (
         <button
           type="button"
           className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-bg/85 px-8 text-center"
@@ -762,7 +766,9 @@ export function VoiceRoom() {
                       ? "点灯打断 · 点按钮挂断"
                       : call.phase === "speaking-you"
                         ? "说完停一下就会发给她"
-                        : call.error || "通话中"
+                        : call.resting || call.interrupted
+                          ? "闹钟可以响 · 回来点一下就能接着说"
+                          : call.error || "通话中"
                     : recording
                       ? voice.interim.trim() || "松开发送"
                       : transcribing

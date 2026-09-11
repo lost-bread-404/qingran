@@ -1,12 +1,18 @@
-import { resumeAudioContext } from "@/lib/lover/audio-session";
+import { resumeAudioContext, setAudioSessionKind } from "@/lib/lover/audio-session";
 
 const SILENCE =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
 const PCM_RATE = 24_000;
 const START_SEC = 0.7;
+// Pillow-close: even at iOS max volume this stays next-to-the-phone quiet.
+// No compressor — Web Audio makeup gain is what made her volume pump.
+export const VOICE_GAIN = 0.02;
 
 let ctx: AudioContext | null = null;
+let masterIn: AudioNode | null = null;
+let masterGain: GainNode | null = null;
+let masterCtx: AudioContext | null = null;
 let unlocked = false;
 let playGen = 0;
 let nextStart = 0;
@@ -34,6 +40,29 @@ function getCtx(): AudioContext | null {
   return ctx;
 }
 
+function applyVoiceGain(node: GainNode, audioCtx: AudioContext) {
+  try {
+    node.gain.cancelScheduledValues(audioCtx.currentTime);
+    node.gain.setValueAtTime(VOICE_GAIN, audioCtx.currentTime);
+  } catch {
+    node.gain.value = VOICE_GAIN;
+  }
+}
+
+function getOutput(audioCtx: AudioContext): AudioNode {
+  if (masterIn && masterGain && masterCtx === audioCtx) {
+    applyVoiceGain(masterGain, audioCtx);
+    return masterIn;
+  }
+  const gain = audioCtx.createGain();
+  applyVoiceGain(gain, audioCtx);
+  gain.connect(audioCtx.destination);
+  masterIn = gain;
+  masterGain = gain;
+  masterCtx = audioCtx;
+  return gain;
+}
+
 function replaceCtx() {
   if (ctx) {
     try {
@@ -43,6 +72,9 @@ function replaceCtx() {
     }
   }
   ctx = null;
+  masterIn = null;
+  masterGain = null;
+  masterCtx = null;
   const Ctor = typeof window === "undefined" ? null : audioCtor();
   if (!Ctor) return null;
   ctx = new Ctor();
@@ -116,7 +148,19 @@ function resetStream() {
   killSources();
 }
 
+function prepSpeak() {
+  setAudioSessionKind("speak");
+  try {
+    const el = getPlaybackElement();
+    el.volume = VOICE_GAIN;
+    el.muted = false;
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function unlockPlayback() {
+  prepSpeak();
   const el = getPlaybackElement();
   const audioCtx = getCtx();
   try {
@@ -126,7 +170,7 @@ export async function unlockPlayback() {
   }
   try {
     el.muted = false;
-    el.volume = 1;
+    el.volume = VOICE_GAIN;
     el.src = SILENCE;
     const play = el.play();
     if (play) await play;
@@ -135,6 +179,7 @@ export async function unlockPlayback() {
   } finally {
     clearElement(el);
     el.muted = false;
+    el.volume = VOICE_GAIN;
     unlocked = true;
   }
 }
@@ -146,9 +191,11 @@ export function stopPlayback() {
   const el = getPlaybackElement();
   clearElement(el);
   el.muted = false;
+  el.volume = VOICE_GAIN;
 }
 
 export async function resumeAudio() {
+  prepSpeak();
   let audioCtx = getCtx();
   if (!audioCtx) return;
   let ok = false;
@@ -171,7 +218,7 @@ export async function resumeAudio() {
   try {
     const el = getPlaybackElement();
     el.muted = false;
-    el.volume = 1;
+    el.volume = VOICE_GAIN;
   } catch {
     /* ignore */
   }
@@ -181,7 +228,7 @@ export async function resumeAudio() {
     const buffer = audioCtx.createBuffer(1, frames, audioCtx.sampleRate);
     const src = audioCtx.createBufferSource();
     src.buffer = buffer;
-    src.connect(audioCtx.destination);
+    src.connect(getOutput(audioCtx));
     src.start();
   } catch {
     /* ignore */
@@ -196,6 +243,7 @@ export async function kickAudio() {
 }
 
 export function enqueuePlayback(bytes: Uint8Array<ArrayBuffer>, mimeType: string) {
+  prepSpeak();
   inFlight += 1;
   void ingest(bytes, mimeType, playGen).finally(() => {
     inFlight = Math.max(0, inFlight - 1);
@@ -296,7 +344,7 @@ function scheduleBuffer(buffer: AudioBuffer, audioCtx: AudioContext, gen: number
   if (gen !== playGen) return;
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
-  src.connect(audioCtx.destination);
+  src.connect(getOutput(audioCtx));
   const now = audioCtx.currentTime;
   if (nextStart < now + 0.005) nextStart = now + 0.005;
   src.start(nextStart);
@@ -340,6 +388,7 @@ export async function playMp3Bytes(
   bytes: Uint8Array<ArrayBuffer>,
   mimeType: string,
 ): Promise<boolean> {
+  prepSpeak();
   const gen = playGen;
   inFlight += 1;
   try {

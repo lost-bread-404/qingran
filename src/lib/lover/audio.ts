@@ -1,7 +1,8 @@
 import {
   getAudioSession,
   micStreamUsable,
-  primeAudioSession,
+  claimListenSession,
+  yieldAudioSession,
   resumeAudioContext,
 } from "@/lib/lover/audio-session";
 
@@ -128,32 +129,6 @@ export function currentMic(): MediaStream | null {
   return micUsable(sharedMic) ? sharedMic : null;
 }
 
-function getMicKeepAlive(): HTMLAudioElement | null {
-  if (typeof document === "undefined") return null;
-  const existing = document.getElementById("qingran-mic") as HTMLAudioElement | null;
-  if (existing) return existing;
-  const el = document.createElement("audio");
-  el.id = "qingran-mic";
-  el.setAttribute("playsinline", "true");
-  el.setAttribute("webkit-playsinline", "true");
-  el.muted = true;
-  el.autoplay = true;
-  el.style.display = "none";
-  document.body.appendChild(el);
-  return el;
-}
-
-function keepMicHot(stream: MediaStream) {
-  const el = getMicKeepAlive();
-  if (!el) return;
-  try {
-    if (el.srcObject !== stream) el.srcObject = stream;
-    void el.play();
-  } catch {
-    /* ignore */
-  }
-}
-
 function bindTrackWatchers(stream: MediaStream) {
   for (const track of stream.getAudioTracks()) {
     track.addEventListener("mute", () => emitMicEvent("mute"));
@@ -185,26 +160,13 @@ function dropMic(stream: MediaStream | null) {
       /* ignore */
     }
   });
-  const el =
-    typeof document === "undefined"
-      ? null
-      : (document.getElementById("qingran-mic") as HTMLAudioElement | null);
-  if (el) {
-    try {
-      el.srcObject = null;
-      el.load();
-    } catch {
-      /* ignore */
-    }
-  }
 }
 
 export async function acquireMic(opts?: { force?: boolean }): Promise<MediaStream> {
-  primeAudioSession();
   if (!opts?.force && sharedMic) {
     if (micUsable(sharedMic)) {
       setMicEnabled(sharedMic, true);
-      keepMicHot(sharedMic);
+      claimListenSession();
       return sharedMic;
     }
     const stillLive =
@@ -213,7 +175,7 @@ export async function acquireMic(opts?: { force?: boolean }): Promise<MediaStrea
       setMicEnabled(sharedMic, true);
       await new Promise((resolve) => window.setTimeout(resolve, 60));
       if (micUsable(sharedMic)) {
-        keepMicHot(sharedMic);
+        claimListenSession();
         return sharedMic;
       }
     }
@@ -226,7 +188,7 @@ export async function acquireMic(opts?: { force?: boolean }): Promise<MediaStrea
 
   sharedMic = await requestMic();
   bindTrackWatchers(sharedMic);
-  keepMicHot(sharedMic);
+  claimListenSession();
   return sharedMic;
 }
 
@@ -237,6 +199,7 @@ export function pauseMic() {
 export function releaseMic() {
   dropMic(sharedMic);
   sharedMic = null;
+  yieldAudioSession();
 }
 
 export async function getMicStream(): Promise<MediaStream> {
@@ -272,7 +235,7 @@ export async function resumeOrReplaceContext(ctx: AudioContext | null): Promise<
   return next;
 }
 
-export { getAudioSession, primeAudioSession, resumeAudioContext };
+export { getAudioSession, claimListenSession, yieldAudioSession, resumeAudioContext };
 
 export function tapHaptic(kind: "start" | "end") {
   try {
