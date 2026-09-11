@@ -261,7 +261,7 @@ test("A/B/C prompt builders keep the contract the model must fill", () => {
   assert.match(a, /清然/);
   assert.match(a, /close_and_open/);
   assert.match(PROMPT_A_SYSTEM, /merge/);
-  assert.match(PROMPT_B_SYSTEM, /更高分辨率/);
+  assert.match(PROMPT_B_SYSTEM, /谁、发生了什么、结果/);
   assert.match(PROMPT_C_SYSTEM, /dormant/);
   assert.match(
     buildPromptBUser({
@@ -297,10 +297,10 @@ test("A/B/C prompt builders keep the contract the model must fill", () => {
   );
 });
 
-test("A/B/C system prompts describe the job and do not use a forbid list", () => {
-  assert.match(PROMPT_A_SYSTEM, /merge/);
-  assert.match(PROMPT_A_SYSTEM, /跨夜/);
-  assert.match(PROMPT_B_SYSTEM, /更高分辨率/);
-  assert.match(PROMPT_C_SYSTEM, /dormant/);
-  assert.doesNotMatch(PROMPT_A_SYSTEM + PROMPT_B_SYSTEM + PROMPT_C_SYSTEM, /不要|不扮演|不回复|不改/);
+test("A writes one-sentence events and C portrait is Rosie-only", () => {
+  assert.match(PROMPT_A_SYSTEM, /一句完整的话/);
+  assert.match(PROMPT_A_SYSTEM, /林泽从房子里搬了出去/);
+  assert.match(PROMPT_C_SYSTEM, /清然眼中的 Rosie/);
+  assert.match(PROMPT_C_SYSTEM, /只写 Rosie，不写清然/);
+  assert.match(PROMPT_B_SYSTEM, /谁、发生了什么、结果/);
 });
