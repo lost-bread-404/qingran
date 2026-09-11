@@ -19,9 +19,9 @@ import {
 import {
   audioContextNeedsResume,
   claimListenSession,
-  isInterruptedState,
   listenAppLifecycle,
   listenAudioSession,
+  pageIsHidden,
   resumeAudioContext,
 } from "@/lib/lover/audio-session";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
@@ -64,6 +64,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const lastTextAtRef = useRef(0);
   const listenReadyAtRef = useRef(0);
   const rafRef = useRef(0);
+  const intervalRef = useRef(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -114,10 +115,9 @@ export function useCall({ onUtterance, prompt }: Options) {
     analyserRef.current = analyser;
   };
 
-  const keepAlive = () => {
-    claimListenSession();
+  const keepAudioSteady = () => {
+    if (pageIsHidden()) return;
     keepPlaybackAlive();
-    startCallHold();
     const ctx = ctxRef.current;
     if (ctx && audioContextNeedsResume(ctx.state)) {
       try {
@@ -131,6 +131,8 @@ export function useCall({ onUtterance, prompt }: Options) {
   const teardownMedia = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
+    if (intervalRef.current) window.clearInterval(intervalRef.current);
+    intervalRef.current = 0;
     try {
       sourceRef.current?.disconnect();
     } catch {
@@ -176,9 +178,9 @@ export function useCall({ onUtterance, prompt }: Options) {
     releaseWakeLock();
   }, [teardownMedia]);
 
-  const beginUtterance = useCallback(() => {
+  const armRecorder = () => {
     const stream = streamRef.current;
-    if (!stream || recorderRef.current) return;
+    if (!liveRef.current || deafRef.current || !stream || recorderRef.current) return;
     chunksRef.current = [];
     const mime = pickRecorderMime();
     const recorder = mime
@@ -186,14 +188,22 @@ export function useCall({ onUtterance, prompt }: Options) {
       : new MediaRecorder(stream);
     recorder.ondataavailable = (ev) => {
       if (ev.data.size > 0) chunksRef.current.push(ev.data);
+      if (phaseRef.current === "listening" && chunksRef.current.length > 8) {
+        chunksRef.current = chunksRef.current.slice(-6);
+      }
     };
     recorderRef.current = recorder;
     try {
       startRecorder(recorder);
     } catch {
       recorderRef.current = null;
-      return;
     }
+  };
+
+  const beginUtterance = useCallback(() => {
+    if (deafRef.current || phaseRef.current !== "listening") return;
+    armRecorder();
+    if (!streamRef.current || !recorderRef.current) return;
     const now = performance.now();
     speechStartRef.current = now;
     lastVoiceRef.current = now;
@@ -253,6 +263,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     lastTextAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
     setPhaseBoth("listening");
+    armRecorder();
   }, []);
 
   const flushUtterance = useCallback(async () => {
@@ -296,6 +307,7 @@ export function useCall({ onUtterance, prompt }: Options) {
       deafRef.current = false;
       listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
       setPhaseBoth("listening");
+      armRecorder();
       return;
     }
     setError(null);
@@ -311,7 +323,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
   }, [collectRecording]);
 
-  const tick = useCallback(() => {
+  const listenPulse = useCallback(() => {
     if (!liveRef.current) return;
     const ctx = ctxRef.current;
     const ctxState = ctx?.state as string | undefined;
@@ -324,7 +336,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     const analyser = analyserRef.current;
     const now = performance.now();
-    if (analyser && !isInterruptedState(ctxState)) {
+    if (analyser) {
       const speaking = phaseRef.current === "speaking-you";
       const frame = sampleProsody(
         analyser,
@@ -382,10 +394,15 @@ export function useCall({ onUtterance, prompt }: Options) {
         lastTextAt: lastTextAtRef.current,
       }) && void flushUtterance();
     }
-    rafRef.current = requestAnimationFrame(tick);
   }, [abortUtterance, beginUtterance, flushUtterance]);
 
-  tickRef.current = tick;
+  const tick = useCallback(() => {
+    if (!liveRef.current) return;
+    listenPulse();
+    rafRef.current = requestAnimationFrame(tick);
+  }, [listenPulse]);
+
+  tickRef.current = listenPulse;
 
   const startSpeechRec = (replace = false) => {
     if (!usesBrowserStt()) return;
@@ -506,8 +523,13 @@ export function useCall({ onUtterance, prompt }: Options) {
     setActive(true);
     setPhaseBoth("listening");
     startSpeechRec(true);
+    armRecorder();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(tick);
+    if (intervalRef.current) window.clearInterval(intervalRef.current);
+    intervalRef.current = window.setInterval(() => {
+      if (liveRef.current) tickRef.current();
+    }, 80);
     startCallHold();
     try {
       wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? null;
@@ -544,11 +566,11 @@ export function useCall({ onUtterance, prompt }: Options) {
     interimRef.current = "";
     lastTextAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + 80;
-    keepAlive();
     startSpeechRec(true);
+    armRecorder();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(tickRef.current);
-  }, []);
+    rafRef.current = requestAnimationFrame(tick);
+  }, [tick]);
 
   useEffect(() => {
     if (!active) return;
@@ -559,60 +581,52 @@ export function useCall({ onUtterance, prompt }: Options) {
           try {
             const stream = await acquireMic({ force: true });
             await attachStream(stream, false);
-            if (!deafRef.current) startSpeechRec(true);
-            keepAlive();
+            if (!deafRef.current) {
+              startSpeechRec(true);
+              armRecorder();
+            }
+            keepAudioSteady();
           } catch {
             /* stay on the call; user can speak after returning */
           }
         })();
       }
-      if (event === "mute" || event === "unmute") {
-        keepPlaybackAlive();
-        const ctx = ctxRef.current;
-        if (ctx && audioContextNeedsResume(ctx.state)) {
-          try {
-            void ctx.resume();
-          } catch {
-            /* ignore */
-          }
-        }
-      }
+      // iOS mutes the track when hiding. Leave the graph alone so it can unmute.
     });
+    const restoreAfterReturn = (reclaimMic: boolean) => {
+      if (!liveRef.current) return;
+      keepAudioSteady();
+      if (!deafRef.current) {
+        startSpeechRec(false);
+        armRecorder();
+      }
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(tick);
+      if (reclaimMic && !micUsable(streamRef.current)) {
+        void acquireMic({ force: true })
+          .then((stream) => attachStream(stream, false))
+          .then(() => {
+            if (!liveRef.current) return;
+            if (!deafRef.current) {
+              startSpeechRec(true);
+              armRecorder();
+            }
+          })
+          .catch(() => undefined);
+      }
+    };
     const stopLife = listenAppLifecycle({
-      onForeground: () => {
-        if (!liveRef.current) return;
-        keepAlive();
-        if (!micUsable(streamRef.current)) {
-          void acquireMic({ force: true })
-            .then((stream) => attachStream(stream, false))
-            .then(() => {
-              if (!liveRef.current) return;
-              if (!deafRef.current) startSpeechRec(true);
-            })
-            .catch(() => undefined);
-        }
-      },
-      onBackground: () => {
-        if (!liveRef.current) return;
-        keepAlive();
-      },
+      onForeground: () => restoreAfterReturn(true),
     });
     const stopSession = listenAudioSession({
-      onInterrupted: () => {
-        if (!liveRef.current) return;
-        keepAlive();
-      },
-      onActive: () => {
-        if (!liveRef.current) return;
-        keepAlive();
-      },
+      onActive: () => restoreAfterReturn(false),
     });
     return () => {
       stopMicWatch();
       stopLife();
       stopSession();
     };
-  }, [active]);
+  }, [active, tick]);
 
   useEffect(() => () => hangup(), [hangup]);
 

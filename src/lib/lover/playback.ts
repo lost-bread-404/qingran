@@ -49,11 +49,7 @@ function applyVoiceGain(node: GainNode, audioCtx: AudioContext) {
 }
 
 function getOutput(audioCtx: AudioContext): AudioNode {
-  if (masterIn && masterGain && masterCtx === audioCtx) {
-    applyVoiceGain(masterGain, audioCtx);
-    armVoiceElement(audioCtx);
-    return masterIn;
-  }
+  if (masterIn && masterGain && masterCtx === audioCtx) return masterIn;
   const gain = audioCtx.createGain();
   applyVoiceGain(gain, audioCtx);
   const dest = audioCtx.createMediaStreamDestination();
@@ -88,6 +84,7 @@ function armVoiceElement(audioCtx: AudioContext) {
 }
 
 function replaceCtx() {
+  stopGraphKeepalive();
   if (ctx) {
     try {
       void ctx.close();
@@ -175,8 +172,6 @@ function resetStream() {
 }
 
 function prepSpeak() {
-  setAudioSessionKind("speak");
-  pauseHoldLoop();
   try {
     const audioCtx = getCtx();
     if (audioCtx) armVoiceElement(audioCtx);
@@ -221,52 +216,53 @@ export function stopPlayback() {
   wakeIdle();
 }
 
-let holdUrl: string | null = null;
 let holdPlaying = false;
+let graphKeepalive: AudioBufferSourceNode | null = null;
+let graphKeepaliveCtx: AudioContext | null = null;
 
-function getHoldElement(): HTMLAudioElement {
-  const existing = document.getElementById("qingran-hold") as HTMLAudioElement | null;
-  if (existing) return existing;
-  const el = document.createElement("audio");
-  el.id = "qingran-hold";
-  el.setAttribute("playsinline", "true");
-  el.setAttribute("webkit-playsinline", "true");
-  el.preload = "auto";
-  el.loop = true;
-  el.style.display = "none";
-  document.body.appendChild(el);
-  return el;
+function startGraphKeepalive(audioCtx: AudioContext) {
+  if (graphKeepalive && graphKeepaliveCtx === audioCtx) return;
+  stopGraphKeepalive();
+  const frames = Math.max(audioCtx.sampleRate, Math.floor(audioCtx.sampleRate * 2));
+  const buffer = audioCtx.createBuffer(1, frames, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  const amp = 1 / 32768;
+  for (let i = 0; i < data.length; i += 1) data[i] = i & 1 ? amp : -amp;
+  const src = audioCtx.createBufferSource();
+  src.buffer = buffer;
+  src.loop = true;
+  src.connect(getOutput(audioCtx));
+  src.onended = () => {
+    if (graphKeepalive === src) {
+      graphKeepalive = null;
+      graphKeepaliveCtx = null;
+    }
+    if (holdPlaying) {
+      const next = getCtx();
+      if (next) startGraphKeepalive(next);
+    }
+  };
+  src.start();
+  graphKeepalive = src;
+  graphKeepaliveCtx = audioCtx;
 }
 
-function quietLoopUrl() {
-  if (holdUrl) return holdUrl;
-  const rate = 8000;
-  const seconds = 12;
-  const n = rate * seconds;
-  const dataSize = n * 2;
-  const buf = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buf);
-  const write = (offset: number, str: string) => {
-    for (let i = 0; i < str.length; i += 1) view.setUint8(offset + i, str.charCodeAt(i));
-  };
-  write(0, "RIFF");
-  view.setUint32(4, 36 + dataSize, true);
-  write(8, "WAVE");
-  write(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, rate, true);
-  view.setUint32(28, rate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  write(36, "data");
-  view.setUint32(40, dataSize, true);
-  for (let i = 0; i < n; i += 1) {
-    view.setInt16(44 + i * 2, i & 1 ? 1 : -1, true);
+function stopGraphKeepalive() {
+  const src = graphKeepalive;
+  graphKeepalive = null;
+  graphKeepaliveCtx = null;
+  if (!src) return;
+  src.onended = null;
+  try {
+    src.stop();
+  } catch {
+    /* ignore */
   }
-  holdUrl = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
-  return holdUrl;
+  try {
+    src.disconnect();
+  } catch {
+    /* ignore */
+  }
 }
 
 function claimMediaSession() {
@@ -294,21 +290,35 @@ function releaseMediaSession() {
   }
 }
 
+function stopLegacyHoldElement() {
+  try {
+    const el = document.getElementById("qingran-hold") as HTMLAudioElement | null;
+    if (!el) return;
+    el.pause();
+    el.removeAttribute("src");
+    el.src = "";
+  } catch {
+    /* ignore leftover hold element from older builds */
+  }
+}
+
 export function startCallHold() {
   holdPlaying = true;
+  stopLegacyHoldElement();
   setAudioSessionKind("listen");
   claimMediaSession();
-  if (isSpeaking()) {
-    keepPlaybackAlive();
-    return;
+  const audioCtx = getCtx();
+  if (audioCtx) {
+    startGraphKeepalive(audioCtx);
+    armVoiceElement(audioCtx);
   }
-  playHoldLoop();
 }
 
 export function stopCallHold() {
   holdPlaying = false;
   releaseMediaSession();
-  pauseHoldLoop();
+  stopGraphKeepalive();
+  stopLegacyHoldElement();
 }
 
 export function isCallHoldPlaying() {
@@ -316,6 +326,7 @@ export function isCallHoldPlaying() {
 }
 
 export function keepPlaybackAlive() {
+  if (!holdPlaying) return;
   const audioCtx = getCtx();
   if (audioCtx && audioContextNeedsResumeLocal(audioCtx.state)) {
     try {
@@ -324,42 +335,19 @@ export function keepPlaybackAlive() {
       /* ignore */
     }
   }
-  if (isSpeaking()) {
+  if (audioCtx) {
+    startGraphKeepalive(audioCtx);
     try {
-      if (audioCtx) armVoiceElement(audioCtx);
+      armVoiceElement(audioCtx);
     } catch {
       /* ignore */
     }
-    claimMediaSession();
-    return;
   }
-  if (holdPlaying) playHoldLoop();
+  claimMediaSession();
 }
 
 function isSpeaking() {
   return liveSources.size > 0 || inFlight > 0 || (startedClock && !ended) || sampleQueue.length > 0;
-}
-
-function pauseHoldLoop() {
-  try {
-    const el = getHoldElement();
-    el.pause();
-  } catch {
-    /* ignore */
-  }
-}
-
-function playHoldLoop() {
-  const el = getHoldElement();
-  try {
-    el.loop = true;
-    el.muted = false;
-    el.volume = 0.01;
-    if (!el.src) el.src = quietLoopUrl();
-    if (el.paused) void el.play().catch(() => undefined);
-  } catch {
-    /* ignore */
-  }
 }
 
 
@@ -540,7 +528,6 @@ async function decodeBytes(bytes: Uint8Array<ArrayBuffer>): Promise<AudioBuffer 
 function maybeWakeIdle() {
   if (ended && inFlight === 0 && sampleQueue.length === 0 && liveSources.size === 0) {
     wakeIdle();
-    if (holdPlaying) playHoldLoop();
   }
 }
 

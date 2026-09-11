@@ -40,6 +40,16 @@ export function sessionTypeFor(kind: AudioSessionKind) {
   return "play-and-record";
 }
 
+/** iOS clicks and ducks if we write audioSession.type even to the same value. */
+export function sessionTypeIfChanged(
+  current: string | undefined | null,
+  kind: AudioSessionKind,
+): string | null {
+  const next = sessionTypeFor(kind);
+  if (kind !== "yield" && current === next) return null;
+  return next;
+}
+
 
 export function micTrackUsable(track: { readyState: string; muted: boolean }) {
   return track.readyState === "live";
@@ -88,8 +98,10 @@ export function audioSessionIsInterrupted() {
 export function setAudioSessionKind(kind: AudioSessionKind) {
   const session = getAudioSession();
   if (!session) return;
+  const next = sessionTypeIfChanged(session.type, kind);
+  if (!next) return;
   try {
-    session.type = sessionTypeFor(kind);
+    session.type = next;
     if (kind === "yield") {
       try {
         session.type = "auto";

@@ -10,6 +10,7 @@ import {
   micTrackUsable,
   sessionIsActive,
   sessionTypeFor,
+  sessionTypeIfChanged,
 } from "./audio-session.ts";
 
 test("audio context treats iOS interrupted like suspended", () => {
@@ -40,6 +41,16 @@ test("a live call keeps play-and-record; only hangup yields the session", () => 
   assert.equal(sessionTypeFor("listen"), "play-and-record");
   assert.equal(sessionTypeFor("speak"), "play-and-record");
   assert.equal(sessionTypeFor("yield"), "ambient");
+});
+
+test("rewriting play-and-record is skipped so iOS does not click or duck", () => {
+  assert.equal(sessionTypeIfChanged("play-and-record", "listen"), null);
+  assert.equal(sessionTypeIfChanged("play-and-record", "speak"), null);
+  assert.equal(sessionTypeIfChanged("ambient", "listen"), "play-and-record");
+  assert.equal(sessionTypeIfChanged("auto", "listen"), "play-and-record");
+  assert.equal(sessionTypeIfChanged(undefined, "listen"), "play-and-record");
+  assert.equal(sessionTypeIfChanged("play-and-record", "yield"), "ambient");
+  assert.equal(sessionTypeIfChanged("ambient", "yield"), "ambient");
 });
 
 
