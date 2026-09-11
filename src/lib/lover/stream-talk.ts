@@ -161,8 +161,6 @@ class LiveTts {
   private waitDone: Promise<void>;
   private resolveDone = () => undefined as void;
   private rejectDone = (_err: Error) => undefined as void;
-  private audioQueue: Array<{ b: string; m: string }> = [];
-  private draining = false;
 
   constructor(
     private apiKey: string,
@@ -236,7 +234,7 @@ class LiveTts {
       return;
     }
     const timeout = new Promise<void>((resolve) => {
-      setTimeout(resolve, 16_000);
+      setTimeout(resolve, 45_000);
     });
     await Promise.race([this.waitDone, timeout]);
     this.finishSocket();
@@ -268,8 +266,8 @@ class LiveTts {
     }
     if (event.type === "audio.delta" && event.delta) {
       this.gotAudio = true;
-      this.audioQueue.push({ b: event.delta, m: PCM_MIME });
-      this.drainAudio();
+      this.emit({ t: "audio", i: this.seq, b: event.delta, m: PCM_MIME });
+      this.seq += 1;
       return;
     }
     if (event.type === "audio.done") {
@@ -280,22 +278,6 @@ class LiveTts {
       this.failed = true;
       this.finishSocket();
     }
-  }
-
-  private drainAudio() {
-    if (this.draining) return;
-    this.draining = true;
-    const pump = () => {
-      const next = this.audioQueue.shift();
-      if (!next) {
-        this.draining = false;
-        return;
-      }
-      this.emit({ t: "audio", i: this.seq, b: next.b, m: next.m });
-      this.seq += 1;
-      setImmediate(pump);
-    };
-    setImmediate(pump);
   }
 
   private finishSocket() {

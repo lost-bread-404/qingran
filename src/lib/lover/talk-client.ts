@@ -66,6 +66,10 @@ export async function streamTalk(
         if (!audioTimer) audioTimer = window.setTimeout(flushAudio, 0);
         continue;
       }
+      if (event.t === "done" || event.t === "err") {
+        if (audioTimer) window.clearTimeout(audioTimer);
+        flushAudio();
+      }
       onEvent(event);
     }
   }
