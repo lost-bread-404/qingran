@@ -22,6 +22,7 @@ import {
 } from "@/lib/lover/audio";
 import {
   claimListenSession,
+  audioContextNeedsResume,
   isInterruptedState,
   listenAppLifecycle,
   listenAudioSession,
@@ -29,6 +30,7 @@ import {
   setAudioSessionKind,
 } from "@/lib/lover/audio-session";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
+import { startCallHold, stopCallHold } from "@/lib/lover/playback";
 import { transcribeVoice } from "@/lib/lover/server";
 import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import {
@@ -44,7 +46,6 @@ export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing";
 
 const FFT_SIZE = 2048;
 const REVIVE_GAPS = [80, 200, 500];
-const SLEEP_YIELD_MS = 90_000;
 
 type Options = {
   onUtterance: (text: string) => Promise<void>;
@@ -176,6 +177,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     setResting(false);
     setInterrupted(false);
     setPhaseBoth("idle");
+    stopCallHold();
     teardownMedia();
     releaseWakeLock();
   }, [teardownMedia]);
@@ -272,7 +274,6 @@ export function useCall({ onUtterance, prompt }: Options) {
     const blob = await collectRecording();
     recorderRef.current = null;
     chunksRef.current = [];
-    setMicEnabled(streamRef.current, false);
     if (!liveRef.current) return;
     finalTextRef.current = "";
     interimRef.current = "";
@@ -379,13 +380,6 @@ export function useCall({ onUtterance, prompt }: Options) {
   const armRestTimer = () => {
     if (restTimerRef.current) window.clearTimeout(restTimerRef.current);
     restTimerRef.current = 0;
-    if (!liveRef.current || restingRef.current || interruptedRef.current || deafRef.current) return;
-    restTimerRef.current = window.setTimeout(() => {
-      restTimerRef.current = 0;
-      if (!liveRef.current || restingRef.current || interruptedRef.current || deafRef.current) return;
-      if (phaseRef.current !== "listening") return;
-      enterRest();
-    }, SLEEP_YIELD_MS);
   };
 
   const markInterrupted = () => {
@@ -398,21 +392,23 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   const tick = useCallback(() => {
     if (!liveRef.current) return;
-    if (restingRef.current || interruptedRef.current) {
-      rafRef.current = requestAnimationFrame(tick);
-      return;
-    }
-    if (pageIsHidden() && typeof document !== "undefined" && !document.hasFocus()) {
+    if (restingRef.current) {
       rafRef.current = requestAnimationFrame(tick);
       return;
     }
     const ctxState = ctxRef.current?.state as string | undefined;
+    if (audioContextNeedsResume(ctxState ?? "")) {
+      try {
+        void ctxRef.current?.resume();
+      } catch {
+        /* ignore */
+      }
+    }
     if (isInterruptedState(ctxState)) {
-      if (pageIsHidden()) {
-        fromBackgroundRef.current = true;
-        enterRest();
-      } else {
-        markInterrupted();
+      try {
+        void ctxRef.current?.resume();
+      } catch {
+        /* ignore */
       }
       rafRef.current = requestAnimationFrame(tick);
       return;
@@ -439,7 +435,6 @@ export function useCall({ onUtterance, prompt }: Options) {
       if (
         !deafRef.current &&
         !restingRef.current &&
-        !interruptedRef.current &&
         phaseRef.current === "listening" &&
         now >= listenReadyAtRef.current &&
         rising
@@ -524,7 +519,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     rec.interimResults = true;
     rec.maxAlternatives = 3;
     rec.onresult = (ev) => {
-      if (!liveRef.current || deafRef.current || restingRef.current || interruptedRef.current) return;
+      if (!liveRef.current || deafRef.current || restingRef.current) return;
       let addition = "";
       let live = "";
       for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
@@ -549,11 +544,10 @@ export function useCall({ onUtterance, prompt }: Options) {
       }
     };
     rec.onend = () => {
-      if (!liveRef.current || deafRef.current || restingRef.current || interruptedRef.current) return;
+      if (!liveRef.current || deafRef.current || restingRef.current) return;
       if (recRef.current !== rec) return;
-      if (pageIsHidden()) return;
       window.setTimeout(() => {
-        if (!liveRef.current || deafRef.current || restingRef.current || interruptedRef.current) return;
+        if (!liveRef.current || deafRef.current || restingRef.current) return;
         if (recRef.current !== rec) return;
         try {
           rec.start();
@@ -567,7 +561,7 @@ export function useCall({ onUtterance, prompt }: Options) {
       rec.start();
     } catch {
       window.setTimeout(() => {
-        if (!liveRef.current || deafRef.current || restingRef.current || interruptedRef.current) return;
+        if (!liveRef.current || deafRef.current || restingRef.current) return;
         if (recRef.current !== rec) return;
         try {
           rec.start();
@@ -580,11 +574,9 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   const reviveOnce = async (opts?: { gesture?: boolean; reclaim?: boolean }) => {
     if (!liveRef.current) return false;
-    if (pageIsHidden() && !opts?.gesture) return false;
 
     const reclaim =
       Boolean(opts?.reclaim) ||
-      fromBackgroundRef.current ||
       restingRef.current;
 
     const existing = hearingStream(streamRef.current);
@@ -683,20 +675,17 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   const revive = useCallback(async (opts?: { gesture?: boolean; immediate?: boolean; reclaim?: boolean }) => {
     if (!liveRef.current) return;
-    if (pageIsHidden() && !opts?.gesture) return;
     if (revivingRef.current && !opts?.gesture) return;
     const gen = ++reviveGenRef.current;
     revivingRef.current = true;
     try {
       let ok = await reviveOnce(opts);
       if (!ok && liveRef.current && gen === reviveGenRef.current) {
-        const gaps = opts?.gesture ? [60] : opts?.immediate || opts?.reclaim || fromBackgroundRef.current ? [80, 240] : REVIVE_GAPS;
+        const gaps = opts?.gesture ? [60] : opts?.immediate || opts?.reclaim ? [80, 240] : REVIVE_GAPS;
         for (const gap of gaps) {
           if (!liveRef.current || ok || gen !== reviveGenRef.current) break;
-          if (pageIsHidden() && !opts?.gesture) return;
           await new Promise((resolve) => window.setTimeout(resolve, gap));
           if (!liveRef.current || gen !== reviveGenRef.current) return;
-          if (pageIsHidden() && !opts?.gesture) return;
           ok = await reviveOnce(opts);
         }
       }
@@ -711,6 +700,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         setNeedsTap(false);
         setError(null);
         armRestTimer();
+        startCallHold();
       } else if (!pageIsHidden()) {
         setNeedsTap(true);
       }
@@ -752,6 +742,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     setPhaseBoth("listening");
     startSpeechRec(true);
     rafRef.current = requestAnimationFrame(tick);
+    startCallHold();
     armRestTimer();
     try {
       wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? null;
@@ -779,8 +770,8 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     recorderRef.current = null;
     chunksRef.current = [];
-    setMicEnabled(streamRef.current, false);
-    setAudioSessionKind("speak");
+    claimListenSession();
+    startCallHold();
     if (phaseRef.current === "speaking-you") {
       setPhaseBoth("listening");
     }
@@ -788,10 +779,6 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   const hear = useCallback(() => {
     if (!liveRef.current) return;
-    if (pageIsHidden()) {
-      enterRest();
-      return;
-    }
     deafRef.current = false;
     interruptedRef.current = false;
     setInterrupted(false);
@@ -800,7 +787,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     interimRef.current = "";
     lastTextAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + 80;
-    const needReclaim = fromBackgroundRef.current || restingRef.current || !hearingStream(streamRef.current);
+    const needReclaim = restingRef.current || !micUsable(streamRef.current);
     if (needReclaim) {
       void revive({ immediate: true, reclaim: true });
       return;
@@ -810,6 +797,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     setMicEnabled(streamRef.current, true);
     claimListenSession();
     startSpeechRec(true);
+    startCallHold();
     armRestTimer();
     void revive({ immediate: true });
   }, [revive]);
@@ -818,13 +806,17 @@ export function useCall({ onUtterance, prompt }: Options) {
     if (!active) return;
     const stopMicWatch = onMicEvent((event) => {
       if (!liveRef.current) return;
-      if (restingRef.current || pageIsHidden()) return;
+      if (restingRef.current) return;
       if (event === "ended") void revive({ immediate: true, reclaim: true });
       if (event === "mute") {
         setMicEnabled(streamRef.current, true);
-        if (fromBackgroundRef.current || !micHearing(streamRef.current)) {
-          void revive({ immediate: true, reclaim: true });
-        }
+        claimListenSession();
+        startCallHold();
+      }
+      if (event === "unmute") {
+        setMicEnabled(streamRef.current, true);
+        interruptedRef.current = false;
+        setInterrupted(false);
       }
     });
     const stopLife = listenAppLifecycle({
@@ -832,45 +824,52 @@ export function useCall({ onUtterance, prompt }: Options) {
         if (!liveRef.current) return;
         if (bgYieldTimerRef.current) window.clearTimeout(bgYieldTimerRef.current);
         bgYieldTimerRef.current = 0;
-        fromBackgroundRef.current = true;
         interruptedRef.current = false;
-        deafRef.current = false;
         setInterrupted(false);
-        void revive({ immediate: true, reclaim: true });
+        startCallHold();
+        claimListenSession();
+        const dead = !micUsable(streamRef.current);
+        void revive({ immediate: true, reclaim: dead });
       },
       onBackground: () => {
         fromBackgroundRef.current = true;
         if (bgYieldTimerRef.current) window.clearTimeout(bgYieldTimerRef.current);
         bgYieldTimerRef.current = 0;
-        enterRest();
+        claimListenSession();
+        startCallHold();
+        setMicEnabled(streamRef.current, true);
+        try {
+          void ctxRef.current?.resume();
+        } catch {
+          /* ignore */
+        }
       },
     });
     const stopSession = listenAudioSession({
       onInterrupted: () => {
         if (!liveRef.current) return;
-        if (pageIsHidden()) {
-          fromBackgroundRef.current = true;
-          enterRest();
-          return;
+        startCallHold();
+        claimListenSession();
+        try {
+          void ctxRef.current?.resume();
+        } catch {
+          /* ignore */
         }
-        markInterrupted();
       },
       onActive: () => {
         if (!liveRef.current) return;
-        if (pageIsHidden()) return;
         interruptedRef.current = false;
         setInterrupted(false);
-        void revive({
-          immediate: true,
-          reclaim: fromBackgroundRef.current || restingRef.current,
-        });
+        startCallHold();
+        const dead = !micUsable(streamRef.current);
+        void revive({ immediate: true, reclaim: dead });
       },
     });
     const devices = navigator.mediaDevices;
     const onDevice = () => {
       if (!liveRef.current) return;
-      if (interruptedRef.current || restingRef.current || pageIsHidden()) return;
-      void revive();
+      if (restingRef.current) return;
+      void revive({ immediate: true });
     };
     try {
       devices?.addEventListener?.("devicechange", onDevice);

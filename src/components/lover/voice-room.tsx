@@ -215,6 +215,7 @@ export function VoiceRoom() {
       onForeground: wake,
       onBackground: () => {
         persistInflight();
+        if (callActiveRef.current) return;
         stopPlayback();
         turnRef.current += 1;
         busyRef.current = false;
@@ -636,7 +637,7 @@ export function VoiceRoom() {
             ? "清然在说 · 点灯可打断"
             : call.resting || call.interrupted
               ? "我在"
-              : "你说，说完停两秒"
+              : "你说，说完停两秒 · 切出去也能接着说"
     : "";
 
   return (
@@ -819,8 +820,8 @@ export function VoiceRoom() {
                       : call.phase === "speaking-you"
                         ? "说完停两秒再发给她"
                         : call.resting || call.interrupted
-                          ? "闹钟可以响 · 回来点一下就能接着说"
-                          : call.error || "通话中"
+                          ? "电话被系统打断了 · 点一下接着说"
+                          : "通话中 · 切出去也能接着说"
                     : recording
                       ? voice.interim.trim() || "松开发送"
                       : transcribing

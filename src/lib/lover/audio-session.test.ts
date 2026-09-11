@@ -36,11 +36,12 @@ test("only an active session should resume capture after an alarm", () => {
   assert.equal(sessionIsActive(null), false);
 });
 
-test("listen claims the call session, speak and yield mix so alarms can ring", () => {
+test("a live call keeps play-and-record; only hangup yields the session", () => {
   assert.equal(sessionTypeFor("listen"), "play-and-record");
-  assert.equal(sessionTypeFor("speak"), "ambient");
+  assert.equal(sessionTypeFor("speak"), "play-and-record");
   assert.equal(sessionTypeFor("yield"), "ambient");
 });
+
 
 test("live tracks are reusable even when iOS starts them muted", () => {
   assert.equal(micTrackUsable({ readyState: "live", muted: false }), true);

@@ -190,14 +190,116 @@ export function stopPlayback() {
   clearElement(el);
   el.muted = false;
   el.volume = VOICE_GAIN;
-  if (ctx && (ctx.state as string) === "running") {
-    try {
-      void ctx.suspend();
-    } catch {
-      /* ignore */
-    }
+}
+
+let holdUrl: string | null = null;
+let holdPlaying = false;
+
+function getHoldElement(): HTMLAudioElement {
+  const existing = document.getElementById("qingran-hold") as HTMLAudioElement | null;
+  if (existing) return existing;
+  const el = document.createElement("audio");
+  el.id = "qingran-hold";
+  el.setAttribute("playsinline", "true");
+  el.setAttribute("webkit-playsinline", "true");
+  el.preload = "auto";
+  el.loop = true;
+  el.style.display = "none";
+  document.body.appendChild(el);
+  return el;
+}
+
+function quietLoopUrl() {
+  if (holdUrl) return holdUrl;
+  const rate = 8000;
+  const seconds = 12;
+  const n = rate * seconds;
+  const dataSize = n * 2;
+  const buf = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buf);
+  const write = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i += 1) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  write(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, dataSize, true);
+  for (let i = 0; i < n; i += 1) {
+    view.setInt16(44 + i * 2, i & 1 ? 1 : -1, true);
+  }
+  holdUrl = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  return holdUrl;
+}
+
+function claimMediaSession() {
+  const session = navigator.mediaSession;
+  if (!session) return;
+  try {
+    session.metadata = new MediaMetadata({
+      title: "清然",
+      artist: "通话中",
+    });
+    session.playbackState = "playing";
+  } catch {
+    /* older WebKit */
   }
 }
+
+function releaseMediaSession() {
+  const session = navigator.mediaSession;
+  if (!session) return;
+  try {
+    session.playbackState = "none";
+    session.metadata = null;
+  } catch {
+    /* ignore */
+  }
+}
+
+export function startCallHold() {
+  holdPlaying = true;
+  setAudioSessionKind("listen");
+  claimMediaSession();
+  const el = getHoldElement();
+  try {
+    el.loop = true;
+    el.muted = false;
+    el.volume = 0.01;
+    if (!el.src) el.src = quietLoopUrl();
+    const play = el.play();
+    if (play) void play.catch(() => undefined);
+  } catch {
+    /* ignore */
+  }
+  const audioCtx = getCtx();
+  if (audioCtx) void resumeAudioContext(audioCtx);
+}
+
+export function stopCallHold() {
+  holdPlaying = false;
+  releaseMediaSession();
+  try {
+    const el = getHoldElement();
+    el.pause();
+    el.muted = true;
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isCallHoldPlaying() {
+  return holdPlaying;
+}
+
 
 export async function resumeAudio() {
   let audioCtx = getCtx();

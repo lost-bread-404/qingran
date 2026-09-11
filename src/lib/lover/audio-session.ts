@@ -34,10 +34,12 @@ export function isStandalonePwa() {
 export type AudioSessionKind = "listen" | "speak" | "yield";
 
 export function sessionTypeFor(kind: AudioSessionKind) {
-  if (kind === "listen") return "play-and-record";
-  // Ambient mixes with Sleep Cycle / other alarms. Playback would duck them.
-  return "ambient";
+  if (kind === "yield") return "ambient";
+  // A live call stays play-and-record even while she is speaking,
+  // so iOS treats it like a phone call instead of mixing us away.
+  return "play-and-record";
 }
+
 
 export function micTrackUsable(track: { readyState: string; muted: boolean }) {
   return track.readyState === "live";
