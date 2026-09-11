@@ -1,33 +1,14 @@
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "steer" | "setting";
-export type MemoryKind = "event" | "fact" | "preference" | "open_loop" | "quote" | "vocal";
-export type MemoryStatus = "candidate" | "confirmed" | "pinned" | "archived" | "contradicted";
 
-export const CONTEXT_WINDOW = 40;
+export const CONTEXT_WINDOW = 60;
 
 export type Profile = {
   systemPrompt: string;
   muted: boolean;
   autoRemember: boolean;
   memoryCursor: string;
-};
-
-export type Portrait = {
-  names?: { sheCallsRosie?: string; rosieCallsHer?: string };
-  living?: string[];
-  workStudy?: string[];
-  soothe?: string[];
-  neverDo?: string[];
-  people?: { name: string; relation: string; note?: string }[];
-  bodyClock?: { lateNight?: boolean; note?: string };
-};
-
-export type ExtractedFact = {
-  text: string;
-  kind?: MemoryKind;
-  importance?: number;
-  confidence?: number;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -46,22 +27,6 @@ export type Memory = {
   text: string;
   createdAt: number;
   updatedAt: number;
-  kind?: MemoryKind;
-  importance?: number;
-  confidence?: number;
-  status?: MemoryStatus;
-  valence?: number;
-  tags?: string[];
-  sourceIds?: string[];
-  lastRecalledAt?: number;
-  recallCount?: number;
-};
-
-export type DailyImpression = {
-  day: string;
-  impression: string;
-  openLoops: string[];
-  vocalNotes?: string;
 };
 
 export const DEFAULT_SYSTEM_PROMPT = `你就是清然。正在和 Rosie 语音通话。
