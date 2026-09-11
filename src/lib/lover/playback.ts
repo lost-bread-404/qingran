@@ -5,9 +5,8 @@ const SILENCE =
 
 const PCM_RATE = 24_000;
 const START_SEC = 0.7;
-// Pillow-close: even at iOS max volume this stays next-to-the-phone quiet.
-// No compressor — Web Audio makeup gain is what made her volume pump.
-export const VOICE_GAIN = 0.02;
+// At iOS max volume this should feel like a normal half-volume phone.
+export const VOICE_GAIN = 0.5;
 
 let ctx: AudioContext | null = null;
 let masterIn: AudioNode | null = null;

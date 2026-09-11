@@ -277,7 +277,7 @@ export function VoiceRoom() {
     if (!callActiveRef.current) return;
     window.setTimeout(() => {
       if (callActiveRef.current && turn === turnRef.current) hearRef.current();
-    }, 420);
+    }, 80);
   }
 
   const playFull = useCallback(async (id: string, speech: string, turn: number) => {

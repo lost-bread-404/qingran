@@ -24,8 +24,12 @@ export function sessionTypeFor(kind: AudioSessionKind) {
 }
 
 export function micTrackUsable(track: { readyState: string; muted: boolean }) {
-  // iOS often delivers live tracks already muted; they still count as ours.
+  // iOS often delivers live tracks already muted; they can be unmuted.
   return track.readyState === "live";
+}
+
+export function micTrackHearing(track: { readyState: string; muted: boolean }) {
+  return track.readyState === "live" && !track.muted;
 }
 
 export function micStreamUsable(
@@ -36,6 +40,16 @@ export function micStreamUsable(
 ) {
   if (!stream?.active) return false;
   return stream.getAudioTracks().some(micTrackUsable);
+}
+
+export function micStreamHearing(
+  stream: {
+    active: boolean;
+    getAudioTracks: () => Array<{ readyState: string; muted: boolean }>;
+  } | null,
+) {
+  if (!stream?.active) return false;
+  return stream.getAudioTracks().some(micTrackHearing);
 }
 
 type NavAudioSession = {

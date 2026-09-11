@@ -3,7 +3,9 @@ import { test } from "node:test";
 import {
   audioContextNeedsResume,
   isInterruptedState,
+  micStreamHearing,
   micStreamUsable,
+  micTrackHearing,
   micTrackUsable,
   sessionIsActive,
   sessionTypeFor,
@@ -39,13 +41,15 @@ test("listen claims the call session, speak and yield mix so alarms can ring", (
   assert.equal(sessionTypeFor("yield"), "ambient");
 });
 
-test("live tracks are usable even when iOS starts them muted", () => {
+test("live tracks are reusable even when iOS starts them muted", () => {
   assert.equal(micTrackUsable({ readyState: "live", muted: false }), true);
   assert.equal(micTrackUsable({ readyState: "live", muted: true }), true);
   assert.equal(micTrackUsable({ readyState: "ended", muted: false }), false);
+  assert.equal(micTrackHearing({ readyState: "live", muted: false }), true);
+  assert.equal(micTrackHearing({ readyState: "live", muted: true }), false);
 });
 
-test("ended or inactive streams are not reused", () => {
+test("ended streams are not reused; muted live streams are not yet hearing", () => {
   const live = {
     active: true,
     getAudioTracks: () => [{ readyState: "live", muted: false }],
@@ -62,4 +66,7 @@ test("ended or inactive streams are not reused", () => {
   assert.equal(micStreamUsable(muted), true);
   assert.equal(micStreamUsable(ended), false);
   assert.equal(micStreamUsable(null), false);
+  assert.equal(micStreamHearing(live), true);
+  assert.equal(micStreamHearing(muted), false);
+  assert.equal(micStreamHearing(ended), false);
 });
