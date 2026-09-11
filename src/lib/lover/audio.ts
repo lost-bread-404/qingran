@@ -233,40 +233,7 @@ export function acquireMicFromGesture(): Promise<MediaStream> {
     () => undefined,
     () => undefined,
   );
-  return pending.then(async (stream) => {
-    await waitUntilHearing(stream, 360);
-    return stream;
-  });
-}
-
-export async function waitUntilHearing(stream: MediaStream | null, ms = 240) {
-  if (!stream) return false;
-  setMicEnabled(stream, true);
-  if (micHearing(stream)) return true;
-
-  return await new Promise<boolean>((resolve) => {
-    let settled = false;
-    const finish = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      for (const track of stream.getAudioTracks()) {
-        track.removeEventListener("unmute", onUnmute);
-      }
-      resolve(ok);
-    };
-    const onUnmute = () => {
-      setMicEnabled(stream, true);
-      if (micHearing(stream)) finish(true);
-    };
-    for (const track of stream.getAudioTracks()) {
-      track.addEventListener("unmute", onUnmute);
-    }
-    const timer = window.setTimeout(() => {
-      setMicEnabled(stream, true);
-      finish(micHearing(stream));
-    }, ms);
-  });
+  return pending;
 }
 
 export function pauseMic() {

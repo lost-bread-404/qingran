@@ -4,33 +4,28 @@ import {
   acquireMic,
   acquireMicFromGesture,
   createAudioContext,
-  currentMic,
   getSpeechRecognitionCtor,
   isAppleTouch,
   micFailHint,
-  micHearing,
   micUsable,
   onMicEvent,
   releaseMic,
   pickRecorderMime,
   resumeOrReplaceContext,
-  setMicEnabled,
   startRecorder,
   usesBrowserStt,
-  waitUntilHearing,
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
 import {
-  claimListenSession,
   audioContextNeedsResume,
+  claimListenSession,
   isInterruptedState,
   listenAppLifecycle,
   listenAudioSession,
-  pageIsHidden,
-  setAudioSessionKind,
+  resumeAudioContext,
 } from "@/lib/lover/audio-session";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
-import { startCallHold, stopCallHold } from "@/lib/lover/playback";
+import { startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
 import { transcribeVoice } from "@/lib/lover/server";
 import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import {
@@ -45,27 +40,17 @@ import {
 export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing";
 
 const FFT_SIZE = 2048;
-const REVIVE_GAPS = [80, 200, 500];
 
 type Options = {
   onUtterance: (text: string) => Promise<void>;
   prompt?: string;
 };
 
-function hearingStream(preferred: MediaStream | null): MediaStream | null {
-  if (micHearing(preferred)) return preferred;
-  if (micHearing(currentMic())) return currentMic();
-  return null;
-}
-
 export function useCall({ onUtterance, prompt }: Options) {
   const [active, setActive] = useState(false);
   const [phase, setPhase] = useState<CallPhase>("idle");
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [needsTap, setNeedsTap] = useState(false);
-  const [resting, setResting] = useState(false);
-  const [interrupted, setInterrupted] = useState(false);
 
   const liveRef = useRef(false);
   const deafRef = useRef(true);
@@ -91,14 +76,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const interimRef = useRef("");
   const framesRef = useRef<ProsodyFrame[]>([]);
   const pitchTickRef = useRef(0);
-  const revivingRef = useRef(false);
-  const reviveGenRef = useRef(0);
   const tickRef = useRef<() => void>(() => undefined);
-  const fromBackgroundRef = useRef(false);
-  const interruptedRef = useRef(false);
-  const restingRef = useRef(false);
-  const restTimerRef = useRef(0);
-  const bgYieldTimerRef = useRef(0);
 
   useEffect(() => {
     onUtteranceRef.current = onUtterance;
@@ -112,13 +90,6 @@ export function useCall({ onUtterance, prompt }: Options) {
     setPhase(next);
   };
 
-  const clearTimers = () => {
-    if (restTimerRef.current) window.clearTimeout(restTimerRef.current);
-    if (bgYieldTimerRef.current) window.clearTimeout(bgYieldTimerRef.current);
-    restTimerRef.current = 0;
-    bgYieldTimerRef.current = 0;
-  };
-
   const releaseWakeLock = () => {
     try {
       void wakeLockRef.current?.release();
@@ -126,6 +97,34 @@ export function useCall({ onUtterance, prompt }: Options) {
       /* ignore */
     }
     wakeLockRef.current = null;
+  };
+
+  const hookAnalyser = (stream: MediaStream, ctx: AudioContext) => {
+    try {
+      sourceRef.current?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    analyser.smoothingTimeConstant = 0.35;
+    source.connect(analyser);
+    sourceRef.current = source;
+    analyserRef.current = analyser;
+  };
+
+  const keepAlive = () => {
+    claimListenSession();
+    startCallHold();
+    const ctx = ctxRef.current;
+    if (ctx && audioContextNeedsResume(ctx.state)) {
+      try {
+        void ctx.resume();
+      } catch {
+        /* ignore */
+      }
+    }
   };
 
   const teardownMedia = useCallback(() => {
@@ -168,14 +167,8 @@ export function useCall({ onUtterance, prompt }: Options) {
   const hangup = useCallback(() => {
     liveRef.current = false;
     deafRef.current = true;
-    restingRef.current = false;
-    interruptedRef.current = false;
-    fromBackgroundRef.current = false;
-    clearTimers();
     setActive(false);
-    setNeedsTap(false);
-    setResting(false);
-    setInterrupted(false);
+    setError(null);
     setPhaseBoth("idle");
     stopCallHold();
     teardownMedia();
@@ -185,8 +178,6 @@ export function useCall({ onUtterance, prompt }: Options) {
   const beginUtterance = useCallback(() => {
     const stream = streamRef.current;
     if (!stream || recorderRef.current) return;
-    if (restTimerRef.current) window.clearTimeout(restTimerRef.current);
-    restTimerRef.current = 0;
     chunksRef.current = [];
     const mime = pickRecorderMime();
     const recorder = mime
@@ -261,7 +252,6 @@ export function useCall({ onUtterance, prompt }: Options) {
     lastTextAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
     setPhaseBoth("listening");
-    armRestTimer();
   }, []);
 
   const flushUtterance = useCallback(async () => {
@@ -303,10 +293,8 @@ export function useCall({ onUtterance, prompt }: Options) {
     if (!heard) {
       setError("我没听清，再说一遍。");
       deafRef.current = false;
-      setMicEnabled(streamRef.current, true);
       listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
       setPhaseBoth("listening");
-      armRestTimer();
       return;
     }
     setError(null);
@@ -316,110 +304,30 @@ export function useCall({ onUtterance, prompt }: Options) {
     } catch {
       if (liveRef.current) {
         deafRef.current = false;
-        setMicEnabled(streamRef.current, true);
         listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
         setPhaseBoth("listening");
-        armRestTimer();
       }
     }
   }, [collectRecording]);
 
-  const dropCapture = (kind: "speak" | "yield") => {
-    const rec = recRef.current;
-    recRef.current = null;
-    try {
-      rec?.abort();
-    } catch {
-      /* ignore */
-    }
-    try {
-      sourceRef.current?.disconnect();
-    } catch {
-      /* ignore */
-    }
-    sourceRef.current = null;
-    analyserRef.current = null;
-    try {
-      recorderRef.current?.state === "recording" && recorderRef.current.stop();
-    } catch {
-      /* ignore */
-    }
-    recorderRef.current = null;
-    chunksRef.current = [];
-    releaseMic();
-    streamRef.current = null;
-    try {
-      void ctxRef.current?.close();
-    } catch {
-      /* ignore */
-    }
-    ctxRef.current = null;
-    setAudioSessionKind(kind);
-    setLevel(0);
-    if (kind === "yield") releaseWakeLock();
-  };
-
-  const enterRest = () => {
-    if (!liveRef.current) return;
-    if (phaseRef.current === "speaking-you") {
-      try {
-        recorderRef.current?.state === "recording" && recorderRef.current.stop();
-      } catch {
-        /* ignore */
-      }
-      recorderRef.current = null;
-      chunksRef.current = [];
-      setPhaseBoth("listening");
-    }
-    restingRef.current = true;
-    setResting(true);
-    deafRef.current = false;
-    dropCapture("yield");
-  };
-
-  const armRestTimer = () => {
-    if (restTimerRef.current) window.clearTimeout(restTimerRef.current);
-    restTimerRef.current = 0;
-  };
-
-  const markInterrupted = () => {
-    if (!liveRef.current) return;
-    interruptedRef.current = true;
-    setInterrupted(true);
-    setNeedsTap(true);
-    dropCapture("yield");
-  };
-
   const tick = useCallback(() => {
     if (!liveRef.current) return;
-    if (restingRef.current) {
-      rafRef.current = requestAnimationFrame(tick);
-      return;
-    }
-    const ctxState = ctxRef.current?.state as string | undefined;
-    if (audioContextNeedsResume(ctxState ?? "")) {
+    const ctx = ctxRef.current;
+    const ctxState = ctx?.state as string | undefined;
+    if (ctx && audioContextNeedsResume(ctxState ?? "")) {
       try {
-        void ctxRef.current?.resume();
+        void ctx.resume();
       } catch {
         /* ignore */
       }
-    }
-    if (isInterruptedState(ctxState)) {
-      try {
-        void ctxRef.current?.resume();
-      } catch {
-        /* ignore */
-      }
-      rafRef.current = requestAnimationFrame(tick);
-      return;
     }
     const analyser = analyserRef.current;
     const now = performance.now();
-    if (analyser) {
+    if (analyser && !isInterruptedState(ctxState)) {
       const speaking = phaseRef.current === "speaking-you";
       const frame = sampleProsody(
         analyser,
-        ctxRef.current?.sampleRate ?? 44100,
+        ctx?.sampleRate ?? 44100,
         (now - speechStartRef.current) / 1000,
         pitchTickRef.current % 2 === 0,
       );
@@ -434,7 +342,6 @@ export function useCall({ onUtterance, prompt }: Options) {
       setLevel(Math.min(1, rms * 8));
       if (
         !deafRef.current &&
-        !restingRef.current &&
         phaseRef.current === "listening" &&
         now >= listenReadyAtRef.current &&
         rising
@@ -479,21 +386,6 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   tickRef.current = tick;
 
-  const hookAnalyser = (stream: MediaStream, ctx: AudioContext) => {
-    try {
-      sourceRef.current?.disconnect();
-    } catch {
-      /* ignore */
-    }
-    const source = ctx.createMediaStreamSource(stream);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = FFT_SIZE;
-    analyser.smoothingTimeConstant = 0.35;
-    source.connect(analyser);
-    sourceRef.current = source;
-    analyserRef.current = analyser;
-  };
-
   const startSpeechRec = (replace = false) => {
     if (!usesBrowserStt()) return;
     const Ctor = getSpeechRecognitionCtor();
@@ -502,7 +394,7 @@ export function useCall({ onUtterance, prompt }: Options) {
       try {
         recRef.current.start();
       } catch {
-        /* already started, or the instance died */
+        /* already started */
       }
       return;
     }
@@ -519,7 +411,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     rec.interimResults = true;
     rec.maxAlternatives = 3;
     rec.onresult = (ev) => {
-      if (!liveRef.current || deafRef.current || restingRef.current) return;
+      if (!liveRef.current || deafRef.current) return;
       let addition = "";
       let live = "";
       for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
@@ -538,16 +430,13 @@ export function useCall({ onUtterance, prompt }: Options) {
       if ((addition || live).trim()) lastTextAtRef.current = performance.now();
     };
     rec.onerror = (ev) => {
-      if (ev.error === "not-allowed") {
-        setNeedsTap(true);
-        setError("点一下，打开麦克风");
-      }
+      if (ev.error === "not-allowed") setError(micFailHint({ name: "NotAllowedError" }));
     };
     rec.onend = () => {
-      if (!liveRef.current || deafRef.current || restingRef.current) return;
+      if (!liveRef.current || deafRef.current) return;
       if (recRef.current !== rec) return;
       window.setTimeout(() => {
-        if (!liveRef.current || deafRef.current || restingRef.current) return;
+        if (!liveRef.current || deafRef.current) return;
         if (recRef.current !== rec) return;
         try {
           rec.start();
@@ -561,179 +450,54 @@ export function useCall({ onUtterance, prompt }: Options) {
       rec.start();
     } catch {
       window.setTimeout(() => {
-        if (!liveRef.current || deafRef.current || restingRef.current) return;
+        if (!liveRef.current || deafRef.current) return;
         if (recRef.current !== rec) return;
         try {
           rec.start();
         } catch {
-          setNeedsTap(true);
+          /* ignore */
         }
       }, 180);
     }
   };
 
-  const reviveOnce = async (opts?: { gesture?: boolean; reclaim?: boolean }) => {
-    if (!liveRef.current) return false;
-
-    const reclaim =
-      Boolean(opts?.reclaim) ||
-      restingRef.current;
-
-    const existing = hearingStream(streamRef.current);
-
-    // getUserMedia must start in this turn on a user gesture. No await before it.
-    let stream: MediaStream | null = null;
-    if (opts?.gesture && (reclaim || !existing)) {
-      const pending = acquireMicFromGesture();
-      if (
-        !ctxRef.current ||
-        (ctxRef.current.state as string) === "closed" ||
-        isInterruptedState(ctxRef.current.state)
-      ) {
-        ctxRef.current = createAudioContext();
-      } else {
-        try {
-          void ctxRef.current.resume();
-        } catch {
-          /* ignore */
-        }
-      }
-      try {
-        stream = await pending;
-      } catch {
-        return false;
-      }
-    } else if (!reclaim && existing) {
-      stream = existing;
-      setMicEnabled(stream, true);
-      claimListenSession();
-    } else {
-      try {
-        stream = await acquireMic({ force: reclaim });
-      } catch {
-        return false;
-      }
-    }
-    if (!stream) return false;
+  const attachStream = async (stream: MediaStream, fromGesture: boolean) => {
     streamRef.current = stream;
-    setMicEnabled(stream, true);
     claimListenSession();
-    const hearing = await waitUntilHearing(stream, opts?.gesture ? 360 : 180);
-
     if (!ctxRef.current || (ctxRef.current.state as string) === "closed") {
-      ctxRef.current = opts?.gesture ? createAudioContext() : await resumeOrReplaceContext(null);
+      ctxRef.current = fromGesture ? createAudioContext() : await resumeOrReplaceContext(null);
     } else {
       try {
-        ctxRef.current = await resumeOrReplaceContext(ctxRef.current);
+        await resumeAudioContext(ctxRef.current);
       } catch {
         /* ignore */
       }
     }
-    if (ctxRef.current && stream) {
+    if (ctxRef.current) {
       try {
         hookAnalyser(stream, ctxRef.current);
       } catch {
-        ctxRef.current = opts?.gesture ? createAudioContext() : await resumeOrReplaceContext(null);
-        if (ctxRef.current) {
-          try {
-            hookAnalyser(stream, ctxRef.current);
-          } catch {
-            return false;
-          }
-        }
+        ctxRef.current = fromGesture ? createAudioContext() : await resumeOrReplaceContext(null);
+        if (ctxRef.current) hookAnalyser(stream, ctxRef.current);
       }
     }
-
-    if (phaseRef.current === "speaking-you") {
-      try {
-        recorderRef.current?.state === "recording" && recorderRef.current.stop();
-      } catch {
-        /* ignore */
-      }
-      recorderRef.current = null;
-      chunksRef.current = [];
-      setPhaseBoth("listening");
-    }
-
-    deafRef.current = false;
-    setMicEnabled(streamRef.current, true);
-    listenReadyAtRef.current = performance.now() + 80;
-    startSpeechRec(true);
-
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(tickRef.current);
-    try {
-      wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? wakeLockRef.current;
-    } catch {
-      /* ignore */
-    }
-    const ctxOk = Boolean(ctxRef.current && ctxRef.current.state === "running" && analyserRef.current);
-    if (!ctxOk || !micUsable(streamRef.current)) return false;
-    if (reclaim && !hearing && !micHearing(streamRef.current)) return false;
-    return true;
   };
-
-  const revive = useCallback(async (opts?: { gesture?: boolean; immediate?: boolean; reclaim?: boolean }) => {
-    if (!liveRef.current) return;
-    if (revivingRef.current && !opts?.gesture) return;
-    const gen = ++reviveGenRef.current;
-    revivingRef.current = true;
-    try {
-      let ok = await reviveOnce(opts);
-      if (!ok && liveRef.current && gen === reviveGenRef.current) {
-        const gaps = opts?.gesture ? [60] : opts?.immediate || opts?.reclaim ? [80, 240] : REVIVE_GAPS;
-        for (const gap of gaps) {
-          if (!liveRef.current || ok || gen !== reviveGenRef.current) break;
-          await new Promise((resolve) => window.setTimeout(resolve, gap));
-          if (!liveRef.current || gen !== reviveGenRef.current) return;
-          ok = await reviveOnce(opts);
-        }
-      }
-      if (!liveRef.current || gen !== reviveGenRef.current) return;
-      if (ok) {
-        fromBackgroundRef.current = false;
-        interruptedRef.current = false;
-        restingRef.current = false;
-        deafRef.current = false;
-        setInterrupted(false);
-        setResting(false);
-        setNeedsTap(false);
-        setError(null);
-        armRestTimer();
-        startCallHold();
-      } else if (!pageIsHidden()) {
-        setNeedsTap(true);
-      }
-    } finally {
-      if (gen === reviveGenRef.current) revivingRef.current = false;
-    }
-  }, []);
 
   const start = useCallback(async () => {
     if (liveRef.current) return;
     setError(null);
-    setNeedsTap(false);
-    setResting(false);
-    setInterrupted(false);
-    restingRef.current = false;
-    interruptedRef.current = false;
-    fromBackgroundRef.current = false;
+    const pending = acquireMicFromGesture();
+    void unlockPlayback();
+    ctxRef.current = createAudioContext();
+    let stream: MediaStream;
     try {
-      const stream = await acquireMic();
-      streamRef.current = stream;
-      const ctx = await resumeOrReplaceContext(null);
-      if (ctx) {
-        ctxRef.current = ctx;
-        hookAnalyser(stream, ctx);
-      }
+      stream = await pending;
     } catch (err) {
       teardownMedia();
-      liveRef.current = false;
-      setActive(false);
-      setNeedsTap(true);
       setError(micFailHint(err));
       return;
     }
+    await attachStream(stream, true);
     liveRef.current = true;
     deafRef.current = false;
     noiseFloorRef.current = 0.008;
@@ -741,9 +505,9 @@ export function useCall({ onUtterance, prompt }: Options) {
     setActive(true);
     setPhaseBoth("listening");
     startSpeechRec(true);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(tick);
     startCallHold();
-    armRestTimer();
     try {
       wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? null;
     } catch {
@@ -754,8 +518,6 @@ export function useCall({ onUtterance, prompt }: Options) {
   const deafen = useCallback(() => {
     if (!liveRef.current) return;
     deafRef.current = true;
-    if (restTimerRef.current) window.clearTimeout(restTimerRef.current);
-    restTimerRef.current = 0;
     const rec = recRef.current;
     recRef.current = null;
     try {
@@ -770,123 +532,77 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     recorderRef.current = null;
     chunksRef.current = [];
-    claimListenSession();
-    startCallHold();
-    if (phaseRef.current === "speaking-you") {
-      setPhaseBoth("listening");
-    }
+    keepAlive();
+    if (phaseRef.current === "speaking-you") setPhaseBoth("listening");
   }, []);
 
   const hear = useCallback(() => {
     if (!liveRef.current) return;
     deafRef.current = false;
-    interruptedRef.current = false;
-    setInterrupted(false);
     setPhaseBoth("listening");
     finalTextRef.current = "";
     interimRef.current = "";
     lastTextAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + 80;
-    const needReclaim = restingRef.current || !micUsable(streamRef.current);
-    if (needReclaim) {
-      void revive({ immediate: true, reclaim: true });
-      return;
-    }
-    restingRef.current = false;
-    setResting(false);
-    setMicEnabled(streamRef.current, true);
-    claimListenSession();
+    keepAlive();
     startSpeechRec(true);
-    startCallHold();
-    armRestTimer();
-    void revive({ immediate: true });
-  }, [revive]);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tickRef.current);
+  }, []);
 
   useEffect(() => {
     if (!active) return;
     const stopMicWatch = onMicEvent((event) => {
       if (!liveRef.current) return;
-      if (restingRef.current) return;
-      if (event === "ended") void revive({ immediate: true, reclaim: true });
-      if (event === "mute") {
-        setMicEnabled(streamRef.current, true);
-        claimListenSession();
-        startCallHold();
+      if (event === "ended") {
+        void (async () => {
+          try {
+            const stream = await acquireMic({ force: true });
+            await attachStream(stream, false);
+            if (!deafRef.current) startSpeechRec(true);
+            keepAlive();
+          } catch {
+            /* stay on the call; user can speak after returning */
+          }
+        })();
       }
-      if (event === "unmute") {
-        setMicEnabled(streamRef.current, true);
-        interruptedRef.current = false;
-        setInterrupted(false);
-      }
+      if (event === "mute" || event === "unmute") keepAlive();
     });
     const stopLife = listenAppLifecycle({
       onForeground: () => {
         if (!liveRef.current) return;
-        if (bgYieldTimerRef.current) window.clearTimeout(bgYieldTimerRef.current);
-        bgYieldTimerRef.current = 0;
-        interruptedRef.current = false;
-        setInterrupted(false);
-        startCallHold();
-        claimListenSession();
-        const dead = !micUsable(streamRef.current);
-        void revive({ immediate: true, reclaim: dead });
+        keepAlive();
+        if (!micUsable(streamRef.current)) {
+          void acquireMic({ force: true })
+            .then((stream) => attachStream(stream, false))
+            .then(() => {
+              if (!liveRef.current) return;
+              if (!deafRef.current) startSpeechRec(true);
+            })
+            .catch(() => undefined);
+        }
       },
       onBackground: () => {
-        fromBackgroundRef.current = true;
-        if (bgYieldTimerRef.current) window.clearTimeout(bgYieldTimerRef.current);
-        bgYieldTimerRef.current = 0;
-        claimListenSession();
-        startCallHold();
-        setMicEnabled(streamRef.current, true);
-        try {
-          void ctxRef.current?.resume();
-        } catch {
-          /* ignore */
-        }
+        if (!liveRef.current) return;
+        keepAlive();
       },
     });
     const stopSession = listenAudioSession({
       onInterrupted: () => {
         if (!liveRef.current) return;
-        startCallHold();
-        claimListenSession();
-        try {
-          void ctxRef.current?.resume();
-        } catch {
-          /* ignore */
-        }
+        keepAlive();
       },
       onActive: () => {
         if (!liveRef.current) return;
-        interruptedRef.current = false;
-        setInterrupted(false);
-        startCallHold();
-        const dead = !micUsable(streamRef.current);
-        void revive({ immediate: true, reclaim: dead });
+        keepAlive();
       },
     });
-    const devices = navigator.mediaDevices;
-    const onDevice = () => {
-      if (!liveRef.current) return;
-      if (restingRef.current) return;
-      void revive({ immediate: true });
-    };
-    try {
-      devices?.addEventListener?.("devicechange", onDevice);
-    } catch {
-      /* ignore */
-    }
     return () => {
       stopMicWatch();
       stopLife();
       stopSession();
-      try {
-        devices?.removeEventListener?.("devicechange", onDevice);
-      } catch {
-        /* ignore */
-      }
     };
-  }, [active, revive]);
+  }, [active]);
 
   useEffect(() => () => hangup(), [hangup]);
 
@@ -895,13 +611,9 @@ export function useCall({ onUtterance, prompt }: Options) {
     phase,
     level,
     error,
-    needsTap,
-    resting,
-    interrupted,
     start,
     hangup,
     deafen,
     hear,
-    revive,
   };
 }

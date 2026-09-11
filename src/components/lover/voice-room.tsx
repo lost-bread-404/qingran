@@ -7,7 +7,6 @@ import { Transcript } from "@/components/lover/transcript";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useCall } from "@/hooks/use-call";
-import { useMicGate } from "@/hooks/use-mic-gate";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { base64ToBytes, concatBytes } from "@/lib/lover/audio";
@@ -16,7 +15,6 @@ import { dropIncompleteReplies } from "@/lib/lover/pair-messages";
 import {
   enqueuePlayback,
   getPlaybackElement,
-  isPlaybackUnlocked,
   playMp3Bytes,
   resumeAudio,
   sealPlayback,
@@ -87,17 +85,9 @@ export function VoiceRoom() {
   const callActiveRef = useRef(false);
   const hearRef = useRef<() => void>(() => undefined);
   const deafenRef = useRef<() => void>(() => undefined);
-  const reviveRef = useRef<(gesture?: boolean) => void>(() => undefined);
-  const connectMicRef = useRef<(mode?: { gesture?: boolean }) => Promise<boolean>>(async () => false);
-  const needsMicRef = useRef(false);
   const spokenCacheRef = useRef(new Map<string, { bytes: Uint8Array<ArrayBuffer>; mimeType: string }>());
   const viewport = useVisualViewportHeight();
-  const mic = useMicGate({ pausedRef: callActiveRef });
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
-
-  useEffect(() => {
-    connectMicRef.current = mic.connect;
-  }, [mic.connect]);
 
   useEffect(() => {
     profileRef.current = profile;
@@ -197,22 +187,7 @@ export function VoiceRoom() {
         },
       });
     };
-    const wake = () => {
-      if (callActiveRef.current) {
-        reviveRef.current();
-        return;
-      }
-      void connectMicRef.current();
-    };
-    const onGesture = () => {
-      if (callActiveRef.current) {
-        if (needsMicRef.current) reviveRef.current(true);
-        return;
-      }
-      if (needsMicRef.current) void connectMicRef.current({ gesture: true });
-    };
     const stopLife = listenAppLifecycle({
-      onForeground: wake,
       onBackground: () => {
         persistInflight();
         if (callActiveRef.current) return;
@@ -223,11 +198,9 @@ export function VoiceRoom() {
       },
     });
     window.addEventListener("beforeunload", persistInflight);
-    document.addEventListener("pointerdown", onGesture, { capture: true });
     return () => {
       stopLife();
       window.removeEventListener("beforeunload", persistInflight);
-      document.removeEventListener("pointerdown", onGesture, { capture: true } as EventListenerOptions);
     };
   }, []);
 
@@ -483,12 +456,7 @@ export function VoiceRoom() {
     callActiveRef.current = call.active;
     hearRef.current = call.hear;
     deafenRef.current = call.deafen;
-    reviveRef.current = (gesture?: boolean) => {
-      void call.revive(gesture ? { gesture: true } : { immediate: true });
-    };
-    needsMicRef.current = Boolean(mic.blocked || call.needsTap || call.resting || call.interrupted);
-    if (!call.active) void mic.connect();
-  }, [call.active, call.hear, call.deafen, call.revive, call.needsTap, call.resting, call.interrupted, mic.connect, mic.blocked]);
+  }, [call.active, call.hear, call.deafen]);
 
   const finishHold = useCallback(async () => {
     if (finishingHoldRef.current) return;
@@ -511,11 +479,6 @@ export function VoiceRoom() {
     if (voice.status === "transcribing") return;
     if (status === "thinking" || status === "speaking") return;
     holdingRef.current = true;
-    const ok = await mic.connect({ gesture: true });
-    if (!ok) {
-      holdingRef.current = false;
-      return;
-    }
     const starting = voice.start();
     try {
       window.scrollTo(0, 0);
@@ -536,7 +499,7 @@ export function VoiceRoom() {
     setStatus("recording");
     await starting;
     if (!holdingRef.current) await finishHold();
-  }, [finishHold, mic.connect, status, voice]);
+  }, [finishHold, status, voice]);
 
   const holdEnd = useCallback(() => {
     holdingRef.current = false;
@@ -550,13 +513,9 @@ export function VoiceRoom() {
       turnRef.current += 1;
       busyRef.current = false;
       setStatus("idle");
-      void mic.connect();
       return;
     }
-    const ok = await mic.connect({ gesture: true });
-    if (!ok) return;
     if (voice.status === "recording") voice.cancel();
-    if (!isPlaybackUnlocked()) await unlockPlayback();
     stopPlayback();
     setComposerOpen(false);
     setEditingId(null);
@@ -635,9 +594,7 @@ export function VoiceRoom() {
           ? "她在想"
           : status === "speaking"
             ? "清然在说 · 点灯可打断"
-            : call.resting || call.interrupted
-              ? "我在"
-              : "你说，说完停两秒 · 切出去也能接着说"
+            : "你说，说完停两秒"
     : "";
 
   return (
@@ -645,35 +602,6 @@ export function VoiceRoom() {
       className="room-bg fixed inset-x-0 flex flex-col overflow-hidden"
       style={{ top: viewport.offsetTop, height: viewport.height }}
     >
-      {(mic.blocked || call.needsTap) && !composerOpen ? (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-bg/85 px-8 text-center">
-          <button
-            type="button"
-            className="flex flex-col items-center"
-            onPointerDown={(e) => {
-              e.preventDefault();
-              if (call.active) void call.revive({ gesture: true, reclaim: true });
-              else void mic.connect({ gesture: true });
-            }}
-          >
-            <div className="lamp-orb size-14 rounded-full" aria-hidden />
-            <p className="mt-5 font-display text-xl">我在</p>
-            <p className="mt-2 text-sm text-subtle">{mic.blocked ? mic.hint : "点一下，接着说"}</p>
-          </button>
-          <button
-            type="button"
-            className="mt-8 text-xs text-muted underline-offset-4 hover:underline"
-            onPointerDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              mic.dismiss();
-              setComposerOpen(true);
-            }}
-          >
-            先打字
-          </button>
-        </div>
-      ) : null}
       <div className="mx-auto flex h-full min-h-0 w-full max-w-lg flex-col overflow-hidden">
         <header className="relative z-10 flex shrink-0 items-center justify-between bg-bg/80 px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm">
           <div className="flex items-center gap-3">
@@ -819,9 +747,7 @@ export function VoiceRoom() {
                       ? "点灯打断 · 点按钮挂断"
                       : call.phase === "speaking-you"
                         ? "说完停两秒再发给她"
-                        : call.resting || call.interrupted
-                          ? "电话被系统打断了 · 点一下接着说"
-                          : "通话中 · 切出去也能接着说"
+                        : "通话中"
                     : recording
                       ? voice.interim.trim() || "松开发送"
                       : transcribing

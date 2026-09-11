@@ -167,8 +167,8 @@ export async function unlockPlayback() {
     /* ignore */
   }
   try {
-    el.muted = false;
-    el.volume = VOICE_GAIN;
+    el.muted = true;
+    el.volume = 0;
     el.src = SILENCE;
     const play = el.play();
     if (play) await play;
