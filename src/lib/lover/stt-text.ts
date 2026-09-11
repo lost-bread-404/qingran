@@ -1,77 +1,26 @@
-import { cuesFromProsody, hasCueEnergy, markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
+import { hasCueEnergy, markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
+import { expandHeardCues, listenVocal, renderBursts } from "./vocal-event.ts";
 
 export const STT_KEYTERMS = [
-  "哼",
-  "哼哼",
-  "哼，",
   "嗯",
-  "嗯嗯",
-  "嗯啊",
-  "嗯哼",
-  "唔",
-  "唔嗯",
-  "呜",
-  "呜呜",
-  "呜嗯",
-  "嗷",
-  "嗷呜",
-  "嗷呜嗷呜",
   "啊",
-  "啊啊",
-  "啊啊啊",
-  "呜呜呜",
-  "啊呜",
-  "呜啊",
-  "啊啊呜呜",
-  "唔唔唔",
-  "啊嗯",
-  "哈啊",
-  "哈哈哈",
-  "呼",
-  "呼哈",
-  "抽噎",
-  "喘气",
-  "嘤嘤",
-  "呜咽",
-  "哼嗯",
-  "哦",
-  "噢",
-  "喔",
-  "额",
-  "呃",
-  "唉",
-  "哎",
-  "诶",
-  "欸",
-  "哼",
-  "呵",
+  "呜",
   "哈",
-  "嘿",
-  "哇",
-  "呀",
-  "哟",
-  "呦",
-  "切",
-  "啧",
-  "嘶",
+  "哼",
+  "嗷",
+  "哦",
+  "唉",
   "嘛",
+  "呀",
+  "啦",
   "呢",
   "吧",
-  "啦",
-  "咯",
-  "嘤",
   "喵",
+  "嗯嗯",
+  "啊啊",
+  "呜呜",
+  "哈哈",
   "喵喵",
-  "喵呜",
-  "哼哼",
-  "唔唔",
-  "嗯～",
-  "喵～",
-  "啊～",
-  "嗷呜～",
-  "抽泣",
-  "吸鼻子",
-  "哭",
   "清然",
   "Rosie",
   "姐姐",
@@ -451,17 +400,22 @@ export function recoverCues(stt: string, frames?: ProsodyFrame[]): string {
   const existing = stt.trim();
   if (!frames?.length) return existing;
   const islands = voicedIslands(frames);
-  const fromAudio = islands.length ? cuesFromProsody(frames) : "";
+  const heard = listenVocal(frames);
+
+  if (existing && !isMostlyFiller(existing) && leftoverMeaning(existing)) return existing;
+
+  if (heard.kind === "laugh") return heard.text;
+  if (heard.kind === "cry") return heard.text;
+  if (heard.kind === "pant") return heard.text;
+  if (heard.kind === "hum") return heard.text;
+
   if (!existing) {
     if (!hasCueEnergy(frames)) return "";
-    return fromAudio;
+    return islands.length ? renderBursts("啊", islands) : "";
   }
-  if (!isMostlyFiller(existing) && leftoverMeaning(existing)) return existing;
-  if (!fromAudio) return existing;
-  if (/^哈+$/.test(stripMarks(existing)) && !/^哈+$/.test(stripMarks(fromAudio))) return fromAudio;
-  if (islands.length >= 3) return fromAudio;
-  if (islands.length >= 2 && stripMarks(existing).length <= 4) return fromAudio;
-  return existing;
+
+  if (islands.length <= 1) return existing;
+  return expandHeardCues(existing, islands);
 }
 
 export function refineCueWords(
@@ -475,16 +429,13 @@ export function refineCueWords(
 export function finishHeard(
   server: string,
   browser: string,
-  words: CueWord[] | undefined,
+  _words: CueWord[] | undefined,
   frames: ProsodyFrame[] | undefined,
 ): string {
   const picked = pickTranscript(server, browser);
   const recovered = recoverCues(picked, frames);
-  const islands = frames?.length ? voicedIslands(frames) : [];
-  if (isMostlyFiller(recovered) && islands.length >= 2) {
-    return keepCuePunct(recovered) || recovered;
-  }
-  return shapeCueProsody(shapeSajiaoTail(recovered, frames), words, frames);
+  if (isMostlyFiller(recovered)) return recovered;
+  return shapeSajiaoTail(recovered, frames);
 }
 
 function shapeSajiaoTail(text: string, frames?: ProsodyFrame[]): string {
