@@ -68,7 +68,7 @@ export function VoiceRoom() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [board, setBoard] = useState<MemoryBoard>({
     portrait: "",
-    openEvent: null,
+    openEvents: [],
     items: [],
   });
   const [hydrated, setHydrated] = useState(false);
@@ -134,7 +134,7 @@ export function VoiceRoom() {
         setMessages(room.messages);
         setBoard({
           portrait: room.portrait,
-          openEvent: room.openEvent,
+          openEvents: room.openEvents,
           items: room.items,
         });
         setHydrated(true);

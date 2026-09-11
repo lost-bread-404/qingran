@@ -20,7 +20,7 @@ const EMPTY_ROOM: Room = {
   profile: lockedProfile(),
   messages: [],
   portrait: "",
-  openEvent: null,
+  openEvents: [],
   items: [],
 };
 

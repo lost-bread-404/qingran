@@ -1,45 +1,45 @@
 import { formatClock } from "../prompt";
 import type { ChatMessage } from "../types";
-import { planDecisionA } from "./apply";
+import { planArchive } from "./apply";
 import { writeJournal } from "./journal";
-import { buildMainMessages, clipPortrait, countChars } from "./pack";
+import { buildMainMessages, clipPortrait, countChars, selectPackMemories } from "./pack";
 import {
   PROMPT_A_SYSTEM,
   PROMPT_B_SYSTEM,
   PROMPT_C_SYSTEM,
+  PROMPT_D_SYSTEM,
   buildPromptAUser,
   buildPromptBUser,
   buildPromptCUser,
-  parseDecisionA,
+  buildPromptDUser,
+  parseArchiveA,
   parseL2List,
   parseMaybeTime,
   parsePatternsAndPortrait,
+  parsePickedIds,
 } from "./prompts";
-import { buildQuery, retrieveCandidates } from "./retrieve";
 import {
   appendLog,
   insertL1,
-  insertL2,
   loadAllMessages,
   loadL1Since,
   loadL2,
   loadL3,
   loadMeta,
-  loadOpenEvent,
+  loadOpenThreads,
   loadPortrait,
   loadRetrievable,
   markScanned,
   replaceL3,
+  replaceOpenThreads,
   saveMeta,
-  saveOpenEvent,
   savePortrait,
+  upsertL2,
 } from "./store";
 import {
   CONTEXT_WINDOW,
   DROPPED_PACK_LIMIT,
-  MAX_MAIN_MEMORIES,
   MAX_PORTRAIT_CHARS,
-  type MainPackInput,
   type PackedChatMessage,
   type PackedMemory,
 } from "./types";
@@ -58,36 +58,39 @@ export async function assembleMainPack(opts: {
   timeZone: string;
 }): Promise<{ messages: PackedChatMessage[]; stats: Record<string, number> }> {
   const clock = (ms: number) => formatClock(ms, opts.timeZone);
-  const [portrait, items] = await Promise.all([loadPortrait(), loadRetrievable()]);
-  const query = buildQuery(
-    opts.userText,
-    opts.history.filter((m) => m.role === "user").slice(-2).map((m) => m.text),
-  );
-  const candidates = retrieveCandidates({
-    query,
-    items,
-    now: opts.nowMs,
-  });
-  const memories: PackedMemory[] = candidates.slice(0, MAX_MAIN_MEMORIES).map((item) => ({
+  const [portrait, opens, items, meta] = await Promise.all([
+    loadPortrait(),
+    loadOpenThreads(),
+    loadRetrievable(),
+    loadMeta(),
+  ]);
+  const pickedItems = items.filter((item) => meta.pickedIds.includes(item.id));
+  const picked: PackedMemory[] = pickedItems.map((item) => ({
     time: clock(item.startedAt),
     text: item.text,
     dormant: item.layer === "l3" && item.status === "dormant",
+    open: item.layer === "open",
   }));
+  const openMem: PackedMemory[] = opens.map((item) => ({
+    time: clock(item.startedAt),
+    text: item.text,
+    open: true,
+  }));
+  const memories = selectPackMemories(picked, openMem);
   const history = opts.history.slice(-(CONTEXT_WINDOW - 1)).map((m) => ({
     role: m.role,
     content: m.text,
   }));
-  const pack: MainPackInput = {
+  const messages = buildMainMessages({
     charter: opts.charter,
     clock: clock(opts.nowMs),
     portrait,
     memories,
     history,
     userText: opts.userText.trim(),
-  };
-  const messages = buildMainMessages(pack);
+  });
   const stats = {
-    charter: pack.charter.length,
+    charter: opts.charter.length,
     portrait: portrait.length,
     memories: memories.length,
     history: history.length,
@@ -109,6 +112,7 @@ async function runTick(timeZone: string): Promise<void> {
   try {
     await saveMeta({ timeZone });
     await processDropped(timeZone);
+    await pickRelated(timeZone);
     await maybeInterval(timeZone);
   } catch (error) {
     await appendLog("tick_error", String(error).slice(0, 80));
@@ -123,7 +127,7 @@ async function processDropped(timeZone: string): Promise<void> {
   const dropped = messages.slice(0, overflowAt).filter((m) => !m.scanned).slice(0, DROPPED_PACK_LIMIT);
   if (dropped.length === 0) return;
 
-  const open = await loadOpenEvent();
+  const open = await loadOpenThreads();
   const result = await chatJson({
     system: PROMPT_A_SYSTEM,
     user: buildPromptAUser({ open, dropped, clock }),
@@ -136,35 +140,31 @@ async function processDropped(timeZone: string): Promise<void> {
     await writeJournal("process", { step: "A", decision: "fail", note: result.error });
     return;
   }
-  const decision = parseDecisionA(result.text);
-  if (!decision) {
+  const archive = parseArchiveA(result.text);
+  if (!archive) {
     await appendLog("a_parse_fail", result.text.slice(0, 80));
     await writeJournal("process", { step: "A", decision: "parse_fail", raw: result.text.slice(0, 4000) });
     return;
   }
 
-  const plan = planDecisionA({ decision, dropped, open, clock });
-  if (plan.closed) {
+  const plan = planArchive({ archive, dropped });
+  for (const row of plan.facts) {
     await insertL1({
-      startedAt: plan.closed.startedAt,
-      endedAt: plan.closed.endedAt,
-      text: plan.closed.text,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+      text: row.text,
     });
   }
-  if (plan.open !== "keep") {
-    await saveOpenEvent(plan.open);
-  }
+  await replaceOpenThreads(plan.open);
   await markScanned(plan.scannedIds);
-  await appendLog(plan.logKind, plan.note, {
+  await appendLog("archive", `${plan.facts.length} facts / ${plan.open.length} open`, {
     n: plan.scannedIds.length,
-    closed: Boolean(plan.closed),
   });
   await writeJournal("process", {
     step: "A",
-    decision: plan.logKind,
-    note: plan.note,
-    closed: plan.closed?.text ?? "",
-    draft: plan.open === "keep" ? open?.draft ?? "" : plan.open?.draft ?? "",
+    decision: "archive",
+    facts: plan.facts.map((item) => item.text).join(" / "),
+    draft: plan.open.map((item) => item.text).join(" / "),
     raw: result.text.slice(0, 4000),
   });
 }
@@ -210,11 +210,12 @@ async function collapseL2(opts: {
   periodEnd: string;
   l1: Array<{ startedAt: number; endedAt: number; text: string }>;
   clock: (ms: number) => string;
-}): Promise<Array<{ time: string; text: string }>> {
+}): Promise<Array<{ id: string; time: string; text: string }>> {
   if (opts.l1.length === 0) return [];
+  const oldL2 = await loadL2();
   const result = await chatJson({
     system: PROMPT_B_SYSTEM,
-    user: buildPromptBUser(opts),
+    user: buildPromptBUser({ ...opts, oldL2 }),
     maxTokens: 1200,
     timeoutMs: 24_000,
     temperature: 0.3,
@@ -225,12 +226,13 @@ async function collapseL2(opts: {
   const now = Date.now();
   const written = [];
   for (const item of list) {
-    const row = await insertL2({
+    const row = await upsertL2({
+      id: item.id || undefined,
       periodStart: parseMaybeTime(opts.periodStart, now - 86_400_000),
       periodEnd: parseMaybeTime(opts.periodEnd, now),
       text: item.text,
     });
-    written.push({ time: item.time, text: row.text });
+    written.push({ id: row.id, time: item.time, text: row.text });
   }
   await writeJournal("process", {
     step: "B",
@@ -243,15 +245,15 @@ async function collapseL2(opts: {
 async function rewriteState(opts: {
   periodStart: string;
   periodEnd: string;
-  newL2: Array<{ time: string; text: string }>;
+  newL2: Array<{ id: string; time: string; text: string }>;
   clock: (ms: number) => string;
   now: number;
 }): Promise<void> {
-  const [oldL2, oldL3, portrait, open] = await Promise.all([
+  const [oldL2, oldL3, portrait, opens] = await Promise.all([
     loadL2(),
     loadL3(),
     loadPortrait(),
-    loadOpenEvent(),
+    loadOpenThreads(),
   ]);
   if (opts.newL2.length === 0 && oldL2.length === 0 && oldL3.length === 0 && !portrait) return;
   const result = await chatJson({
@@ -263,7 +265,7 @@ async function rewriteState(opts: {
       oldL2: oldL2.slice(0, 24),
       oldL3,
       portrait,
-      openDraft: open?.draft ?? "",
+      openDraft: opens.map((item) => item.text).join("；"),
       now: opts.now,
       clock: opts.clock,
     }),
@@ -291,6 +293,40 @@ async function rewriteState(opts: {
     step: "C",
     note: `规律 ${parsed.patterns.length} 条`,
     raw: result.text.slice(0, 4000),
+  });
+}
+
+async function pickRelated(timeZone: string): Promise<void> {
+  const clock = (ms: number) => formatClock(ms, timeZone);
+  const messages = await loadAllMessages();
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  if (!lastUser?.text.trim()) return;
+  const items = await loadRetrievable();
+  if (items.length === 0) {
+    await saveMeta({ pickedIds: [] });
+    return;
+  }
+  const result = await chatJson({
+    system: PROMPT_D_SYSTEM,
+    user: buildPromptDUser({
+      brief: lastUser.text,
+      candidates: items.slice(0, 80),
+      clock,
+    }),
+    maxTokens: 400,
+    timeoutMs: 12_000,
+    temperature: 0.1,
+  });
+  if (!result.ok) {
+    await appendLog("d_fail", result.error);
+    return;
+  }
+  const ids = parsePickedIds(result.text, items.map((item) => item.id));
+  await saveMeta({ pickedIds: ids });
+  await writeJournal("process", {
+    step: "D",
+    note: `${ids.length} 条相关记忆`,
+    raw: result.text.slice(0, 1000),
   });
 }
 

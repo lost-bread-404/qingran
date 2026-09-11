@@ -65,12 +65,17 @@ export function packMemoryBlock(memories: PackedMemory[]): string | null {
   const lines = memories
     .slice(0, 8)
     .map((item) => {
-      const tag = item.dormant ? "休眠 " : "";
+      const tag = item.open ? "未完成 " : item.dormant ? "休眠 " : "";
       return `${item.time} ${tag}${item.text}`.replace(/\s+/g, " ").trim();
     })
     .filter(Boolean);
   if (lines.length === 0) return null;
   return `【相关记忆】\n${lines.join("\n")}`;
+}
+
+export function selectPackMemories(picked: PackedMemory[], opens: PackedMemory[]): PackedMemory[] {
+  if (picked.length) return picked.slice(0, 8);
+  return opens.slice(0, 8);
 }
 
 export function countChars(text: string): number {

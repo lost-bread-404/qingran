@@ -1,6 +1,5 @@
 export const CONTEXT_WINDOW = 20;
 export const MAX_MAIN_MEMORIES = 8;
-export const MAX_CANDIDATES = 8;
 export const MAX_PORTRAIT_CHARS = 900;
 export const DROPPED_PACK_LIMIT = 30;
 
@@ -11,9 +10,9 @@ export type PatternStatus = "active" | "dormant";
 export type MemoryLayer = "l1" | "l2" | "l3";
 
 export type OpenEvent = {
+  id: string;
   startedAt: number;
-  draft: string;
-  points: string;
+  text: string;
 };
 
 export type L1Event = {
@@ -52,13 +51,13 @@ export type MemoryItem = {
 
 export type MemoryBoard = {
   portrait: string;
-  openEvent: OpenEvent | null;
+  openEvents: OpenEvent[];
   items: MemoryItem[];
 };
 
 export type Retrievable = {
   id: string;
-  layer: MemoryLayer;
+  layer: MemoryLayer | "open";
   text: string;
   startedAt: number;
   endedAt: number;
@@ -69,6 +68,7 @@ export type PackedMemory = {
   time: string;
   text: string;
   dormant?: boolean;
+  open?: boolean;
 };
 
 export type ChatTurn = {
@@ -91,22 +91,24 @@ export type MainPackInput = {
   userText: string;
 };
 
-export type DecisionA = {
-  decision: "merge" | "close_and_open" | "ignore";
-  closedEvent: string;
-  closedStart: string;
-  closedEnd: string;
-  openDraft: string;
-  openStart: string;
-  note: string;
+export type MemoryFact = {
+  text: string;
+  time: string;
+};
+
+export type ArchiveA = {
+  open: Array<{ id: string; text: string; started: string }>;
+  facts: MemoryFact[];
 };
 
 export type L2Draft = {
+  id: string;
   time: string;
   text: string;
 };
 
 export type PatternDraft = {
+  id: string;
   status: PatternStatus;
   time: string;
   text: string;

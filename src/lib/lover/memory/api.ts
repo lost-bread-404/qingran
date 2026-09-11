@@ -12,7 +12,7 @@ export const loadMemoryBoard = createServerFn({ method: "GET" }).handler(async (
   try {
     return await loadBoard();
   } catch {
-    return { portrait: "", openEvent: null, items: [] } satisfies MemoryBoard;
+    return { portrait: "", openEvents: [], items: [] } satisfies MemoryBoard;
   }
 });
 

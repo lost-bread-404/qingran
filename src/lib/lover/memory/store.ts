@@ -22,6 +22,7 @@ export type MemoryMeta = {
   lastIntervalDay: string;
   intervalRetryAt: number;
   timeZone: string;
+  pickedIds: string[];
 };
 
 export async function loadAllMessages(): Promise<ChatMessage[]> {
@@ -50,43 +51,52 @@ export async function markScanned(ids: string[]): Promise<void> {
   }
 }
 
-export async function loadOpenEvent(): Promise<OpenEvent | null> {
+export async function loadOpenThreads(): Promise<OpenEvent[]> {
   const sql = await getSql();
-  const [row] = await sql<{ started_at: number; draft: string; points: string }>`
-    select started_at, draft, points from qingran_open_event where id = 1
+  const rows = await sql<{ id: string; started_at: number; text: string }>`
+    select id, started_at, text from qingran_open order by started_at asc
   `;
-  if (!row) return null;
-  const draft = row.draft.trim();
-  if (!draft) return null;
-  return {
-    startedAt: Number(row.started_at) || Date.now(),
-    draft,
-    points: row.points ?? "",
-  };
+  return rows
+    .map((row) => ({
+      id: row.id,
+      startedAt: Number(row.started_at) || Date.now(),
+      text: row.text.trim(),
+    }))
+    .filter((row) => row.text);
+}
+
+export async function replaceOpenThreads(events: OpenEvent[]): Promise<OpenEvent[]> {
+  const sql = await getSql();
+  const now = Date.now();
+  const next: OpenEvent[] = events
+    .map((item) => ({
+      id: item.id || newId(),
+      startedAt: item.startedAt || now,
+      text: item.text.replace(/\s+/g, " ").trim().slice(0, 800),
+    }))
+    .filter((item) => item.text);
+  await sql`delete from qingran_open`;
+  for (const item of next) {
+    await sql`
+      insert into qingran_open (id, started_at, text, updated_at)
+      values (${item.id}, ${item.startedAt}, ${item.text}, ${now})
+    `;
+  }
+  await writeJournal(
+    "open",
+    { draft: next.map((item) => item.text).join(" / ") },
+    now,
+  );
+  return next;
+}
+
+export async function loadOpenEvent(): Promise<OpenEvent | null> {
+  const [first] = await loadOpenThreads();
+  return first ?? null;
 }
 
 export async function saveOpenEvent(event: OpenEvent | null): Promise<void> {
-  const sql = await getSql();
-  if (!event || !event.draft.trim()) {
-    await sql`delete from qingran_open_event where id = 1`;
-    await writeJournal("open", { draft: "" });
-    return;
-  }
-  const now = Date.now();
-  await sql`
-    insert into qingran_open_event (id, started_at, draft, points, updated_at)
-    values (1, ${event.startedAt}, ${event.draft.slice(0, 800)}, ${event.points.slice(0, 2400)}, ${now})
-    on conflict (id) do update
-      set started_at = excluded.started_at,
-          draft = excluded.draft,
-          points = excluded.points,
-          updated_at = excluded.updated_at
-  `;
-  await writeJournal(
-    "open",
-    { started: String(event.startedAt), draft: event.draft.slice(0, 800) },
-    now,
-  );
+  await replaceOpenThreads(event ? [event] : []);
 }
 
 export async function insertL1(event: Omit<L1Event, "id" | "createdAt"> & { id?: string }): Promise<L1Event> {
@@ -141,6 +151,28 @@ export async function insertL2(event: Omit<L2Event, "id" | "createdAt">): Promis
     row.createdAt,
   );
   return row;
+}
+
+export async function upsertL2(event: {
+  id?: string;
+  periodStart: number;
+  periodEnd: number;
+  text: string;
+}): Promise<L2Event> {
+  const all = await loadL2();
+  const existing =
+    (event.id && all.find((item) => item.id === event.id)) ||
+    all.find((item) => similarText(item.text, event.text));
+  if (!existing) return insertL2(event);
+  const sql = await getSql();
+  const text = event.text.slice(0, 1600);
+  await sql`
+    update qingran_l2
+    set period_start = ${event.periodStart}, period_end = ${event.periodEnd}, text = ${text}
+    where id = ${existing.id}
+  `;
+  await writeJournal("l2", { id: existing.id, text, updated: true });
+  return { ...existing, periodStart: event.periodStart, periodEnd: event.periodEnd, text };
 }
 
 export async function loadL1(): Promise<L1Event[]> {
@@ -229,7 +261,9 @@ export async function replaceL3(patterns: PatternDraft[], now: number): Promise<
   for (const pattern of patterns) {
     const text = pattern.text.slice(0, 600);
     if (!text) continue;
-    const found = existing.find((item) => similarText(item.text, text) && !used.has(item.id));
+    const found =
+      (pattern.id && existing.find((item) => item.id === pattern.id && !used.has(item.id))) ||
+      existing.find((item) => similarText(item.text, text) && !used.has(item.id));
     const evidence = parseLooseTime(pattern.time, now);
     if (found) {
       used.add(found.id);
@@ -283,12 +317,14 @@ export async function loadMeta(): Promise<MemoryMeta> {
     last_interval_day: string;
     interval_retry_at: number;
     time_zone: string;
-  }>`select last_interval_at, last_interval_day, interval_retry_at, time_zone from qingran_memory_meta where id = 1`;
+    picked_ids?: unknown;
+  }>`select last_interval_at, last_interval_day, interval_retry_at, time_zone, picked_ids from qingran_memory_meta where id = 1`;
   return {
     lastIntervalAt: Number(row?.last_interval_at) || 0,
     lastIntervalDay: row?.last_interval_day ?? "",
     intervalRetryAt: Number(row?.interval_retry_at) || 0,
     timeZone: row?.time_zone || "UTC",
+    pickedIds: asIdList(row?.picked_ids),
   };
 }
 
@@ -300,15 +336,17 @@ export async function saveMeta(meta: Partial<MemoryMeta> & { timeZone?: string }
     lastIntervalDay: meta.lastIntervalDay ?? current.lastIntervalDay,
     intervalRetryAt: meta.intervalRetryAt ?? current.intervalRetryAt,
     timeZone: meta.timeZone ?? current.timeZone,
+    pickedIds: meta.pickedIds ?? current.pickedIds,
   };
   await sql`
-    insert into qingran_memory_meta (id, last_interval_at, last_interval_day, interval_retry_at, time_zone)
-    values (1, ${next.lastIntervalAt}, ${next.lastIntervalDay}, ${next.intervalRetryAt}, ${next.timeZone})
+    insert into qingran_memory_meta (id, last_interval_at, last_interval_day, interval_retry_at, time_zone, picked_ids)
+    values (1, ${next.lastIntervalAt}, ${next.lastIntervalDay}, ${next.intervalRetryAt}, ${next.timeZone}, ${JSON.stringify(next.pickedIds)}::jsonb)
     on conflict (id) do update
       set last_interval_at = excluded.last_interval_at,
           last_interval_day = excluded.last_interval_day,
           interval_retry_at = excluded.interval_retry_at,
-          time_zone = excluded.time_zone
+          time_zone = excluded.time_zone,
+          picked_ids = excluded.picked_ids
   `;
 }
 
@@ -333,8 +371,16 @@ export async function appendLog(
 }
 
 export async function loadRetrievable(): Promise<Retrievable[]> {
-  const [l1, l2, l3] = await Promise.all([loadL1(), loadL2(), loadL3()]);
+  const [opens, l1, l2, l3] = await Promise.all([loadOpenThreads(), loadL1(), loadL2(), loadL3()]);
   return [
+    ...opens.map((item) => ({
+      id: item.id,
+      layer: "open" as const,
+      text: item.text,
+      startedAt: item.startedAt,
+      endedAt: item.startedAt,
+      status: "active" as const,
+    })),
     ...l1.map((item) => ({
       id: item.id,
       layer: "l1" as const,
@@ -363,9 +409,9 @@ export async function loadRetrievable(): Promise<Retrievable[]> {
 }
 
 export async function loadBoard(): Promise<MemoryBoard> {
-  const [portrait, openEvent, l1, l2, l3] = await Promise.all([
+  const [portrait, openEvents, l1, l2, l3] = await Promise.all([
     loadPortrait(),
-    loadOpenEvent(),
+    loadOpenThreads(),
     loadL1(),
     loadL2(),
     loadL3(),
@@ -393,7 +439,7 @@ export async function loadBoard(): Promise<MemoryBoard> {
       endedAt: item.endedAt,
     })),
   ];
-  return { portrait, openEvent, items };
+  return { portrait, openEvents, items };
 }
 
 export async function updateMemoryItem(
@@ -473,6 +519,19 @@ export function encodeStoredMessage(msg: ChatMessage): string {
 
 export function withCursor(messages: ChatMessage[], cursor: string): ChatMessage[] {
   return applyMemoryCursor(messages, cursor);
+}
+
+function asIdList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((id) => String(id)).filter(Boolean);
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return Array.isArray(parsed) ? parsed.map((id) => String(id)).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
 }
 
 function similarText(a: string, b: string): boolean {

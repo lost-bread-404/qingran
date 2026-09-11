@@ -122,12 +122,17 @@ export function SettingsDrawer({
               )}
             </section>
 
-            {board.openEvent ? (
+            {board.openEvents.length > 0 ? (
               <section className="flex flex-col gap-2">
-                <p className="text-xs text-subtle">未结束（未入库）</p>
-                <p className="rounded-md bg-surface-2 px-3 py-2 text-sm leading-relaxed text-muted">
-                  {board.openEvent.draft}
-                </p>
+                <p className="text-xs text-subtle">未结束</p>
+                {board.openEvents.map((item) => (
+                  <p
+                    key={item.id}
+                    className="rounded-md bg-surface-2 px-3 py-2 text-sm leading-relaxed text-muted"
+                  >
+                    {item.text}
+                  </p>
+                ))}
               </section>
             ) : null}
 

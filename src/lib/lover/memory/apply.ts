@@ -1,94 +1,48 @@
 import type { ChatMessage } from "../types.ts";
-import { formatDropped, parseMaybeTime } from "./prompts.ts";
-import type { DecisionA, OpenEvent } from "./types.ts";
+import { parseMaybeTime } from "./prompts.ts";
+import type { ArchiveA, OpenEvent } from "./types.ts";
 
-export type ClosedEventPlan = {
+export type FactPlan = {
   startedAt: number;
   endedAt: number;
   text: string;
 };
 
-export type DecisionPlan = {
+export type ArchivePlan = {
   scannedIds: string[];
-  open: OpenEvent | null | "keep";
-  closed: ClosedEventPlan | null;
-  logKind: "ignore" | "merge" | "close_and_open";
-  note: string;
+  open: OpenEvent[];
+  facts: FactPlan[];
 };
 
-export function planDecisionA(opts: {
-  decision: DecisionA;
+export function planArchive(opts: {
+  archive: ArchiveA;
   dropped: ChatMessage[];
-  open: OpenEvent | null;
-  clock: (ms: number) => string;
   now?: number;
-}): DecisionPlan {
-  const ids = opts.dropped.map((m) => m.id);
-  const note = opts.decision.note;
+}): ArchivePlan {
   const now = opts.now ?? Date.now();
-
-  if (opts.decision.decision === "ignore") {
-    return { scannedIds: ids, open: "keep", closed: null, logKind: "ignore", note };
+  const fallback = opts.dropped[0]?.createdAt || now;
+  const seen = new Set<string>();
+  const facts: FactPlan[] = [];
+  for (const fact of opts.archive.facts) {
+    const text = fact.text.replace(/\s+/g, " ").trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    const at = parseMaybeTime(fact.time, fallback);
+    facts.push({ startedAt: at, endedAt: at, text });
   }
-
-  if (opts.decision.decision === "merge") {
-    const startedAt = parseMaybeTime(
-      opts.decision.openStart,
-      opts.open?.startedAt || opts.dropped[0]?.createdAt || now,
-    );
-    return {
-      scannedIds: ids,
-      open: {
-        startedAt,
-        draft: (opts.decision.openDraft || opts.open?.draft || "").slice(0, 800),
-        points: appendPoints(opts.open?.points ?? "", opts.dropped, opts.clock),
-      },
-      closed: null,
-      logKind: "merge",
-      note,
-    };
+  const open: OpenEvent[] = [];
+  for (const item of opts.archive.open) {
+    const text = item.text.replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    open.push({
+      id: item.id.trim() || "",
+      startedAt: parseMaybeTime(item.started, fallback),
+      text: text.slice(0, 800),
+    });
   }
-
-  const closedText = opts.decision.closedEvent.trim() || opts.open?.draft.trim() || "";
-  const closed =
-    closedText && (opts.open || closedText)
-      ? {
-          startedAt: parseMaybeTime(
-            opts.decision.closedStart,
-            opts.open?.startedAt || opts.dropped[0]?.createdAt || now,
-          ),
-          endedAt: Math.max(
-            parseMaybeTime(opts.decision.closedEnd, opts.dropped.at(-1)?.createdAt || now),
-            parseMaybeTime(
-              opts.decision.closedStart,
-              opts.open?.startedAt || opts.dropped[0]?.createdAt || now,
-            ),
-          ),
-          text: closedText,
-        }
-      : null;
-
-  const openDraft = opts.decision.openDraft.trim();
   return {
-    scannedIds: ids,
-    open: openDraft
-      ? {
-          startedAt: parseMaybeTime(opts.decision.openStart, opts.dropped[0]?.createdAt || now),
-          draft: openDraft.slice(0, 800),
-          points: appendPoints("", opts.dropped, opts.clock),
-        }
-      : null,
-    closed,
-    logKind: "close_and_open",
-    note,
+    scannedIds: opts.dropped.map((m) => m.id),
+    open,
+    facts,
   };
-}
-
-export function appendPoints(
-  prev: string,
-  dropped: ChatMessage[],
-  clock: (ms: number) => string,
-): string {
-  const extra = formatDropped(dropped, clock);
-  return `${prev}\n${extra}`.trim().slice(-2000);
 }
