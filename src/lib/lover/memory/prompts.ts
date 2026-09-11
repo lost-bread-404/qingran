@@ -9,36 +9,30 @@ import type {
   Retrievable,
 } from "./types.ts";
 
-export const PROMPT_A_SYSTEM = `你在给一段长期对话做事件归档。不扮演角色，不回复 Rosie。
+export const PROMPT_A_SYSTEM = `给长期对话做事件归档。
 
-对照未完成事件和新挤出的对话，三选一：
+对照当前未完成事件和新挤出的对话，三选一：
 - merge：还是同一件事，更新草稿
-- close_and_open：上一件已经能完整叙述，新对话是另一件。收上一件，给下一件一份草稿
+- close_and_open：上一件已经能完整叙述，新对话是另一件。把上一件收成以后能检索到的记录，并给下一件一份草稿
 - ignore：没有跨会话价值
 
-结束只看内容有没有换页。跨夜、隔很多天、第二天接着聊，都可以仍是同一件。没结束就还是草稿，不要写成已经有结果。
+结束只看内容有没有换页。跨夜、隔很多天、第二天接着聊，都可以仍是同一件。
 
-写具体、可检索：人名、关系、决定、身体、时间。按对话里有的写。
+写成以后只看到这一条也能接上：人名、关系、决定、因由、结果、身体、时间。`;
 
-只输出一个 JSON 对象。`;
+export const PROMPT_B_SYSTEM = `把本周期已经结束的小事件，收成更少、更高分辨率的叙述。
 
-export const PROMPT_B_SYSTEM = `你把本周期已经结束的小事件，收成更少、更高分辨率的叙述。
+同一条故事线并在一起，无关的事分开。原料里的因由、转折、结果都留下。`;
 
-同一条故事线并在一起，无关的事分开。原料里的因由、转折、结果都留下。你只收事件。
+export const PROMPT_C_SYSTEM = `维护一份会随时间改写的用户状态。
 
-只输出一个 JSON 对象。`;
-
-export const PROMPT_C_SYSTEM = `你在维护一份会随时间改写的用户状态。
-
-1. 规律：反复出现的结构。写清楚，可以有判断。
+规律：这个人身上反复出现的结构。写清楚，可以有判断。
 - active：眼下仍在起作用，或本周期又有证据
 - dormant：是真的，但此刻不在场面上。事实留下，只改状态。
 
-2. 活画像：整页重写这个人最近是什么样、和人怎样靠近、眼下悬着什么。一次情绪写成近况。未结束的事只点「还在进行」。
+活画像：整页重写这个人最近是什么样、和人怎样靠近、眼下悬着什么。`;
 
-不要改清然的人设。只输出一个 JSON 对象。`;
-
-export const PROMPT_D_SYSTEM = `从候选里为当前对话选出此刻值得带上的记忆，最多8条。优先近况、当面相关的人名和事、被当前话题唤起的规律。只输出 JSON。`;
+export const PROMPT_D_SYSTEM = `从候选里为当前对话选出此刻值得带上的记忆，最多8条。优先近况、当面相关的人名和事、被当前话题唤起的规律。`;
 
 export function buildPromptAUser(opts: {
   open: OpenEvent | null;
@@ -168,7 +162,8 @@ export function parseDecisionA(raw: string): DecisionA | null {
   const parsed = parseJson(raw);
   if (!parsed || typeof parsed !== "object") return parseDecisionAText(raw);
   const row = parsed as Record<string, unknown>;
-  const decision = String(row.decision ?? "").trim();
+  const decisionRaw = String(row.decision ?? "").trim();
+  const decision = decisionRaw === "open" ? "merge" : decisionRaw;
   if (decision !== "merge" && decision !== "close_and_open" && decision !== "ignore") {
     return parseDecisionAText(raw);
   }
@@ -242,7 +237,8 @@ export function parsePickedIds(raw: string, allowed: string[]): string[] {
 }
 
 function parseDecisionAText(raw: string): DecisionA | null {
-  const decision = raw.match(/decision:\s*(merge|close_and_open|ignore)/i)?.[1]?.toLowerCase();
+  const decisionRaw = raw.match(/decision:\s*(merge|close_and_open|ignore|open)/i)?.[1]?.toLowerCase();
+  const decision = decisionRaw === "open" ? "merge" : decisionRaw;
   if (decision !== "merge" && decision !== "close_and_open" && decision !== "ignore") {
     return null;
   }

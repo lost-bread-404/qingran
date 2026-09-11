@@ -6,6 +6,7 @@ import {
   encodeStoredMessage,
   withCursor,
 } from "./memory/store";
+import { writeJournal } from "./memory/journal";
 import type { MemoryBoard } from "./memory/types";
 import { lockedProfile, type ChatMessage, type Profile } from "./types";
 import { sortConversation } from "./pair-messages";
@@ -93,6 +94,11 @@ export const appendRoomMessage = createServerFn({ method: "POST" })
       on conflict (id) do update
         set body = excluded.body
     `;
+    await writeJournal(
+      "chat",
+      { id: data.id, role: data.role, text: data.text },
+      data.createdAt,
+    );
     return { ok: true as const };
   });
 

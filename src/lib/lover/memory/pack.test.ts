@@ -158,6 +158,7 @@ open_start: 2026-09-08
 note: 续`);
   assert.equal(lines?.decision, "merge");
   assert.match(lines?.openDraft ?? "", /溃疡/);
+  assert.equal(parseDecisionA('{"decision":"open","open_draft":"溃疡开始了"}')?.decision, "merge");
 });
 
 test("parse B none and C portrait helpers", () => {

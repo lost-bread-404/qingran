@@ -1,6 +1,7 @@
 import { formatClock } from "../prompt";
 import type { ChatMessage } from "../types";
 import { planDecisionA } from "./apply";
+import { writeJournal } from "./journal";
 import { buildMainMessages, clipPortrait, countChars } from "./pack";
 import {
   PROMPT_A_SYSTEM,
@@ -132,11 +133,13 @@ async function processDropped(timeZone: string): Promise<void> {
   });
   if (!result.ok) {
     await appendLog("a_fail", result.error);
+    await writeJournal("process", { step: "A", decision: "fail", note: result.error });
     return;
   }
   const decision = parseDecisionA(result.text);
   if (!decision) {
     await appendLog("a_parse_fail", result.text.slice(0, 80));
+    await writeJournal("process", { step: "A", decision: "parse_fail", raw: result.text.slice(0, 4000) });
     return;
   }
 
@@ -155,6 +158,14 @@ async function processDropped(timeZone: string): Promise<void> {
   await appendLog(plan.logKind, plan.note, {
     n: plan.scannedIds.length,
     closed: Boolean(plan.closed),
+  });
+  await writeJournal("process", {
+    step: "A",
+    decision: plan.logKind,
+    note: plan.note,
+    closed: plan.closed?.text ?? "",
+    draft: plan.open === "keep" ? open?.draft ?? "" : plan.open?.draft ?? "",
+    raw: result.text.slice(0, 4000),
   });
 }
 
@@ -221,6 +232,11 @@ async function collapseL2(opts: {
     });
     written.push({ time: item.time, text: row.text });
   }
+  await writeJournal("process", {
+    step: "B",
+    note: `${written.length} 条 L2`,
+    raw: result.text.slice(0, 4000),
+  });
   return written;
 }
 
@@ -271,6 +287,11 @@ async function rewriteState(opts: {
   if (parsed.patterns.length) {
     await replaceL3(parsed.patterns, opts.now);
   }
+  await writeJournal("process", {
+    step: "C",
+    note: `规律 ${parsed.patterns.length} 条`,
+    raw: result.text.slice(0, 4000),
+  });
 }
 
 function dayKey(ms: number, timeZone: string): string {

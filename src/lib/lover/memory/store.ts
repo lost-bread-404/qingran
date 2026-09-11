@@ -1,3 +1,4 @@
+import { writeJournal } from "./journal";
 import { getSql } from "@/lib/db";
 import { newId } from "../storage";
 import {
@@ -68,6 +69,7 @@ export async function saveOpenEvent(event: OpenEvent | null): Promise<void> {
   const sql = await getSql();
   if (!event || !event.draft.trim()) {
     await sql`delete from qingran_open_event where id = 1`;
+    await writeJournal("open", { draft: "" });
     return;
   }
   const now = Date.now();
@@ -80,6 +82,11 @@ export async function saveOpenEvent(event: OpenEvent | null): Promise<void> {
           points = excluded.points,
           updated_at = excluded.updated_at
   `;
+  await writeJournal(
+    "open",
+    { started: String(event.startedAt), draft: event.draft.slice(0, 800) },
+    now,
+  );
 }
 
 export async function insertL1(event: Omit<L1Event, "id" | "createdAt"> & { id?: string }): Promise<L1Event> {
@@ -97,6 +104,16 @@ export async function insertL1(event: Omit<L1Event, "id" | "createdAt"> & { id?:
     on conflict (id) do update
       set text = excluded.text, ended_at = excluded.ended_at
   `;
+  await writeJournal(
+    "l1",
+    {
+      id: row.id,
+      started: String(row.startedAt),
+      ended: String(row.endedAt),
+      text: row.text,
+    },
+    row.createdAt,
+  );
   return row;
 }
 
@@ -113,6 +130,16 @@ export async function insertL2(event: Omit<L2Event, "id" | "createdAt">): Promis
     insert into qingran_l2 (id, period_start, period_end, text, created_at)
     values (${row.id}, ${row.periodStart}, ${row.periodEnd}, ${row.text}, ${row.createdAt})
   `;
+  await writeJournal(
+    "l2",
+    {
+      id: row.id,
+      started: String(row.periodStart),
+      ended: String(row.periodEnd),
+      text: row.text,
+    },
+    row.createdAt,
+  );
   return row;
 }
 
@@ -223,6 +250,14 @@ export async function replaceL3(patterns: PatternDraft[], now: number): Promise<
       `;
     }
   }
+  const snapshot = await loadL3();
+  await writeJournal(
+    "l3",
+    {
+      patterns: snapshot.map((item) => ({ status: item.status, text: item.text })),
+    },
+    now,
+  );
 }
 
 export async function loadPortrait(): Promise<string> {
@@ -238,6 +273,7 @@ export async function savePortrait(body: string): Promise<void> {
     values (1, ${body.slice(0, 2400)}, ${Date.now()})
     on conflict (id) do update set body = excluded.body, updated_at = excluded.updated_at
   `;
+  await writeJournal("portrait", { text: body.slice(0, 2400) });
 }
 
 export async function loadMeta(): Promise<MemoryMeta> {
