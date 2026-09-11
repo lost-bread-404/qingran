@@ -10,11 +10,13 @@ let playGen = 0;
 let nextStart = 0;
 let startedClock = false;
 let ended = false;
+let softened = false;
 let inFlight = 0;
 let pendingSamples = 0;
 const liveSources = new Set<AudioBufferSourceNode>();
 const sampleQueue: Float32Array[] = [];
 let idleWaiters: Array<() => void> = [];
+let master: GainNode | null = null;
 
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -84,14 +86,34 @@ function killSources() {
   liveSources.clear();
 }
 
+function ensureMaster(audioCtx: AudioContext) {
+  if (master && master.context === audioCtx) return master;
+  master = audioCtx.createGain();
+  master.gain.value = 1;
+  master.connect(audioCtx.destination);
+  return master;
+}
+
+function resetMaster() {
+  if (!master) return;
+  try {
+    master.gain.cancelScheduledValues(0);
+    master.gain.setValueAtTime(1, master.context.currentTime);
+  } catch {
+    /* ignore */
+  }
+}
+
 function resetStream() {
   sampleQueue.length = 0;
   pendingSamples = 0;
   inFlight = 0;
   ended = false;
+  softened = false;
   nextStart = 0;
   startedClock = false;
   killSources();
+  resetMaster();
 }
 
 export async function unlockPlayback() {
@@ -184,6 +206,7 @@ export function enqueuePlayback(bytes: Uint8Array<ArrayBuffer>, mimeType: string
 export function sealPlayback() {
   ended = true;
   flushScheduled(playGen);
+  softenTail(playGen);
   maybeWakeIdle();
 }
 
@@ -263,13 +286,36 @@ function flushScheduled(gen: number) {
     buffer.getChannelData(0).set(chunk);
     scheduleBuffer(buffer, audioCtx, gen);
   }
+  if (ended) softenTail(gen);
+}
+
+function softenTail(gen: number) {
+  if (gen !== playGen || !ended || softened) return;
+  if (inFlight > 0 || sampleQueue.length > 0) return;
+  const audioCtx = getCtx();
+  if (!audioCtx || !startedClock) return;
+  softened = true;
+  const now = audioCtx.currentTime;
+  const end = Math.max(now + 0.1, nextStart);
+  const fadeAt = Math.max(now + 0.02, end - 0.12);
+  try {
+    const gain = ensureMaster(audioCtx);
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(1, fadeAt);
+    gain.gain.linearRampToValueAtTime(0.0001, end);
+  } catch {
+    /* ignore */
+  }
+  const tail = Math.max(1, Math.floor(PCM_RATE * 0.22));
+  const silence = audioCtx.createBuffer(1, tail, PCM_RATE);
+  scheduleBuffer(silence, audioCtx, gen);
 }
 
 function scheduleBuffer(buffer: AudioBuffer, audioCtx: AudioContext, gen: number) {
   if (gen !== playGen) return;
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
-  src.connect(audioCtx.destination);
+  src.connect(ensureMaster(audioCtx));
   const now = audioCtx.currentTime;
   if (nextStart < now + 0.005) nextStart = now + 0.005;
   src.start(nextStart);
@@ -294,7 +340,9 @@ async function decodeBytes(bytes: Uint8Array<ArrayBuffer>): Promise<AudioBuffer 
 }
 
 function maybeWakeIdle() {
-  if (ended && inFlight === 0 && sampleQueue.length === 0 && liveSources.size === 0) wakeIdle();
+  if (!ended || inFlight !== 0 || sampleQueue.length !== 0) return;
+  if (!softened) softenTail(playGen);
+  if (liveSources.size === 0) wakeIdle();
 }
 
 function wakeIdle() {
