@@ -177,10 +177,10 @@ function dropMic(stream: MediaStream | null) {
 export function micFailHint(err: unknown) {
   const name = (err as { name?: string } | null)?.name ?? "";
   if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
-    return "系统设置里打开麦克风，再点这里";
+    return "点电话重新接通";
   }
-  if (name === "AbortError") return "点一下，打开麦克风";
-  return "点一下，打开麦克风";
+  if (name === "AbortError") return "点电话重新接通";
+  return "点电话重新接通";
 }
 
 let acquireChain: Promise<unknown> = Promise.resolve();
@@ -217,11 +217,9 @@ export async function acquireMic(opts?: { force?: boolean }): Promise<MediaStrea
   return run;
 }
 
-async function acquireMicInner(opts?: { force?: boolean }): Promise<MediaStream> {
-  claimListenSession();
-  if (!opts?.force && sharedMic && micUsable(sharedMic)) {
+async function acquireMicInner(_opts?: { force?: boolean }): Promise<MediaStream> {
+  if (sharedMic && micUsable(sharedMic)) {
     setMicEnabled(sharedMic, true);
-    claimListenSession();
     return sharedMic;
   }
   return beginMicRequest();

@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   blobToBase64,
-  acquireMic,
   acquireMicFromGesture,
   createAudioContext,
   getSpeechRecognitionCtor,
   isAppleTouch,
   micFailHint,
-  micUsable,
-  onMicEvent,
   releaseMic,
   pickRecorderMime,
   resumeOrReplaceContext,
@@ -180,13 +177,16 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   const armRecorder = () => {
     const stream = streamRef.current;
-    if (!liveRef.current || deafRef.current || !stream || recorderRef.current) return;
+    if (!liveRef.current || !stream) return;
+    if (recorderRef.current && recorderRef.current.state !== "inactive") return;
+    recorderRef.current = null;
     chunksRef.current = [];
     const mime = pickRecorderMime();
     const recorder = mime
       ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 128000 })
       : new MediaRecorder(stream);
     recorder.ondataavailable = (ev) => {
+      if (deafRef.current) return;
       if (ev.data.size > 0) chunksRef.current.push(ev.data);
       if (phaseRef.current === "listening" && chunksRef.current.length > 8) {
         chunksRef.current = chunksRef.current.slice(-6);
@@ -222,40 +222,37 @@ export function useCall({ onUtterance, prompt }: Options) {
     const recorder = recorderRef.current;
     const mime = recorder?.mimeType || pickRecorderMime() || "audio/webm";
     return new Promise<Blob | null>((resolve) => {
-      if (!recorder || recorder.state === "inactive") {
+      const take = () => {
         const parts = chunksRef.current.filter((b) => b.size > 0);
+        chunksRef.current = [];
         resolve(parts.length ? new Blob(parts, { type: mime }) : null);
+      };
+      if (!recorder || recorder.state === "inactive") {
+        take();
         return;
       }
       let done = false;
       const finish = () => {
         if (done) return;
         done = true;
-        const parts = chunksRef.current.filter((b) => b.size > 0);
-        resolve(parts.length ? new Blob(parts, { type: mime }) : null);
+        take();
       };
-      const timer = window.setTimeout(finish, 1600);
-      recorder.onstop = () => {
-        window.clearTimeout(timer);
-        finish();
-      };
+      const timer = window.setTimeout(finish, 280);
       try {
         recorder.requestData?.();
-        recorder.stop();
       } catch {
         window.clearTimeout(timer);
         finish();
+        return;
       }
+      window.setTimeout(() => {
+        window.clearTimeout(timer);
+        finish();
+      }, 220);
     });
   }, []);
 
   const abortUtterance = useCallback(() => {
-    try {
-      recorderRef.current?.state === "recording" && recorderRef.current.stop();
-    } catch {
-      /* ignore */
-    }
-    recorderRef.current = null;
     chunksRef.current = [];
     framesRef.current = [];
     finalTextRef.current = "";
@@ -263,7 +260,6 @@ export function useCall({ onUtterance, prompt }: Options) {
     lastTextAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
     setPhaseBoth("listening");
-    armRecorder();
   }, []);
 
   const flushUtterance = useCallback(async () => {
@@ -274,8 +270,6 @@ export function useCall({ onUtterance, prompt }: Options) {
     const liveText = (finalTextRef.current || interimRef.current).trim();
     const frames = framesRef.current.slice();
     const blob = await collectRecording();
-    recorderRef.current = null;
-    chunksRef.current = [];
     if (!liveRef.current) return;
     finalTextRef.current = "";
     interimRef.current = "";
@@ -327,7 +321,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     if (!liveRef.current) return;
     const ctx = ctxRef.current;
     const ctxState = ctx?.state as string | undefined;
-    if (ctx && audioContextNeedsResume(ctxState ?? "")) {
+    if (ctx && audioContextNeedsResume(ctxState ?? "") && !pageIsHidden()) {
       try {
         void ctx.resume();
       } catch {
@@ -405,6 +399,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   tickRef.current = listenPulse;
 
   const startSpeechRec = (replace = false) => {
+    if (pageIsHidden()) return;
     if (!usesBrowserStt()) return;
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) return;
@@ -447,19 +442,21 @@ export function useCall({ onUtterance, prompt }: Options) {
       interimRef.current = shown.trim();
       if ((addition || live).trim()) lastTextAtRef.current = performance.now();
     };
-    rec.onerror = (ev) => {
-      if (ev.error === "not-allowed") setError(micFailHint({ name: "NotAllowedError" }));
+    rec.onerror = () => {
+      /* iOS kills recognition in the background; that is not a permission problem */
     };
     rec.onend = () => {
       if (!liveRef.current || deafRef.current) return;
       if (recRef.current !== rec) return;
+      if (pageIsHidden()) return;
       window.setTimeout(() => {
         if (!liveRef.current || deafRef.current) return;
         if (recRef.current !== rec) return;
+        if (pageIsHidden()) return;
         try {
           rec.start();
         } catch {
-          startSpeechRec(true);
+          /* leave the recorder running; do not rebuild recognition */
         }
       }, isAppleTouch() ? 160 : 0);
     };
@@ -541,19 +538,6 @@ export function useCall({ onUtterance, prompt }: Options) {
   const deafen = useCallback(() => {
     if (!liveRef.current) return;
     deafRef.current = true;
-    const rec = recRef.current;
-    recRef.current = null;
-    try {
-      rec?.abort();
-    } catch {
-      /* ignore */
-    }
-    try {
-      recorderRef.current?.state === "recording" && recorderRef.current.stop();
-    } catch {
-      /* ignore */
-    }
-    recorderRef.current = null;
     chunksRef.current = [];
     if (phaseRef.current === "speaking-you") setPhaseBoth("listening");
   }, []);
@@ -566,7 +550,8 @@ export function useCall({ onUtterance, prompt }: Options) {
     interimRef.current = "";
     lastTextAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + 80;
-    startSpeechRec(true);
+    chunksRef.current = [];
+    if (!pageIsHidden()) startSpeechRec(false);
     armRecorder();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(tick);
@@ -574,55 +559,21 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   useEffect(() => {
     if (!active) return;
-    const stopMicWatch = onMicEvent((event) => {
+    const restoreAfterReturn = () => {
       if (!liveRef.current) return;
-      if (event === "ended") {
-        void (async () => {
-          try {
-            const stream = await acquireMic({ force: true });
-            await attachStream(stream, false);
-            if (!deafRef.current) {
-              startSpeechRec(true);
-              armRecorder();
-            }
-            keepAudioSteady();
-          } catch {
-            /* stay on the call; user can speak after returning */
-          }
-        })();
-      }
-      // iOS mutes the track when hiding. Leave the graph alone so it can unmute.
-    });
-    const restoreAfterReturn = (reclaimMic: boolean) => {
-      if (!liveRef.current) return;
+      if (pageIsHidden()) return;
       keepAudioSteady();
-      if (!deafRef.current) {
-        startSpeechRec(false);
-        armRecorder();
-      }
+      armRecorder();
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(tick);
-      if (reclaimMic && !micUsable(streamRef.current)) {
-        void acquireMic({ force: true })
-          .then((stream) => attachStream(stream, false))
-          .then(() => {
-            if (!liveRef.current) return;
-            if (!deafRef.current) {
-              startSpeechRec(true);
-              armRecorder();
-            }
-          })
-          .catch(() => undefined);
-      }
     };
     const stopLife = listenAppLifecycle({
-      onForeground: () => restoreAfterReturn(true),
+      onForeground: restoreAfterReturn,
     });
     const stopSession = listenAudioSession({
-      onActive: () => restoreAfterReturn(false),
+      onActive: restoreAfterReturn,
     });
     return () => {
-      stopMicWatch();
       stopLife();
       stopSession();
     };
