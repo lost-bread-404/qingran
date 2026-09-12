@@ -28,7 +28,7 @@ function islandFalling(island: Island) {
   return head > 0 && tail < head * 0.82;
 }
 
-function islandVoiced(island: Island) {
+export function islandVoiced(island: Island) {
   const frames = island.frames;
   if (!frames.length) return false;
   const voiced = frames.filter((f) => f.hz > 80 && f.clarity >= 0.65).length;
@@ -61,6 +61,7 @@ export function listenVocal(frames: ProsodyFrame[]): VocalEvent {
   const meanGap = avg(gaps);
   const meanClarity = avg(islands.flatMap((island) => island.frames.map((f) => f.clarity)));
   const meanBright = avg(islands.flatMap((island) => island.frames.map((f) => f.bright)));
+  const peak = Math.max(0, ...islands.flatMap((island) => island.frames.map((f) => f.rms)));
   const voicedShare = islands.filter(islandVoiced).length / islands.length;
   const fallingShare = islands.filter(islandFalling).length / islands.length;
   const n = islands.length;
@@ -97,7 +98,12 @@ export function listenVocal(frames: ProsodyFrame[]): VocalEvent {
     !hum &&
     n >= 3 &&
     voicedShare <= 0.35 &&
-    meanDur <= 0.36;
+    meanDur <= 0.36 &&
+    meanDur >= 0.08 &&
+    meanBright >= 0.16 &&
+    peak >= 0.028 &&
+    meanGap >= 0.1 &&
+    meanGap <= 0.6;
 
   if (laugh) return { kind: "laugh", text: renderBursts("哈", islands) };
   if (cry) return { kind: "cry", text: renderBursts("呜", islands) };

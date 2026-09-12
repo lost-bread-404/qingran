@@ -209,6 +209,25 @@ test("empty STT recovers cute / cry / pant from audio", () => {
   assert.doesNotMatch(stripMarks(finishHeard("哈哈哈哈", "", undefined, pant)), /哈/);
 });
 
+test("empty STT does not turn room noise into 喘息", () => {
+  const rumble: ProsodyFrame[] = [];
+  for (let i = 0; i < 48; i += 1) {
+    const on = i % 8 < 3;
+    rumble.push(
+      frame({
+        t: i * 0.04,
+        rms: on ? 0.014 + (i % 3) * 0.003 : 0.002,
+        hz: 0,
+        clarity: 0.12,
+        centroid: 380,
+        bright: 0.07,
+      }),
+    );
+  }
+  assert.equal(recoverCues("", rumble), "");
+  assert.equal(finishHeard("", "", undefined, rumble), "");
+});
+
 test("latin ASR guesses of vocalizations become 语气词", () => {
   assert.equal(stripMarks(restoreSpeechText("ahh")), "啊");
   assert.equal(stripMarks(restoreSpeechText("hmm")), "嗯");

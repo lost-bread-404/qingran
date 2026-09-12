@@ -1,5 +1,5 @@
-import { hasCueEnergy, markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
-import { expandHeardCues, listenVocal, renderBursts } from "./vocal-event.ts";
+import { markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
+import { expandHeardCues, islandVoiced, listenVocal, renderBursts } from "./vocal-event.ts";
 
 export const STT_KEYTERMS = [
   "嗯",
@@ -410,8 +410,10 @@ export function recoverCues(stt: string, frames?: ProsodyFrame[]): string {
   if (heard.kind === "hum") return heard.text;
 
   if (!existing) {
-    if (!hasCueEnergy(frames)) return "";
-    return islands.length ? renderBursts("啊", islands) : "";
+    if (islands.length === 1 && islandVoiced(islands[0]!)) {
+      return renderBursts("啊", islands);
+    }
+    return "";
   }
 
   if (islands.length <= 1) return existing;

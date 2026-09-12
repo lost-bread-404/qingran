@@ -80,3 +80,45 @@ test("slow unvoiced bursts are panting, not laughter", () => {
   assert.match(heard.text, /啊/);
   assert.doesNotMatch(heard.text, /哈/);
 });
+
+test("room rumble is not panting", () => {
+  const frames: ProsodyFrame[] = [];
+  for (let i = 0; i < 48; i += 1) {
+    const on = i % 8 < 3;
+    frames.push(
+      frame({
+        t: i * 0.04,
+        rms: on ? 0.014 + (i % 3) * 0.003 : 0.002,
+        hz: 0,
+        clarity: 0.12,
+        centroid: 380,
+        bright: 0.07,
+      }),
+    );
+  }
+  const heard = listenVocal(frames);
+  assert.notEqual(heard.kind, "pant");
+  assert.equal(heard.text, "");
+});
+
+test("irregular clicks are not panting", () => {
+  const frames: ProsodyFrame[] = [];
+  const hits = [0, 0.11, 0.4, 0.46, 0.9, 1.35];
+  for (let i = 0; i < 50; i += 1) {
+    const t = i * 0.04;
+    const on = hits.some((hit) => t >= hit && t < hit + 0.06);
+    frames.push(
+      frame({
+        t,
+        rms: on ? 0.03 : 0.0015,
+        hz: 0,
+        clarity: 0.2,
+        centroid: 1800,
+        bright: 0.4,
+      }),
+    );
+  }
+  const heard = listenVocal(frames);
+  assert.notEqual(heard.kind, "pant");
+  assert.doesNotMatch(heard.text, /啊|嗯|呜|哈/);
+});
