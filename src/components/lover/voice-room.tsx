@@ -795,8 +795,8 @@ export function VoiceRoom() {
           profile={profile}
           memories={memories}
           onSave={(next) => setProfile(lockedProfile(next))}
-          onAddMemory={(text) => setMemories((list) => addManualMemory(list, text))}
-          onUpdateMemory={(id, text) => setMemories((list) => updateMemory(list, id, text))}
+          onAddMemory={(text, at) => setMemories((list) => addManualMemory(list, text, at))}
+          onUpdateMemory={(id, text, at) => setMemories((list) => updateMemory(list, id, text, at))}
           onDeleteMemory={(id) => setMemories((list) => list.filter((m) => m.id !== id))}
           onConsolidateMemories={async () => {
             const result = await consolidateMemories({

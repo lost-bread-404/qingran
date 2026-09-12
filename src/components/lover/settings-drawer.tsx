@@ -1,8 +1,13 @@
-import { Pencil, X } from "lucide-react";
+import { Check, Pencil, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  resolveManualMemory,
+  splitLeadingTimestamp,
+  toDatetimeLocal,
+} from "@/lib/lover/memory";
 import { DEFAULT_SYSTEM_PROMPT, type Memory, type Profile } from "@/lib/lover/types";
 import { cn } from "@/lib/utils";
 
@@ -12,8 +17,8 @@ type Props = {
   profile: Profile;
   memories: Memory[];
   onSave: (next: Profile) => void;
-  onAddMemory: (text: string) => void;
-  onUpdateMemory: (id: string, text: string) => void;
+  onAddMemory: (text: string, at?: number) => void;
+  onUpdateMemory: (id: string, text: string, at?: number) => void;
   onDeleteMemory: (id: string) => void;
   onConsolidateMemories: () => Promise<void>;
   onClearChat: () => void;
@@ -33,8 +38,11 @@ export function SettingsDrawer({
 }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
   const [newFact, setNewFact] = useState("");
+  const [newAt, setNewAt] = useState(() => toDatetimeLocal(Date.now()));
+  const [newTimeTouched, setNewTimeTouched] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const [editAt, setEditAt] = useState("");
   const [tab, setTab] = useState<"prompt" | "memory">("prompt");
   const [consolidating, setConsolidating] = useState(false);
 
@@ -42,6 +50,9 @@ export function SettingsDrawer({
     if (open) {
       setDraft(profile.systemPrompt);
       setTab("prompt");
+      setNewAt(toDatetimeLocal(Date.now()));
+      setNewTimeTouched(false);
+      setEditingId(null);
     }
   }, [open, profile.systemPrompt]);
 
@@ -51,6 +62,15 @@ export function SettingsDrawer({
       systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
     });
     onOpenChange(false);
+  }
+
+  function commitNewMemory() {
+    const resolved = resolveManualMemory(newFact, newAt, newTimeTouched);
+    if (!resolved.text) return;
+    onAddMemory(resolved.text, resolved.at);
+    setNewFact("");
+    setNewAt(toDatetimeLocal(Date.now()));
+    setNewTimeTouched(false);
   }
 
   if (!open) return null;
@@ -111,24 +131,43 @@ export function SettingsDrawer({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
             <form
-              className="flex gap-2"
+              className="flex flex-col gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                const text = newFact.trim();
-                if (!text) return;
-                onAddMemory(text);
-                setNewFact("");
+                commitNewMemory();
               }}
             >
-              <Input
+              <Textarea
                 value={newFact}
-                onChange={(e) => setNewFact(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setNewFact(value);
+                  if (newTimeTouched) return;
+                  const parsed = splitLeadingTimestamp(value);
+                  if (parsed.at) setNewAt(toDatetimeLocal(parsed.at));
+                }}
                 placeholder="记下大事"
-                maxLength={120}
+                maxLength={200}
+                className="min-h-24 resize-none"
               />
-              <Button type="submit" size="pill" disabled={!newFact.trim()}>
-                记下
-              </Button>
+              <div className="flex gap-2">
+                <label className="min-w-0 flex-1">
+                  <span className="sr-only">记忆时间</span>
+                  <Input
+                    type="datetime-local"
+                    value={newAt}
+                    onChange={(e) => {
+                      setNewTimeTouched(true);
+                      setNewAt(e.target.value);
+                    }}
+                    className="flex-1"
+                  />
+                </label>
+                <Button type="submit" size="pill" disabled={!newFact.trim()}>
+                  记下
+                </Button>
+              </div>
+              <p className="text-xs text-subtle">默认现在。开头写日期会自动填上。</p>
             </form>
             <Button
               type="button"
@@ -151,31 +190,47 @@ export function SettingsDrawer({
                   .map((m) => (
                     <li key={m.id} className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
                       {editingId === m.id ? (
-                        <Input
-                          autoFocus
-                          value={editDraft}
-                          onChange={(e) => setEditDraft(e.target.value)}
-                          onBlur={() => {
-                            if (editingId) onUpdateMemory(editingId, editDraft);
-                            setEditingId(null);
-                          }}
-                          className="flex-1"
-                        />
+                        <div className="flex min-w-0 flex-1 flex-col gap-2">
+                          <Input
+                            autoFocus
+                            value={editDraft}
+                            onChange={(e) => setEditDraft(e.target.value)}
+                          />
+                          <Input
+                            type="datetime-local"
+                            value={editAt}
+                            onChange={(e) => setEditAt(e.target.value)}
+                          />
+                        </div>
                       ) : (
                         <span className="flex-1 leading-relaxed">
-                          <span className="mr-2 text-[11px] text-subtle">
+                          <span className="mr-2 text-xs text-subtle">
                             {formatMemoryTime(m.createdAt)}
                           </span>
                           {m.text}
                         </span>
                       )}
-                      {editingId === m.id ? null : (
+                      {editingId === m.id ? (
+                        <button
+                          type="button"
+                          aria-label="好"
+                          onClick={() => {
+                            const resolved = resolveManualMemory(editDraft, editAt, true);
+                            onUpdateMemory(m.id, resolved.text, resolved.at);
+                            setEditingId(null);
+                          }}
+                          className="mt-0.5 text-subtle hover:text-fg"
+                        >
+                          <Check className="size-4" />
+                        </button>
+                      ) : (
                         <button
                           type="button"
                           aria-label="改"
                           onClick={() => {
                             setEditingId(m.id);
                             setEditDraft(m.text);
+                            setEditAt(toDatetimeLocal(m.createdAt));
                           }}
                           className="mt-0.5 text-subtle hover:text-fg"
                         >
@@ -208,6 +263,7 @@ function formatMemoryTime(ms: number) {
   if (!ms) return "";
   try {
     return new Intl.DateTimeFormat("zh-CN", {
+      year: "numeric",
       month: "numeric",
       day: "numeric",
       hour: "2-digit",
