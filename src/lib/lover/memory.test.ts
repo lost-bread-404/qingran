@@ -4,6 +4,7 @@ import {
   addManualMemory,
   fromDatetimeLocal,
   resolveManualMemory,
+  sortMemoriesByTime,
   splitLeadingTimestamp,
   toDatetimeLocal,
 } from "./memory.ts";
@@ -84,4 +85,18 @@ test("addManualMemory keeps a chosen time and a long fact", () => {
   assert.equal(next.length, 1);
   assert.equal(next[0]?.createdAt, at);
   assert.equal(next[0]?.text, text);
+});
+
+test("sortMemoriesByTime is chronological, newest first when asked", () => {
+  const a = { id: "a", text: "old", createdAt: 100, updatedAt: 1 };
+  const b = { id: "b", text: "new", createdAt: 300, updatedAt: 1 };
+  const c = { id: "c", text: "mid", createdAt: 200, updatedAt: 1 };
+  assert.deepEqual(
+    sortMemoriesByTime([b, a, c]).map((m) => m.id),
+    ["a", "c", "b"],
+  );
+  assert.deepEqual(
+    sortMemoriesByTime([a, b, c], true).map((m) => m.id),
+    ["b", "c", "a"],
+  );
 });

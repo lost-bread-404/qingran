@@ -1,3 +1,4 @@
+import { sortMemoriesByTime } from "./memory.ts";
 import type { ChatMessage, Memory, Profile } from "./types";
 
 export function buildSystemPrompt(
@@ -10,7 +11,7 @@ export function buildSystemPrompt(
   const memoryBlock =
     memories.length === 0
       ? "（还没有长期记忆）"
-      : memories
+      : sortMemoriesByTime(memories)
           .map((item) => `- ${formatClock(item.createdAt || Date.now(), timeZone)}：${item.text}`)
           .join("\n");
   return `${base}\n\n现在是${clock}。记忆里的时间是事情发生时的时间，用来判断那是多久以前。\n\n你还记得：\n${memoryBlock}`;
@@ -37,7 +38,7 @@ export function buildRememberPrompt(stretch: string, memories: Memory[]): string
   const known =
     memories.length === 0
       ? "（还没有）"
-      : memories
+      : sortMemoriesByTime(memories)
           .slice(-24)
           .map((m) => `- ${m.text}`)
           .join("\n");
@@ -74,7 +75,7 @@ export function buildOverflowRememberPrompt(
   const known =
     memories.length === 0
       ? "（还没有）"
-      : memories
+      : sortMemoriesByTime(memories)
           .slice(-24)
           .map((m) => `- ${m.text}`)
           .join("\n");
@@ -154,7 +155,7 @@ export function buildConsolidatePrompt(
   const list =
     memories.length === 0
       ? "（还没有）"
-      : memories
+      : sortMemoriesByTime(memories)
           .map((m, i) => `${i + 1}. [${formatClock(m.createdAt || Date.now(), timeZone)}] ${m.text}`)
           .join("\n");
   return `你在整理清然的长期记忆。现在是${clock}。只输出 JSON：{"facts":[{"text":"","at":0}]}

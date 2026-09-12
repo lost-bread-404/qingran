@@ -23,6 +23,15 @@ export function isMajorMemory(text: string): boolean {
   return t.length >= 22 && /因为|之后|决定|搬|离开|在一起|分开|不再|从.*搬/.test(t);
 }
 
+export function sortMemoriesByTime(memories: Memory[], newestFirst = false): Memory[] {
+  return memories.slice().sort((a, b) => {
+    const da = a.createdAt || 0;
+    const db = b.createdAt || 0;
+    if (da !== db) return newestFirst ? db - da : da - db;
+    return (a.id || "").localeCompare(b.id || "");
+  });
+}
+
 export function memoriesForPrompt(memories: Memory[], query: string): Memory[] {
   if (memories.length === 0) return [];
   const terms = tokenize(query);
@@ -39,7 +48,7 @@ export function memoriesForPrompt(memories: Memory[], query: string): Memory[] {
     used += cost;
     if (picked.length >= 18) break;
   }
-  return picked;
+  return sortMemoriesByTime(picked);
 }
 
 export function mergeFacts(existing: Memory[], facts: string[], at = Date.now()): Memory[] {

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   resolveManualMemory,
+  sortMemoriesByTime,
   splitLeadingTimestamp,
   toDatetimeLocal,
 } from "@/lib/lover/memory";
@@ -184,10 +185,7 @@ export function SettingsDrawer({
               <p className="text-sm text-subtle">还没有。只记会改往后相处的事。</p>
             ) : (
               <ul className="flex flex-col gap-2">
-                {memories
-                  .slice()
-                  .reverse()
-                  .map((m) => (
+                {sortMemoriesByTime(memories, true).map((m) => (
                     <li key={m.id} className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
                       {editingId === m.id ? (
                         <div className="flex min-w-0 flex-1 flex-col gap-2">
