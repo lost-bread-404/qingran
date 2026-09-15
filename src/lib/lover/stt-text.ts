@@ -1,4 +1,5 @@
 import { classifyCue, cuesFromProsody, glueCueParts, markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
+import { applyFeelToText, feelFromFrames } from "./emotion.ts";
 import { expandHeardCues, islandVoiced, listenVocal, renderBursts } from "./vocal-event.ts";
 
 export const STT_KEYTERMS = [
@@ -464,8 +465,11 @@ export function finishHeard(
   const picked = pickTranscript(stripHehe(server), stripHehe(browser));
   const recovered = recoverCues(picked, frames);
   if (!recovered) return "";
-  if (isMostlyFiller(recovered)) return shapeCueProsody(recovered, words, frames);
-  return shapeSajiaoTail(recovered, frames);
+  const feel = frames?.length ? feelFromFrames(frames) : "calm";
+  if (isMostlyFiller(recovered)) {
+    return applyFeelToText(shapeCueProsody(recovered, words, frames), feel);
+  }
+  return applyFeelToText(shapeSajiaoTail(recovered, frames), feel);
 }
 
 function shapeSajiaoTail(text: string, frames?: ProsodyFrame[]): string {

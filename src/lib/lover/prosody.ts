@@ -5,6 +5,7 @@ export type ProsodyFrame = {
   clarity: number;
   centroid: number;
   bright: number;
+  tilt?: number;
 };
 
 export type CueWord = {
@@ -27,6 +28,7 @@ export function spectralShape(freq: Uint8Array, sampleRate: number) {
   let mag = 0;
   let weighted = 0;
   let high = 0;
+  let low = 0;
   for (let i = 1; i < n; i += 1) {
     const v = freq[i] ?? 0;
     if (!v) continue;
@@ -34,10 +36,12 @@ export function spectralShape(freq: Uint8Array, sampleRate: number) {
     mag += v;
     weighted += v * hz;
     if (hz >= 1100) high += v;
+    else if (hz <= 400) low += v;
   }
   return {
     centroid: mag ? weighted / mag : 0,
     bright: mag ? high / mag : 0,
+    tilt: mag ? (low - high) / mag : 0,
   };
 }
 
@@ -59,9 +63,7 @@ export function pitchWithClarity(data: Uint8Array, sampleRate: number) {
   const tauMax = Math.min(Math.floor(n / 2) - 2, Math.floor(sampleRate / 70));
   if (tauMax <= tauMin + 4) return { hz: 0, clarity: 0 };
 
-  let bestTau = 0;
-  let best = 0;
-  for (let tau = tauMin; tau <= tauMax; tau += 1) {
+  const nsdfAt = (tau: number) => {
     let ac = 0;
     let m = 0;
     const last = n - tau;
@@ -71,14 +73,26 @@ export function pitchWithClarity(data: Uint8Array, sampleRate: number) {
       ac += a * b;
       m += a * a + b * b;
     }
-    const nsdf = m ? (2 * ac) / m : 0;
+    return m ? (2 * ac) / m : 0;
+  };
+
+  let bestTau = 0;
+  let best = 0;
+  for (let tau = tauMin; tau <= tauMax; tau += 1) {
+    const nsdf = nsdfAt(tau);
     if (nsdf > best) {
       best = nsdf;
       bestTau = tau;
     }
   }
-  if (!bestTau || best < 0.62) return { hz: 0, clarity: best };
-  return { hz: sampleRate / bestTau, clarity: best };
+  if (!bestTau || best < 0.58) return { hz: 0, clarity: best };
+
+  const prev = bestTau > tauMin ? nsdfAt(bestTau - 1) : best;
+  const next = bestTau < tauMax ? nsdfAt(bestTau + 1) : best;
+  const denom = 2 * (prev - 2 * best + next);
+  const shift = denom !== 0 ? (prev - next) / denom : 0;
+  const tau = bestTau + Math.max(-1, Math.min(1, shift));
+  return { hz: sampleRate / tau, clarity: best };
 }
 
 export function pitchFromTimeDomain(data: Uint8Array, sampleRate: number): number {
@@ -97,7 +111,7 @@ export function sampleProsody(
   const freq = new Uint8Array(analyser.frequencyBinCount);
   analyser.getByteFrequencyData(freq);
   const shape = spectralShape(freq, sampleRate);
-  const pitch = needPitch && rms >= 0.01 ? pitchWithClarity(time, sampleRate) : { hz: 0, clarity: 0 };
+  const pitch = needPitch && rms >= 0.008 ? pitchWithClarity(time, sampleRate) : { hz: 0, clarity: 0 };
   return {
     t,
     rms,
@@ -105,6 +119,7 @@ export function sampleProsody(
     clarity: pitch.clarity,
     centroid: shape.centroid,
     bright: shape.bright,
+    tilt: shape.tilt,
   };
 }
 
@@ -189,11 +204,12 @@ export function markForFrames(frames: ProsodyFrame[]): "…" | "～" | "！" | "
   const mean = avg(rms);
   const span = hz.length >= 3 ? Math.max(...hz) - Math.min(...hz) : 0;
   const mid = avg(hz);
-  const glide = mid > 0 && span / mid >= 0.07;
+  const glide = mid > 0 && span / mid >= 0.055;
+  const tilt = avg(frames.map((f) => f.tilt ?? 0));
   if (dur <= 0.24 && peak >= 0.08) return "！";
   if (peak > Math.max(0.04, mean * 1.55) && dur <= 0.32) return "！";
-  if (glide && dur >= 0.12) return "～";
-  if (dur >= 0.18 && tail >= head * 0.88 && peak <= 0.07 && mean <= 0.05) return "～";
+  if (glide && dur >= 0.1) return "～";
+  if (dur >= 0.16 && tail >= head * 0.86 && peak <= 0.08 && tilt >= 0) return "～";
   if ((tail < head * 0.72 && dur >= 0.22) || dur >= 0.42) return "…";
   return "";
 }

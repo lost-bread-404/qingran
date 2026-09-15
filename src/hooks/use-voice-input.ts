@@ -98,12 +98,10 @@ export function useVoiceInput({ lang, prompt }: Options) {
     source.connect(analyser);
     analyseRef.current = { ctx, source };
     const data = new Uint8Array(analyser.fftSize);
-    let n = 0;
     const tick = () => {
-      const frame = sampleProsody(analyser, ctx.sampleRate, (performance.now() - t0) / 1000, n % 2 === 0);
+      const frame = sampleProsody(analyser, ctx.sampleRate, (performance.now() - t0) / 1000, true);
       framesRef.current.push(frame);
       setLevel(Math.min(1, frame.rms * 8));
-      n += 1;
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);

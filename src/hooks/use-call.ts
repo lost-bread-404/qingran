@@ -62,7 +62,6 @@ export function useCall({ onUtterance, prompt }: Options) {
   const finalTextRef = useRef("");
   const interimRef = useRef("");
   const framesRef = useRef<ProsodyFrame[]>([]);
-  const pitchTickRef = useRef(0);
 
   useEffect(() => {
     onUtteranceRef.current = onUtterance;
@@ -153,7 +152,6 @@ export function useCall({ onUtterance, prompt }: Options) {
       lastTextAtRef.current = 0;
     }
     framesRef.current = [];
-    pitchTickRef.current = 0;
     setPhaseBoth("speaking-you");
   }, []);
 
@@ -273,10 +271,9 @@ export function useCall({ onUtterance, prompt }: Options) {
         analyser,
         ctxRef.current?.sampleRate ?? 44100,
         (now - speechStartRef.current) / 1000,
-        pitchTickRef.current % 2 === 0,
+        true,
       );
       if (speaking) {
-        pitchTickRef.current += 1;
         framesRef.current.push(frame);
       }
       const rms = frame.rms;
