@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { buildSystemPrompt, formatClock } from "./prompt";
 import { spokenForTts } from "./speech-tags";
-import { ttsRequestBody } from "./tts";
+import { shouldSendDelta, ttsRequestBody } from "./tts";
 import type { ChatMessage, Memory, Profile } from "./types";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
@@ -12,7 +12,7 @@ const PCM_MIME = "audio/pcm;rate=24000";
 export type TalkStreamEvent =
   | { t: "text"; d: string }
   | { t: "text_end"; speech: string }
-  | { t: "audio"; i: number; b: string; m: string }
+  | { t: "audio"; i: number; b: string; m: string; replace?: boolean }
   | { t: "done"; speech: string }
   | { t: "err"; m: string };
 
@@ -126,32 +126,21 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     return;
   }
 
-  if (!tts.gotAudio) {
+  if (!tts.complete) {
     const clip = await speakRest(apiKey, speech);
-    if (clip?.b) emit({ t: "audio", i: 0, b: clip.b, m: clip.m });
+    if (clip?.b) emit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
   }
 
   emit({ t: "done", speech });
 }
 
-function shouldSendDelta(text: string, first: boolean): boolean {
-  if (!text.trim()) return false;
-  if (/[。！？!?]\s*$/.test(text) && text.trim().length >= (first ? 6 : 8)) return true;
-  if (/[…]\s*$/.test(text) && text.trim().length >= (first ? 10 : 14)) return true;
-  if (text.length >= (first ? 28 : 42)) return true;
-  return false;
-}
-
 function toSpokenDelta(text: string) {
-  return text
-    .replace(/\r/g, "")
-    .replace(/[「」『』“”""]/g, "")
-    .replace(/\n{2,}/g, " [pause] ")
-    .replace(/\n+/g, " ");
+  return spokenForTts(text);
 }
 
 class LiveTts {
   gotAudio = false;
+  complete = false;
   private socket: WebSocket | null = null;
   private opened = false;
   private failed = false;
@@ -234,7 +223,7 @@ class LiveTts {
       return;
     }
     const timeout = new Promise<void>((resolve) => {
-      setTimeout(resolve, 45_000);
+      setTimeout(resolve, 12_000);
     });
     await Promise.race([this.waitDone, timeout]);
     this.finishSocket();
@@ -271,6 +260,7 @@ class LiveTts {
       return;
     }
     if (event.type === "audio.done") {
+      this.complete = true;
       this.resolveDone();
       return;
     }
@@ -304,7 +294,7 @@ async function speakRest(apiKey: string, text: string): Promise<{ b: string; m: 
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(ttsRequestBody(spoken, "zh")),
-      signal: AbortSignal.timeout(16_000),
+      signal: AbortSignal.timeout(40_000),
     });
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());

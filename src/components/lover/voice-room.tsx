@@ -282,6 +282,10 @@ export function VoiceRoom() {
     void resumeAudio();
     if (callActiveRef.current) deafenRef.current();
     let clip = spokenCacheRef.current.get(id);
+    if (clip && !streamAudioCovers([clip.bytes], stripSpeechTags(speech))) {
+      spokenCacheRef.current.delete(id);
+      clip = undefined;
+    }
     if (!clip) {
       const spoken = await speakAsLover({ data: { text: speech } });
       if (!spoken.ok || turn !== turnRef.current) return;
@@ -406,19 +410,28 @@ export function VoiceRoom() {
               setMessages((prev) => prev.map((m) => (m.id === reply.id ? finalMsg : m)));
               if (turn === turnRef.current) sealPlayback();
               if (turn !== turnRef.current) return;
-              if (clips.length) {
+              if (clips.length && streamAudioCovers(clips, display)) {
                 spokenCacheRef.current.set(reply.id, {
                   bytes: concatBytes(clips),
                   mimeType: clipMime,
                 });
-              } else if (display && !profileRef.current.muted) {
-                void playFull(reply.id, full, turn);
+              } else {
+                spokenCacheRef.current.delete(reply.id);
+                if (display && !profileRef.current.muted) {
+                  void playFull(reply.id, full, turn);
+                }
               }
               return;
             }
             if (turn !== turnRef.current) return;
             if (event.t === "audio") {
               if (profileRef.current.muted) return;
+              if (event.replace) {
+                stopPlayback();
+                clips.length = 0;
+                void unlockPlayback();
+                void resumeAudio();
+              }
               gotAudio = true;
               setStatus("speaking");
               const bytes = base64ToBytes(event.b);
@@ -821,3 +834,13 @@ export function VoiceRoom() {
     </div>
   );
 }
+
+function streamAudioCovers(chunks: Array<Uint8Array>, display: string) {
+  let bytes = 0;
+  for (const chunk of chunks) bytes += chunk.byteLength;
+  const sec = bytes / 2 / 24_000;
+  const chars = display.replace(/\s+/g, "").length;
+  if (chars < 4) return sec >= 0.35;
+  return sec >= Math.max(1, chars / 6.5);
+}
+

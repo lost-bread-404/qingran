@@ -3,7 +3,7 @@ import type { ChatMessage, Memory, Profile } from "./types";
 export type TalkStreamEvent =
   | { t: "text"; d: string }
   | { t: "text_end"; speech: string }
-  | { t: "audio"; i: number; b: string; m: string }
+  | { t: "audio"; i: number; b: string; m: string; replace?: boolean }
   | { t: "done"; speech: string }
   | { t: "err"; m: string };
 

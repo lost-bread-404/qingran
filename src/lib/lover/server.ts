@@ -185,7 +185,7 @@ export const speakAsLover = createServerFn({ method: "POST" })
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(ttsRequestBody(text, "zh")),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(40_000),
     });
 
     if (!res.ok) {
