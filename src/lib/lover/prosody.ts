@@ -192,7 +192,8 @@ export function markForFrames(frames: ProsodyFrame[]): "…" | "～" | "！" | "
   const glide = mid > 0 && span / mid >= 0.07;
   if (dur <= 0.24 && peak >= 0.08) return "！";
   if (peak > Math.max(0.04, mean * 1.55) && dur <= 0.32) return "！";
-  if (glide && dur >= 0.16) return "～";
+  if (glide && dur >= 0.12) return "～";
+  if (dur >= 0.18 && tail >= head * 0.88 && peak <= 0.07 && mean <= 0.05) return "～";
   if ((tail < head * 0.72 && dur >= 0.22) || dur >= 0.42) return "…";
   return "";
 }
@@ -259,6 +260,20 @@ export function leadingCueFrames(frames: ProsodyFrame[]): ProsodyFrame[] | null 
   return first.frames.filter((f) => f.t <= first.start + 0.28);
 }
 
+export function glueCueParts(parts: string[], islands: Island[], tight = false) {
+  if (!parts.length) return "";
+  if (parts.length === 1 || tight) return parts.join("");
+  let out = parts[0] ?? "";
+  for (let i = 1; i < parts.length; i += 1) {
+    const gap = Math.max(0, (islands[i]?.start ?? 0) - (islands[i - 1]?.end ?? 0));
+    const prev = out;
+    const next = parts[i] ?? "";
+    const sep = prev.endsWith("…") || next.startsWith("…") || gap < 0.08 ? "" : "，";
+    out += `${sep}${next}`;
+  }
+  return out;
+}
+
 export function cuesFromProsody(frames: ProsodyFrame[]): string {
   const islands = voicedIslands(frames);
   if (!islands.length) return "";
@@ -273,7 +288,7 @@ export function cuesFromProsody(frames: ProsodyFrame[]): string {
     if (!mark && next && next.start - island.end >= 0.1) mark = "…";
     parts.push(`${cue.repeat(n)}${mark}`);
   }
-  return parts.join("");
+  return glueCueParts(parts, islands, parts.every((part) => part.startsWith("哈")));
 }
 
 function cueRepeat(kind: CueKind, dur: number) {

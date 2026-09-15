@@ -1,4 +1,4 @@
-import { markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
+import { classifyCue, cuesFromProsody, glueCueParts, markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
 import { expandHeardCues, islandVoiced, listenVocal, renderBursts } from "./vocal-event.ts";
 
 export const STT_KEYTERMS = [
@@ -17,7 +17,10 @@ export const STT_KEYTERMS = [
   "吧",
   "喵",
   "嗯嗯",
+  "嗯嗯嗯",
+  "嗯～",
   "啊啊",
+  "啊～",
   "呜呜",
   "哈哈",
   "喵喵",
@@ -48,7 +51,7 @@ const ABO_TERMS = [
   "分化",
 ];
 
-const CUE_CHARS = "嗯唔呜啊哦噢喔额呃唉哎诶欸哼呵哈嘿哇呀哟呦切啧嘶嘛呢吧啦咯嘞嘤喵嗷呼嘻嗨嘘咿欧咕唧呐呵欸喔哇";
+const CUE_CHARS = "嗯唔呜啊哦噢喔额呃唉哎诶欸哼哈嘿哇呀哟呦切啧嘶嘛呢吧啦咯嘞嘤喵嗷呼嘻嗨嘘咿欧咕唧呐欸喔哇";
 const FILLER = new RegExp(`[${CUE_CHARS}]`);
 const CUE_RUN = new RegExp(`[${CUE_CHARS}]+`, "g");
 
@@ -76,6 +79,7 @@ export function restoreSpeechText(raw: string, words?: SttWord[]): string {
 function softenCue(raw: string): string {
   let text = raw.replace(/\s+/g, " ").trim();
   if (!text) return "";
+  text = text.replace(/呵+/g, "");
   const core = stripMarks(text);
   const mapped = mapVocalization(core);
   if (mapped) return mapped;
@@ -202,15 +206,9 @@ export function punctuateSpeech(raw: string): string {
 
 function keepCuePunct(text: string): string {
   let t = text.replace(/\s+/g, "");
-  t = t.replace(/~+/g, "～").replace(/\.{2,}|…+/g, "…").replace(/[，,。]/g, "");
-  const core = t.replace(/[～…！？!?]+$/g, "");
-  if (!core) return t;
-  const mark = t.match(/[～…！？!?]+$/)?.[0] ?? "";
-  if (/[….]/.test(mark)) return `${core}…`;
-  if (/[！!]/.test(mark)) return `${core}！`;
-  if (/[？?]/.test(mark)) return `${core}？`;
-  if (/[～~]/.test(mark)) return `${core}～`;
-  return core;
+  t = t.replace(/~+/g, "～").replace(/\.{2,}|…+/g, "…").replace(/,/g, "，").replace(/。+/g, "");
+  t = t.replace(/，{2,}/g, "，").replace(/，(?=[～…！？])/g, "");
+  return t;
 }
 
 function isCueToken(text: string): boolean {
@@ -397,27 +395,56 @@ export function pickTranscript(server: string, browser: string): string {
 }
 
 export function recoverCues(stt: string, frames?: ProsodyFrame[]): string {
-  const existing = stt.trim();
+  const existing = stripHehe(stt.trim());
   if (!frames?.length) return existing;
   const islands = voicedIslands(frames);
   const heard = listenVocal(frames);
+  const fixed = rewriteMisheardCues(existing, frames);
 
-  if (existing && !isMostlyFiller(existing) && leftoverMeaning(existing)) return existing;
+  if (fixed && !isMostlyFiller(fixed) && leftoverMeaning(fixed)) return fixed;
 
   if (heard.kind === "laugh") return heard.text;
   if (heard.kind === "cry") return heard.text;
   if (heard.kind === "pant") return heard.text;
   if (heard.kind === "hum") return heard.text;
 
-  if (!existing) {
-    if (islands.length === 1 && islandVoiced(islands[0]!)) {
-      return renderBursts("啊", islands);
-    }
+  if (!fixed) {
+    const voiced = islands.filter(islandVoiced);
+    if (!voiced.length) return "";
+    if (voiced.length === islands.length) return cuesFromProsody(frames);
     return "";
   }
 
-  if (islands.length <= 1) return existing;
-  return expandHeardCues(existing, islands);
+  if (islands.length <= 1) return fixed;
+  return expandHeardCues(fixed, islands);
+}
+
+function stripHehe(text: string) {
+  return text.replace(/呵+/g, "").replace(/\s+/g, " ").trim();
+}
+
+const NG_MISHEAR = /^(算了|算啦|算咯|那|呐|嗯那|恩了|嗯了|嗯呐)$/;
+
+function looksLikeClosedCue(frames: ProsodyFrame[]) {
+  const heard = listenVocal(frames);
+  if (heard.kind === "hum") return true;
+  const islands = voicedIslands(frames);
+  if (!islands.length) return false;
+  const span = (islands[islands.length - 1]?.end ?? 0) - (islands[0]?.start ?? 0);
+  if (span > 1.6) return false;
+  return islands.every((island) => {
+    const cue = classifyCue(island.frames);
+    return cue === "嗯" || cue === "哼";
+  });
+}
+
+function rewriteMisheardCues(text: string, frames?: ProsodyFrame[]) {
+  const core = stripMarks(text);
+  if (!NG_MISHEAR.test(core)) return text;
+  if (!frames?.length || !looksLikeClosedCue(frames)) return text;
+  const islands = voicedIslands(frames);
+  if (!islands.length) return "嗯";
+  return renderBursts("嗯", islands);
 }
 
 export function refineCueWords(
@@ -431,12 +458,13 @@ export function refineCueWords(
 export function finishHeard(
   server: string,
   browser: string,
-  _words: CueWord[] | undefined,
+  words: CueWord[] | undefined,
   frames: ProsodyFrame[] | undefined,
 ): string {
-  const picked = pickTranscript(server, browser);
+  const picked = pickTranscript(stripHehe(server), stripHehe(browser));
   const recovered = recoverCues(picked, frames);
-  if (isMostlyFiller(recovered)) return recovered;
+  if (!recovered) return "";
+  if (isMostlyFiller(recovered)) return shapeCueProsody(recovered, words, frames);
   return shapeSajiaoTail(recovered, frames);
 }
 
@@ -446,7 +474,7 @@ function shapeSajiaoTail(text: string, frames?: ProsodyFrame[]): string {
   const last = islands[islands.length - 1];
   if (!last || markForFrames(last.frames) !== "～") return text;
   const stripped = text.replace(/[。！？]?$/, "");
-  if (!/[嘛啦呢呀哦噢嗯啊]$/.test(stripped)) return text;
+  if (!/[嘛啦呢呀哦噢嗯啊吧]$/.test(stripped)) return text;
   return `${stripped}～`;
 }
 
@@ -492,6 +520,8 @@ export function shapeCueProsody(
     if (used < chars.length && chunks.length) {
       chunks[chunks.length - 1] = `${chars.join("")}${markForFrames(islands[islands.length - 1]!.frames)}`;
     }
+    const joined = glueCueParts(chunks, islands);
+    return keepCuePunct(joined) || text;
   }
 
   const joined = chunks.join("").replace(/([…～！]){2,}/g, "$1");

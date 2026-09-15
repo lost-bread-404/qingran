@@ -360,4 +360,71 @@ test("real words are not replaced by a moan track", () => {
   assert.equal(stripMarks(finishHeard("嗯，我想你了", "", undefined, ah)), "嗯我想你了");
 });
 
+test("呵呵 is dropped from cues", () => {
+  assert.equal(stripMarks(restoreSpeechText("呵呵")), "");
+  assert.doesNotMatch(finishHeard("呵呵", "", undefined, undefined), /呵/);
+});
+
+test("算了 hummed as 嗯 is not kept as 算了", () => {
+  const hum: ProsodyFrame[] = [];
+  for (let p = 0; p < 2; p += 1) {
+    const t0 = p * 0.45;
+    for (let i = 0; i < 8; i += 1) {
+      hum.push(
+        frame({
+          t: t0 + i * 0.04,
+          rms: 0.035,
+          hz: 170,
+          clarity: 0.88,
+          centroid: 520,
+          bright: 0.12,
+        }),
+      );
+    }
+    hum.push(hush(t0 + 0.38));
+  }
+  const heard = finishHeard("算了", "", undefined, hum);
+  assert.match(heard, /嗯/);
+  assert.doesNotMatch(heard, /算了/);
+});
+
+test("standalone 嗯 keeps 撒娇 marks", () => {
+  const ng = Array.from({ length: 10 }, (_, i) =>
+    frame({
+      t: i * 0.04,
+      rms: 0.035,
+      hz: 160 + i * 8,
+      clarity: 0.9,
+      centroid: 500,
+      bright: 0.12,
+    }),
+  );
+  const heard = finishHeard("", "", undefined, ng);
+  assert.match(heard, /嗯/);
+  assert.match(heard, /～/);
+});
+
+test("coquettish repeats get commas", () => {
+  const frames: ProsodyFrame[] = [];
+  for (let p = 0; p < 3; p += 1) {
+    const t0 = p * 0.5;
+    for (let i = 0; i < 8; i += 1) {
+      frames.push(
+        frame({
+          t: t0 + i * 0.04,
+          rms: 0.035,
+          hz: 170,
+          clarity: 0.9,
+          centroid: 500,
+          bright: 0.12,
+        }),
+      );
+    }
+    frames.push(hush(t0 + 0.4));
+  }
+  const heard = finishHeard("嗯嗯嗯", "", undefined, frames);
+  assert.match(heard, /，/);
+  assert.match(stripMarks(heard), /嗯/);
+});
+
 

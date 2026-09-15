@@ -1,4 +1,4 @@
-import { hasCueEnergy, markForFrames, voicedIslands, type Island, type ProsodyFrame } from "./prosody.ts";
+import { glueCueParts, hasCueEnergy, markForFrames, voicedIslands, type Island, type ProsodyFrame } from "./prosody.ts";
 
 export type VocalKind = "speech" | "laugh" | "cry" | "pant" | "hum" | "vocal" | "none";
 
@@ -47,7 +47,7 @@ export function renderBursts(char: string, islands: Island[]) {
     if (!mark && next && next.start - island.end >= 0.1) mark = "…";
     parts.push(`${char.repeat(n)}${mark}`);
   }
-  return parts.join("");
+  return glueCueParts(parts, islands, char === "哈");
 }
 
 export function listenVocal(frames: ProsodyFrame[]): VocalEvent {
