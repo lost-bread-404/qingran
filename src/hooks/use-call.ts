@@ -23,6 +23,7 @@ import {
 } from "@/lib/lover/audio-session";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { keepPlaybackAlive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
+import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
 import { transcribeVoice } from "@/lib/lover/server";
 import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import {
@@ -75,6 +76,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const framesRef = useRef<ProsodyFrame[]>([]);
   const pitchTickRef = useRef(0);
   const tickRef = useRef<() => void>(() => undefined);
+  const nativeHangupRef = useRef(false);
 
   useEffect(() => {
     onUtteranceRef.current = onUtterance;
@@ -173,6 +175,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     stopCallHold();
     teardownMedia();
     releaseWakeLock();
+    if (!nativeHangupRef.current) nativeEndCall();
   }, [teardownMedia]);
 
   const armRecorder = () => {
@@ -501,6 +504,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const start = useCallback(async () => {
     if (liveRef.current) return;
     setError(null);
+    nativeStartCall();
     const pending = acquireMicFromGesture();
     void unlockPlayback();
     ctxRef.current = createAudioContext();
@@ -508,6 +512,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     try {
       stream = await pending;
     } catch (err) {
+      nativeEndCall();
       teardownMedia();
       setError(micFailHint(err));
       return;
@@ -580,6 +585,15 @@ export function useCall({ onUtterance, prompt }: Options) {
   }, [active, tick]);
 
   useEffect(() => () => hangup(), [hangup]);
+
+  useEffect(() => {
+    return listenNativeHangup(() => {
+      if (!liveRef.current) return;
+      nativeHangupRef.current = true;
+      hangup();
+      nativeHangupRef.current = false;
+    });
+  }, [hangup]);
 
   return {
     active,

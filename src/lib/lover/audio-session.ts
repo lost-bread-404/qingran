@@ -1,3 +1,5 @@
+import { isNativeShell } from "./native-shell.ts";
+
 export function audioContextNeedsResume(state: string) {
   return state === "suspended" || state === "interrupted";
 }
@@ -96,6 +98,7 @@ export function audioSessionIsInterrupted() {
 }
 
 export function setAudioSessionKind(kind: AudioSessionKind) {
+  if (isNativeShell()) return;
   const session = getAudioSession();
   if (!session) return;
   const next = sessionTypeIfChanged(session.type, kind);

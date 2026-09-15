@@ -11,3 +11,6 @@ attachments
 .env.*
 .project_id
 .node_modules.lock
+xcuserdata/
+*.xcuserstate
+DerivedData/
