@@ -155,6 +155,7 @@ class LiveTts {
       codec: "pcm",
       sample_rate: "24000",
       text_normalization: "true",
+      optimize_streaming_latency: "1",
       speed: "1",
     });
     const url = `wss://api.x.ai/v1/tts?${params.toString()}`;

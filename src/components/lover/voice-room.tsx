@@ -339,6 +339,7 @@ export function VoiceRoom() {
       pendingIdsRef.current.add(reply.id);
       inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text: "" };
       setStatus("thinking");
+      void kickAudio();
 
       let full = "";
       let gotAudio = false;
@@ -397,6 +398,7 @@ export function VoiceRoom() {
             if (event.t === "text_end") {
               full = event.speech || full;
               paintText(full, true);
+              void kickAudio();
               return;
             }
             if (event.t === "done") {

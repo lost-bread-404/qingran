@@ -2,9 +2,9 @@ const SILENCE =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
 const PCM_RATE = 24_000;
-const START_SEC = 1.1;
+const START_SEC = 0.42;
 const HOLD_SEC = 0.3;
-const SLICE_SEC = 0.24;
+const SLICE_SEC = 0.18;
 
 let ctx: AudioContext | null = null;
 let unlocked = false;
@@ -313,7 +313,7 @@ function flushScheduled(gen: number) {
   }
   if (!startedClock) {
     if (!ended && pendingSamples / PCM_RATE < START_SEC) return;
-    nextStart = audioCtx.currentTime + 0.05;
+    nextStart = audioCtx.currentTime + 0.02;
     startedClock = true;
   }
   const hold = ended ? 0 : Math.floor(PCM_RATE * HOLD_SEC);
