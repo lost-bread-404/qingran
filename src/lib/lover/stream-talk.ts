@@ -103,19 +103,21 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       if (!token) continue;
       full += token;
       emit({ t: "text", d: token });
-      tts.push(token);
     }
-    // Let the SSE socket flush text before the next LLM chunk / TTS audio.
+    // Let the SSE socket flush text before the next LLM chunk.
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  emit({ t: "text_end", speech: full.trim() });
-  await tts.finish();
 
   const speech = full.trim();
+  emit({ t: "text_end", speech });
   if (!speech) {
+    tts.abort();
     emit({ t: "err", m: "她好像走神了，再说一次。" });
     return;
   }
+
+  tts.push(spokenForTts(speech));
+  await tts.finish();
 
   if (!tts.complete) {
     const clip = await speakRest(apiKey, speech);
@@ -123,10 +125,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   }
 
   emit({ t: "done", speech });
-}
-
-function toSpokenDelta(text: string) {
-  return text.replace(/\r/g, "");
 }
 
 class LiveTts {
@@ -192,8 +190,8 @@ class LiveTts {
   }
 
   push(text: string) {
-    const spoken = toSpokenDelta(text);
-    if (!spoken.trim() || this.failed || this.closed) return;
+    const spoken = text.replace(/\r/g, "").trim();
+    if (!spoken || this.failed || this.closed) return;
     if (!this.opened) {
       this.queued.push(spoken);
       return;
