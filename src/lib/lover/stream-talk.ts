@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { buildSystemPrompt, formatClock } from "./prompt";
 import { spokenForTts } from "./speech-tags";
-import { shouldSendDelta, ttsRequestBody } from "./tts";
+import { ttsRequestBody } from "./tts";
 import type { ChatMessage, Memory, Profile } from "./types";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
@@ -76,8 +76,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   }
 
   let full = "";
-  let pending = "";
-  let first = true;
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -104,19 +102,12 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       }
       if (!token) continue;
       full += token;
-      pending += token;
       emit({ t: "text", d: token });
-      if (shouldSendDelta(pending, first)) {
-        tts.push(pending);
-        pending = "";
-        first = false;
-      }
+      tts.push(token);
     }
     // Let the SSE socket flush text before the next LLM chunk / TTS audio.
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-
-  if (pending.trim()) tts.push(pending);
   emit({ t: "text_end", speech: full.trim() });
   await tts.finish();
 
@@ -135,7 +126,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 }
 
 function toSpokenDelta(text: string) {
-  return spokenForTts(text);
+  return text.replace(/\r/g, "");
 }
 
 class LiveTts {
@@ -223,7 +214,7 @@ class LiveTts {
       return;
     }
     const timeout = new Promise<void>((resolve) => {
-      setTimeout(resolve, 12_000);
+      setTimeout(resolve, 45_000);
     });
     await Promise.race([this.waitDone, timeout]);
     this.finishSocket();

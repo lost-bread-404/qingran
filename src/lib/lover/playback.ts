@@ -2,8 +2,8 @@ const SILENCE =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
 const PCM_RATE = 24_000;
-const START_SEC = 1.15;
-const HOLD_SEC = 0.32;
+const START_SEC = 0.45;
+const HOLD_SEC = 0.16;
 
 let ctx: AudioContext | null = null;
 let unlocked = false;
