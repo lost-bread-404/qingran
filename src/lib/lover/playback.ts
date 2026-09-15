@@ -2,8 +2,9 @@ const SILENCE =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
 const PCM_RATE = 24_000;
-const START_SEC = 0.45;
-const HOLD_SEC = 0.16;
+const START_SEC = 1.1;
+const HOLD_SEC = 0.3;
+const SLICE_SEC = 0.24;
 
 let ctx: AudioContext | null = null;
 let unlocked = false;
@@ -198,6 +199,15 @@ export async function kickAudio() {
 
 export function enqueuePlayback(bytes: Uint8Array<ArrayBuffer>, mimeType: string) {
   inFlight += 1;
+  if (isRawPcm(bytes, mimeType)) {
+    try {
+      pushSamples(pcmToFloats(bytes), playGen);
+    } finally {
+      inFlight = Math.max(0, inFlight - 1);
+      maybeWakeIdle();
+    }
+    return;
+  }
   void ingest(bytes, mimeType, playGen).finally(() => {
     inFlight = Math.max(0, inFlight - 1);
     maybeWakeIdle();
@@ -266,29 +276,50 @@ function resample(input: Float32Array, fromRate: number, toRate: number) {
   return out;
 }
 
+function pullMerged(hold: number): Float32Array | null {
+  if (!sampleQueue.length) return null;
+  while (sampleQueue[0] && sampleQueue[0].length === 0) sampleQueue.shift();
+  if (!sampleQueue.length) return null;
+
+  const slice = Math.floor(PCM_RATE * SLICE_SEC);
+  const available = pendingSamples;
+  if (hold > 0 && available <= hold) return null;
+
+  let take = hold > 0 ? Math.min(available - hold, Math.max(slice, sampleQueue[0]!.length)) : available;
+  if (take <= 0) return null;
+
+  const out = new Float32Array(take);
+  let offset = 0;
+  while (offset < take && sampleQueue.length) {
+    const chunk = sampleQueue[0]!;
+    const n = Math.min(chunk.length, take - offset);
+    out.set(chunk.subarray(0, n), offset);
+    offset += n;
+    if (n === chunk.length) sampleQueue.shift();
+    else sampleQueue[0] = chunk.subarray(n);
+  }
+  pendingSamples -= offset;
+  return offset ? (offset === take ? out : out.subarray(0, offset)) : null;
+}
+
 function flushScheduled(gen: number) {
   const audioCtx = getCtx();
   if (!audioCtx || gen !== playGen) return;
-  try {
-    if (audioCtx.state === "suspended") void audioCtx.resume();
-  } catch {
-    /* ignore */
+  if (audioCtx.state !== "running") {
+    void audioCtx.resume().then(() => {
+      if (gen === playGen) flushScheduled(gen);
+    });
+    return;
   }
   if (!startedClock) {
     if (!ended && pendingSamples / PCM_RATE < START_SEC) return;
-    nextStart = Math.max(audioCtx.currentTime + 0.03, nextStart);
+    nextStart = audioCtx.currentTime + 0.05;
     startedClock = true;
   }
   const hold = ended ? 0 : Math.floor(PCM_RATE * HOLD_SEC);
-  while (sampleQueue.length) {
-    const chunk = sampleQueue[0];
-    if (!chunk || chunk.length === 0) {
-      sampleQueue.shift();
-      continue;
-    }
-    if (!ended && pendingSamples - chunk.length < hold) break;
-    sampleQueue.shift();
-    pendingSamples -= chunk.length;
+  while (true) {
+    const chunk = pullMerged(hold);
+    if (!chunk) break;
     const buffer = audioCtx.createBuffer(1, chunk.length, PCM_RATE);
     buffer.getChannelData(0).set(chunk);
     scheduleBuffer(buffer, audioCtx, gen);
