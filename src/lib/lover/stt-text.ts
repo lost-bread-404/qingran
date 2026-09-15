@@ -252,6 +252,12 @@ export function isMostlyFiller(text: string): boolean {
   return [...stripped].every((ch) => FILLER.test(ch));
 }
 
+export function browserSttReady(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return !isMostlyFiller(t);
+}
+
 function isPunctToken(text: string): boolean {
   return /^[，。！？,.!?…]+$/.test(text);
 }

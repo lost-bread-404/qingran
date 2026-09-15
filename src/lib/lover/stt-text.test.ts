@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  browserSttReady,
   extractKeyterms,
   finishHeard,
   needsPunctuationHelp,
@@ -420,6 +421,14 @@ test("STT 嗯嗯嗯 is not rewritten with commas", () => {
     frames.push(hush(t0 + 0.4));
   }
   assert.equal(finishHeard("嗯嗯嗯", "", undefined, frames), "嗯嗯嗯");
+});
+
+test("browser STT with real words can skip the server", () => {
+  assert.equal(browserSttReady("我想你了"), true);
+  assert.equal(browserSttReady("嗯，我想你了"), true);
+  assert.equal(browserSttReady("嗯"), false);
+  assert.equal(browserSttReady("嗯嗯～"), false);
+  assert.equal(browserSttReady(""), false);
 });
 
 

@@ -14,7 +14,7 @@ import {
 } from "@/lib/lover/audio";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { transcribeVoice } from "@/lib/lover/server";
-import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
+import { finishHeard, browserSttReady, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import {
   LISTEN_WARMUP_MS,
   isHoldVoiced,
@@ -220,7 +220,9 @@ export function useCall({ onUtterance, prompt }: Options) {
 
     let heard = "";
     let words: { text?: string; start?: number; end?: number }[] = [];
-    if (blob && blob.size >= 40) {
+    if (browserSttReady(liveText)) {
+      heard = finishHeard("", liveText, undefined, frames);
+    } else if (blob && blob.size >= 40) {
       try {
         const result = await transcribeVoice({
           data: {
@@ -236,8 +238,10 @@ export function useCall({ onUtterance, prompt }: Options) {
       } catch {
         /* fall through */
       }
+      heard = finishHeard(heard, liveText, words, frames);
+    } else {
+      heard = finishHeard("", liveText, undefined, frames);
     }
-    heard = finishHeard(heard, liveText, words, frames);
     if (!liveRef.current) return;
     if (!heard) {
       setError("我没听清，再说一遍。");

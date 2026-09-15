@@ -9,13 +9,7 @@ import {
   parseRememberResult,
 } from "./prompt";
 import { spokenForTts } from "./speech-tags";
-import {
-  isMostlyFiller,
-  needsPunctuationHelp,
-  restoreSpeechText,
-  sttKeyterms,
-  stripMarks,
-} from "./stt-text";
+import { restoreSpeechText, sttKeyterms } from "./stt-text";
 import { ttsRequestBody } from "./tts";
 import type { ChatMessage, Memory } from "./types";
 
@@ -244,46 +238,8 @@ export const transcribeVoice = createServerFn({ method: "POST" })
       const fallback = (body.words ?? []).map((w) => w.text ?? "").join("").trim();
       text = restoreSpeechText(fallback);
     }
-    if (text && !isMostlyFiller(text)) text = await restorePunctuation(apiKey, text);
     return { ok: true as const, text, words: body.words ?? [] };
   });
-
-async function restorePunctuation(apiKey: string, text: string): Promise<string> {
-  if (!needsPunctuationHelp(text)) return text;
-  try {
-    const res = await fetch("https://api.x.ai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: FAST_MODEL,
-        temperature: 0,
-        max_tokens: 900,
-        messages: [
-          {
-            role: "system",
-            content:
-              "只给中文口语补标点。只在句子真正说完时加句号或问号。不要密密麻麻加逗号，语气词后面不要加逗号。不要改字、删字、翻译或解释。只输出正文。",
-          },
-          { role: "user", content: text.slice(0, 1800) },
-        ],
-      }),
-      signal: AbortSignal.timeout(6_000),
-    });
-    if (!res.ok) return text;
-    const body = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const next = (body.choices?.[0]?.message?.content ?? "").trim();
-    if (!next) return text;
-    if (stripMarks(next) !== stripMarks(text.slice(0, 1800))) return text;
-    return next;
-  } catch {
-    return text;
-  }
-}
 
 function sanitizeMime(mime: string): string {
   const base = mime.split(";")[0]?.trim().toLowerCase() || "audio/webm";

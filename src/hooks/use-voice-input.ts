@@ -13,7 +13,7 @@ import {
 } from "@/lib/lover/audio";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { transcribeVoice } from "@/lib/lover/server";
-import { finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
+import { browserSttReady, finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 
 export type VoiceInputStatus = "idle" | "recording" | "transcribing";
 
@@ -219,7 +219,9 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
     let heard = "";
     let words: { text?: string; start?: number; end?: number }[] = [];
-    if (blob && blob.size >= 40) {
+    if (browserSttReady(liveText)) {
+      heard = finishHeard("", liveText, undefined, frames);
+    } else if (blob && blob.size >= 40) {
       try {
         const audioBase64 = await blobToBase64(blob);
         const result = await transcribeVoice({
@@ -236,9 +238,10 @@ export function useVoiceInput({ lang, prompt }: Options) {
       } catch {
         /* fall through */
       }
+      heard = finishHeard(heard, liveText, words, frames);
+    } else {
+      heard = finishHeard("", liveText, undefined, frames);
     }
-
-    heard = finishHeard(heard, liveText, words, frames);
 
     setInterim("");
     interimRef.current = "";
