@@ -216,7 +216,7 @@ export const transcribeVoice = createServerFn({ method: "POST" })
     form.append("vad_threshold", "0");
     form.append(
       "prompt",
-      "中文。鼻音和撒娇写成嗯、嗯嗯、嗯～、啊～、呜呜。不要写成呵呵。短促的嗯不要写成算了。",
+      "中文。鼻音写成嗯、嗯嗯、啊、呜呜。不要写成呵呵。短促的嗯不要写成算了。",
     );
     for (const term of sttKeyterms(data.prompt)) form.append("keyterm", term);
     const blob = new Blob([new Uint8Array(bytes)], { type: mime });

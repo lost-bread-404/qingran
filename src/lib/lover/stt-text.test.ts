@@ -206,7 +206,7 @@ test("empty STT recovers cute / cry / pant from audio", () => {
   assert.doesNotMatch(cuesFromProsody(pant), /哈/);
   assert.match(recoverCues("", pant), /啊/);
   assert.match(stripMarks(finishHeard("", "", undefined, pant)), /啊/);
-  assert.doesNotMatch(stripMarks(finishHeard("哈哈哈哈", "", undefined, pant)), /哈/);
+  assert.match(stripMarks(finishHeard("哈哈哈哈", "", undefined, pant)), /哈/);
 });
 
 test("empty STT does not turn room noise into 喘息", () => {
@@ -321,10 +321,8 @@ test("STT phones are kept; laugh and cry come from the sound itself", () => {
   assert.ok(voicedIslands(frames).length >= 5, `islands=${voicedIslands(frames).length}`);
 
   const fromAh = finishHeard("啊", "", undefined, frames);
-  assert.match(fromAh, /啊/);
+  assert.equal(stripMarks(fromAh), "啊");
   assert.doesNotMatch(fromAh, /哈/);
-  assert.notEqual(stripMarks(fromAh), "啊");
-  assert.match(fromAh, /[～…！]/);
 
   const heard = finishHeard("啊啊呜呜嗯嗯", "", undefined, frames);
   assert.match(stripMarks(heard), /啊/);
@@ -350,7 +348,7 @@ test("laughter is transcribed as 哈, not 啊", () => {
     }
     frames.push(hush(t0 + 0.16));
   }
-  const heard = finishHeard("啊", "", undefined, frames);
+  const heard = finishHeard("", "", undefined, frames);
   assert.match(heard, /哈/);
   assert.doesNotMatch(heard, /啊|嗯|呜/);
 });
@@ -388,7 +386,7 @@ test("算了 hummed as 嗯 is not kept as 算了", () => {
   assert.doesNotMatch(heard, /算了/);
 });
 
-test("standalone 嗯 keeps 撒娇 marks", () => {
+test("short 嗯 is passed through without 语气 marks", () => {
   const ng = Array.from({ length: 10 }, (_, i) =>
     frame({
       t: i * 0.04,
@@ -399,12 +397,11 @@ test("standalone 嗯 keeps 撒娇 marks", () => {
       bright: 0.12,
     }),
   );
-  const heard = finishHeard("", "", undefined, ng);
-  assert.match(heard, /嗯/);
-  assert.match(heard, /～/);
+  assert.equal(finishHeard("嗯", "", undefined, ng), "嗯");
+  assert.equal(finishHeard("嗯嗯", "", undefined, ng), "嗯嗯");
 });
 
-test("coquettish repeats get commas", () => {
+test("STT 嗯嗯嗯 is not rewritten with commas", () => {
   const frames: ProsodyFrame[] = [];
   for (let p = 0; p < 3; p += 1) {
     const t0 = p * 0.5;
@@ -422,9 +419,7 @@ test("coquettish repeats get commas", () => {
     }
     frames.push(hush(t0 + 0.4));
   }
-  const heard = finishHeard("嗯嗯嗯", "", undefined, frames);
-  assert.match(heard, /，/);
-  assert.match(stripMarks(heard), /嗯/);
+  assert.equal(finishHeard("嗯嗯嗯", "", undefined, frames), "嗯嗯嗯");
 });
 
 

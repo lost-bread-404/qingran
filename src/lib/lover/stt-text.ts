@@ -1,6 +1,5 @@
 import { classifyCue, cuesFromProsody, glueCueParts, markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
-import { applyFeelToText, feelFromFrames } from "./emotion.ts";
-import { expandHeardCues, islandVoiced, listenVocal, renderBursts } from "./vocal-event.ts";
+import { islandVoiced, listenVocal } from "./vocal-event.ts";
 
 export const STT_KEYTERMS = [
   "嗯",
@@ -19,9 +18,7 @@ export const STT_KEYTERMS = [
   "喵",
   "嗯嗯",
   "嗯嗯嗯",
-  "嗯～",
   "啊啊",
-  "啊～",
   "呜呜",
   "哈哈",
   "喵喵",
@@ -402,22 +399,17 @@ export function recoverCues(stt: string, frames?: ProsodyFrame[]): string {
   const heard = listenVocal(frames);
   const fixed = rewriteMisheardCues(existing, frames);
 
-  if (fixed && !isMostlyFiller(fixed) && leftoverMeaning(fixed)) return fixed;
+  if (fixed) return fixed;
 
   if (heard.kind === "laugh") return heard.text;
   if (heard.kind === "cry") return heard.text;
   if (heard.kind === "pant") return heard.text;
   if (heard.kind === "hum") return heard.text;
 
-  if (!fixed) {
-    const voiced = islands.filter(islandVoiced);
-    if (!voiced.length) return "";
-    if (voiced.length === islands.length) return cuesFromProsody(frames);
-    return "";
-  }
-
-  if (islands.length <= 1) return fixed;
-  return expandHeardCues(fixed, islands);
+  const voiced = islands.filter(islandVoiced);
+  if (!voiced.length) return "";
+  if (voiced.length === islands.length) return cuesFromProsody(frames);
+  return "";
 }
 
 function stripHehe(text: string) {
@@ -445,7 +437,7 @@ function rewriteMisheardCues(text: string, frames?: ProsodyFrame[]) {
   if (!frames?.length || !looksLikeClosedCue(frames)) return text;
   const islands = voicedIslands(frames);
   if (!islands.length) return "嗯";
-  return renderBursts("嗯", islands);
+  return "嗯".repeat(Math.min(3, Math.max(1, islands.length)));
 }
 
 export function refineCueWords(
@@ -459,17 +451,11 @@ export function refineCueWords(
 export function finishHeard(
   server: string,
   browser: string,
-  words: CueWord[] | undefined,
+  _words: CueWord[] | undefined,
   frames: ProsodyFrame[] | undefined,
 ): string {
   const picked = pickTranscript(stripHehe(server), stripHehe(browser));
-  const recovered = recoverCues(picked, frames);
-  if (!recovered) return "";
-  const feel = frames?.length ? feelFromFrames(frames) : "calm";
-  if (isMostlyFiller(recovered)) {
-    return applyFeelToText(shapeCueProsody(recovered, words, frames), feel);
-  }
-  return applyFeelToText(shapeSajiaoTail(recovered, frames), feel);
+  return recoverCues(picked, frames);
 }
 
 function shapeSajiaoTail(text: string, frames?: ProsodyFrame[]): string {
