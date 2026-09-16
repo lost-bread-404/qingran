@@ -1,4 +1,5 @@
 import { BOND_MAX_CHARS, PORTRAIT_MAX_CHARS, SELF_MAX_CHARS } from "../config.ts";
+import { now as wallClock } from "../clock.ts";
 import { callModel } from "../llm.ts";
 import {
   dormantOldPortrait,
@@ -78,7 +79,7 @@ ${qingranNotes.map((n) => `${n.id}|${n.text}`).join("\n") || "（没有）"}
     bond_summary?: string;
   };
   const noteIds = new Set(relevant.map((n) => n.id));
-  const now = Date.now();
+  const now = wallClock();
   const byTopic = new Map(oldPortrait.map((p) => [p.topic, p]));
   for (const op of parsed.portrait_ops ?? []) {
     const topic = clipChars(String(op.topic ?? ""), 40);

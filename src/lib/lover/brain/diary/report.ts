@@ -1,4 +1,5 @@
 import { callModel } from "../llm.ts";
+import { now } from "../clock.ts";
 import {
   listDays,
   listEpisodes,
@@ -54,7 +55,9 @@ export async function buildReportData(month: string) {
       ...s,
       name: themes.find((t) => t.id === s.themeId)?.name ?? s.themeId,
     })),
-    antecedents: findings.filter((f) => f.kind === "antecedent").slice(0, 5),
+    findings: findings.filter((f) => f.tier === "finding"),
+    clues: findings.filter((f) => f.tier === "clue"),
+    antecedents: findings.filter((f) => f.kind === "antecedent" && f.tier === "finding").slice(0, 5),
     recovery: findings.filter((f) => f.kind === "recovery").slice(0, 3).map((f) => ({ ...f, clue: true })),
     wins: days.flatMap((d) => d.wins.map((w) => ({ day: d.day, text: w.text }))),
     themes: themes.map((t) => ({
@@ -95,7 +98,7 @@ export async function runReport(month: string, jobId?: string): Promise<void> {
     periodEnd: end,
     data,
     narrative,
-    createdAt: Date.now(),
+    createdAt: now(),
   });
   await patchMeta({ lastReportMonth: month });
 }

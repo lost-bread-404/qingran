@@ -68,6 +68,7 @@ export const Route = createFileRoute("/api/talk")({
                 timeZone,
               });
               send({ t: "timing", k: "pack_ms", ms: ctx.packMs });
+              send({ t: "timing", k: "db_first_ms", ms: ctx.dbFirstMs });
 
               let speech = "";
               let failed = false;

@@ -171,6 +171,7 @@ export type Finding = {
   counterDays: string[];
   userFeedback: string | null;
   computedAt: number;
+  tier: "finding" | "clue";
 };
 
 export type Episode = {

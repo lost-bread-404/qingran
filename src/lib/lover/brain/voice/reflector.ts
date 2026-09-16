@@ -15,6 +15,7 @@ import {
   saveMind,
 } from "../store.ts";
 import { formatClock } from "../time.ts";
+import { now } from "../clock.ts";
 import type { Mind } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { REFLECTOR_SYSTEM } from "./prompts.ts";
@@ -105,7 +106,7 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
         "\n";
     }
     const usableFindings = findings
-      .filter((f) => f.userFeedback !== "rejected" && f.kind !== "cooccur")
+      .filter((f) => f.userFeedback !== "rejected" && f.kind !== "cooccur" && f.tier === "finding")
       .slice(0, 5);
     if (usableFindings.length) {
       diaryBlock +=
@@ -134,7 +135,7 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
   const user = `【人设】
 ${systemPrompt}
 
-现在是${formatClock(Date.now(), tz)}。
+现在是${formatClock(now(), tz)}。
 
 【我自己】
 ${meta.selfSummary || "（还没有）"}

@@ -176,6 +176,15 @@ export default defineConfig(({ command, isPreview }) => ({
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
+            // Hobby Fluid 上限 300s。createServerFn 与 SSR 打进同一条
+            // Vercel Function，waitUntil 的长 drain 需要整条 function 都是 300s。
+            // /api/cron/brain 再用 functionRules 明确一次。
+            vercel: {
+              functions: { maxDuration: 300 },
+              functionRules: {
+                "/api/cron/brain": { maxDuration: 300 },
+              },
+            },
           }),
         ]
       : []),

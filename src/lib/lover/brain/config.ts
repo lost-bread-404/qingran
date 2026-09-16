@@ -119,12 +119,15 @@ export const FINDING_MIN_LIFT = 1.5;
 export const FINDING_MIN_UNEXPOSED = 5; // 对照组（没有前因的天）至少这么多天
 export const FINDING_MAX_P = 0.01; // 单侧 Fisher exact test
 export const RECOVERY_MAX_P = 0.05; // 恢复路径样本少，阈值放宽；报告中标注为“线索”
+export const CLUE_MAX_P = 0.05; // p 在 (FINDING_MAX_P, CLUE_MAX_P] 的条目标成 clue
 export const STUCK_MIN_WEEKS = 3;
 export const STALL_DAYS = 14;
 
 export const JOB_MAX_ATTEMPTS = 3;
 export const DRAIN_BUDGET_MS = 15_000;
-export const MANUAL_DRAIN_MS = 120_000;
+export const FUNCTION_MAX_MS = 300_000; // Vercel Hobby 上限
+export const LONG_DRAIN_MS = 270_000; // 留 30s 余量给收尾
+export const LOCK_SLACK_MS = 30_000;
 
 export const QR_VOICE_READS_DIARY = process.env.QR_VOICE_READS_DIARY !== "false";
 export const QR_CARE_CHECKIN = process.env.QR_CARE_CHECKIN === "true";

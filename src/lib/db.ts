@@ -169,6 +169,13 @@ async function createPgliteSql(): Promise<Sql> {
 }
 
 let sqlPromise: Promise<Sql> | null = null;
+let testSql: Sql | null = null;
+
+/** Eval / unit tests: swap in an isolated PGLite client. Pass null to restore. */
+export function installTestSql(sql: Sql | null): void {
+  testSql = sql;
+  sqlPromise = sql ? Promise.resolve(sql) : null;
+}
 
 async function createSql(): Promise<Sql> {
   if (typeof window !== "undefined") {
@@ -191,6 +198,7 @@ async function createSql(): Promise<Sql> {
  * both backends — define tables there, never inline in server functions.
  */
 export function getSql(): Promise<Sql> {
+  if (testSql) return Promise.resolve(testSql);
   sqlPromise ??= createSql().catch((err) => {
     sqlPromise = null; // don't memoize failures — let the next call retry
     throw err;

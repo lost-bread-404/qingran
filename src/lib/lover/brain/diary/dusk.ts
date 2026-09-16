@@ -1,4 +1,5 @@
 import { enqueue } from "../jobs.ts";
+import { now } from "../clock.ts";
 import { callModel } from "../llm.ts";
 import {
   getMeta,
@@ -173,7 +174,7 @@ ${intentions.map((i) => `${i.id}|${i.status}|${i.tag ?? ""}|${i.text}`).join("\n
     string,
     unknown
   >;
-  const now = Date.now();
+  const ts = now();
   const log: DayLog = {
     day,
     summary: String(parsed.summary ?? "").slice(0, 300),
@@ -190,7 +191,7 @@ ${intentions.map((i) => `${i.id}|${i.status}|${i.tag ?? ""}|${i.text}`).join("\n
     coverage: cover,
     noteIds: notes.map((n) => n.id),
     version: 1,
-    updatedAt: now,
+    updatedAt: ts,
   };
   await upsertDay(log);
 
@@ -208,14 +209,14 @@ ${intentions.map((i) => `${i.id}|${i.status}|${i.tag ?? ""}|${i.text}`).join("\n
         id: newId(),
         text,
         tag: String(op.tag ?? "") || null,
-        statedAt: now,
+        statedAt: ts,
         targetDay: String(op.target_day ?? "") || null,
         status: "open",
         startedAt: null,
         doneAt: null,
-        lastEvidenceAt: now,
+        lastEvidenceAt: ts,
         evidenceIds: evidence,
-        updatedAt: now,
+        updatedAt: ts,
       };
       await upsertIntention(row);
       continue;
@@ -223,14 +224,14 @@ ${intentions.map((i) => `${i.id}|${i.status}|${i.tag ?? ""}|${i.text}`).join("\n
     const id = String(op.id ?? "");
     const cur = known.get(id);
     if (!cur) continue;
-    const next = { ...cur, evidenceIds: [...cur.evidenceIds, ...evidence], lastEvidenceAt: now, updatedAt: now };
+    const next = { ...cur, evidenceIds: [...cur.evidenceIds, ...evidence], lastEvidenceAt: ts, updatedAt: ts };
     if (kind === "START") {
       next.status = "started";
-      next.startedAt = next.startedAt ?? now;
+      next.startedAt = next.startedAt ?? ts;
     } else if (kind === "DONE") {
       next.status = "done";
-      next.doneAt = now;
-      if (!next.startedAt) next.startedAt = now;
+      next.doneAt = ts;
+      if (!next.startedAt) next.startedAt = ts;
     } else if (kind === "DROP") {
       next.status = "dropped";
     }

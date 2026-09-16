@@ -1,4 +1,5 @@
 import { callModel } from "../llm.ts";
+import { now as wallClock } from "../clock.ts";
 import { listDayFactors, listExperiments, listFactors, upsertExperiment } from "../store.ts";
 import { daysInclusive, shiftDay } from "../time.ts";
 import type { Experiment } from "../types.ts";
@@ -41,7 +42,7 @@ export async function proposeExperiments(reportData: unknown, jobId?: string): P
   const items = Array.isArray((result.json as { items?: unknown })?.items)
     ? ((result.json as { items: Array<Record<string, string>> }).items ?? [])
     : [];
-  const now = Date.now();
+  const now = wallClock();
   const start = new Date(now).toISOString().slice(0, 10);
   for (const item of items.slice(0, 3)) {
     const row: Experiment = {

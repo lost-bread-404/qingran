@@ -1,4 +1,5 @@
 import {
+  CLUE_MAX_P,
   FINDING_MAX_P,
   FINDING_MIN_EXPOSED,
   FINDING_MIN_LIFT,
@@ -9,6 +10,7 @@ import {
   STALL_DAYS,
   STUCK_MIN_WEEKS,
 } from "../config.ts";
+import { now } from "../clock.ts";
 import { daysInclusive, isoWeek, shiftDay } from "../time.ts";
 import type { DayFactor, DayLog, Episode, Finding, Intention, Theme } from "../types.ts";
 
@@ -58,13 +60,29 @@ export function scoreOf(c: LiftCounts, lift: number): number {
 }
 
 export function keepFinding(c: LiftCounts, lift: number, maxP = FINDING_MAX_P): boolean {
+  return classifyFinding(c, lift, maxP) != null;
+}
+
+function meetsBase(c: LiftCounts, lift: number): boolean {
   return (
     c.n11 >= FINDING_MIN_N11 &&
     c.n11 + c.n10 >= FINDING_MIN_EXPOSED &&
     c.n01 + c.n00 >= FINDING_MIN_UNEXPOSED &&
-    lift >= FINDING_MIN_LIFT &&
-    fisherOneSided(c) <= maxP
+    lift >= FINDING_MIN_LIFT
   );
+}
+
+/** p≤FINDING_MAX_P → finding；FINDING_MAX_P < p ≤ maxP → clue。maxP 默认 CLUE_MAX_P。 */
+export function classifyFinding(
+  c: LiftCounts,
+  lift: number,
+  maxP = CLUE_MAX_P,
+): Finding["tier"] | null {
+  if (!meetsBase(c, lift)) return null;
+  const p = fisherOneSided(c);
+  if (p <= FINDING_MAX_P) return "finding";
+  if (p <= maxP) return "clue";
+  return null;
 }
 
 function logFactorial(n: number): number {
@@ -99,7 +117,7 @@ export function buildEpisodes(
   factorId: string,
   series: Series,
   orderedDays: string[],
-  now = Date.now(),
+  at = now(),
 ): Episode[] {
   const episodes: Episode[] = [];
   let i = 0;
@@ -137,7 +155,7 @@ export function buildEpisodes(
       endKnown,
       days,
       evidenceIds: [],
-      computedAt: now,
+      computedAt: at,
     });
   }
   return episodes;
@@ -170,9 +188,9 @@ export function lagAnalysis(
   outcome: Series,
   antecedent: Series,
   orderedDays: string[],
-  now = Date.now(),
+  at = now(),
 ): Finding | null {
-  let best: { lag: number; counts: LiftCounts; lift: number; score: number } | null = null;
+  let best: { lag: number; counts: LiftCounts; lift: number; score: number; tier: Finding["tier"] } | null = null;
   for (let k = 0; k <= LAG_MAX; k++) {
     const counts: LiftCounts = { n11: 0, n10: 0, n01: 0, n00: 0 };
     for (const d of orderedDays) {
@@ -185,9 +203,10 @@ export function lagAnalysis(
       addCell(counts, o, x);
     }
     const lift = liftOf(counts);
-    if (!keepFinding(counts, lift)) continue;
+    const tier = classifyFinding(counts, lift);
+    if (!tier) continue;
     const score = scoreOf(counts, lift);
-    if (!best || score > best.score) best = { lag: k, counts, lift, score };
+    if (!best || score > best.score) best = { lag: k, counts, lift, score, tier };
   }
   if (!best) return null;
   return {
@@ -202,7 +221,8 @@ export function lagAnalysis(
     exampleDays: collectDays(outcome, antecedent, orderedDays, best.lag, 1, 1),
     counterDays: collectDays(outcome, antecedent, orderedDays, best.lag, 0, 1),
     userFeedback: null,
-    computedAt: now,
+    computedAt: at,
+    tier: best.tier,
   };
 }
 
@@ -212,7 +232,7 @@ export function recoveryAnalysis(
   outcome: Series,
   antecedent: Series,
   episodes: Episode[],
-  now = Date.now(),
+  at = now(),
 ): Finding | null {
   const relevant = episodes.filter((e) => e.factorId === outcomeId);
   let best: { lag: number; counts: LiftCounts; lift: number; score: number } | null = null;
@@ -230,8 +250,8 @@ export function recoveryAnalysis(
       }
     }
     const lift = liftOf(counts);
-    // 恢复路径只在低谷期内部计算、样本天然少，阈值放宽到 RECOVERY_MAX_P
-    if (!keepFinding(counts, lift, RECOVERY_MAX_P)) continue;
+    // 恢复路径只在低谷期内部计算、样本天然少；达标后一律标 clue
+    if (!classifyFinding(counts, lift, RECOVERY_MAX_P)) continue;
     const score = scoreOf(counts, lift);
     if (!best || score > best.score) best = { lag: k, counts, lift, score };
   }
@@ -248,7 +268,8 @@ export function recoveryAnalysis(
     exampleDays: [],
     counterDays: [],
     userFeedback: null,
-    computedAt: now,
+    computedAt: at,
+    tier: "clue",
   };
 }
 
@@ -258,7 +279,7 @@ export function cooccurAnalysis(
   aWeeks: Record<string, number>,
   bWeeks: Record<string, number>,
   weeks: string[],
-  now = Date.now(),
+  at = now(),
 ): Finding | null {
   const counts: LiftCounts = { n11: 0, n10: 0, n01: 0, n00: 0 };
   const example: string[] = [];
@@ -271,7 +292,8 @@ export function cooccurAnalysis(
     if (a === 0 && b === 1 && counter.length < 5) counter.push(w);
   }
   const lift = liftOf(counts);
-  if (!keepFinding(counts, lift)) return null;
+  const tier = classifyFinding(counts, lift);
+  if (!tier) return null;
   return {
     id: hashFinding("cooccur", aId, bId, 0),
     kind: "cooccur",
@@ -284,7 +306,8 @@ export function cooccurAnalysis(
     exampleDays: example,
     counterDays: counter,
     userFeedback: null,
-    computedAt: now,
+    computedAt: at,
+    tier,
   };
 }
 
@@ -317,7 +340,7 @@ export type SayDo = {
   stalledIds: string[];
 };
 
-export function sayDoByTag(intentions: Intention[], now = Date.now()): SayDo[] {
+export function sayDoByTag(intentions: Intention[], at = now()): SayDo[] {
   const groups = new Map<string, Intention[]>();
   for (const it of intentions) {
     const tag = it.tag || "未分类";
@@ -333,7 +356,7 @@ export function sayDoByTag(intentions: Intention[], now = Date.now()): SayDo[] {
     const delays: number[] = [];
     const stalledIds: string[] = [];
     for (const it of list) {
-      const ageDays = (now - it.lastEvidenceAt) / 86_400_000;
+      const ageDays = (at - it.lastEvidenceAt) / 86_400_000;
       const isStalled =
         (it.status === "open" || it.status === "started") && ageDays > STALL_DAYS;
       if (it.status === "done") done += 1;
@@ -426,20 +449,20 @@ export function computeAllFindings(opts: {
   themeWeeks: Array<{ themeId: string; week: string; mentions: number }>;
   now?: number;
 }): Finding[] {
-  const now = opts.now ?? Date.now();
+  const at = opts.now ?? now();
   const days = orderedUnionDays(opts.dayFactors);
   const outcomes = opts.factors.filter((f) => f.isOutcome);
   const others = opts.factors;
   const findings: Finding[] = [];
   for (const o of outcomes) {
     const oSeries = seriesFromDayFactors(opts.dayFactors, o.id);
-    const episodes = buildEpisodes(o.id, oSeries, days, now);
+    const episodes = buildEpisodes(o.id, oSeries, days, at);
     for (const x of others) {
       if (x.id === o.id) continue;
       const xSeries = seriesFromDayFactors(opts.dayFactors, x.id);
-      const lag = lagAnalysis(o.id, x.id, oSeries, xSeries, days, now);
+      const lag = lagAnalysis(o.id, x.id, oSeries, xSeries, days, at);
       if (lag) findings.push(lag);
-      const rec = recoveryAnalysis(o.id, x.id, oSeries, xSeries, episodes, now);
+      const rec = recoveryAnalysis(o.id, x.id, oSeries, xSeries, episodes, at);
       if (rec) findings.push(rec);
     }
   }
@@ -454,7 +477,7 @@ export function computeAllFindings(opts: {
     for (let j = i + 1; j < themeIds.length; j++) {
       const a = themeIds[i]!;
       const b = themeIds[j]!;
-      const co = cooccurAnalysis(a, b, byTheme[a]!, byTheme[b]!, weeks, now);
+      const co = cooccurAnalysis(a, b, byTheme[a]!, byTheme[b]!, weeks, at);
       if (co) findings.push(co);
     }
   }

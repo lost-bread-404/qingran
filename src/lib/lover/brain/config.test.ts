@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { MODEL_CLASSES, resolveRoute, validateModelClasses } from "./config.ts";
+import { LONG_DRAIN_MS, MODEL_CLASSES, ROUTES, resolveRoute, validateModelClasses } from "./config.ts";
 
 test("model classes pass capability checks", () => {
   assert.deepEqual(validateModelClasses(), []);
@@ -18,6 +18,15 @@ test("route overrides class, env route beats class", () => {
   const reflect = resolveRoute("reflect");
   assert.equal(reflect.cls, "FAST_THINKER");
   assert.equal(reflect.effort, "low");
+});
+
+test("every route timeout fits in LONG_DRAIN_MS with 10s slack", () => {
+  for (const [name, spec] of Object.entries(ROUTES)) {
+    assert.ok(
+      spec.timeoutMs < LONG_DRAIN_MS - 10_000,
+      `${name} timeout ${spec.timeoutMs} >= LONG_DRAIN_MS - 10s`,
+    );
+  }
 });
 
 test("src tree has no grok- model strings outside config.ts", async () => {

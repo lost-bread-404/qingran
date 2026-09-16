@@ -1,16 +1,18 @@
 import {
   DRAIN_BUDGET_MS,
   JOB_MAX_ATTEMPTS,
-  MANUAL_DRAIN_MS,
+  LOCK_SLACK_MS,
+  LONG_DRAIN_MS,
 } from "./config.ts";
-import { canStartJob, retryDelayMs } from "./jobs-policy.ts";
+import { now } from "./clock.ts";
+import { canStartJob, retryDelayMs, timeoutFor } from "./jobs-policy.ts";
 import {
   claimJob,
   cleanupOldJobs,
   finishJob,
   insertJob,
   newerReflectExists,
-  restoreClaim,
+  peekNextJob,
   skipOldReflect,
 } from "./store.ts";
 import { newId } from "../storage.ts";
@@ -22,9 +24,10 @@ export async function enqueue(
   type: JobType,
   dedupeKey: string,
   payload: Record<string, unknown> = {},
-  runAfter = Date.now(),
+  runAfter = now(),
   force = false,
 ): Promise<boolean> {
+  const ts = now();
   const job: BrainJob = {
     id: newId(),
     type,
@@ -35,8 +38,8 @@ export async function enqueue(
     runAfter,
     lockedUntil: null,
     lastError: null,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt: ts,
+    updatedAt: ts,
   };
   const inserted = await insertJob(job, force);
   if (inserted && type === "reflect") {
@@ -93,17 +96,16 @@ async function runOne(job: BrainJob): Promise<void> {
 }
 
 export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
-  const started = Date.now();
+  const wall0 = Date.now();
   let ran = 0;
-  await cleanupOldJobs(started);
-  while (Date.now() - started < budgetMs) {
-    const remaining = budgetMs - (Date.now() - started);
-    const job = await claimJob(Date.now(), Math.max(remaining, 5_000));
+  await cleanupOldJobs(now());
+  while (Date.now() - wall0 < budgetMs) {
+    const remaining = budgetMs - (Date.now() - wall0);
+    const peek = await peekNextJob(now());
+    if (!peek) break;
+    if (!canStartJob(peek.type, remaining)) break;
+    const job = await claimJob(now(), timeoutFor(peek.type) + LOCK_SLACK_MS);
     if (!job) break;
-    if (!canStartJob(job.type, remaining)) {
-      await restoreClaim(job.id, job.attempts);
-      break;
-    }
     try {
       await runOne(job);
       ran += 1;
@@ -111,7 +113,7 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
       const message = err instanceof Error ? err.message : String(err);
       if (job.attempts < JOB_MAX_ATTEMPTS) {
         const delay = retryDelayMs(job.attempts);
-        await finishJob(job.id, "pending", { runAfter: Date.now() + delay, error: message });
+        await finishJob(job.id, "pending", { runAfter: now() + delay, error: message });
       } else {
         await finishJob(job.id, "failed", { error: message });
       }
@@ -120,8 +122,8 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
   return ran;
 }
 
-/** 手动执行：调用方负责先 enqueue 带完整 payload 的 job，这里只负责 drain。 */
-export async function runJobsNow(budgetMs = MANUAL_DRAIN_MS): Promise<number> {
+/** 手动 / Diary / cron：调用方负责先 enqueue，这里只负责在长预算内 drain。 */
+export async function runJobsNow(budgetMs = LONG_DRAIN_MS): Promise<number> {
   return drainJobs(budgetMs);
 }
 

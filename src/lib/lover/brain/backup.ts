@@ -1,0 +1,625 @@
+/**
+ * Qingran backup v2. Lives in brain/ so it does not collide with
+ * ios-microphone's src/lib/lover/backup.ts (v1).
+ */
+import { getSql } from "../../db.ts";
+import { lockedProfile, type Profile } from "../types.ts";
+import { now } from "./clock.ts";
+import { enqueue } from "./jobs.ts";
+import { bumpNotesVersion, pgTextArray } from "./store.ts";
+import { localDay, sessionIdFor } from "./time.ts";
+import { resetRetrieveCache } from "./voice/retrieve.ts";
+
+export const BACKUP_KIND = "qingran-backup";
+export const BACKUP_VERSION = 2;
+const PAGE_BYTES = 750_000;
+
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | Json[]
+  | { [key: string]: Json };
+
+export type BackupRow = { [key: string]: Json };
+export type BackupCursor = { table: string; after: string[] };
+
+type ColKind = "text" | "int" | "bool" | "json" | "text[]" | "num";
+
+export type TableSpec = {
+  name: string;
+  pk: string[];
+  columns: Array<[string, ColKind]>;
+};
+
+/** Export order (spec §4.1). Import order is IMPORT_ORDER. */
+export const BACKUP_TABLES: TableSpec[] = [
+  {
+    name: "qingran_messages",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["role", "text"],
+      ["body", "text"],
+      ["created_at", "int"],
+      ["kind", "text"],
+      ["archived_at", "int"],
+      ["session_id", "text"],
+      ["local_day", "text"],
+    ],
+  },
+  {
+    name: "mem_notes",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["text", "text"],
+      ["tags", "text[]"],
+      ["subject", "text"],
+      ["lens", "text[]"],
+      ["from_rosie", "bool"],
+      ["weight", "int"],
+      ["status", "text"],
+      ["superseded_by", "text"],
+      ["links", "text[]"],
+      ["happened_at", "int"],
+      ["local_day", "text"],
+      ["source_ids", "text[]"],
+      ["recall_count", "int"],
+      ["last_recalled_at", "int"],
+      ["created_at", "int"],
+      ["updated_at", "int"],
+      ["batch_key", "text"],
+      ["supersedes", "text"],
+    ],
+  },
+  {
+    name: "mem_history",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["table_name", "text"],
+      ["row_id", "text"],
+      ["op", "text"],
+      ["before", "json"],
+      ["after", "json"],
+      ["job_id", "text"],
+      ["at", "int"],
+    ],
+  },
+  {
+    name: "qr_portrait",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["topic", "text"],
+      ["body", "text"],
+      ["status", "text"],
+      ["evidence_ids", "text[]"],
+      ["last_seen", "int"],
+      ["updated_at", "int"],
+    ],
+  },
+  {
+    name: "qr_mind",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["data", "json"],
+      ["turn_seq", "int"],
+      ["updated_at", "int"],
+    ],
+  },
+  {
+    name: "brain_meta",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["data", "json"],
+    ],
+  },
+  {
+    name: "diary_days",
+    pk: ["day"],
+    columns: [
+      ["day", "text"],
+      ["summary", "text"],
+      ["energy", "int"],
+      ["mood", "int"],
+      ["body", "text"],
+      ["did", "json"],
+      ["avoided", "json"],
+      ["events", "json"],
+      ["wins", "json"],
+      ["first_active", "int"],
+      ["last_active", "int"],
+      ["msg_count", "int"],
+      ["coverage", "text"],
+      ["note_ids", "text[]"],
+      ["version", "int"],
+      ["updated_at", "int"],
+    ],
+  },
+  {
+    name: "diary_intentions",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["text", "text"],
+      ["tag", "text"],
+      ["stated_at", "int"],
+      ["target_day", "text"],
+      ["status", "text"],
+      ["started_at", "int"],
+      ["done_at", "int"],
+      ["last_evidence_at", "int"],
+      ["evidence_ids", "text[]"],
+      ["updated_at", "int"],
+    ],
+  },
+  {
+    name: "diary_factors",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["name", "text"],
+      ["definition", "text"],
+      ["version", "int"],
+      ["is_outcome", "bool"],
+      ["status", "text"],
+      ["origin", "text"],
+      ["user_feedback", "text"],
+      ["created_at", "int"],
+      ["updated_at", "int"],
+    ],
+  },
+  {
+    name: "diary_day_factors",
+    pk: ["day", "factor_id"],
+    columns: [
+      ["day", "text"],
+      ["factor_id", "text"],
+      ["version", "int"],
+      ["value", "int"],
+      ["evidence_ids", "text[]"],
+    ],
+  },
+  {
+    name: "diary_themes",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["name", "text"],
+      ["definition", "text"],
+      ["version", "int"],
+      ["status", "text"],
+      ["merged_into", "text"],
+      ["parent_id", "text"],
+      ["user_feedback", "text"],
+      ["created_at", "int"],
+      ["updated_at", "int"],
+    ],
+  },
+  {
+    name: "diary_theme_members",
+    pk: ["theme_id", "note_id"],
+    columns: [
+      ["theme_id", "text"],
+      ["note_id", "text"],
+      ["version", "int"],
+    ],
+  },
+  {
+    name: "diary_theme_weeks",
+    pk: ["theme_id", "week"],
+    columns: [
+      ["theme_id", "text"],
+      ["week", "text"],
+      ["mentions", "int"],
+      ["action_taken", "int"],
+      ["mood_avg", "num"],
+    ],
+  },
+  {
+    name: "diary_episodes",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["factor_id", "text"],
+      ["start_day", "text"],
+      ["end_day", "text"],
+      ["end_known", "bool"],
+      ["days", "int"],
+      ["evidence_ids", "text[]"],
+      ["computed_at", "int"],
+    ],
+  },
+  {
+    name: "diary_findings",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["kind", "text"],
+      ["outcome_id", "text"],
+      ["antecedent_id", "text"],
+      ["lag", "int"],
+      ["n11", "int"],
+      ["n10", "int"],
+      ["n01", "int"],
+      ["n00", "int"],
+      ["lift", "num"],
+      ["score", "num"],
+      ["example_days", "text[]"],
+      ["counter_days", "text[]"],
+      ["user_feedback", "text"],
+      ["computed_at", "int"],
+      ["tier", "text"],
+    ],
+  },
+  {
+    name: "diary_experiments",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["hypothesis", "text"],
+      ["action", "text"],
+      ["outcome_id", "text"],
+      ["compliance_factor_id", "text"],
+      ["start_day", "text"],
+      ["end_day", "text"],
+      ["status", "text"],
+      ["result", "json"],
+      ["created_at", "int"],
+    ],
+  },
+  {
+    name: "diary_reports",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["period_start", "text"],
+      ["period_end", "text"],
+      ["data", "json"],
+      ["narrative", "text"],
+      ["created_at", "int"],
+    ],
+  },
+];
+
+export const IMPORT_ORDER = [
+  "brain_meta",
+  "qingran_messages",
+  "mem_notes",
+  ...BACKUP_TABLES.map((t) => t.name).filter(
+    (n) => n !== "brain_meta" && n !== "qingran_messages" && n !== "mem_notes",
+  ),
+];
+
+const TABLE_BY_NAME = new Map(BACKUP_TABLES.map((t) => [t.name, t]));
+
+function jsonSafe(value: unknown): Json {
+  if (value == null) return null;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map(jsonSafe);
+  if (typeof value === "object") {
+    const out: { [key: string]: Json } = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = jsonSafe(v);
+    return out;
+  }
+  return String(value);
+}
+
+function pkTuple(row: Record<string, unknown>, pk: string[]): string[] {
+  return pk.map((k) => String(row[k] ?? ""));
+}
+
+function cmpTuple(a: string[], b: string[]): number {
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const x = a[i] ?? "";
+    const y = b[i] ?? "";
+    if (x < y) return -1;
+    if (x > y) return 1;
+  }
+  return 0;
+}
+
+async function loadProfile(): Promise<Profile> {
+  const db = await getSql();
+  const rows = await db.query<{ data: unknown }>("select data from qingran_profile where id = 1");
+  const raw = rows[0]?.data;
+  const data = typeof raw === "string" ? (JSON.parse(raw) as unknown) : raw;
+  return lockedProfile(data ?? {});
+}
+
+async function saveProfile(profile: Profile): Promise<void> {
+  const db = await getSql();
+  await db.query(
+    `insert into qingran_profile (id, data, updated_at)
+     values (1, $1::jsonb, now())
+     on conflict (id) do update set data = excluded.data, updated_at = now()`,
+    [JSON.stringify(lockedProfile(profile))],
+  );
+}
+
+export type ExportPage = {
+  kind: typeof BACKUP_KIND;
+  version: 2;
+  exportedAt: number;
+  profile?: Profile;
+  table: string;
+  rows: BackupRow[];
+  next: BackupCursor | null;
+  done: boolean;
+};
+
+export async function exportBackupPage(opts: {
+  cursor?: BackupCursor | null;
+  maxBytes?: number;
+  exportedAt?: number;
+}): Promise<ExportPage> {
+  const maxBytes = opts.maxBytes ?? PAGE_BYTES;
+  const exportedAt = opts.exportedAt ?? now();
+  const first = !opts.cursor;
+  const startIdx = opts.cursor
+    ? BACKUP_TABLES.findIndex((t) => t.name === opts.cursor!.table)
+    : 0;
+  if (startIdx < 0) {
+    return {
+      kind: BACKUP_KIND,
+      version: 2,
+      exportedAt,
+      table: "",
+      rows: [],
+      next: null,
+      done: true,
+    };
+  }
+
+  const db = await getSql();
+  for (let i = startIdx; i < BACKUP_TABLES.length; i++) {
+    const spec = BACKUP_TABLES[i]!;
+    const after = opts.cursor && spec.name === opts.cursor.table ? opts.cursor.after : [];
+    const order = spec.pk.join(", ");
+    let sqlText = `select * from ${spec.name} order by ${order} limit 400`;
+    const params: unknown[] = [];
+    if (after.length === spec.pk.length) {
+      const placeholders = spec.pk.map((_, idx) => `$${idx + 1}`);
+      sqlText = `select * from ${spec.name} where (${order}) > (${placeholders.join(",")}) order by ${order} limit 400`;
+      params.push(...after);
+    }
+    const fetched = await db.query<Record<string, unknown>>(sqlText, params);
+    const rows: BackupRow[] = [];
+    let encoded = 2;
+    for (const row of fetched) {
+      const clean: BackupRow = {};
+      for (const [col] of spec.columns) {
+        if (col in row) clean[col] = jsonSafe(row[col]);
+      }
+      const nextEncoded = encoded + JSON.stringify(clean).length + 1;
+      if (rows.length && nextEncoded > maxBytes) {
+        return {
+          kind: BACKUP_KIND,
+          version: 2,
+          exportedAt,
+          ...(first ? { profile: await loadProfile() } : {}),
+          table: spec.name,
+          rows,
+          next: { table: spec.name, after: pkTuple(rows[rows.length - 1]!, spec.pk) },
+          done: false,
+        };
+      }
+      rows.push(clean);
+      encoded = nextEncoded;
+    }
+    if (rows.length) {
+      const last = rows[rows.length - 1]!;
+      const more = fetched.length >= 400;
+      const next: BackupCursor | null = more
+        ? { table: spec.name, after: pkTuple(last, spec.pk) }
+        : i + 1 < BACKUP_TABLES.length
+          ? { table: BACKUP_TABLES[i + 1]!.name, after: [] }
+          : null;
+      return {
+        kind: BACKUP_KIND,
+        version: 2,
+        exportedAt,
+        ...(first ? { profile: await loadProfile() } : {}),
+        table: spec.name,
+        rows,
+        next,
+        done: next == null,
+      };
+    }
+  }
+  return {
+    kind: BACKUP_KIND,
+    version: 2,
+    exportedAt,
+    ...(first ? { profile: await loadProfile() } : {}),
+    table: "",
+    rows: [],
+    next: null,
+    done: true,
+  };
+}
+
+function requiredOk(spec: TableSpec, row: BackupRow): boolean {
+  for (const key of spec.pk) {
+    if (row[key] == null || row[key] === "") return false;
+  }
+  return true;
+}
+
+function bindValue(kind: ColKind, value: unknown): unknown {
+  if (value == null) return null;
+  if (kind === "text[]") {
+    const arr = Array.isArray(value) ? value.map(String) : [];
+    return pgTextArray(arr);
+  }
+  if (kind === "json") {
+    return typeof value === "string" ? value : JSON.stringify(value);
+  }
+  if (kind === "bool") return value === true || value === "t" || value === "true" || value === 1;
+  if (kind === "int") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (kind === "num") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return String(value);
+}
+
+export async function importTableChunk(
+  table: string,
+  rows: BackupRow[],
+): Promise<{ inserted: number; updated: number; skipped: number }> {
+  const spec = TABLE_BY_NAME.get(table);
+  if (!spec) return { inserted: 0, updated: 0, skipped: rows.length };
+  const db = await getSql();
+  let inserted = 0;
+  let updated = 0;
+  let skipped = 0;
+  const pkList = spec.pk;
+  const cols = spec.columns.filter(([name]) => {
+    // older dumps may omit later columns (batch_key, tier)
+    return true;
+  });
+
+  for (const raw of rows) {
+    if (!raw || typeof raw !== "object" || !requiredOk(spec, raw)) {
+      skipped += 1;
+      continue;
+    }
+    const present = cols.filter(([name]) => name in raw || pkList.includes(name));
+    const names = present.map(([n]) => n);
+    const placeholders = present.map(([n, kind], i) => {
+      if (kind === "json") return `$${i + 1}::jsonb`;
+      if (kind === "text[]") return `$${i + 1}::text[]`;
+      return `$${i + 1}`;
+    });
+    const values = present.map(([n, kind]) => bindValue(kind, raw[n]));
+    const conflict = pkList.join(", ");
+    const updates = names
+      .filter((n) => !pkList.includes(n))
+      .map((n) => `${n} = excluded.${n}`)
+      .join(", ");
+    const wherePk = pkList.map((n, i) => `${n} = $${i + 1}`).join(" and ");
+    const pkVals = pkList.map((n) => raw[n]);
+    const existing = await db.query<{ n: number }>(
+      `select 1 as n from ${spec.name} where ${wherePk} limit 1`,
+      pkVals,
+    );
+    const sqlText = updates
+      ? `insert into ${spec.name} (${names.join(",")}) values (${placeholders.join(",")})
+         on conflict (${conflict}) do update set ${updates}`
+      : `insert into ${spec.name} (${names.join(",")}) values (${placeholders.join(",")})
+         on conflict (${conflict}) do nothing`;
+    await db.query(sqlText, values);
+    if (existing.length) updated += 1;
+    else inserted += 1;
+  }
+  return { inserted, updated, skipped };
+}
+
+export async function finishImport(opts: { v1?: boolean } = {}): Promise<void> {
+  try {
+    const db = await getSql();
+    await db.query(
+      `select setval('mem_history_id_seq', (select coalesce(max(id), 1) from mem_history))`,
+    );
+  } catch {
+    /* PGLite may not expose the sequence the same way */
+  }
+  await bumpNotesVersion();
+  resetRetrieveCache();
+  const ts = now();
+  await enqueue("reflect", `reflect:import:${ts}`, { turnSeq: ts }, ts, true);
+  if (opts.v1) {
+    await enqueue("archive", `archive:import:${ts}`, { ids: [] }, ts, true);
+  }
+}
+
+export type V1Backup = {
+  kind: typeof BACKUP_KIND;
+  version: 1;
+  exportedAt?: number;
+  profile?: unknown;
+  memories?: Array<{ id?: string; text?: string; createdAt?: number; updatedAt?: number }>;
+  messages?: Array<{
+    id?: string;
+    role?: string;
+    text?: string;
+    createdAt?: number;
+    kind?: string;
+  }>;
+};
+
+export function convertV1(
+  raw: V1Backup,
+  tz = "UTC",
+): {
+  profile: Profile;
+  tables: {
+    qingran_messages: BackupRow[];
+    mem_notes: BackupRow[];
+  };
+} {
+  const profile = lockedProfile(raw.profile ?? {});
+  const messages = [...(raw.messages ?? [])]
+    .map((m) => ({
+      id: String(m.id ?? ""),
+      role: m.role === "assistant" ? "assistant" : "user",
+      body: String(m.text ?? "").slice(0, 4000),
+      created_at: Number(m.createdAt) || 0,
+      kind: m.kind === "steer" || m.kind === "setting" ? m.kind : "say",
+    }))
+    .filter((m) => m.id)
+    .sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id));
+
+  let prev: { createdAt: number; sessionId: string } | null = null;
+  const qingran_messages = messages.map((m) => {
+    const session_id = sessionIdFor(m.created_at, prev, tz);
+    prev = { createdAt: m.created_at, sessionId: session_id };
+    return {
+      ...m,
+      archived_at: null,
+      session_id,
+      local_day: localDay(m.created_at, tz),
+    };
+  });
+
+  const mem_notes = (raw.memories ?? [])
+    .filter((m) => m && (m.id || m.text))
+    .map((m) => {
+      const created = Number(m.createdAt) || 0;
+      const id = String(m.id ?? "");
+      return {
+        id: id.startsWith("legacy:") ? id : `legacy:${id}`,
+        text: String(m.text ?? "").slice(0, 240),
+        tags: [],
+        subject: "us",
+        lens: ["bond", "diary"],
+        from_rosie: true,
+        weight: 4,
+        status: "active",
+        superseded_by: null,
+        links: [],
+        happened_at: created,
+        local_day: localDay(created, tz),
+        source_ids: [],
+        recall_count: 0,
+        last_recalled_at: null,
+        created_at: created,
+        updated_at: Number(m.updatedAt) || created,
+      };
+    });
+
+  return { profile, tables: { qingran_messages, mem_notes } };
+}
+
+export { saveProfile, loadProfile };

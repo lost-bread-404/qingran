@@ -6,7 +6,8 @@ artifacts
 screenshots
 attachments
 .grok
-*.log
+out
+
 .env
 .env.*
 .project_id

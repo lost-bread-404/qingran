@@ -20,6 +20,7 @@ export { buildTail, buildVoiceMessages } from "./pack-build.ts";
 export type HotContext = {
   messages: VoiceChatMessage[];
   packMs: number;
+  dbFirstMs: number;
   sessionId: string | null;
   user: StoredMessage;
 };
@@ -33,7 +34,12 @@ export async function loadHotContext(input: {
   timeZone: string;
 }): Promise<HotContext> {
   const t0 = Date.now();
+  let dbFirstMs = 0;
+  const markFirst = () => {
+    if (!dbFirstMs) dbFirstMs = Date.now() - t0;
+  };
   const userExisting = await getMessage(input.userMsgId);
+  markFirst();
   const user =
     userExisting ??
     (await upsertMessage({
@@ -83,6 +89,7 @@ export async function loadHotContext(input: {
   return {
     messages,
     packMs: Date.now() - t0,
+    dbFirstMs,
     sessionId: user.sessionId,
     user,
   };

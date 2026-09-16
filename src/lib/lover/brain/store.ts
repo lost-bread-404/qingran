@@ -1,6 +1,7 @@
-import { getSql, type Sql } from "@/lib/db";
+import { getSql, type Sql } from "../../db.ts";
 import { newId } from "../storage.ts";
 import { HISTORY_WINDOW, INDEX_MAX_ITEMS, SESSION_GAP_MS } from "./config.ts";
+import { now } from "./clock.ts";
 import { localDay, sessionIdFor, shiftDay } from "./time.ts";
 import { similar } from "./text.ts";
 import type {
@@ -169,7 +170,7 @@ export async function saveMind(mind: Mind, expectedTurn: number): Promise<boolea
      set data = $1::jsonb, turn_seq = $2, updated_at = $3
      where id = 1 and turn_seq < $2
      returning id`,
-    [JSON.stringify(mind), expectedTurn, Date.now()],
+    [JSON.stringify(mind), expectedTurn, now()],
   );
   return rows.length > 0;
 }
@@ -178,7 +179,7 @@ export async function resetMind(): Promise<void> {
   const db = await getSql();
   await db.query(
     "update qr_mind set data = '{}'::jsonb, turn_seq = 0, updated_at = $1 where id = 1",
-    [Date.now()],
+    [now()],
   );
 }
 
@@ -384,7 +385,7 @@ async function writeHistory(
   await db.query(
     `insert into mem_history (table_name, row_id, op, before, after, job_id, at)
      values ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7)`,
-    [table, rowId, op, JSON.stringify(before ?? null), JSON.stringify(after ?? null), jobId ?? null, Date.now()],
+    [table, rowId, op, JSON.stringify(before ?? null), JSON.stringify(after ?? null), jobId ?? null, now()],
   );
 }
 
@@ -432,7 +433,7 @@ export async function abandonPendingBatch(batchKey: string): Promise<number> {
   const rows = await db.query<{ id: string }>(
     `update mem_notes set status = 'archived', updated_at = $2
      where batch_key = $1 and status = 'pending' returning id`,
-    [batchKey, Date.now()],
+    [batchKey, now()],
   );
   return rows.length;
 }
@@ -574,7 +575,7 @@ export async function notesForDay(day: string, diaryFromRosie = false): Promise<
 
 export async function heavyRecentNotes(days: number, minWeight: number): Promise<Note[]> {
   const db = await getSql();
-  const cutoff = Date.now() - days * 86_400_000;
+  const cutoff = now() - days * 86_400_000;
   const rows = await db.query<Record<string, unknown>>(
     `select * from mem_notes
      where status = 'active' and weight >= $1 and happened_at >= $2
@@ -590,7 +591,7 @@ export async function supersedeNote(oldId: string, newIdValue: string, jobId?: s
   const db = await getSql();
   await db.query(
     `update mem_notes set status = 'superseded', superseded_by = $2, updated_at = $3 where id = $1`,
-    [oldId, newIdValue, Date.now()],
+    [oldId, newIdValue, now()],
   );
   await writeHistory(
     "mem_notes",
@@ -611,7 +612,7 @@ export async function addLink(a: string, b: string): Promise<void> {
     await db.query(`update mem_notes set links = $2::text[], updated_at = $3 where id = $1`, [
       from,
       pgTextArray([...note.links, to]),
-      Date.now(),
+      now(),
     ]);
   }
 }
@@ -619,24 +620,24 @@ export async function addLink(a: string, b: string): Promise<void> {
 export async function bumpRecall(ids: string[]): Promise<void> {
   if (!ids.length) return;
   const db = await getSql();
-  const now = Date.now();
+  const ts = now();
   await db.query(
     `update mem_notes set recall_count = recall_count + 1, last_recalled_at = $2, updated_at = $2
      where id = any($1::text[])`,
-    [pgTextArray(ids), now],
+    [pgTextArray(ids), ts],
   );
 }
 
 export async function listIndexNotes(): Promise<IndexItem[]> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(`select * from mem_notes where status = 'active'`);
-  const now = Date.now();
+  const ts = now();
   const items: IndexItem[] = [];
   for (const r of rows) {
     const n = rowNote(r);
     const bond = n.lens.includes("bond");
     if (!bond && !(n.subject === "rosie" && n.weight >= 3)) continue;
-    const ageDays = Math.max(0, (now - n.happenedAt) / 86_400_000);
+    const ageDays = Math.max(0, (ts - n.happenedAt) / 86_400_000);
     const score = n.weight + 2 * Math.exp(-ageDays / 14) + 0.5 * Math.min(n.recallCount, 4) + (bond ? 1 : 0);
     items.push({
       id: n.id, text: n.text, subject: n.subject, lens: n.lens, weight: n.weight,
@@ -683,7 +684,7 @@ export async function dormantOldPortrait(now: number): Promise<void> {
 export function emptyDay(day: string): DayLog {
   return {
     day, summary: "", energy: null, mood: null, body: null, did: [], avoided: [], events: [], wins: [],
-    firstActive: null, lastActive: null, msgCount: 0, coverage: "none", noteIds: [], version: 1, updatedAt: Date.now(),
+    firstActive: null, lastActive: null, msgCount: 0, coverage: "none", noteIds: [], version: 1, updatedAt: now(),
   };
 }
 
@@ -938,7 +939,7 @@ export async function notesForTheme(themeId: string): Promise<Note[]> {
 
 export async function notesWithoutTheme(limit: number): Promise<Note[]> {
   const db = await getSql();
-  const cutoffDay = shiftDay(new Date().toISOString().slice(0, 10), -60);
+  const cutoffDay = shiftDay(localDay(now(), "UTC"), -60);
   const rows = await db.query<Record<string, unknown>>(
     `select n.* from mem_notes n
      where n.status = 'active' and n.from_rosie = true and 'diary' = any(n.lens)
@@ -1010,16 +1011,17 @@ export async function upsertFinding(row: Finding): Promise<void> {
   await db.query(
     `insert into diary_findings (
        id, kind, outcome_id, antecedent_id, lag, n11, n10, n01, n00, lift, score,
-       example_days, counter_days, user_feedback, computed_at
-     ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::text[],$13::text[],$14,$15)
+       example_days, counter_days, user_feedback, computed_at, tier
+     ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::text[],$13::text[],$14,$15,$16)
      on conflict (id) do update set
        n11 = excluded.n11, n10 = excluded.n10, n01 = excluded.n01, n00 = excluded.n00,
        lift = excluded.lift, score = excluded.score, example_days = excluded.example_days,
-       counter_days = excluded.counter_days, computed_at = excluded.computed_at,
+       counter_days = excluded.counter_days, computed_at = excluded.computed_at, tier = excluded.tier,
        user_feedback = coalesce(diary_findings.user_feedback, excluded.user_feedback)`,
     [
       row.id, row.kind, row.outcomeId, row.antecedentId, row.lag, row.n11, row.n10, row.n01, row.n00,
-      row.lift, row.score, pgTextArray(row.exampleDays), pgTextArray(row.counterDays), row.userFeedback, row.computedAt,
+      row.lift, row.score, pgTextArray(row.exampleDays), pgTextArray(row.counterDays), row.userFeedback,
+      row.computedAt, row.tier,
     ],
   );
 }
@@ -1040,6 +1042,7 @@ export async function listFindings(): Promise<Finding[]> {
     counterDays: fromPgArray(r.counter_days),
     userFeedback: r.user_feedback ? String(r.user_feedback) : null,
     computedAt: asInt(r.computed_at),
+    tier: r.tier === "clue" ? "clue" : "finding",
   }));
 }
 
@@ -1050,12 +1053,12 @@ export async function setFindingFeedback(id: string, feedback: string | null): P
 
 export async function setThemeFeedback(id: string, feedback: string | null): Promise<void> {
   const db = await getSql();
-  await db.query("update diary_themes set user_feedback = $2, updated_at = $3 where id = $1", [id, feedback, Date.now()]);
+  await db.query("update diary_themes set user_feedback = $2, updated_at = $3 where id = $1", [id, feedback, now()]);
 }
 
 export async function setFactorFeedback(id: string, feedback: string | null): Promise<void> {
   const db = await getSql();
-  await db.query("update diary_factors set user_feedback = $2, updated_at = $3 where id = $1", [id, feedback, Date.now()]);
+  await db.query("update diary_factors set user_feedback = $2, updated_at = $3 where id = $1", [id, feedback, now()]);
 }
 
 export async function listExperiments(): Promise<Experiment[]> {
@@ -1156,7 +1159,74 @@ export async function insertJob(job: BrainJob, force = false): Promise<boolean> 
   return rows.length > 0;
 }
 
-export async function claimJob(now: number, lockMs: number): Promise<BrainJob | null> {
+export async function peekNextJob(at: number): Promise<BrainJob | null> {
+  const db = await getSql();
+  const rows = await db.query<Record<string, unknown>>(
+    `select * from brain_jobs
+     where (status = 'pending' and run_after <= $1) or (status = 'running' and locked_until < $1)
+     order by case type
+       when 'reflect' then 0 when 'archive' then 1 when 'dusk' then 2
+       when 'backfill' then 3 when 'synth' then 4 else 5 end, run_after
+     limit 1`,
+    [at],
+  );
+  return rows[0] ? rowJob(rows[0]) : null;
+}
+
+export async function countPendingJobs(): Promise<number> {
+  const db = await getSql();
+  const rows = await db.query<{ n: number }>(
+    `select count(*)::int as n from brain_jobs where status in ('pending','running')`,
+  );
+  return asInt(rows[0]?.n);
+}
+
+export async function listJobStatus(): Promise<{
+  pending: number;
+  running: number;
+  pendingTypes: JobType[];
+  runningTypes: JobType[];
+  recent: Array<{ type: JobType; status: JobStatus; updatedAt: number; lastError: string | null }>;
+}> {
+  const db = await getSql();
+  const counts = await db.query<{ status: string; type: string; n: number }>(
+    `select status, type, count(*)::int as n
+     from brain_jobs
+     where status in ('pending','running')
+     group by status, type`,
+  );
+  let pending = 0;
+  let running = 0;
+  const pendingTypes: JobType[] = [];
+  const runningTypes: JobType[] = [];
+  for (const row of counts) {
+    const n = asInt(row.n);
+    if (row.status === "running") {
+      running += n;
+      runningTypes.push(row.type as JobType);
+    } else {
+      pending += n;
+      pendingTypes.push(row.type as JobType);
+    }
+  }
+  const recentRows = await db.query<Record<string, unknown>>(
+    `select type, status, updated_at, last_error from brain_jobs order by updated_at desc limit 10`,
+  );
+  return {
+    pending,
+    running,
+    pendingTypes,
+    runningTypes,
+    recent: recentRows.map((r) => ({
+      type: r.type as JobType,
+      status: r.status as JobStatus,
+      updatedAt: asInt(r.updated_at),
+      lastError: r.last_error ? String(r.last_error) : null,
+    })),
+  };
+}
+
+export async function claimJob(nowMs: number, lockMs: number): Promise<BrainJob | null> {
   const db = await getSql();
   const candidates = await db.query<Record<string, unknown>>(
     `select * from brain_jobs
@@ -1165,7 +1235,7 @@ export async function claimJob(now: number, lockMs: number): Promise<BrainJob | 
        when 'reflect' then 0 when 'archive' then 1 when 'dusk' then 2
        when 'backfill' then 3 when 'synth' then 4 else 5 end, run_after
      limit 8`,
-    [now],
+    [nowMs],
   );
   for (const row of candidates) {
     const job = rowJob(row);
@@ -1174,7 +1244,7 @@ export async function claimJob(now: number, lockMs: number): Promise<BrainJob | 
        set status = 'running', locked_until = $2, attempts = attempts + 1, updated_at = $3
        where id = $1 and (status = 'pending' or locked_until < $3)
        returning *`,
-      [job.id, now + lockMs, now],
+      [job.id, nowMs + lockMs, nowMs],
     );
     if (updated[0]) return rowJob(updated[0]);
   }
@@ -1187,7 +1257,7 @@ export async function finishJob(id: string, status: "done" | "failed" | "pending
   const db = await getSql();
   await db.query(
     `update brain_jobs set status = $2, run_after = coalesce($3, run_after), last_error = $4, locked_until = null, updated_at = $5 where id = $1`,
-    [id, status, extra?.runAfter ?? null, extra?.error ?? null, Date.now()],
+    [id, status, extra?.runAfter ?? null, extra?.error ?? null, now()],
   );
 }
 
@@ -1197,7 +1267,7 @@ export async function restoreClaim(id: string, attempts: number): Promise<void> 
     `update brain_jobs
      set status = 'pending', locked_until = null, attempts = $2, updated_at = $3
      where id = $1`,
-    [id, Math.max(0, attempts - 1), Date.now()],
+    [id, Math.max(0, attempts - 1), now()],
   );
 }
 
@@ -1207,7 +1277,7 @@ export async function skipOldReflect(turnSeq: number): Promise<void> {
     `update brain_jobs set status = 'done', locked_until = null, updated_at = $2
      where type = 'reflect' and status in ('pending','running')
        and coalesce((payload->>'turnSeq')::bigint, 0) < $1`,
-    [turnSeq, Date.now()],
+    [turnSeq, now()],
   );
 }
 
@@ -1234,7 +1304,7 @@ export async function appendBrainLog(row: {
     const db = await getSql();
     await db.query(
       `insert into brain_log (job_id, step, ok, ms, input_chars, raw, note, at) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [row.jobId ?? null, row.step, row.ok, row.ms ?? null, row.inputChars ?? null, (row.raw ?? "").slice(0, 4000), row.note ?? null, Date.now()],
+      [row.jobId ?? null, row.step, row.ok, row.ms ?? null, row.inputChars ?? null, (row.raw ?? "").slice(0, 4000), row.note ?? null, now()],
     );
   } catch {
     /* logging must never break talk */

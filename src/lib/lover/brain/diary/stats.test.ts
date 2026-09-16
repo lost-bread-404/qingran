@@ -4,6 +4,7 @@ import {
   addCell,
   fisherOneSided,
   buildEpisodes,
+  classifyFinding,
   keepFinding,
   lagAnalysis,
   liftOf,
@@ -203,4 +204,15 @@ test("lagAnalysis only counts onset days", () => {
   const x: Series = { "2026-09-01": 1, "2026-09-02": 1, "2026-09-03": 1, "2026-09-04": 1 };
   // 只有 09-02 是起点（前一天为 0），09-03/04 属于同一段，不重复计数 → 样本不足
   assert.equal(lagAnalysis("o", "x", o, x, days), null);
+});
+
+test("classifyFinding splits finding vs clue by p-value", () => {
+  const strong = { n11: 12, n10: 2, n01: 2, n00: 30 };
+  const mid = { n11: 4, n10: 1, n01: 1, n00: 10 };
+  const weak = { n11: 4, n10: 8, n01: 8, n00: 10 };
+  assert.equal(classifyFinding(strong, liftOf(strong)), "finding");
+  assert.equal(classifyFinding(mid, 1.6), "clue");
+  assert.equal(classifyFinding(weak, liftOf(weak)), null);
+  // 恢复路径：达标后一律 clue
+  assert.equal(keepFinding(mid, 1.6, 0.05), true);
 });

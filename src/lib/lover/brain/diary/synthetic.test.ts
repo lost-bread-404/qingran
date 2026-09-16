@@ -108,6 +108,7 @@ test("synthetic diary: planted patterns are recovered, noise rarely surfaces", (
     }
     for (const f of findings) {
       if (f.kind === "cooccur") continue;
+      if (f.tier !== "finding") continue;
       found += 1;
       if (f.antecedentId.startsWith("noise")) noise += 1;
     }

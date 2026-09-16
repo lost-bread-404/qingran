@@ -1,4 +1,5 @@
 import { newId } from "../storage.ts";
+import { now as wallClock } from "./clock.ts";
 import { similar } from "./text.ts";
 import { localDay } from "./time.ts";
 import type { Lens, Note, StoredMessage, Subject } from "./types.ts";
@@ -39,7 +40,7 @@ export function validateOps(
   const batchIds = new Set(batch.map((m) => m.id));
   const candMap = new Map(candidates.map((n) => [n.id, n]));
   const out: Array<{ note: Note; supersede?: string; links: string[] }> = [];
-  const now = Date.now();
+  const now = wallClock();
 
   for (const raw of ops) {
     const text = clip(String(raw.text ?? ""), 120);

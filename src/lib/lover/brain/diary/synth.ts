@@ -1,4 +1,5 @@
 import { enqueue } from "../jobs.ts";
+import { now as wallClock } from "../clock.ts";
 import { callModel } from "../llm.ts";
 import {
   addThemeMember,
@@ -255,7 +256,7 @@ ${themes
     ? ((result.json as { ops: Array<Record<string, unknown>> }).ops ?? [])
     : [];
   const changed: Theme[] = [];
-  const now = Date.now();
+  const now = wallClock();
   for (const op of ops) {
     const kind = String(op.op ?? "");
     if (kind === "CREATE") {
@@ -492,7 +493,7 @@ export async function recomputeStats(): Promise<void> {
   const factors = await listFactors(true);
   const dayFactors = await listDayFactors();
   const themeWeeks = await listThemeWeeks();
-  const now = Date.now();
+  const now = wallClock();
   const days = [...new Set(dayFactors.map((d) => d.day))].sort();
   const episodes = factors
     .filter((f) => f.isOutcome)

@@ -1,4 +1,5 @@
 import { ARCHIVE_BATCH_MAX, ARCHIVE_MIN_OVERFLOW, HISTORY_WINDOW, SESSION_GAP_MS } from "./config.ts";
+import { now } from "./clock.ts";
 import { enqueue } from "./jobs.ts";
 import { callModel } from "./llm.ts";
 import { validateOps, type RawOp } from "./archive-ops.ts";
@@ -129,7 +130,7 @@ ${pending
   const superseded = await commitArchiveBatch(
     batchKey,
     pending.map((m) => m.id),
-    Date.now(),
+    now(),
   );
   // 4) 提交后的非关键步骤：history 与 links（失败不影响数据一致性）
   for (const s of superseded) await logSupersede(s.oldId, s.newId, jobId);
@@ -139,7 +140,7 @@ ${pending
   await bumpNotesVersion();
 }
 
-export async function enqueueArchiveIfNeeded(userCreatedAt = Date.now()): Promise<void> {
+export async function enqueueArchiveIfNeeded(userCreatedAt = now()): Promise<void> {
   const overflow = await unarchivedOverflow(ARCHIVE_BATCH_MAX);
   if (overflow.length >= ARCHIVE_MIN_OVERFLOW) {
     const batch = overflow.slice(0, ARCHIVE_BATCH_MAX);

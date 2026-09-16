@@ -1,5 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
+import { now } from "./clock.ts";
 import { enqueue, runJobsNow } from "./jobs.ts";
+import { LONG_DRAIN_MS } from "./config.ts";
+import { runInBackground } from "./wait-until.ts";
 import {
   bumpNotesVersion,
   getDay,
@@ -31,6 +34,7 @@ import {
   setThemeFeedback,
   upsertNote,
   upsertPortrait,
+  listJobStatus,
 } from "./store.ts";
 import type { JobType, Lens, Note, Subject } from "./types.ts";
 import { askDiary } from "./diary/ask.ts";
@@ -39,10 +43,20 @@ import { buildReportData } from "./diary/report.ts";
 import { safetyFlag } from "./diary/stats.ts";
 import { localDay, shiftDay } from "./time.ts";
 import { newId } from "../storage.ts";
+import {
+  convertV1,
+  exportBackupPage,
+  finishImport,
+  importTableChunk,
+  saveProfile,
+  type BackupCursor,
+  type BackupRow,
+} from "./backup.ts";
+import type { Profile } from "../types.ts";
 
 export const brainGetOverview = createServerFn({ method: "GET" }).handler(async () => {
   const tz = (await getMeta()).timeZone || "UTC";
-  const today = localDay(Date.now(), tz);
+  const today = localDay(now(), tz);
   const from = shiftDay(today, -90);
   const [days, episodes, findings, factors, meta] = await Promise.all([
     listDays(from, today),
@@ -92,7 +106,7 @@ export const brainGetTheme = createServerFn({ method: "POST" })
 export const brainGetIntentions = createServerFn({ method: "GET" }).handler(async () => listIntentions());
 
 export const brainGetExperiments = createServerFn({ method: "GET" }).handler(async () => {
-  await evaluateIfDue(localDay(Date.now(), (await getMeta()).timeZone || "UTC"));
+  await evaluateIfDue(localDay(now(), (await getMeta()).timeZone || "UTC"));
   return listExperiments();
 });
 
@@ -110,39 +124,41 @@ export const brainRunJobs = createServerFn({ method: "POST" })
     const types = data.types.filter((t) =>
       ["dusk", "synth", "report", "archive", "backfill"].includes(t),
     );
-    const now = Date.now();
+    const ts = now();
     if (types.includes("dusk")) {
       const tz = (await getMeta()).timeZone || "UTC";
-      const day = shiftDay(localDay(now, tz), 0);
+      const day = shiftDay(localDay(ts, tz), 0);
       // 独立的 dedupe key：不占用自动 dusk 的 `dusk:<day>`，当天结束后仍会完整重跑
-      await enqueue("dusk", `dusk-manual:${day}:${now}`, { day, manual: true }, now, true);
+      await enqueue("dusk", `dusk-manual:${day}:${ts}`, { day, manual: true }, ts, true);
     }
     if (types.includes("synth")) {
       const { currentIsoWeek } = await import("./time");
       const tz = (await getMeta()).timeZone || "UTC";
-      const week = currentIsoWeek(now, tz);
-      await enqueue("synth", `synth-manual:${week}:${now}`, { week, manual: true }, now, true);
+      const week = currentIsoWeek(ts, tz);
+      await enqueue("synth", `synth-manual:${week}:${ts}`, { week, manual: true }, ts, true);
     }
     if (types.includes("report")) {
       const { previousMonth, yearMonth, localDay: ld } = await import("./time");
       const tz = (await getMeta()).timeZone || "UTC";
-      const month = yearMonth(shiftDay(ld(Date.now(), tz), -1));
-      await enqueue("report", `report:${month}`, { month }, Date.now(), true);
+      const month = yearMonth(shiftDay(ld(ts, tz), -1));
+      await enqueue("report", `report:${month}`, { month }, ts, true);
     }
-    const ran = await runJobsNow();
-    return { ok: true as const, ran };
+    await runInBackground(() => runJobsNow(LONG_DRAIN_MS));
+    return { ok: true as const, started: true as const };
   });
 
-/** Diary 页面打开时调用：把到期的日/周/月任务排上，并在后台跑完（含聊天请求里跑不了的长任务）。 */
+/** Diary 页面打开时调用：把到期的日/周/月任务排上，drain 放到后台，请求立刻返回。 */
 export const brainRunDue = createServerFn({ method: "POST" })
   .validator((input: { timeZone?: string }) => input ?? {})
   .handler(async ({ data }) => {
     const tz = data?.timeZone || (await getMeta()).timeZone || "UTC";
     const { enqueuePeriodicIfDue } = await import("./diary/dusk");
-    await enqueuePeriodicIfDue(Date.now(), tz);
-    const ran = await runJobsNow();
-    return { ok: true as const, ran };
+    await enqueuePeriodicIfDue(now(), tz);
+    await runInBackground(() => runJobsNow(LONG_DRAIN_MS));
+    return { ok: true as const, started: true as const };
   });
+
+export const brainJobStatus = createServerFn({ method: "GET" }).handler(async () => listJobStatus());
 
 export const brainSetFeedback = createServerFn({ method: "POST" })
   .validator((input: { kind: "finding" | "theme" | "factor"; id: string; feedback: string | null }) => input)
@@ -170,7 +186,7 @@ export const brainSaveNote = createServerFn({ method: "POST" })
     }) => input,
   )
   .handler(async ({ data }) => {
-    const now = Date.now();
+    const ts = now();
     const tz = (await getMeta()).timeZone || "UTC";
     const existing = data.id ? await getNote(data.id) : null;
     const note: Note = {
@@ -184,13 +200,13 @@ export const brainSaveNote = createServerFn({ method: "POST" })
       status: data.archive ? "archived" : "active",
       supersededBy: existing?.supersededBy ?? null,
       links: existing?.links ?? [],
-      happenedAt: data.happenedAt ?? existing?.happenedAt ?? now,
-      localDay: existing?.localDay || localDay(data.happenedAt ?? now, tz),
+      happenedAt: data.happenedAt ?? existing?.happenedAt ?? ts,
+      localDay: existing?.localDay || localDay(data.happenedAt ?? ts, tz),
       sourceIds: existing?.sourceIds ?? [],
       recallCount: existing?.recallCount ?? 0,
       lastRecalledAt: existing?.lastRecalledAt ?? null,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
+      createdAt: existing?.createdAt ?? ts,
+      updatedAt: ts,
     };
     await upsertNote(note, undefined, existing ? "MANUAL_EDIT" : "ADD");
     await bumpNotesVersion();
@@ -223,7 +239,7 @@ export const brainSaveLongLayer = createServerFn({ method: "POST" })
       });
     }
     if (data.portrait) {
-      const now = Date.now();
+      const ts = now();
       for (const p of data.portrait) {
         await upsertPortrait({
           id: p.id,
@@ -231,8 +247,8 @@ export const brainSaveLongLayer = createServerFn({ method: "POST" })
           body: p.body.slice(0, 80),
           status: "active",
           evidenceIds: [],
-          lastSeen: now,
-          updatedAt: now,
+          lastSeen: ts,
+          updatedAt: ts,
         });
       }
     }
@@ -246,4 +262,20 @@ export const brainResetMind = createServerFn({ method: "POST" }).handler(async (
 
 export const brainActiveNotes = createServerFn({ method: "GET" }).handler(async () => listActiveNotes());
 
-export { buildReportData };
+export const brainExportBackup = createServerFn({ method: "POST" })
+  .validator((input: { cursor?: BackupCursor | null } | undefined) => input ?? {})
+  .handler(async ({ data }) => exportBackupPage({ cursor: data?.cursor ?? null }));
+
+export const brainImportChunk = createServerFn({ method: "POST" })
+  .validator((input: { table: string; rows: BackupRow[]; importId?: string }) => input)
+  .handler(async ({ data }) => importTableChunk(data.table, data.rows));
+
+export const brainImportFinish = createServerFn({ method: "POST" })
+  .validator((input: { importId?: string; v1?: boolean; profile?: Profile } | undefined) => input ?? {})
+  .handler(async ({ data }) => {
+    if (data?.profile) await saveProfile(data.profile);
+    await finishImport({ v1: Boolean(data?.v1) });
+    return { ok: true as const };
+  });
+
+export { buildReportData, convertV1 };

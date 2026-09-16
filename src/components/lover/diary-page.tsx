@@ -23,6 +23,7 @@ import {
   brainGetThemes,
   brainRunDue,
   brainRunJobs,
+  brainJobStatus,
   brainSetFeedback,
   brainStartExperiment,
 } from "@/lib/lover/brain/api";
@@ -40,6 +41,19 @@ import type {
 import { cn } from "@/lib/utils";
 
 type Tab = "overview" | "report" | "saydo" | "themes" | "experiments" | "ask";
+
+const JOB_LABEL: Record<string, string> = {
+  dusk: "整理今天",
+  synth: "周分析",
+  report: "月报",
+  archive: "归档",
+  reflect: "内心",
+  backfill: "回填",
+};
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 type Overview = Awaited<ReturnType<typeof brainGetOverview>>;
 type ReportRow = Awaited<ReturnType<typeof brainGetReports>>[number];
@@ -91,15 +105,34 @@ export function DiaryPage() {
     }
   }
 
+  async function pollJobs(alive: () => boolean) {
+    for (;;) {
+      if (!alive()) return;
+      try {
+        const s = await brainJobStatus();
+        if (s.pending + s.running === 0) {
+          setBusy(null);
+          return;
+        }
+        const names = [...s.runningTypes, ...s.pendingTypes].map((t) => JOB_LABEL[t] ?? t);
+        setBusy(`正在整理：${[...new Set(names)].join(" / ")}…`);
+      } catch {
+        setBusy(null);
+        return;
+      }
+      await sleep(5000);
+    }
+  }
+
   useEffect(() => {
     let alive = true;
     void loadAll();
-    // 周分析、月报这类长任务在聊天请求里跑不了；打开日记时在后台补跑到期的任务
-    setBusy("正在整理到期的分析…");
+    setBusy("正在整理…");
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     void brainRunDue({ data: { timeZone } })
-      .then((res) => {
-        if (alive && res.ran > 0) void loadAll();
+      .then(() => pollJobs(() => alive))
+      .then(() => {
+        if (alive) void loadAll();
       })
       .catch(() => undefined)
       .finally(() => {
@@ -130,6 +163,7 @@ export function DiaryPage() {
     setBusy(label);
     try {
       await brainRunJobs({ data: { types } });
+      await pollJobs(() => true);
       await loadAll();
     } finally {
       setBusy(null);
@@ -211,6 +245,7 @@ export function DiaryPage() {
             {busy === "生成本月报告" ? "在写…" : "生成本月报告"}
           </Button>
         </div>
+        {busy ? <p className="-mt-2 mb-4 text-xs text-subtle">{busy}</p> : null}
 
         <div className="mb-6 flex gap-1 overflow-x-auto">
           {tabs.map(([id, label]) => (
@@ -253,6 +288,13 @@ export function DiaryPage() {
               )}
             </div>
             <EpisodeList episodes={overview?.episodes ?? []} factors={factorsById} />
+            <FindingsBlock
+              findings={(overview?.findings ?? []).filter((f) => f.kind !== "cooccur")}
+              factors={factorsById}
+              onFeedback={(id, feedback) =>
+                void brainSetFeedback({ data: { kind: "finding", id, feedback } }).then(loadAll)
+              }
+            />
             <div>
               <h2 className="mb-3 font-display text-lg">日子</h2>
               <ul className="flex flex-col gap-2">
@@ -290,7 +332,7 @@ export function DiaryPage() {
                   <h2 className="font-display text-lg">{r.id}</h2>
                   <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">{r.narrative || "数字已经算好，解读还没写成。"}</p>
                   <FindingsBlock
-                    findings={(overview?.findings ?? []).filter((f) => f.kind === "antecedent").slice(0, 5)}
+                    findings={(overview?.findings ?? []).filter((f) => f.kind !== "cooccur")}
                     factors={factorsById}
                     onFeedback={(id, feedback) =>
                       void brainSetFeedback({ data: { kind: "finding", id, feedback } }).then(loadAll)
@@ -463,11 +505,19 @@ function FindingsBlock({
   return (
     <ul className="mt-4 flex flex-col gap-2">
       {findings.map((f) => (
-        <li key={f.id} className="rounded-md bg-surface-2 px-3 py-2 text-xs leading-relaxed">
+        <li
+          key={f.id}
+          className={cn(
+            "rounded-md px-3 py-2 text-xs leading-relaxed",
+            f.tier === "clue" ? "border border-dashed border-subtle/40 bg-surface text-muted" : "bg-surface-2",
+          )}
+        >
+          {f.tier === "clue" ? "初步线索 · " : ""}
           {factors.get(f.antecedentId)?.name ?? f.antecedentId}
-          经常出现在
+          {f.kind === "recovery" ? "出现在" : "经常出现在"}
           {factors.get(f.outcomeId)?.name ?? f.outcomeId}
-          之前（{f.n11} 次，lift {f.lift.toFixed(1)}）
+          {f.kind === "recovery" ? "好转前后" : "之前"}
+          （{f.n11} 次，lift {f.lift.toFixed(1)}）
           <FeedbackRow value={f.userFeedback} onChange={(v) => onFeedback(f.id, v)} />
         </li>
       ))}

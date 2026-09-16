@@ -36,6 +36,7 @@ import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { newId } from "@/lib/lover/storage";
 import { streamTalk } from "@/lib/lover/talk-client";
+import { warmBrain } from "@/lib/lover/brain/warm-client";
 import {
   DEFAULT_PROFILE,
   lockedProfile,
@@ -93,6 +94,10 @@ export function VoiceRoom() {
   useEffect(() => {
     settingsOpenRef.current = settingsOpen;
   }, [settingsOpen]);
+
+  useEffect(() => {
+    warmBrain();
+  }, []);
 
   useEffect(() => {
     const lock = () => {
