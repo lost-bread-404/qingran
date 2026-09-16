@@ -7,6 +7,7 @@ export const CONTEXT_WINDOW = 60;
 export type Profile = {
   systemPrompt: string;
   muted: boolean;
+  softVoice: boolean;
   autoRemember: boolean;
   memoryCursor: string;
 };
@@ -43,6 +44,7 @@ export const DEFAULT_SYSTEM_PROMPT = `你就是清然。正在和 Rosie 语音�
 export const DEFAULT_PROFILE: Profile = {
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   muted: false,
+  softVoice: false,
   autoRemember: true,
   memoryCursor: "",
 };
@@ -57,6 +59,7 @@ type LooseProfile = Partial<Profile> & {
   story?: string;
   identity?: string;
   muted?: boolean;
+  softVoice?: boolean;
   autoRemember?: boolean;
   memoryCursor?: string;
 };
@@ -66,6 +69,7 @@ export function lockedProfile(input?: unknown): Profile {
   return {
     systemPrompt: pickSystemPrompt(raw).slice(0, 16_000),
     muted: Boolean(raw.muted),
+    softVoice: Boolean(raw.softVoice),
     autoRemember: raw.autoRemember !== false,
     memoryCursor: typeof raw.memoryCursor === "string" ? raw.memoryCursor : "",
   };

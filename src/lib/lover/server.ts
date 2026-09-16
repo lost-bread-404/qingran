@@ -10,13 +10,14 @@ import {
 } from "./prompt";
 import { spokenForTts } from "./speech-tags";
 import { restoreSpeechText, sttKeyterms } from "./stt-text";
-import { ttsRequestBody } from "./tts";
+import { ttsRequestBody, ttsSpeed } from "./tts";
 import type { ChatMessage, Memory } from "./types";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
 
 type TtsInput = {
   text: string;
+  softVoice?: boolean;
 };
 
 type SttInput = {
@@ -178,7 +179,7 @@ export const speakAsLover = createServerFn({ method: "POST" })
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(ttsRequestBody(text, "zh")),
+      body: JSON.stringify(ttsRequestBody(text, "zh", ttsSpeed(Boolean(data.softVoice)))),
       signal: AbortSignal.timeout(40_000),
     });
 

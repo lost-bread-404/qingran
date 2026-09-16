@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { buildSystemPrompt, formatClock } from "./prompt";
 import { spokenForTts } from "./speech-tags";
-import { shouldFlushSpoken, ttsRequestBody } from "./tts";
+import { shouldFlushSpoken, ttsRequestBody, ttsSpeed } from "./tts";
 import type { ChatMessage, Memory, Profile } from "./types";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
@@ -47,7 +47,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     role: m.role,
     content: m.text,
   }));
-  const tts = new LiveTts(apiKey, emit);
+  const tts = new LiveTts(apiKey, emit, ttsSpeed(Boolean(data.profile.softVoice)));
 
   const res = await fetch("https://api.x.ai/v1/chat/completions", {
     method: "POST",
@@ -127,7 +127,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   await tts.finish();
 
   if (!tts.complete) {
-    const clip = await speakRest(apiKey, speech);
+    const clip = await speakRest(apiKey, speech, ttsSpeed(Boolean(data.profile.softVoice)));
     if (clip?.b) emit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
   }
 
@@ -150,6 +150,7 @@ class LiveTts {
   constructor(
     private apiKey: string,
     private emit: Emit,
+    private speed = 1,
   ) {
     this.waitDone = new Promise<void>((resolve, reject) => {
       this.resolveDone = resolve;
@@ -163,7 +164,7 @@ class LiveTts {
       sample_rate: "24000",
       text_normalization: "true",
       optimize_streaming_latency: "1",
-      speed: "1",
+      speed: String(this.speed),
     });
     const url = `wss://api.x.ai/v1/tts?${params.toString()}`;
     try {
@@ -279,7 +280,7 @@ class LiveTts {
   }
 }
 
-async function speakRest(apiKey: string, text: string): Promise<{ b: string; m: string } | null> {
+async function speakRest(apiKey: string, text: string, speed: number): Promise<{ b: string; m: string } | null> {
   const spoken = spokenForTts(text);
   if (!spoken) return null;
   try {
@@ -289,7 +290,7 @@ async function speakRest(apiKey: string, text: string): Promise<{ b: string; m: 
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(ttsRequestBody(spoken, "zh")),
+      body: JSON.stringify(ttsRequestBody(spoken, "zh", speed)),
       signal: AbortSignal.timeout(40_000),
     });
     if (!res.ok) return null;

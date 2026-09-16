@@ -287,7 +287,9 @@ export function VoiceRoom() {
       clip = undefined;
     }
     if (!clip) {
-      const spoken = await speakAsLover({ data: { text: speech } });
+      const spoken = await speakAsLover({
+        data: { text: speech, softVoice: profileRef.current.softVoice },
+      });
       if (!spoken.ok || turn !== turnRef.current) return;
       clip = { bytes: base64ToBytes(spoken.audioBase64), mimeType: spoken.mimeType };
       spokenCacheRef.current.set(id, clip);
@@ -298,6 +300,24 @@ export function VoiceRoom() {
     setStatus((s) => (s === "speaking" ? "idle" : s));
     resumeCallListen(turn);
   }, []);
+
+  const toggleSoftVoice = () => {
+    const next = !profileRef.current.softVoice;
+    const profile = lockedProfile({ ...profileRef.current, softVoice: next });
+    profileRef.current = profile;
+    setProfile(profile);
+    spokenCacheRef.current.clear();
+    if (status !== "speaking" && status !== "thinking") return;
+    const live = inflightRef.current;
+    const last = [...chatRef.current].reverse().find((m) => m.role === "assistant");
+    const speech = (live?.text || last?.text || "").trim();
+    const id = live?.id || last?.id;
+    if (!speech || !id) return;
+    abortRef.current?.abort();
+    busyRef.current = false;
+    const turn = ++turnRef.current;
+    void playFull(id, speech, turn);
+  };
 
   const sendTurn = useCallback(
     async (
@@ -656,6 +676,16 @@ export function VoiceRoom() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-pressed={profile.softVoice}
+              aria-label={profile.softVoice ? "恢复平常语速" : "让她说得轻缓"}
+              className={cn("text-xs", profile.softVoice && "text-live")}
+              onClick={toggleSoftVoice}
+            >
+              轻缓
+            </Button>
             <Button
               variant="ghost"
               size="icon"
