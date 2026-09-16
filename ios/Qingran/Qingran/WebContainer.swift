@@ -18,6 +18,7 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
   private let onChangeURL: () -> Void
   private var webView: WKWebView!
   private var failed = false
+  private var foregroundObserver: NSObjectProtocol?
 
   init(url: URL, onChangeURL: @escaping () -> Void) {
     self.startURL = url
@@ -67,9 +68,20 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     }
 
     wv.load(URLRequest(url: startURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 45))
+
+    foregroundObserver = NotificationCenter.default.addObserver(
+      forName: UIApplication.willEnterForegroundNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.reloadIfIdle()
+    }
   }
 
   deinit {
+    if let foregroundObserver {
+      NotificationCenter.default.removeObserver(foregroundObserver)
+    }
     webView?.configuration.userContentController.removeScriptMessageHandler(forName: "qingran")
     CallEngine.shared.onSystemHangup = nil
   }
@@ -130,6 +142,13 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
     showFail(error.localizedDescription)
+  }
+
+  private func reloadIfIdle() {
+    // Never tear down a live call just to pick up a web deploy.
+    guard !CallEngine.shared.inCall else { return }
+    failed = false
+    webView.reloadFromOrigin()
   }
 
   private func showFail(_ detail: String) {
