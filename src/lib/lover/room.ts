@@ -125,6 +125,36 @@ export const saveRoomMemories = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+export const restoreRoomBackup = createServerFn({ method: "POST" })
+  .validator((input: { profile: Profile; memories: Memory[]; messages: ChatMessage[] }) => input)
+  .handler(async ({ data }) => {
+    const sql = await getSql();
+    const profile = lockedProfile(data.profile);
+    await sql`
+      insert into qingran_profile (id, data, updated_at)
+      values (1, ${JSON.stringify(profile)}::jsonb, now())
+      on conflict (id) do update
+        set data = excluded.data, updated_at = now()
+    `;
+    await sql`delete from qingran_memories`;
+    const memories = data.memories.slice(-80);
+    for (const m of memories) {
+      await sql`
+        insert into qingran_memories (id, body, created_at, updated_at)
+        values (${m.id}, ${m.text.slice(0, 240)}, ${m.createdAt}, ${m.updatedAt})
+      `;
+    }
+    await sql`delete from qingran_messages`;
+    const messages = data.messages.slice(-240);
+    for (const msg of messages) {
+      await sql`
+        insert into qingran_messages (id, role, body, created_at)
+        values (${msg.id}, ${msg.role}, ${encodeStoredMessage(msg).slice(0, 4000)}, ${msg.createdAt})
+      `;
+    }
+    return { ok: true as const };
+  });
+
 export const clearRoomMessages = createServerFn({ method: "POST" }).handler(
   async () => {
     const sql = await getSql();

@@ -28,6 +28,7 @@ import {
   deleteRoomMessages,
   loadRoom,
   markRoomMessagesScanned,
+  restoreRoomBackup,
   saveRoomMemories,
   saveRoomProfile,
   updateRoomMessage,
@@ -751,6 +752,7 @@ export function VoiceRoom() {
           onOpenChange={setSettingsOpen}
           profile={profile}
           memories={memories}
+          messages={messages}
           onSave={(next) => setProfile(lockedProfile(next))}
           onAddMemory={(text) => setMemories((list) => addManualMemory(list, text))}
           onUpdateMemory={(id, text) => setMemories((list) => updateMemory(list, id, text))}
@@ -772,6 +774,25 @@ export function VoiceRoom() {
             setMessages([]);
             setProfile((p) => lockedProfile({ ...p, memoryCursor: "" }));
             void clearRoomMessages();
+          }}
+          onRestoreBackup={async (backup) => {
+            if (call.active) {
+              call.hangup();
+              stopPlayback();
+              setStatus("idle");
+            }
+            await restoreRoomBackup({
+              data: {
+                profile: backup.profile,
+                memories: backup.memories,
+                messages: backup.messages,
+              },
+            });
+            setProfile(lockedProfile(backup.profile));
+            setMemories(backup.memories);
+            setMessages(backup.messages);
+            memoriesRef.current = backup.memories;
+            chatRef.current = backup.messages;
           }}
         />
       </div>

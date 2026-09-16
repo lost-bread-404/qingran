@@ -1,9 +1,10 @@
 import { Pencil, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { DEFAULT_SYSTEM_PROMPT, type Memory, type Profile } from "@/lib/lover/types";
+import { backupFilename, makeBackup, parseBackup, type QingranBackup } from "@/lib/lover/backup";
+import { DEFAULT_SYSTEM_PROMPT, type ChatMessage, type Memory, type Profile } from "@/lib/lover/types";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -11,12 +12,14 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   profile: Profile;
   memories: Memory[];
+  messages: ChatMessage[];
   onSave: (next: Profile) => void;
   onAddMemory: (text: string) => void;
   onUpdateMemory: (id: string, text: string) => void;
   onDeleteMemory: (id: string) => void;
   onConsolidateMemories: () => Promise<void>;
   onClearChat: () => void;
+  onRestoreBackup: (backup: QingranBackup) => Promise<void>;
 };
 
 export function SettingsDrawer({
@@ -24,19 +27,23 @@ export function SettingsDrawer({
   onOpenChange,
   profile,
   memories,
+  messages,
   onSave,
   onAddMemory,
   onUpdateMemory,
   onDeleteMemory,
   onConsolidateMemories,
   onClearChat,
+  onRestoreBackup,
 }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
   const [newFact, setNewFact] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
-  const [tab, setTab] = useState<"prompt" | "memory">("prompt");
+  const [tab, setTab] = useState<"prompt" | "memory" | "backup">("prompt");
   const [consolidating, setConsolidating] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -80,6 +87,7 @@ export function SettingsDrawer({
           [
             ["prompt", "Prompt"],
             ["memory", "记忆"],
+            ["backup", "备份"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -106,6 +114,70 @@ export function SettingsDrawer({
             placeholder="写给模型的 system prompt"
           />
           <p className="mt-2 text-xs text-subtle">记忆会另外附上，不用写进这段。</p>
+        </div>
+      ) : tab === "backup" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <div className="mx-auto flex w-full max-w-md flex-col gap-4">
+            <p className="text-sm leading-relaxed text-muted">
+              导出一份文件，里面是 prompt、记忆和聊天。换域名、换手机时在新站导入。文件放在你自己手里，不要传到 GitHub。
+            </p>
+            <Button
+              type="button"
+              onClick={() => {
+                const backup = makeBackup({ profile, memories, messages });
+                const blob = new Blob([`${JSON.stringify(backup, null, 2)}\n`], {
+                  type: "application/json",
+                });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = backupFilename(backup.exportedAt);
+                link.click();
+                URL.revokeObjectURL(url);
+                setBackupStatus("已下载备份。");
+              }}
+            >
+              导出备份
+            </Button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (!file) return;
+                void file.text().then(async (text) => {
+                  let parsed: unknown;
+                  try {
+                    parsed = JSON.parse(text);
+                  } catch {
+                    setBackupStatus("这不是一份能读的备份。");
+                    return;
+                  }
+                  const backup = parseBackup(parsed);
+                  if (!backup) {
+                    setBackupStatus("文件不对，没有导入。");
+                    return;
+                  }
+                  setBackupStatus("正在导入…");
+                  try {
+                    await onRestoreBackup(backup);
+                    setBackupStatus(
+                      `已导入。记忆 ${backup.memories.length} 条，对话 ${backup.messages.length} 条。`,
+                    );
+                  } catch {
+                    setBackupStatus("导入失败，稍后再试。");
+                  }
+                });
+              }}
+            />
+            <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>
+              导入备份
+            </Button>
+            {backupStatus ? <p className="text-sm text-subtle">{backupStatus}</p> : null}
+          </div>
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
