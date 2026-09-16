@@ -47,7 +47,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     role: m.role,
     content: m.text,
   }));
-  const tts = new LiveTts(apiKey, emit, ttsSpeed(Boolean(data.profile.softVoice)));
+  const speed = ttsSpeed(data.profile.voiceSpeed);
+  const tts = new LiveTts(apiKey, emit, speed);
 
   const res = await fetch("https://api.x.ai/v1/chat/completions", {
     method: "POST",
@@ -127,7 +128,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   await tts.finish();
 
   if (!tts.complete) {
-    const clip = await speakRest(apiKey, speech, ttsSpeed(Boolean(data.profile.softVoice)));
+    const clip = await speakRest(apiKey, speech, speed);
     if (clip?.b) emit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
   }
 

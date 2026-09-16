@@ -17,7 +17,7 @@ const FAST_MODEL = "grok-4.20-0309-non-reasoning";
 
 type TtsInput = {
   text: string;
-  softVoice?: boolean;
+  speed?: number;
 };
 
 type SttInput = {
@@ -179,7 +179,7 @@ export const speakAsLover = createServerFn({ method: "POST" })
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(ttsRequestBody(text, "zh", ttsSpeed(Boolean(data.softVoice)))),
+      body: JSON.stringify(ttsRequestBody(text, "zh", ttsSpeed(data.speed ?? 1))),
       signal: AbortSignal.timeout(40_000),
     });
 

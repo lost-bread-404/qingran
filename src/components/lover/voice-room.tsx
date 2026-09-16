@@ -36,6 +36,7 @@ import {
 } from "@/lib/lover/room";
 import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
+import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
 import { newId } from "@/lib/lover/storage";
 import { streamTalk } from "@/lib/lover/talk-client";
 import {
@@ -288,7 +289,7 @@ export function VoiceRoom() {
     }
     if (!clip) {
       const spoken = await speakAsLover({
-        data: { text: speech, softVoice: profileRef.current.softVoice },
+        data: { text: speech, speed: profileRef.current.voiceSpeed },
       });
       if (!spoken.ok || turn !== turnRef.current) return;
       clip = { bytes: base64ToBytes(spoken.audioBase64), mimeType: spoken.mimeType };
@@ -301,9 +302,9 @@ export function VoiceRoom() {
     resumeCallListen(turn);
   }, []);
 
-  const toggleSoftVoice = () => {
-    const next = !profileRef.current.softVoice;
-    const profile = lockedProfile({ ...profileRef.current, softVoice: next });
+  const cycleVoiceSpeed = () => {
+    const next = nextVoiceRate(profileRef.current.voiceSpeed);
+    const profile = lockedProfile({ ...profileRef.current, voiceSpeed: next.speed });
     profileRef.current = profile;
     setProfile(profile);
     spokenCacheRef.current.clear();
@@ -679,12 +680,14 @@ export function VoiceRoom() {
             <Button
               variant="ghost"
               size="sm"
-              aria-pressed={profile.softVoice}
-              aria-label={profile.softVoice ? "恢复平常语速" : "让她说得轻缓"}
-              className={cn("text-xs", profile.softVoice && "text-live")}
-              onClick={toggleSoftVoice}
+              aria-label={`语速 ${snapVoiceRate(profile.voiceSpeed).label}，点一下换一档`}
+              className={cn(
+                "text-xs",
+                snapVoiceRate(profile.voiceSpeed).id !== "normal" && "text-live",
+              )}
+              onClick={cycleVoiceSpeed}
             >
-              轻缓
+              {snapVoiceRate(profile.voiceSpeed).label}
             </Button>
             <Button
               variant="ghost"

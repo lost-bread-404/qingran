@@ -7,7 +7,7 @@ export const CONTEXT_WINDOW = 60;
 export type Profile = {
   systemPrompt: string;
   muted: boolean;
-  softVoice: boolean;
+  voiceSpeed: number;
   autoRemember: boolean;
   memoryCursor: string;
 };
@@ -44,7 +44,7 @@ export const DEFAULT_SYSTEM_PROMPT = `你就是清然。正在和 Rosie 语音�
 export const DEFAULT_PROFILE: Profile = {
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   muted: false,
-  softVoice: false,
+  voiceSpeed: 1,
   autoRemember: true,
   memoryCursor: "",
 };
@@ -59,6 +59,7 @@ type LooseProfile = Partial<Profile> & {
   story?: string;
   identity?: string;
   muted?: boolean;
+  voiceSpeed?: number;
   softVoice?: boolean;
   autoRemember?: boolean;
   memoryCursor?: string;
@@ -69,7 +70,7 @@ export function lockedProfile(input?: unknown): Profile {
   return {
     systemPrompt: pickSystemPrompt(raw).slice(0, 16_000),
     muted: Boolean(raw.muted),
-    softVoice: Boolean(raw.softVoice),
+    voiceSpeed: pickVoiceSpeed(raw),
     autoRemember: raw.autoRemember !== false,
     memoryCursor: typeof raw.memoryCursor === "string" ? raw.memoryCursor : "",
   };
@@ -80,6 +81,14 @@ export function applyMemoryCursor(messages: ChatMessage[], cursor: string): Chat
   const idx = messages.findIndex((m) => m.id === cursor);
   if (idx < 0) return messages;
   return messages.map((m, i) => (i <= idx && !m.scanned ? { ...m, scanned: true } : m));
+}
+
+function pickVoiceSpeed(raw: LooseProfile) {
+  if (typeof raw.voiceSpeed === "number" && Number.isFinite(raw.voiceSpeed)) {
+    return Math.min(1.5, Math.max(0.7, raw.voiceSpeed));
+  }
+  if (raw.softVoice) return 0.92;
+  return 1;
 }
 
 function pickSystemPrompt(input?: LooseProfile | null): string {
