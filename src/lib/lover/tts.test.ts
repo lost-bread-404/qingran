@@ -14,11 +14,11 @@ test("later flushes stay on the same stream after a sentence", () => {
 });
 
 test("voice speed cycles through four natural Eve rates", () => {
-  assert.equal(snapVoiceRate(1).label, "平常");
-  assert.equal(nextVoiceRate(1).label, "轻缓");
-  assert.equal(nextVoiceRate(0.92).label, "慢");
-  assert.equal(nextVoiceRate(0.85).label, "稍快");
-  assert.equal(nextVoiceRate(1.12).label, "平常");
+  assert.equal(snapVoiceRate(1).label, "1.0");
+  assert.equal(nextVoiceRate(1).label, "0.92");
+  assert.equal(nextVoiceRate(0.92).label, "0.85");
+  assert.equal(nextVoiceRate(0.85).label, "1.12");
+  assert.equal(nextVoiceRate(1.12).label, "1.0");
   assert.equal(ttsSpeed(0.7), 0.85);
   assert.equal(ttsSpeed(0.9), 0.92);
 });

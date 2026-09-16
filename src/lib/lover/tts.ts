@@ -1,10 +1,10 @@
 export const TTS_SPEED_NORMAL = 1;
 
 export const TTS_VOICE_RATES = [
-  { id: "normal", label: "平常", speed: 1 },
-  { id: "soft", label: "轻缓", speed: 0.92 },
-  { id: "slow", label: "慢", speed: 0.85 },
-  { id: "brisk", label: "稍快", speed: 1.12 },
+  { id: "normal", label: "1.0", speed: 1 },
+  { id: "soft", label: "0.92", speed: 0.92 },
+  { id: "slow", label: "0.85", speed: 0.85 },
+  { id: "brisk", label: "1.12", speed: 1.12 },
 ] as const;
 
 export type VoiceRateId = (typeof TTS_VOICE_RATES)[number]["id"];
