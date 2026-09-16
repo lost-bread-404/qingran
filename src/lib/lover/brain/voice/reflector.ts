@@ -6,6 +6,7 @@ import {
   getMeta,
   getMind,
   getProfilePrompt,
+  listFactors,
   listFindings,
   listHistoryWindow,
   listPortrait,
@@ -80,11 +81,14 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
 
   let diaryBlock = "";
   if (QR_VOICE_READS_DIARY) {
-    const [themes, findings, weeks] = await Promise.all([
+    const [themes, findings, weeks, factors] = await Promise.all([
       listThemes(true),
       listFindings(),
       listThemeWeeks(),
+      listFactors(false),
     ]);
+    const factorName = new Map(factors.map((f) => [f.id, f.name]));
+    const nameOf = (id: string) => factorName.get(id) ?? id;
     const usableThemes = themes.filter((t) => t.userFeedback !== "rejected").slice(0, 8);
     const weekMap = new Map<string, string>();
     for (const w of weeks.sort((a, b) => b.week.localeCompare(a.week))) {
@@ -107,9 +111,10 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
       diaryBlock +=
         "【她的长期规律·发现】\n" +
         usableFindings
-          .map(
-            (f) =>
-              `- ${f.kind}：${f.antecedentId} 之后 ${f.lag} 天常见 ${f.outcomeId}（${f.n11} 次，lift ${f.lift.toFixed(2)}）`,
+          .map((f) =>
+            f.kind === "recovery"
+              ? `- 「${nameOf(f.outcomeId)}」期间出现「${nameOf(f.antecedentId)}」后，常在 1–2 天内好转（${f.n11} 次）`
+              : `- 「${nameOf(f.antecedentId)}」之后${f.lag ? ` ${f.lag} 天内` : "当天"}常出现「${nameOf(f.outcomeId)}」（${f.n11} 次，是平时的 ${f.lift.toFixed(1)} 倍）`,
           )
           .join("\n") +
         "\n";
@@ -121,14 +126,15 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     .map((p) => `${p.topic}：${p.body}`)
     .join("\n");
   const indexText = index.items.map(formatIndexLine).join("\n");
+  const tz = meta.timeZone || "UTC";
   const convo = history
-    .map((m) => `${m.role === "user" ? "Rosie" : "清然"}：${m.text}`)
+    .map((m) => `[${formatClock(m.createdAt, tz)}] ${m.role === "user" ? "Rosie" : "清然"}：${m.text}`)
     .join("\n");
 
   const user = `【人设】
 ${systemPrompt}
 
-现在是${formatClock(Date.now(), meta.timeZone || "UTC")}。
+现在是${formatClock(Date.now(), tz)}。
 
 【我自己】
 ${meta.selfSummary || "（还没有）"}

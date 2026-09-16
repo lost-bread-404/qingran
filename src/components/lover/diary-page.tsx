@@ -21,6 +21,7 @@ import {
   brainGetReports,
   brainGetTheme,
   brainGetThemes,
+  brainRunDue,
   brainRunJobs,
   brainSetFeedback,
   brainStartExperiment,
@@ -91,7 +92,22 @@ export function DiaryPage() {
   }
 
   useEffect(() => {
+    let alive = true;
     void loadAll();
+    // 周分析、月报这类长任务在聊天请求里跑不了；打开日记时在后台补跑到期的任务
+    setBusy("正在整理到期的分析…");
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    void brainRunDue({ data: { timeZone } })
+      .then((res) => {
+        if (alive && res.ran > 0) void loadAll();
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (alive) setBusy(null);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   useEffect(() => {

@@ -20,6 +20,7 @@ import {
   upsertFinding,
   upsertTheme,
   upsertThemeWeek,
+  getMeta,
 } from "../store.ts";
 import { daysInclusive, isoWeek, isoWeekStart, shiftDay } from "../time.ts";
 import type { Factor, Theme } from "../types.ts";
@@ -199,7 +200,12 @@ ${notes.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n")}`,
   }
 }
 
-export async function runSynth(week: string, jobId?: string): Promise<void> {
+export async function runSynth(
+  week: string,
+  jobId?: string,
+  opts: { manual?: boolean } = {},
+): Promise<void> {
+  if (!/^\d{4}-W\d{2}$/.test(week)) return;
   const start = isoWeekStart(week);
   const end = shiftDay(start, 6);
   const weekNotes = await listNotes({
@@ -439,7 +445,10 @@ ${findings.slice(0, 20).map((f) => `${f.kind}|${f.antecedentId}->${f.outcomeId}|
   }
 
   await recomputeStats();
-  await patchMeta({ lastSynthWeek: week });
+  if (!opts.manual) {
+    const meta = await getMeta();
+    if (!meta.lastSynthWeek || meta.lastSynthWeek < week) await patchMeta({ lastSynthWeek: week });
+  }
 }
 
 export async function runBackfill(factorId: string, jobId?: string): Promise<void> {

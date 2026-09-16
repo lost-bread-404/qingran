@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   addCell,
+  fisherOneSided,
   buildEpisodes,
   keepFinding,
   lagAnalysis,
@@ -14,6 +15,7 @@ import {
   type Series,
 } from "./stats.ts";
 import type { Intention } from "../types.ts";
+import { shiftDay } from "../time.ts";
 
 function series(map: Record<string, 1 | 0 | null>): Series {
   return map;
@@ -51,7 +53,14 @@ test("lift skips null cells and applies Laplace", () => {
   const lift = liftOf({ n11: 8, n10: 2, n01: 2, n00: 8 });
   assert.ok(lift > 2);
   assert.equal(keepFinding({ n11: 3, n10: 3, n01: 1, n00: 10 }, 3), false);
-  assert.equal(keepFinding({ n11: 4, n10: 1, n01: 1, n00: 10 }, 1.6), true);
+  // 对照组太小：不保留
+  assert.equal(keepFinding({ n11: 6, n10: 1, n01: 0, n00: 3 }, 5), false);
+  // 小样本、不显著：不保留
+  assert.equal(keepFinding({ n11: 4, n10: 1, n01: 1, n00: 10 }, 1.6), false);
+  // 样本足够且显著：保留
+  assert.equal(keepFinding({ n11: 8, n10: 2, n01: 2, n00: 20 }, liftOf({ n11: 8, n10: 2, n01: 2, n00: 20 })), true);
+  // 恢复路径的放宽阈值
+  assert.equal(keepFinding({ n11: 4, n10: 1, n01: 1, n00: 10 }, 1.6, 0.05), true);
 });
 
 test("episodes merge with one null gap and end_known", () => {
@@ -77,11 +86,12 @@ test("lagAnalysis picks the best lag and keeps example days", () => {
   const days: string[] = [];
   const outcome: Series = {};
   const ante: Series = {};
-  for (let i = 1; i <= 20; i++) {
-    const d = `2026-09-${String(i).padStart(2, "0")}`;
+  // 每 4 天：第 1 天出现前因，第 2 天出现结果（结果之间有间隔，才有“起点”可数）
+  for (let i = 0; i < 40; i++) {
+    const d = shiftDay("2026-09-01", i);
     days.push(d);
-    ante[d] = i % 2 === 1 ? 1 : 0;
-    outcome[d] = i % 2 === 0 ? 1 : 0;
+    ante[d] = i % 4 === 1 ? 1 : 0;
+    outcome[d] = i % 4 === 2 ? 1 : 0;
   }
   const finding = lagAnalysis("o", "x", outcome, ante, days);
   assert.ok(finding);
@@ -180,4 +190,17 @@ test("safety flag needs recent low-mood days to jump", () => {
     today,
   );
   assert.equal(jump, true);
+});
+
+test("fisherOneSided matches a known value", () => {
+  // 2x2 [[3,1],[1,3]] 单侧 p = 17/70 ≈ 0.2429
+  assert.ok(Math.abs(fisherOneSided({ n11: 3, n10: 1, n01: 1, n00: 3 }) - 17 / 70) < 1e-9);
+});
+
+test("lagAnalysis only counts onset days", () => {
+  const days = ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"];
+  const o: Series = { "2026-09-01": 0, "2026-09-02": 1, "2026-09-03": 1, "2026-09-04": 1 };
+  const x: Series = { "2026-09-01": 1, "2026-09-02": 1, "2026-09-03": 1, "2026-09-04": 1 };
+  // 只有 09-02 是起点（前一天为 0），09-03/04 属于同一段，不重复计数 → 样本不足
+  assert.equal(lagAnalysis("o", "x", o, x, days), null);
 });

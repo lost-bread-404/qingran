@@ -110,16 +110,18 @@ export const brainRunJobs = createServerFn({ method: "POST" })
     const types = data.types.filter((t) =>
       ["dusk", "synth", "report", "archive", "backfill"].includes(t),
     );
+    const now = Date.now();
     if (types.includes("dusk")) {
       const tz = (await getMeta()).timeZone || "UTC";
-      const day = shiftDay(localDay(Date.now(), tz), 0);
-      await enqueue("dusk", `dusk:${day}`, { day }, Date.now(), true);
+      const day = shiftDay(localDay(now, tz), 0);
+      // 独立的 dedupe key：不占用自动 dusk 的 `dusk:<day>`，当天结束后仍会完整重跑
+      await enqueue("dusk", `dusk-manual:${day}:${now}`, { day, manual: true }, now, true);
     }
     if (types.includes("synth")) {
       const { currentIsoWeek } = await import("./time");
       const tz = (await getMeta()).timeZone || "UTC";
-      const week = currentIsoWeek(Date.now(), tz);
-      await enqueue("synth", `synth:${week}`, { week }, Date.now(), true);
+      const week = currentIsoWeek(now, tz);
+      await enqueue("synth", `synth-manual:${week}:${now}`, { week, manual: true }, now, true);
     }
     if (types.includes("report")) {
       const { previousMonth, yearMonth, localDay: ld } = await import("./time");
@@ -127,7 +129,18 @@ export const brainRunJobs = createServerFn({ method: "POST" })
       const month = yearMonth(shiftDay(ld(Date.now(), tz), -1));
       await enqueue("report", `report:${month}`, { month }, Date.now(), true);
     }
-    const ran = await runJobsNow(types);
+    const ran = await runJobsNow();
+    return { ok: true as const, ran };
+  });
+
+/** Diary 页面打开时调用：把到期的日/周/月任务排上，并在后台跑完（含聊天请求里跑不了的长任务）。 */
+export const brainRunDue = createServerFn({ method: "POST" })
+  .validator((input: { timeZone?: string }) => input ?? {})
+  .handler(async ({ data }) => {
+    const tz = data?.timeZone || (await getMeta()).timeZone || "UTC";
+    const { enqueuePeriodicIfDue } = await import("./diary/dusk");
+    await enqueuePeriodicIfDue(Date.now(), tz);
+    const ran = await runJobsNow();
     return { ok: true as const, ran };
   });
 

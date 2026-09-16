@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { enqueueArchiveIfNeeded } from "@/lib/lover/brain/archivist";
-import { DRAIN_BUDGET_MS, validateModelClasses } from "@/lib/lover/brain/config";
+import { assertModelConfig, DRAIN_BUDGET_MS } from "@/lib/lover/brain/config";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
 import { drainJobs, enqueue } from "@/lib/lover/brain/jobs";
 import { upsertMessage } from "@/lib/lover/brain/store";
@@ -43,8 +43,14 @@ export const Route = createFileRoute("/api/talk")({
               controller.enqueue(encoder.encode(frame));
             };
             try {
-              const caps = validateModelClasses();
-              if (caps.length) console.error("[brain] model class errors", caps);
+              assertModelConfig();
+            } catch (err) {
+              console.error(err);
+              send({ t: "err", m: "模型配置有误，请检查 brain/config.ts。" });
+              controller.close();
+              return;
+            }
+            try {
               const text = String(body.text ?? "");
               const profile = lockedProfile(body.profile);
               const nowMs = Number(body.nowMs) || Date.now();

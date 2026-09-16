@@ -1,8 +1,11 @@
 import {
+  FINDING_MAX_P,
   FINDING_MIN_EXPOSED,
   FINDING_MIN_LIFT,
   FINDING_MIN_N11,
+  FINDING_MIN_UNEXPOSED,
   LAG_MAX,
+  RECOVERY_MAX_P,
   STALL_DAYS,
   STUCK_MIN_WEEKS,
 } from "../config.ts";
@@ -54,8 +57,42 @@ export function scoreOf(c: LiftCounts, lift: number): number {
   return c.n11 * Math.log(lift);
 }
 
-export function keepFinding(c: LiftCounts, lift: number): boolean {
-  return c.n11 >= FINDING_MIN_N11 && c.n11 + c.n10 >= FINDING_MIN_EXPOSED && lift >= FINDING_MIN_LIFT;
+export function keepFinding(c: LiftCounts, lift: number, maxP = FINDING_MAX_P): boolean {
+  return (
+    c.n11 >= FINDING_MIN_N11 &&
+    c.n11 + c.n10 >= FINDING_MIN_EXPOSED &&
+    c.n01 + c.n00 >= FINDING_MIN_UNEXPOSED &&
+    lift >= FINDING_MIN_LIFT &&
+    fisherOneSided(c) <= maxP
+  );
+}
+
+function logFactorial(n: number): number {
+  let s = 0;
+  for (let i = 2; i <= n; i++) s += Math.log(i);
+  return s;
+}
+
+/**
+ * 单侧 Fisher exact test：在边际固定时，n11 至少这么大的概率。
+ * 用来过滤小样本和“对照组几乎为空”造成的虚高 lift。
+ */
+export function fisherOneSided(c: LiftCounts): number {
+  const row1 = c.n11 + c.n10;
+  const col1 = c.n11 + c.n01;
+  const n = c.n11 + c.n10 + c.n01 + c.n00;
+  const maxA = Math.min(row1, col1);
+  const base =
+    logFactorial(row1) + logFactorial(n - row1) + logFactorial(col1) + logFactorial(n - col1) - logFactorial(n);
+  let p = 0;
+  for (let a = c.n11; a <= maxA; a++) {
+    const b = row1 - a;
+    const cc = col1 - a;
+    const d = n - row1 - cc;
+    if (b < 0 || cc < 0 || d < 0) continue;
+    p += Math.exp(base - logFactorial(a) - logFactorial(b) - logFactorial(cc) - logFactorial(d));
+  }
+  return Math.min(1, p);
 }
 
 export function buildEpisodes(
@@ -141,6 +178,9 @@ export function lagAnalysis(
     for (const d of orderedDays) {
       const o = outcome[d] ?? null;
       if (o == null) continue;
+      // 只看“可能开始”的天：前一天状态已知且为 0。
+      // 连续多天的状态只算一次起点，避免自相关把显著性虚高。
+      if ((outcome[shiftDay(d, -1)] ?? null) !== 0) continue;
       const x = windowValue(antecedent, d, k);
       addCell(counts, o, x);
     }
@@ -182,15 +222,16 @@ export function recoveryAnalysis(
       if (!ep.endDay) continue;
       const days = daysInclusive(ep.startDay, ep.endDay);
       for (const d of days) {
-        const endsSoon =
-          (shiftDay(d, 1) === ep.endDay || shiftDay(d, 2) === ep.endDay) && ep.endKnown;
+        // endDay 是低谷的最后一天；“在 d+1 或 d+2 走出来”即 endDay ∈ {d, d+1}
+        const endsSoon = (ep.endDay === d || shiftDay(d, 1) === ep.endDay) && ep.endKnown;
         const r: FactorValue = endsSoon ? 1 : 0;
         const x = windowValue(antecedent, d, k);
         addCell(counts, r, x);
       }
     }
     const lift = liftOf(counts);
-    if (!keepFinding(counts, lift)) continue;
+    // 恢复路径只在低谷期内部计算、样本天然少，阈值放宽到 RECOVERY_MAX_P
+    if (!keepFinding(counts, lift, RECOVERY_MAX_P)) continue;
     const score = scoreOf(counts, lift);
     if (!best || score > best.score) best = { lag: k, counts, lift, score };
   }

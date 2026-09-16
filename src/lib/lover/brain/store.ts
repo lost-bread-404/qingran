@@ -388,7 +388,12 @@ async function writeHistory(
   );
 }
 
-export async function upsertNote(note: Note, jobId?: string, op: string = "ADD"): Promise<void> {
+export async function upsertNote(
+  note: Note,
+  jobId?: string,
+  op: string = "ADD",
+  batch?: { key: string; supersedes?: string | null },
+): Promise<void> {
   const db = await getSql();
   const existing = await getNote(note.id);
   await db.query(
@@ -411,7 +416,78 @@ export async function upsertNote(note: Note, jobId?: string, op: string = "ADD")
       note.lastRecalledAt, note.createdAt, note.updatedAt,
     ],
   );
+  if (batch) {
+    await db.query(`update mem_notes set batch_key = $2, supersedes = $3 where id = $1`, [
+      note.id,
+      batch.key,
+      batch.supersedes ?? null,
+    ]);
+  }
   await writeHistory("mem_notes", note.id, op, existing, note, jobId);
+}
+
+/** 放弃某批次之前失败留下的 pending notes（重试前调用）。 */
+export async function abandonPendingBatch(batchKey: string): Promise<number> {
+  const db = await getSql();
+  const rows = await db.query<{ id: string }>(
+    `update mem_notes set status = 'archived', updated_at = $2
+     where batch_key = $1 and status = 'pending' returning id`,
+    [batchKey, Date.now()],
+  );
+  return rows.length;
+}
+
+/**
+ * 原子提交一个 archive 批次：单条 SQL 语句内完成
+ * 消息标记已归档 + 旧 note supersede + pending note 生效。
+ * 返回被 supersede 的 (旧 id, 新 id) 列表，用于事后写 history。
+ */
+export async function commitArchiveBatch(
+  batchKey: string,
+  messageIds: string[],
+  at: number,
+): Promise<Array<{ oldId: string; newId: string }>> {
+  const db = await getSql();
+  const rows = await db.query<{ kind: string; old_id: string | null; new_id: string | null }>(
+    `with msgs as (
+       update qingran_messages set archived_at = $2
+       where id = any($1::text[]) and archived_at is null
+       returning id
+     ),
+     sup as (
+       update mem_notes o
+       set status = 'superseded', superseded_by = n.id, updated_at = $2
+       from mem_notes n
+       where n.batch_key = $3 and n.status = 'pending'
+         and n.supersedes = o.id and o.status = 'active'
+       returning o.id as old_id, n.id as new_id
+     ),
+     act as (
+       update mem_notes set status = 'active', updated_at = $2
+       where batch_key = $3 and status = 'pending'
+       returning id
+     )
+     select 'sup' as kind, old_id, new_id from sup
+     union all select 'msg', null, null from (select count(*) from msgs) m
+     union all select 'act', null, null from (select count(*) from act) a`,
+    [pgTextArray(messageIds), at, batchKey],
+  );
+  return rows
+    .filter((r) => r.kind === "sup" && r.old_id && r.new_id)
+    .map((r) => ({ oldId: r.old_id!, newId: r.new_id! }));
+}
+
+export async function logSupersede(oldId: string, newIdValue: string, jobId?: string): Promise<void> {
+  const existing = await getNote(oldId);
+  if (!existing) return;
+  await writeHistory(
+    "mem_notes",
+    oldId,
+    "SUPERSEDE",
+    { ...existing, status: "active", supersededBy: null },
+    existing,
+    jobId,
+  );
 }
 
 export async function getNote(id: string): Promise<Note | null> {
@@ -458,7 +534,10 @@ export async function listNotes(filter: {
     where.push(clause.replace("?", `$${params.length}`));
   };
   if (filter.status) add("status = ?", filter.status);
-  else add("status <> ?", "archived");
+  else {
+    add("status <> ?", "archived");
+    add("status <> ?", "pending");
+  }
   if (filter.subject) add("subject = ?", filter.subject);
   if (filter.fromDay) add("local_day >= ?", filter.fromDay);
   if (filter.toDay) add("local_day <= ?", filter.toDay);

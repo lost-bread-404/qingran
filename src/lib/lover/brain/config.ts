@@ -116,6 +116,9 @@ export const LAG_MAX = 3;
 export const FINDING_MIN_N11 = 4;
 export const FINDING_MIN_EXPOSED = 5;
 export const FINDING_MIN_LIFT = 1.5;
+export const FINDING_MIN_UNEXPOSED = 5; // 对照组（没有前因的天）至少这么多天
+export const FINDING_MAX_P = 0.01; // 单侧 Fisher exact test
+export const RECOVERY_MAX_P = 0.05; // 恢复路径样本少，阈值放宽；报告中标注为“线索”
 export const STUCK_MIN_WEEKS = 3;
 export const STALL_DAYS = 14;
 
@@ -198,17 +201,35 @@ export function validateModelClasses(): string[] {
       errors.push(`${cls}: contextTokens must be ≥ 200k`);
     }
   }
-  for (const [route, spec] of Object.entries(ROUTES) as [Route, (typeof ROUTES)[Route]][]) {
-    const clsCfg = MODEL_CLASSES[spec.cls];
-    const model = clsCfg.model;
-    const effort = spec.effort !== undefined ? spec.effort : clsCfg.effort;
-    const caps = MODEL_CAPS[model];
-    if (!caps) continue;
-    if (!caps.efforts.includes(effort)) {
-      errors.push(`${route}: effort ${String(effort)} is not valid for ${model}`);
+  // 按实际生效的配置（含环境变量覆盖）逐个 route 校验
+  for (const route of Object.keys(ROUTES) as Route[]) {
+    const r = resolveRoute(route);
+    const caps = MODEL_CAPS[r.model];
+    if (!caps) {
+      errors.push(`${route}: model ${r.model} is not in MODEL_CAPS`);
+      continue;
+    }
+    if (!caps.efforts.includes(r.effort)) {
+      errors.push(`${route}: effort ${String(r.effort)} is not valid for ${r.model}`);
+    }
+    if (r.cls === "REALTIME" && r.effort !== null && r.effort !== "none") {
+      errors.push(`${route}: REALTIME must not use reasoning`);
+    }
+    if (r.cls === "AGENT" && !caps.functionCalling) {
+      errors.push(`${route}: model must support function calling`);
     }
   }
-  return errors;
+  return [...new Set(errors)];
+}
+
+let validated: string[] | null = null;
+
+/** 首次调用时校验模型配置；配置错误时抛出，调用方据此拒绝服务。 */
+export function assertModelConfig(): void {
+  validated ??= validateModelClasses();
+  if (validated.length) {
+    throw new Error(`[brain] invalid model config: ${validated.join("; ")}`);
+  }
 }
 
 const FALLBACK_MODEL = MODEL_CLASSES.REALTIME.model;

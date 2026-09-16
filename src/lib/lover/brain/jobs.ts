@@ -67,13 +67,13 @@ async function runOne(job: BrainJob): Promise<void> {
   }
   if (job.type === "dusk") {
     const { runDusk } = await import("./diary/dusk");
-    await runDusk(String(job.payload.day ?? ""), job.id);
+    await runDusk(String(job.payload.day ?? ""), job.id, { manual: Boolean(job.payload.manual) });
     await finishJob(job.id, "done");
     return;
   }
   if (job.type === "synth") {
     const { runSynth } = await import("./diary/synth");
-    await runSynth(String(job.payload.week ?? ""), job.id);
+    await runSynth(String(job.payload.week ?? ""), job.id, { manual: Boolean(job.payload.manual) });
     await finishJob(job.id, "done");
     return;
   }
@@ -120,12 +120,9 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
   return ran;
 }
 
-export async function runJobsNow(types: JobType[]): Promise<number> {
-  const now = Date.now();
-  for (const type of types) {
-    await enqueue(type, `manual:${type}:${now}`, { manual: true }, now, true);
-  }
-  return drainJobs(MANUAL_DRAIN_MS);
+/** 手动执行：调用方负责先 enqueue 带完整 payload 的 job，这里只负责 drain。 */
+export async function runJobsNow(budgetMs = MANUAL_DRAIN_MS): Promise<number> {
+  return drainJobs(budgetMs);
 }
 
 export { skipOldReflect };

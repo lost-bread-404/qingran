@@ -10,8 +10,9 @@ import {
   lastMessageBefore,
   listMessagesByIds,
   listNotes,
-  markArchived,
-  supersedeNote,
+  abandonPendingBatch,
+  commitArchiveBatch,
+  logSupersede,
   unarchivedForDay,
   unarchivedForSession,
   unarchivedOverflow,
@@ -114,15 +115,27 @@ ${pending
     ? ((result.json as { ops: RawOp[] }).ops ?? [])
     : [];
   const valid = validateOps(rawOps, pending, candidates);
+  const batchKey = `archive:${pending[0]!.id}`;
+  // 1) 清掉上一次失败留下的半成品
+  await abandonPendingBatch(batchKey);
+  // 2) 以 pending 写入（对检索和日记不可见）
   for (const item of valid) {
-    await upsertNote(item.note, jobId, item.supersede ? "SUPERSEDE" : "ADD");
-    if (item.supersede) await supersedeNote(item.supersede, item.note.id, jobId);
-    for (const link of item.links) await addLink(item.note.id, link);
+    await upsertNote({ ...item.note, status: "pending" }, jobId, item.supersede ? "SUPERSEDE" : "ADD", {
+      key: batchKey,
+      supersedes: item.supersede ?? null,
+    });
   }
-  await markArchived(
+  // 3) 单条语句原子提交：消息已归档 + supersede + pending → active
+  const superseded = await commitArchiveBatch(
+    batchKey,
     pending.map((m) => m.id),
     Date.now(),
   );
+  // 4) 提交后的非关键步骤：history 与 links（失败不影响数据一致性）
+  for (const s of superseded) await logSupersede(s.oldId, s.newId, jobId);
+  for (const item of valid) {
+    for (const link of item.links) await addLink(item.note.id, link);
+  }
   await bumpNotesVersion();
 }
 

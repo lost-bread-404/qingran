@@ -40,10 +40,18 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   const speed = ttsSpeed(Boolean(data.softVoice));
   void checkModelAvailability(apiKey);
   const route = applyAvailabilityFallback(resolveRoute("voice"));
-  const tts = new LiveTts(apiKey, emit, speed);
   const t0 = Date.now();
   let ttftSent = false;
   let firstAudioSent = false;
+  // 从一开始就包一层，流式阶段的第一段音频也能计时
+  const timedEmit: Emit = (event) => {
+    if (event.t === "audio" && !firstAudioSent) {
+      emit({ t: "timing", k: "first_audio_ms", ms: Date.now() - t0 });
+      firstAudioSent = true;
+    }
+    emit(event);
+  };
+  const tts = new LiveTts(apiKey, timedEmit, speed);
 
   const res = await fetch("https://api.x.ai/v1/chat/completions", {
     method: "POST",
@@ -120,24 +128,11 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     return;
   }
 
-  const origEmit = emit;
-  const wrapped: Emit = (event) => {
-    if (event.t === "audio" && !firstAudioSent) {
-      origEmit({ t: "timing", k: "first_audio_ms", ms: Date.now() - t0 });
-      firstAudioSent = true;
-    }
-    origEmit(event);
-  };
-  tts.setEmit(wrapped);
-
   await tts.finish();
 
   if (!tts.complete) {
     const clip = await speakRest(apiKey, speech, speed);
-    if (clip?.b) {
-      if (!firstAudioSent) emit({ t: "timing", k: "first_audio_ms", ms: Date.now() - t0 });
-      emit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
-    }
+    if (clip?.b) timedEmit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
   }
 
   emit({ t: "done", speech, replyId: data.replyId });

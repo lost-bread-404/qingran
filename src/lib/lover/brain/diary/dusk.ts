@@ -132,7 +132,11 @@ function ternary(v: unknown): -1 | 0 | 1 | null {
   return null;
 }
 
-export async function runDusk(day: string, jobId?: string): Promise<void> {
+export async function runDusk(
+  day: string,
+  jobId?: string,
+  opts: { manual?: boolean } = {},
+): Promise<void> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
   await archiveDaySync(day, jobId);
 
@@ -275,7 +279,11 @@ ${factors.map((f) => `${f.id}|${f.name}|${f.definition}`).join("\n")}`,
   }
 
   await updatePortraitSelfBond(day, jobId);
-  await patchMeta({ lastDuskDay: day });
+  // 手动整理（通常是还没结束的今天）不推进 lastDuskDay，这一天结束后自动 dusk 仍会完整重跑
+  if (!opts.manual) {
+    const meta = await getMeta();
+    if (!meta.lastDuskDay || meta.lastDuskDay < day) await patchMeta({ lastDuskDay: day });
+  }
 }
 
 export async function enqueuePeriodicIfDue(nowMs: number, timeZone: string): Promise<void> {
@@ -292,8 +300,9 @@ export async function enqueuePeriodicIfDue(nowMs: number, timeZone: string): Pro
     guard += 1;
   }
 
-  const { currentIsoWeek, previousMonth } = await import("../time");
-  const week = currentIsoWeek(nowMs, timeZone);
+  const { previousIsoWeek, previousMonth } = await import("../time");
+  // 周分析处理的是刚结束的上一周
+  const week = previousIsoWeek(nowMs, timeZone);
   if (meta.lastSynthWeek < week) {
     await enqueue("synth", `synth:${week}`, { week });
   }

@@ -1,6 +1,6 @@
 export type Subject = "rosie" | "qingran" | "us";
 export type Lens = "diary" | "bond";
-export type NoteStatus = "active" | "superseded" | "archived";
+export type NoteStatus = "active" | "superseded" | "archived" | "pending";
 export type JobType = "reflect" | "archive" | "dusk" | "synth" | "report" | "backfill";
 export type JobStatus = "pending" | "running" | "done" | "failed";
 

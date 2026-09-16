@@ -55,7 +55,7 @@ export async function buildReportData(month: string) {
       name: themes.find((t) => t.id === s.themeId)?.name ?? s.themeId,
     })),
     antecedents: findings.filter((f) => f.kind === "antecedent").slice(0, 5),
-    recovery: findings.filter((f) => f.kind === "recovery").slice(0, 3),
+    recovery: findings.filter((f) => f.kind === "recovery").slice(0, 3).map((f) => ({ ...f, clue: true })),
     wins: days.flatMap((d) => d.wins.map((w) => ({ day: d.day, text: w.text }))),
     themes: themes.map((t) => ({
       id: t.id,
