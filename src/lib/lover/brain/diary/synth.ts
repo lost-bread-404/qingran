@@ -10,6 +10,7 @@ import {
   listNotes,
   listThemes,
   listThemeWeeks,
+  notesForTheme,
   notesWithoutTheme,
   patchMeta,
   replaceEpisodes,
@@ -129,9 +130,9 @@ const ACTION_SCHEMA = {
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["theme_id", "action_taken"],
+          required: ["week", "action_taken"],
           properties: {
-            theme_id: { type: "string" },
+            week: { type: "string" },
             action_taken: { type: ["integer", "null"] },
           },
         },
@@ -322,14 +323,14 @@ ${themes
   const start60 = shiftDay(end, -60);
   const days = await listDays(start60, end);
   for (const theme of themes) {
-    const members = diaryNotes; // mentions approximated via search of theme name in notes
+    const members = await notesForTheme(theme.id);
     const byWeek = new Map<string, number>();
     for (const n of members) {
-      if (!n.text.includes(theme.name) && !n.tags.some((t) => theme.name.includes(t))) continue;
       const w = isoWeek(n.localDay);
       byWeek.set(w, (byWeek.get(w) ?? 0) + 1);
     }
     const weekKeys = [...byWeek.keys()].sort().slice(-8);
+    if (!weekKeys.length) continue;
     const judged = await callModel("assign", {
       system: DIARY_ANALYST_SYSTEM,
       input: `判断这些周是否对该主题有具体行动（day log 的 did/wins）。没有信息为 null。
@@ -349,18 +350,19 @@ ${days
       jobId,
     });
     const items = Array.isArray((judged.json as { items?: unknown })?.items)
-      ? ((judged.json as { items: Array<{ theme_id?: string; action_taken?: number | null }> }).items ?? [])
+      ? ((judged.json as { items: Array<{ week?: string; action_taken?: number | null }> }).items ?? [])
       : [];
-    const actionMap = new Map(items.map((i) => [String(i.theme_id), i.action_taken]));
+    const actionMap = new Map(items.map((i) => [String(i.week), i.action_taken]));
     for (const w of weekKeys) {
       const weekDays = days.filter((d) => isoWeek(d.day) === w);
       const moods = weekDays.map((d) => d.mood).filter((m): m is number => m != null);
       const moodAvg = moods.length ? moods.reduce((a, b) => a + b, 0) / moods.length : null;
+      const rawAction = actionMap.get(w);
       await upsertThemeWeek({
         themeId: theme.id,
         week: w,
         mentions: byWeek.get(w) ?? 0,
-        actionTaken: actionMap.get(theme.id) ?? null,
+        actionTaken: rawAction === 1 ? 1 : rawAction === 0 ? 0 : null,
         moodAvg,
       });
     }

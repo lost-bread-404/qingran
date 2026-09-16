@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { resolveRoute, VOICE_IO } from "./brain/config";
+import { applyAvailabilityFallback, checkModelAvailability, resolveRoute, VOICE_IO } from "./brain/config";
 import { spokenForTts } from "./speech-tags";
 import { shouldFlushSpoken, ttsRequestBody, ttsSpeed } from "./tts";
 import type { VoiceChatMessage } from "./brain/types";
@@ -38,7 +38,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   }
 
   const speed = ttsSpeed(Boolean(data.softVoice));
-  const route = resolveRoute("voice");
+  void checkModelAvailability(apiKey);
+  const route = applyAvailabilityFallback(resolveRoute("voice"));
   const tts = new LiveTts(apiKey, emit, speed);
   const t0 = Date.now();
   let ttftSent = false;

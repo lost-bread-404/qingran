@@ -38,7 +38,12 @@ export async function enqueue(
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
-  return insertJob(job, force);
+  const inserted = await insertJob(job, force);
+  if (inserted && type === "reflect") {
+    const turnSeq = Number(payload.turnSeq ?? 0);
+    if (turnSeq) await skipOldReflect(turnSeq);
+  }
+  return inserted;
 }
 
 async function runOne(job: BrainJob): Promise<void> {

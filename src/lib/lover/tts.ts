@@ -1,3 +1,5 @@
+import { VOICE_IO } from "./brain/config.ts";
+
 export const TTS_SPEED_NORMAL = 1;
 export const TTS_SPEED_SOFT = 0.7;
 
@@ -5,16 +7,16 @@ export function ttsSpeed(soft: boolean) {
   return soft ? TTS_SPEED_SOFT : TTS_SPEED_NORMAL;
 }
 
-export function ttsRequestBody(text: string, language: string, speed = TTS_SPEED_NORMAL) {
+export function ttsRequestBody(text: string, language = VOICE_IO.language, speed = TTS_SPEED_NORMAL) {
   return {
     text,
-    voice_id: "eve",
+    voice_id: VOICE_IO.voice,
     language,
     speed: clampSpeed(speed),
     text_normalization: true,
     output_format: {
-      codec: "pcm",
-      sample_rate: 24000,
+      codec: VOICE_IO.codec,
+      sample_rate: VOICE_IO.sampleRate,
     },
   };
 }

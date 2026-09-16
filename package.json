@@ -16,7 +16,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts src/lib/lover/speech-tags.test.ts src/lib/lover/stt-text.test.ts src/lib/lover/pair-messages.test.ts src/lib/lover/vad.test.ts src/lib/lover/vocal-event.test.ts src/lib/lover/memory.test.ts src/lib/lover/tts.test.ts src/lib/lover/brain/time.test.ts src/lib/lover/brain/config.test.ts src/lib/lover/brain/jobs.test.ts src/lib/lover/brain/llm.test.ts src/lib/lover/brain/archivist.test.ts src/lib/lover/brain/diary/stats.test.ts src/lib/lover/brain/diary/report.test.ts src/lib/lover/brain/voice/pack.test.ts src/lib/lover/brain/voice/retrieve.test.ts src/lib/lover/brain/voice/reflector.test.ts",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts src/lib/lover/speech-tags.test.ts src/lib/lover/stt-text.test.ts src/lib/lover/pair-messages.test.ts src/lib/lover/vad.test.ts src/lib/lover/vocal-event.test.ts src/lib/lover/memory.test.ts src/lib/lover/tts.test.ts src/lib/lover/pcm-tap.test.ts src/lib/lover/brain/time.test.ts src/lib/lover/brain/config.test.ts src/lib/lover/brain/jobs.test.ts src/lib/lover/brain/llm.test.ts src/lib/lover/brain/archivist.test.ts src/lib/lover/brain/diary/stats.test.ts src/lib/lover/brain/diary/report.test.ts src/lib/lover/brain/voice/pack.test.ts src/lib/lover/brain/voice/retrieve.test.ts src/lib/lover/brain/voice/reflector.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

@@ -11,6 +11,7 @@ import {
 import { computeAllFindings, seriesFromDayFactors } from "./stats.ts";
 import { listDayFactors } from "../store.ts";
 import { DIARY_ANALYST_SYSTEM } from "./prompts.ts";
+import { daysInclusive } from "../time.ts";
 
 const TOOLS: ToolDef[] = [
   {
@@ -25,7 +26,7 @@ const TOOLS: ToolDef[] = [
         from_day: { type: "string" },
         to_day: { type: "string" },
       },
-      required: ["query", "from_day", "to_day"],
+      required: ["query"],
     },
   },
   {
@@ -51,7 +52,23 @@ const TOOLS: ToolDef[] = [
         from_day: { type: "string" },
         to_day: { type: "string" },
       },
-      required: ["name", "from_day", "to_day"],
+      required: ["name"],
+    },
+  },
+  {
+    type: "function",
+    name: "define_adhoc_factor",
+    description: "按自然语言定义临时判定一个特征，返回日期序列（不入库）",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        name: { type: "string" },
+        definition: { type: "string" },
+        from_day: { type: "string" },
+        to_day: { type: "string" },
+      },
+      required: ["name", "definition", "from_day", "to_day"],
     },
   },
   {
@@ -94,7 +111,7 @@ const TOOLS: ToolDef[] = [
       type: "object",
       additionalProperties: false,
       properties: { tag: { type: "string" }, status: { type: "string" } },
-      required: ["tag", "status"],
+      required: [],
     },
   },
   {
@@ -109,6 +126,72 @@ const TOOLS: ToolDef[] = [
     },
   },
 ];
+
+const ADHOC_SCHEMA = {
+  name: "adhoc_factor",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["days"],
+    properties: {
+      days: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["day", "value"],
+          properties: {
+            day: { type: "string" },
+            value: { type: ["integer", "null"] },
+          },
+        },
+      },
+    },
+  },
+};
+
+async function defineAdhocFactor(args: Record<string, unknown>): Promise<unknown> {
+  const name = String(args.name ?? "").trim();
+  const definition = String(args.definition ?? "").trim();
+  const fromDay = String(args.from_day ?? "");
+  const toDay = String(args.to_day ?? "");
+  if (!name || !definition || !fromDay || !toDay) return { error: "missing fields" };
+  const days = await listDays(fromDay, toDay);
+  const notes = await listNotes({
+    fromDay,
+    toDay,
+    fromRosie: true,
+    lens: "diary",
+    status: "active",
+    limit: 400,
+  });
+  const result = await callModel("assign", {
+    system: `${DIARY_ANALYST_SYSTEM}
+按给定判定标准，给每一天标 1、0 或 null（未知）。不要猜，不要入库。`,
+    input: `特征：${name}
+定义：${definition}
+日期：${daysInclusive(fromDay, toDay).join(", ")}
+
+【day logs】
+${days.map((d) => `${d.day}|${d.summary}|e=${d.energy}|m=${d.mood}|did=${JSON.stringify(d.did)}|wins=${JSON.stringify(d.wins)}`).join("\n").slice(0, 6000)}
+
+【笔记】
+${notes.map((n) => `${n.localDay}|${n.text}`).join("\n").slice(0, 4000)}`,
+    schema: ADHOC_SCHEMA,
+  });
+  const items = Array.isArray((result.json as { days?: unknown })?.days)
+    ? ((result.json as { days: Array<{ day?: string; value?: unknown }> }).days ?? [])
+    : [];
+  return {
+    name,
+    definition,
+    stored: false,
+    series: items.map((i) => ({
+      day: String(i.day ?? ""),
+      value: i.value === 1 ? 1 : i.value === 0 ? 0 : null,
+    })),
+  };
+}
 
 async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   if (name === "search_notes") {
@@ -130,8 +213,12 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
     const f = factors.find((x) => x.name === args.name || x.id === args.name);
     if (!f) return [];
     const rows = await listDayFactors(String(args.from_day || "") || undefined, String(args.to_day || "") || undefined);
-    return rows.filter((r) => r.factorId === f.id);
+    return seriesFromDayFactors(
+      rows.filter((r) => r.factorId === f.id),
+      f.id,
+    );
   }
+  if (name === "define_adhoc_factor") return defineAdhocFactor(args);
   if (name === "compute_lift") {
     const factors = await listFactors(true);
     const o = factors.find((x) => x.name === args.outcome || x.id === args.outcome);

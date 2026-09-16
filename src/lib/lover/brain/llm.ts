@@ -185,8 +185,10 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     const toolCalls = outputToolCalls(raw);
     const json = parseJsonLoose(text);
     const ms = Date.now() - started;
-    const usage = (raw && typeof raw === "object" ? (raw as { usage?: Record<string, number> }).usage : null) ?? {};
-    const note = `model=${resolved.model} effort=${String(resolved.effort)} in=${usage.input_tokens ?? "?"} out=${usage.output_tokens ?? "?"}`;
+    const usage = (raw && typeof raw === "object" ? (raw as { usage?: Record<string, unknown> }).usage : null) ?? {};
+    const detailsIn = (usage.input_tokens_details as Record<string, unknown> | undefined) ?? {};
+    const detailsOut = (usage.output_tokens_details as Record<string, unknown> | undefined) ?? {};
+    const note = `model=${resolved.model} effort=${String(resolved.effort)} in=${usage.input_tokens ?? "?"} cached=${detailsIn.cached_tokens ?? usage.cached_tokens ?? "?"} out=${usage.output_tokens ?? "?"} reason=${detailsOut.reasoning_tokens ?? usage.reasoning_tokens ?? "?"}`;
     await appendBrainLog({
       jobId: input.jobId,
       step: `${route}:${resolved.model}`,

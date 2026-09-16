@@ -92,7 +92,7 @@ export const Route = createFileRoute("/api/talk")({
               if (!failed) send({ t: "done", speech, replyId });
 
               await enqueue("reflect", `reflect:${userCreatedAt}`, { turnSeq: userCreatedAt });
-              await enqueueArchiveIfNeeded();
+              await enqueueArchiveIfNeeded(userCreatedAt);
               await enqueuePeriodicIfDue(nowMs, timeZone);
               await drainJobs(DRAIN_BUDGET_MS);
             } catch {

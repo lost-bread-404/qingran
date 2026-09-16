@@ -7,7 +7,7 @@ import {
   bumpNotesVersion,
   getNote,
   heavyRecentNotes,
-  lastMessage,
+  lastMessageBefore,
   listMessagesByIds,
   listNotes,
   markArchived,
@@ -126,17 +126,15 @@ ${pending
   await bumpNotesVersion();
 }
 
-export async function enqueueArchiveIfNeeded(): Promise<void> {
+export async function enqueueArchiveIfNeeded(userCreatedAt = Date.now()): Promise<void> {
   const overflow = await unarchivedOverflow(ARCHIVE_BATCH_MAX);
   if (overflow.length >= ARCHIVE_MIN_OVERFLOW) {
     const batch = overflow.slice(0, ARCHIVE_BATCH_MAX);
     await enqueue("archive", `archive:${batch[0]!.id}`, { ids: batch.map((m) => m.id) });
   }
-  const last = await lastMessage();
-  if (!last) return;
-  const prevGap = Date.now() - last.createdAt;
-  if (prevGap >= SESSION_GAP_MS && last.sessionId) {
-    const session = await unarchivedForSession(last.sessionId);
+  const prev = await lastMessageBefore(userCreatedAt);
+  if (prev && userCreatedAt - prev.createdAt >= SESSION_GAP_MS && prev.sessionId) {
+    const session = await unarchivedForSession(prev.sessionId);
     if (session.length) {
       for (let i = 0; i < session.length; i += ARCHIVE_BATCH_MAX) {
         const batch = session.slice(i, i + ARCHIVE_BATCH_MAX);

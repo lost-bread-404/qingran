@@ -256,6 +256,19 @@ export async function lastMessage(): Promise<StoredMessage | null> {
   return rows[0] ? rowMessage(rows[0]) : null;
 }
 
+export async function lastMessageBefore(createdAt: number): Promise<StoredMessage | null> {
+  const db = await getSql();
+  const rows = await db.query<Record<string, unknown>>(
+    `select id, role, body, created_at, kind, archived_at, session_id, local_day
+     from qingran_messages
+     where created_at < $1
+     order by created_at desc, id desc
+     limit 1`,
+    [createdAt],
+  );
+  return rows[0] ? rowMessage(rows[0]) : null;
+}
+
 export async function upsertMessage(msg: {
   id: string;
   role: "user" | "assistant";
