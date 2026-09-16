@@ -51,6 +51,7 @@ import {
   saveProfile,
   type BackupCursor,
   type BackupRow,
+  type V1Backup,
 } from "./backup.ts";
 import type { Profile } from "../types.ts";
 
@@ -276,6 +277,30 @@ export const brainImportFinish = createServerFn({ method: "POST" })
     if (data?.profile) await saveProfile(data.profile);
     await finishImport({ v1: Boolean(data?.v1) });
     return { ok: true as const };
+  });
+
+/** v1 备份体积小，一次转完：用 brain_meta.timeZone 补 local_day / session_id。 */
+export const brainImportV1 = createServerFn({ method: "POST" })
+  .validator((input: { backup: V1Backup }) => input)
+  .handler(async ({ data }) => {
+    const raw = data.backup;
+    if (!raw || raw.kind !== "qingran-backup" || raw.version !== 1) {
+      return { inserted: 0, updated: 0, skipped: 0, error: "not-v1" as const };
+    }
+    const tz = (await getMeta()).timeZone || "UTC";
+    const converted = convertV1(raw, tz);
+    await saveProfile(converted.profile);
+    let inserted = 0;
+    let updated = 0;
+    let skipped = 0;
+    for (const table of ["qingran_messages", "mem_notes"] as const) {
+      const r = await importTableChunk(table, converted.tables[table]);
+      inserted += r.inserted;
+      updated += r.updated;
+      skipped += r.skipped;
+    }
+    await finishImport({ v1: true });
+    return { inserted, updated, skipped };
   });
 
 export { buildReportData, convertV1 };

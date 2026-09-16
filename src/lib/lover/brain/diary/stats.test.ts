@@ -121,6 +121,7 @@ test("recovery only scores inside episodes", () => {
   const rec = recoveryAnalysis("o", "x", outcome, ante, eps);
   if (rec) {
     assert.equal(rec.kind, "recovery");
+    assert.equal(rec.tier, "clue");
     assert.ok(rec.n11 >= 0);
   }
 });

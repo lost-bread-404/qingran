@@ -72,6 +72,21 @@ test("v1 conversion fills local_day, session_id, and legacy notes", () => {
   assert.equal(converted.tables.mem_notes[0]!.weight, 4);
 });
 
+test("v1 conversion uses the given timeZone for local_day", () => {
+  // 2026-01-15 03:30 UTC = 2026-01-14 22:30 New York (EST)
+  const at = Date.UTC(2026, 0, 15, 3, 30, 0);
+  const converted = convertV1(
+    {
+      kind: "qingran-backup",
+      version: 1,
+      messages: [{ id: "m1", role: "user", text: "晚了", createdAt: at }],
+      memories: [],
+    },
+    "America/New_York",
+  );
+  assert.equal(converted.tables.qingran_messages[0]!.local_day, "2026-01-14");
+});
+
 test("v2 roundtrip, idempotent re-import, skipped illegal rows, chunk split", async () => {
   const a = await openIsolatedSql();
   try {

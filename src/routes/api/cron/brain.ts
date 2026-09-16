@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { now } from "@/lib/lover/brain/clock";
 import { assertModelConfig, LONG_DRAIN_MS } from "@/lib/lover/brain/config";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
 import { drainJobs } from "@/lib/lover/brain/jobs";
@@ -29,7 +30,7 @@ export const Route = createFileRoute("/api/cron/brain")({
           return Response.json({ ok: false, error: message }, { status: 500 });
         }
         const tz = (await getMeta()).timeZone || "America/New_York";
-        await enqueuePeriodicIfDue(Date.now(), tz);
+        await enqueuePeriodicIfDue(now(), tz);
         const ran = await drainJobs(LONG_DRAIN_MS);
         const pending = await countPendingJobs();
         return Response.json({ ok: true, ran, pending });

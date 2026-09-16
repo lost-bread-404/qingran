@@ -1226,8 +1226,18 @@ export async function listJobStatus(): Promise<{
   };
 }
 
-export async function claimJob(nowMs: number, lockMs: number): Promise<BrainJob | null> {
+export async function claimJob(nowMs: number, lockMs: number, preferId?: string): Promise<BrainJob | null> {
   const db = await getSql();
+  if (preferId) {
+    const updated = await db.query<Record<string, unknown>>(
+      `update brain_jobs
+       set status = 'running', locked_until = $2, attempts = attempts + 1, updated_at = $3
+       where id = $1 and ((status = 'pending' and run_after <= $3) or (status = 'running' and locked_until < $3))
+       returning *`,
+      [preferId, nowMs + lockMs, nowMs],
+    );
+    return updated[0] ? rowJob(updated[0]) : null;
+  }
   const candidates = await db.query<Record<string, unknown>>(
     `select * from brain_jobs
      where (status = 'pending' and run_after <= $1) or (status = 'running' and locked_until < $1)

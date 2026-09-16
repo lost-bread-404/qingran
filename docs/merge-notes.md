@@ -21,7 +21,7 @@
 ## Vercel
 
 - `vercel.json`：`regions: ["iad1"]`（和 Neon US East 同区）；三条 cron 打到 `/api/cron/brain?slot=1|2|3`，调度 `0 10/11/12 * * *`（UTC，对应纽约夏令时早上 6–8 点，都在 04:00 日界之后）。Hobby 每个表达式每天最多一次，所以拆成三个小时把积压的 synth / report 分段跑完。slot 参数路由忽略。
-- **maxDuration**：Nitro 3 + TanStack Start 把 SSR 和 `createServerFn` 打进同一条 Vercel Function，`waitUntil` 的 270s drain 无法只加在 cron 上。因此 `vite.config.ts` 里 `nitro({ vercel: { functions: { maxDuration: 300 }, functionRules: { "/api/cron/brain": { maxDuration: 300 } } } })`。Hobby Fluid 上限就是 300s。
+- **maxDuration**：Nitro 3 + TanStack Start 把 SSR 和 `createServerFn` 打进同一条 Vercel Function，`waitUntil` 的 270s drain 无法只加在 cron 上。因此 `vite.config.ts` 里 `nitro({ vercel: { functions: { maxDuration: 300 } } })` 全局设成 300s。**不要**再用 `functionRules` 给 `/api/cron/brain` 单独复制一份——Nitro 会把整个 server bundle 再拷一份（[nitro#4233](https://github.com/nitrojs/nitro/issues/4233)），而 Diary 触发的 waitUntil 也跑在同一条 function 上。Hobby Fluid 上限就是 300s。
 - 环境变量：新增 **`CRON_SECRET`**。Vercel Cron 会带 `Authorization: Bearer $CRON_SECRET`。本地没设 `CRON_SECRET` 时允许从 localhost 调 `/api/cron/brain`。
 
 ## `操作说明.md` 需要补的步骤

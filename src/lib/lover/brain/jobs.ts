@@ -104,8 +104,8 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
     const peek = await peekNextJob(now());
     if (!peek) break;
     if (!canStartJob(peek.type, remaining)) break;
-    const job = await claimJob(now(), timeoutFor(peek.type) + LOCK_SLACK_MS);
-    if (!job) break;
+    const job = await claimJob(now(), timeoutFor(peek.type) + LOCK_SLACK_MS, peek.id);
+    if (!job) continue;
     try {
       await runOne(job);
       ran += 1;

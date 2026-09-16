@@ -178,12 +178,10 @@ export default defineConfig(({ command, isPreview }) => ({
             serverDir: "./server",
             // Hobby Fluid 上限 300s。createServerFn 与 SSR 打进同一条
             // Vercel Function，waitUntil 的长 drain 需要整条 function 都是 300s。
-            // /api/cron/brain 再用 functionRules 明确一次。
+            // 不要用 functionRules 给 cron 单独设：Nitro 会整包复制一份
+            // （nitro#4233），而 Diary 的 waitUntil 也跑在同一条 function 上。
             vercel: {
               functions: { maxDuration: 300 },
-              functionRules: {
-                "/api/cron/brain": { maxDuration: 300 },
-              },
             },
           }),
         ]

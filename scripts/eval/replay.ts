@@ -140,44 +140,44 @@ export async function replayFile(
       await enqueuePeriodicIfDue(turn.at, TZ);
       await drainJobs(LONG_DRAIN_MS);
     }
+
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(join(outDir, `${name}.transcript.json`), JSON.stringify(transcript, null, 2));
+    writeFileSync(
+      join(outDir, `${name}.timing.json`),
+      JSON.stringify({ pack_ms: packMs, ttft_ms: ttftMs }, null, 2),
+    );
+    const isDiary = name.startsWith("diary-");
+    if (isDiary) {
+      const [days, intentions, episodes, findings, factors] = await Promise.all([
+        listDays("1970-01-01", "2099-12-31"),
+        listIntentions(),
+        listEpisodes(),
+        listFindings(),
+        listFactors(false),
+      ]);
+      const names = new Map(factors.map((f) => [f.id, f.name]));
+      writeFileSync(
+        join(outDir, `${name}.diary.json`),
+        JSON.stringify(
+          {
+            days,
+            intentions,
+            episodes,
+            findings: findings.filter((f) => f.tier === "finding"),
+            clues: findings.filter((f) => f.tier === "clue"),
+            factorNames: Object.fromEntries(names),
+          },
+          null,
+          2,
+        ),
+      );
+    }
+    return { name, packMs, ttftMs, replies, isDiary };
   } finally {
     setClock(null);
+    await isolated.close();
   }
-
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, `${name}.transcript.json`), JSON.stringify(transcript, null, 2));
-  writeFileSync(
-    join(outDir, `${name}.timing.json`),
-    JSON.stringify({ pack_ms: packMs, ttft_ms: ttftMs }, null, 2),
-  );
-  const isDiary = name.startsWith("diary-");
-  if (isDiary) {
-    const [days, intentions, episodes, findings, factors] = await Promise.all([
-      listDays("1970-01-01", "2099-12-31"),
-      listIntentions(),
-      listEpisodes(),
-      listFindings(),
-      listFactors(false),
-    ]);
-    const names = new Map(factors.map((f) => [f.id, f.name]));
-    writeFileSync(
-      join(outDir, `${name}.diary.json`),
-      JSON.stringify(
-        {
-          days,
-          intentions,
-          episodes,
-          findings: findings.filter((f) => f.tier === "finding"),
-          clues: findings.filter((f) => f.tier === "clue"),
-          factorNames: Object.fromEntries(names),
-        },
-        null,
-        2,
-      ),
-    );
-  }
-  await isolated.close();
-  return { name, packMs, ttftMs, replies, isDiary };
 }
 
 export type ScenarioTurnFile = ScenarioTurn;

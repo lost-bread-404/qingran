@@ -4,10 +4,10 @@ import {
   brainExportBackup,
   brainImportChunk,
   brainImportFinish,
+  brainImportV1,
 } from "@/lib/lover/brain/api";
 import {
   BACKUP_KIND,
-  convertV1,
   IMPORT_ORDER,
   type BackupCursor,
   type BackupRow,
@@ -80,16 +80,19 @@ export function BrainBackupPanel() {
         return;
       }
       const v1 = raw.version === 1;
-      const tables: Record<string, BackupRow[]> = {};
-      let profile = raw.profile;
       if (v1) {
-        const converted = convertV1(raw);
-        profile = converted.profile;
-        tables.qingran_messages = converted.tables.qingran_messages;
-        tables.mem_notes = converted.tables.mem_notes;
-      } else {
-        Object.assign(tables, raw.tables ?? {});
+        setProgress("正在导入 v1 备份…");
+        const r = await brainImportV1({ data: { backup: raw } });
+        if ("error" in r && r.error) {
+          setProgress("不是清然的备份文件。");
+          return;
+        }
+        setProgress(`导入完成。写入 ${r.inserted}，更新 ${r.updated}，跳过 ${r.skipped}。`);
+        return;
       }
+      const tables: Record<string, BackupRow[]> = {};
+      const profile = raw.profile;
+      Object.assign(tables, raw.tables ?? {});
       const importId = `imp:${Date.now()}`;
       let inserted = 0;
       let updated = 0;
