@@ -1,28 +1,25 @@
 import WebSocket from "ws";
-import { buildSystemPrompt, formatClock } from "./prompt";
+import { resolveRoute, VOICE_IO } from "./brain/config";
 import { spokenForTts } from "./speech-tags";
 import { shouldFlushSpoken, ttsRequestBody, ttsSpeed } from "./tts";
-import type { ChatMessage, Memory, Profile } from "./types";
+import type { VoiceChatMessage } from "./brain/types";
 
-const FAST_MODEL = "grok-4.20-0309-non-reasoning";
-const MAX_HISTORY = 60;
 const MAX_INPUT = 2000;
-const PCM_MIME = "audio/pcm;rate=24000";
+const PCM_MIME = `audio/pcm;rate=${VOICE_IO.sampleRate}`;
 
 export type TalkStreamEvent =
   | { t: "text"; d: string }
   | { t: "text_end"; speech: string }
   | { t: "audio"; i: number; b: string; m: string; replace?: boolean }
-  | { t: "done"; speech: string }
+  | { t: "timing"; k: string; ms: number }
+  | { t: "done"; speech: string; replyId?: string }
   | { t: "err"; m: string };
 
 export type TalkStreamInput = {
   text: string;
-  profile: Profile;
-  history: ChatMessage[];
-  memories: Memory[];
-  nowMs?: number;
-  timeZone?: string;
+  messages: VoiceChatMessage[];
+  replyId?: string;
+  softVoice?: boolean;
 };
 
 type Emit = (event: TalkStreamEvent) => void;
@@ -40,14 +37,12 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     return;
   }
 
-  const timeZone = data.timeZone || "UTC";
-  const clock = formatClock(data.nowMs || Date.now(), timeZone);
-  const system = buildSystemPrompt(data.profile, data.memories, clock, timeZone);
-  const history = data.history.slice(-MAX_HISTORY).map((m) => ({
-    role: m.role,
-    content: m.text,
-  }));
-  const tts = new LiveTts(apiKey, emit, ttsSpeed(Boolean(data.profile.softVoice)));
+  const speed = ttsSpeed(Boolean(data.softVoice));
+  const route = resolveRoute("voice");
+  const tts = new LiveTts(apiKey, emit, speed);
+  const t0 = Date.now();
+  let ttftSent = false;
+  let firstAudioSent = false;
 
   const res = await fetch("https://api.x.ai/v1/chat/completions", {
     method: "POST",
@@ -56,17 +51,13 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: FAST_MODEL,
+      model: route.model,
       temperature: 0.85,
-      max_tokens: 550,
+      max_tokens: route.maxOutput,
       stream: true,
-      messages: [
-        { role: "system", content: system },
-        ...history,
-        { role: "user", content: say },
-      ],
+      messages: data.messages,
     }),
-    signal: AbortSignal.timeout(28_000),
+    signal: AbortSignal.timeout(route.timeoutMs),
   });
 
   if (!res.ok || !res.body) {
@@ -103,6 +94,10 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
         continue;
       }
       if (!token) continue;
+      if (!ttftSent) {
+        emit({ t: "timing", k: "ttft_ms", ms: Date.now() - t0 });
+        ttftSent = true;
+      }
       full += token;
       pending += token;
       emit({ t: "text", d: token });
@@ -124,14 +119,27 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     return;
   }
 
+  const origEmit = emit;
+  const wrapped: Emit = (event) => {
+    if (event.t === "audio" && !firstAudioSent) {
+      origEmit({ t: "timing", k: "first_audio_ms", ms: Date.now() - t0 });
+      firstAudioSent = true;
+    }
+    origEmit(event);
+  };
+  tts.setEmit(wrapped);
+
   await tts.finish();
 
   if (!tts.complete) {
-    const clip = await speakRest(apiKey, speech, ttsSpeed(Boolean(data.profile.softVoice)));
-    if (clip?.b) emit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
+    const clip = await speakRest(apiKey, speech, speed);
+    if (clip?.b) {
+      if (!firstAudioSent) emit({ t: "timing", k: "first_audio_ms", ms: Date.now() - t0 });
+      emit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
+    }
   }
 
-  emit({ t: "done", speech });
+  emit({ t: "done", speech, replyId: data.replyId });
 }
 
 class LiveTts {
@@ -158,15 +166,15 @@ class LiveTts {
     }).catch(() => undefined);
 
     const params = new URLSearchParams({
-      language: "zh",
-      voice: "eve",
-      codec: "pcm",
-      sample_rate: "24000",
+      language: VOICE_IO.language,
+      voice: VOICE_IO.voice,
+      codec: VOICE_IO.codec,
+      sample_rate: String(VOICE_IO.sampleRate),
       text_normalization: "true",
       optimize_streaming_latency: "1",
       speed: String(this.speed),
     });
-    const url = `wss://api.x.ai/v1/tts?${params.toString()}`;
+    const url = `${VOICE_IO.ttsWsUrl}?${params.toString()}`;
     try {
       const socket = new WebSocket(url, {
         headers: { Authorization: `Bearer ${this.apiKey}` },
@@ -195,6 +203,10 @@ class LiveTts {
       this.failed = true;
       this.resolveDone();
     }
+  }
+
+  setEmit(emit: Emit) {
+    this.emit = emit;
   }
 
   push(text: string) {
@@ -284,13 +296,13 @@ async function speakRest(apiKey: string, text: string, speed: number): Promise<{
   const spoken = spokenForTts(text);
   if (!spoken) return null;
   try {
-    const res = await fetch("https://api.x.ai/v1/tts", {
+    const res = await fetch(VOICE_IO.ttsUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(ttsRequestBody(spoken, "zh", speed)),
+      body: JSON.stringify(ttsRequestBody(spoken, VOICE_IO.language, speed)),
       signal: AbortSignal.timeout(40_000),
     });
     if (!res.ok) return null;

@@ -10,11 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DiaryRouteImport } from './routes/diary'
 import { Route as ApiTalkRouteImport } from './routes/api/talk'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DiaryRoute = DiaryRouteImport.update({
+  id: '/diary',
+  path: '/diary',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTalkRoute = ApiTalkRouteImport.update({
@@ -25,27 +31,31 @@ const ApiTalkRoute = ApiTalkRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/diary': typeof DiaryRoute
   '/api/talk': typeof ApiTalkRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/diary': typeof DiaryRoute
   '/api/talk': typeof ApiTalkRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/diary': typeof DiaryRoute
   '/api/talk': typeof ApiTalkRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/talk'
+  fullPaths: '/' | '/diary' | '/api/talk'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/talk'
-  id: '__root__' | '/' | '/api/talk'
+  to: '/' | '/diary' | '/api/talk'
+  id: '__root__' | '/' | '/diary' | '/api/talk'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DiaryRoute: typeof DiaryRoute
   ApiTalkRoute: typeof ApiTalkRoute
 }
 
@@ -56,6 +66,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/diary': {
+      id: '/diary'
+      path: '/diary'
+      fullPath: '/diary'
+      preLoaderRoute: typeof DiaryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/talk': {
@@ -70,6 +87,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DiaryRoute: DiaryRoute,
   ApiTalkRoute: ApiTalkRoute,
 }
 export const routeTree = rootRouteImport

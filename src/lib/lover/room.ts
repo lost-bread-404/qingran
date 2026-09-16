@@ -33,12 +33,14 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
       role: ChatMessage["role"];
       body: string;
       created_at: number;
+      kind?: string;
     }>`
-      select id, role, body, created_at
+      select id, role, body, created_at, kind
       from qingran_messages
-      order by created_at asc,
-        case when role = 'user' then 0 else 1 end asc,
-        id asc
+      order by created_at desc,
+        case when role = 'user' then 1 else 0 end desc,
+        id desc
+      limit 240
     `;
     const memories = await sql<{
       id: string;
@@ -59,7 +61,7 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
       profile,
       messages: sortConversation(
         applyMemoryCursor(
-          messages.map((m) => decodeStoredMessage(m)),
+          messages.reverse().map((m) => decodeStoredMessage(m)),
           profile.memoryCursor,
         ),
       ),
@@ -93,19 +95,12 @@ export const appendRoomMessage = createServerFn({ method: "POST" })
   .validator((input: ChatMessage) => input)
   .handler(async ({ data }) => {
     const sql = await getSql();
+    const kind = data.kind === "steer" || data.kind === "setting" ? data.kind : "say";
     await sql`
-      insert into qingran_messages (id, role, body, created_at)
-      values (${data.id}, ${data.role}, ${encodeStoredMessage(data).slice(0, 4000)}, ${data.createdAt})
+      insert into qingran_messages (id, role, body, created_at, kind)
+      values (${data.id}, ${data.role}, ${data.text.slice(0, 4000)}, ${data.createdAt}, ${kind})
       on conflict (id) do update
-        set body = excluded.body
-    `;
-    await sql`
-      delete from qingran_messages
-      where id in (
-        select id from qingran_messages
-        order by created_at desc
-        offset 240
-      )
+        set body = excluded.body, kind = excluded.kind
     `;
     return { ok: true as const };
   });
@@ -115,11 +110,12 @@ export const saveRoomMemories = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const sql = await getSql();
     const list = data.slice(-80);
-    await sql`delete from qingran_memories`;
     for (const m of list) {
       await sql`
         insert into qingran_memories (id, body, created_at, updated_at)
         values (${m.id}, ${m.text.slice(0, 240)}, ${m.createdAt}, ${m.updatedAt})
+        on conflict (id) do update set
+          body = excluded.body, updated_at = excluded.updated_at
       `;
     }
     return { ok: true as const };
@@ -127,9 +123,7 @@ export const saveRoomMemories = createServerFn({ method: "POST" })
 
 export const clearRoomMessages = createServerFn({ method: "POST" }).handler(
   async () => {
-    const sql = await getSql();
-    await sql`delete from qingran_messages`;
-    return { ok: true as const };
+    return { ok: true as const, skipped: true as const };
   },
 );
 
@@ -137,9 +131,10 @@ export const updateRoomMessage = createServerFn({ method: "POST" })
   .validator((input: ChatMessage) => input)
   .handler(async ({ data }) => {
     const sql = await getSql();
+    const kind = data.kind === "steer" || data.kind === "setting" ? data.kind : "say";
     await sql`
       update qingran_messages
-      set body = ${encodeStoredMessage(data).slice(0, 4000)}
+      set body = ${data.text.slice(0, 4000)}, kind = ${kind}
       where id = ${data.id}
     `;
     return { ok: true as const };
@@ -161,38 +156,24 @@ export const markRoomMessagesScanned = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (!data.ids.length) return { ok: true as const };
     const sql = await getSql();
+    const now = Date.now();
     for (const id of data.ids) {
-      const rows = await sql<{ body: string }>`
-        select body from qingran_messages where id = ${id}
-      `;
-      const body = rows[0]?.body;
-      if (!body || body.startsWith("⟦已扫⟧")) continue;
-      await sql`
-        update qingran_messages
-        set body = ${`⟦已扫⟧${body}`.slice(0, 4000)}
-        where id = ${id}
-      `;
+      await sql`update qingran_messages set archived_at = coalesce(archived_at, ${now}) where id = ${id}`;
     }
     return { ok: true as const };
   });
-
-function encodeStoredMessage(msg: ChatMessage): string {
-  let text = msg.text;
-  if (msg.kind === "steer") text = `⟦走向⟧${text}`;
-  else if (msg.kind === "setting") text = `⟦设定⟧${text}`;
-  if (msg.scanned) text = `⟦已扫⟧${text}`;
-  return text;
-}
 
 function decodeStoredMessage(row: {
   id: string;
   role: ChatMessage["role"];
   body: string;
   created_at: number;
+  kind?: string;
 }): ChatMessage {
   let text = row.body;
   let scanned = false;
-  let kind: MessageKind | undefined;
+  let kind: MessageKind | undefined =
+    row.kind === "steer" || row.kind === "setting" || row.kind === "say" ? row.kind : undefined;
   if (text.startsWith("⟦已扫⟧")) {
     scanned = true;
     text = text.slice(4);

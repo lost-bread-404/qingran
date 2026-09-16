@@ -2,7 +2,7 @@ export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "steer" | "setting";
 
-export const CONTEXT_WINDOW = 60;
+export const CONTEXT_WINDOW = 40;
 
 export type Profile = {
   systemPrompt: string;

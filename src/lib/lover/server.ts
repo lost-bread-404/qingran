@@ -1,19 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
-import {
-  buildConsolidatePrompt,
-  buildOverflowRememberPrompt,
-  buildRememberPrompt,
-  formatClock,
-  parseConsolidateResult,
-  parseOverflowResult,
-  parseRememberResult,
-} from "./prompt";
+import { VOICE_IO } from "./brain/config";
 import { spokenForTts } from "./speech-tags";
 import { restoreSpeechText, sttKeyterms } from "./stt-text";
 import { ttsRequestBody, ttsSpeed } from "./tts";
-import type { ChatMessage, Memory } from "./types";
-
-const FAST_MODEL = "grok-4.20-0309-non-reasoning";
 
 type TtsInput = {
   text: string;
@@ -26,144 +15,6 @@ type SttInput = {
   prompt?: string;
 };
 
-type RememberInput = {
-  stretch: string;
-  memories: Memory[];
-};
-
-type OverflowInput = {
-  overflow: ChatMessage[];
-  lookahead: ChatMessage[];
-  memories: Memory[];
-};
-
-export const rememberTurn = createServerFn({ method: "POST" })
-  .validator((input: RememberInput) => input)
-  .handler(async ({ data }) => {
-    const empty = { facts: [] as string[], events: [] as string[] };
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) return { ok: true as const, ...empty };
-
-    try {
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: FAST_MODEL,
-          temperature: 0,
-          max_tokens: 120,
-          response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "user",
-              content: buildRememberPrompt(data.stretch, data.memories),
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(8_000),
-      });
-      if (!res.ok) return { ok: true as const, ...empty };
-      const body = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      const parsed = parseRememberResult(body.choices?.[0]?.message?.content ?? "");
-      return { ok: true as const, facts: parsed.facts, events: parsed.facts };
-    } catch {
-      return { ok: true as const, ...empty };
-    }
-  });
-
-export const rememberOverflow = createServerFn({ method: "POST" })
-  .validator((input: OverflowInput) => input)
-  .handler(async ({ data }) => {
-    const overflow = Array.isArray(data.overflow) ? data.overflow.slice(0, 24) : [];
-    if (overflow.length === 0) {
-      return { consumedIds: [] as string[], fact: "" };
-    }
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) {
-      return { consumedIds: overflow.map((m) => m.id), fact: "" };
-    }
-    try {
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: FAST_MODEL,
-          temperature: 0,
-          max_tokens: 180,
-          response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "user",
-              content: buildOverflowRememberPrompt(
-                overflow,
-                data.lookahead.slice(0, 10),
-                data.memories,
-              ),
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) return { consumedIds: overflow.map((m) => m.id), fact: "" };
-      const body = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      const parsed = parseOverflowResult(
-        body.choices?.[0]?.message?.content ?? "",
-        overflow.length,
-      );
-      const consumedIds = overflow.slice(0, Math.max(parsed.consumed, 1)).map((m) => m.id);
-      return { consumedIds, fact: parsed.fact, at: overflow[0]?.createdAt || Date.now() };
-    } catch {
-      return { consumedIds: overflow.map((m) => m.id), fact: "" };
-    }
-  });
-
-export const consolidateMemories = createServerFn({ method: "POST" })
-  .validator((input: { memories: Memory[]; nowMs?: number; timeZone?: string }) => input)
-  .handler(async ({ data }) => {
-    const memories = Array.isArray(data.memories) ? data.memories.slice(0, 80) : [];
-    if (memories.length === 0) return { ok: true as const, facts: [] as Array<{ text: string; createdAt?: number }> };
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) return { ok: false as const, facts: [] as Array<{ text: string; createdAt?: number }> };
-    try {
-      const clock = formatClock(data.nowMs || Date.now(), data.timeZone || "UTC");
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: FAST_MODEL,
-          temperature: 0.2,
-          max_tokens: 700,
-          response_format: { type: "json_object" },
-          messages: [{ role: "user", content: buildConsolidatePrompt(memories, clock, data.timeZone || "UTC") }],
-        }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!res.ok) return { ok: false as const, facts: [] as Array<{ text: string; createdAt?: number }> };
-      const body = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      return {
-        ok: true as const,
-        facts: parseConsolidateResult(body.choices?.[0]?.message?.content ?? ""),
-      };
-    } catch {
-      return { ok: false as const, facts: [] as Array<{ text: string; createdAt?: number }> };
-    }
-  });
-
 export const speakAsLover = createServerFn({ method: "POST" })
   .validator((input: TtsInput) => input)
   .handler(async ({ data }) => {
@@ -173,13 +24,13 @@ export const speakAsLover = createServerFn({ method: "POST" })
     const text = spokenForTts(data.text.trim());
     if (!text) return { ok: false as const, error: "empty" };
 
-    const res = await fetch("https://api.x.ai/v1/tts", {
+    const res = await fetch(VOICE_IO.ttsUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(ttsRequestBody(text, "zh", ttsSpeed(Boolean(data.softVoice)))),
+      body: JSON.stringify(ttsRequestBody(text, VOICE_IO.language, ttsSpeed(Boolean(data.softVoice)))),
       signal: AbortSignal.timeout(40_000),
     });
 
@@ -190,7 +41,7 @@ export const speakAsLover = createServerFn({ method: "POST" })
     const buf = Buffer.from(await res.arrayBuffer());
     return {
       ok: true as const,
-      mimeType: res.headers.get("content-type") || "audio/pcm;rate=24000",
+      mimeType: res.headers.get("content-type") || `audio/pcm;rate=${VOICE_IO.sampleRate}`,
       audioBase64: buf.toString("base64"),
     };
   });
@@ -218,7 +69,7 @@ export const transcribeVoice = createServerFn({ method: "POST" })
     const blob = new Blob([new Uint8Array(bytes)], { type: mime });
     form.append("file", blob, filenameFor(mime));
 
-    const res = await fetch("https://api.x.ai/v1/stt", {
+    const res = await fetch(VOICE_IO.sttUrl, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form,

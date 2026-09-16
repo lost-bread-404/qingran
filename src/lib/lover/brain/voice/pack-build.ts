@@ -1,0 +1,132 @@
+import { HISTORY_WINDOW, PORTRAIT_MAX_CHARS } from "../config.ts";
+import { formatClock } from "../time.ts";
+import type { Mind, Note, PortraitRow, StoredMessage, VoiceChatMessage } from "../types.ts";
+import { QINGRAN_STANCE_ONE_LINE } from "./prompts.ts";
+
+function mindIsEmpty(mind: Mind): boolean {
+  return (
+    !mind.rosie_now &&
+    !mind.undercurrent &&
+    !mind.my_feel &&
+    !mind.my_view &&
+    !mind.my_logic &&
+    !mind.intent &&
+    mind.lead_plan.length === 0
+  );
+}
+
+function portraitBlock(rows: PortraitRow[]): string {
+  const active = rows.filter((r) => r.status === "active");
+  if (!active.length) return "（还在慢慢认识她）";
+  const lines = active.map((r) => `${r.topic}：${r.body}`);
+  let text = lines.join("\n");
+  if (text.length > PORTRAIT_MAX_CHARS) text = `${text.slice(0, PORTRAIT_MAX_CHARS - 1)}…`;
+  return text;
+}
+
+function formatMemories(notes: Note[], timeZone: string): string {
+  if (!notes.length) return "（这一刻没有特别要提起的）";
+  return notes
+    .map((n) => {
+      const md = n.localDay.slice(5) || formatClock(n.happenedAt, timeZone).slice(0, 10);
+      return `${md} ${n.text}`;
+    })
+    .join("\n");
+}
+
+function readingLine(mind: Mind): string {
+  if (!mind.reading.length) return "";
+  return mind.reading
+    .map((r) => `${r.guess}（把握 ${Math.round(r.conf * 100)}%）`)
+    .join("；");
+}
+
+export function buildTail(opts: {
+  clock: string;
+  mind: Mind;
+  notes: Note[];
+  timeZone: string;
+  careHint: boolean;
+}): string {
+  let reading = readingLine(opts.mind);
+  let threads = opts.mind.threads.join("；");
+  const core = {
+    lead: opts.mind.lead_plan.join(" → "),
+    intent: opts.mind.intent,
+  };
+
+  const inner = mindIsEmpty(opts.mind)
+    ? ""
+    : `【你此刻的内心】（这是你上一刻的想法；如果她这句话改变了情况，以这句话为准。说不说出来、怎么说，由你判断。）
+她现在：${opts.mind.rosie_now}
+底下的东西：${opts.mind.undercurrent}
+你的推断：${reading}
+${opts.mind.soft_spot ? `心软的地方：${opts.mind.soft_spot}\n` : ""}你的感受：${opts.mind.my_feel}
+你的看法：${opts.mind.my_view}
+你的思路：${opts.mind.my_logic}
+你要带她走的路：${core.lead}
+这一句：${core.intent}
+要跟进：${threads}
+
+`;
+
+  let tail = `现在是${opts.clock}。
+
+${inner}【可以用的记忆】
+${formatMemories(opts.notes, opts.timeZone)}
+
+${QINGRAN_STANCE_ONE_LINE}
+说话要有逻辑：观点有依据，前后一致。`;
+
+  if (opts.careHint) {
+    tail += "\n如果时机自然，可以像平常关心一样问问她今天过得怎么样、睡得如何。";
+  }
+
+  if (tail.length > 2400 && !mindIsEmpty(opts.mind)) {
+    reading = "";
+    threads = "";
+    tail = `现在是${opts.clock}。
+
+【你此刻的内心】（这是你上一刻的想法；如果她这句话改变了情况，以这句话为准。说不说出来、怎么说，由你判断。）
+她现在：${opts.mind.rosie_now}
+底下的东西：${opts.mind.undercurrent}
+你的感受：${opts.mind.my_feel}
+你的看法：${opts.mind.my_view}
+你的思路：${opts.mind.my_logic}
+你要带她走的路：${core.lead}
+这一句：${core.intent}
+
+【可以用的记忆】
+${formatMemories(opts.notes, opts.timeZone)}
+
+${QINGRAN_STANCE_ONE_LINE}
+说话要有逻辑：观点有依据，前后一致。`;
+  }
+  return tail;
+}
+
+export function buildVoiceMessages(opts: {
+  charter: string;
+  selfSummary: string;
+  bondSummary: string;
+  portrait: PortraitRow[];
+  history: StoredMessage[];
+  tail: string;
+  userText: string;
+}): VoiceChatMessage[] {
+  const charter = opts.charter.trim() || "你就是清然。正在和 Rosie 语音通话。";
+  const long = `【我自己】${opts.selfSummary || "（还在过自己的日子）"}
+【我们】${opts.bondSummary || "（还在一点点建立）"}
+【我眼中的她】${portraitBlock(opts.portrait)}`;
+  const history = opts.history.slice(-HISTORY_WINDOW).map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.text,
+  }));
+  return [
+    { role: "system", content: charter },
+    { role: "system", content: long },
+    ...history,
+    { role: "system", content: opts.tail },
+    { role: "user", content: opts.userText },
+  ];
+}

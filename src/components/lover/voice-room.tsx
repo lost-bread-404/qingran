@@ -1,5 +1,6 @@
-import { Settings, Volume2, VolumeX } from "lucide-react";
+import { BookOpen, Settings, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { CallButton } from "@/components/lover/call-button";
 import { MicButton } from "@/components/lover/mic-button";
 import { SettingsDrawer } from "@/components/lover/settings-drawer";
@@ -10,7 +11,6 @@ import { useCall } from "@/hooks/use-call";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { base64ToBytes, concatBytes } from "@/lib/lover/audio";
-import { addManualMemory, mergeFacts, replaceMemories, updateMemory } from "@/lib/lover/memory";
 import { dropIncompleteReplies } from "@/lib/lover/pair-messages";
 import {
   enqueuePlayback,
@@ -29,21 +29,17 @@ import {
   clearRoomMessages,
   deleteRoomMessages,
   loadRoom,
-  markRoomMessagesScanned,
-  saveRoomMemories,
   saveRoomProfile,
   updateRoomMessage,
 } from "@/lib/lover/room";
-import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
+import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { newId } from "@/lib/lover/storage";
 import { streamTalk } from "@/lib/lover/talk-client";
 import {
-  CONTEXT_WINDOW,
   DEFAULT_PROFILE,
   lockedProfile,
   type ChatMessage,
-  type Memory,
   type Profile,
   type SessionStatus,
 } from "@/lib/lover/types";
@@ -62,7 +58,6 @@ function lastUserSay(messages: ChatMessage[]): ChatMessage | null {
 export function VoiceRoom() {
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [memories, setMemories] = useState<Memory[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [draft, setDraft] = useState("");
@@ -73,13 +68,11 @@ export function VoiceRoom() {
   const [editDraft, setEditDraft] = useState("");
   const busyRef = useRef(false);
   const turnRef = useRef(0);
-  const memoriesRef = useRef<Memory[]>([]);
   const profileRef = useRef(profile);
   const chatRef = useRef<ChatMessage[]>([]);
   const settingsOpenRef = useRef(false);
   const holdingRef = useRef(false);
   const finishingHoldRef = useRef(false);
-  const rememberLockRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const pendingIdsRef = useRef(new Set<string>());
   const inflightRef = useRef<{ id: string; createdAt: number; text: string } | null>(null);
@@ -94,9 +87,6 @@ export function VoiceRoom() {
   useEffect(() => {
     profileRef.current = profile;
   }, [profile]);
-  useEffect(() => {
-    memoriesRef.current = memories;
-  }, [memories]);
   useEffect(() => {
     chatRef.current = messages;
   }, [messages]);
@@ -129,7 +119,6 @@ export function VoiceRoom() {
         if (cancelled) return;
         setProfile(lockedProfile(room.profile));
         setMessages(room.messages);
-        setMemories(room.memories);
         setHydrated(true);
       })
       .catch(() => {
@@ -148,19 +137,6 @@ export function VoiceRoom() {
     }, 400);
     return () => window.clearTimeout(timer);
   }, [hydrated, profile]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    const timer = window.setTimeout(() => {
-      void saveRoomMemories({ data: memories });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [hydrated, memories]);
-
-  useEffect(() => {
-    if (!hydrated || !profile.autoRemember) return;
-    void sweepOverflow();
-  }, [hydrated, messages.length, profile.autoRemember, profile.memoryCursor]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -220,53 +196,6 @@ export function VoiceRoom() {
     };
   }, []);
 
-  async function sweepOverflow() {
-    if (rememberLockRef.current || !profileRef.current.autoRemember) return;
-    rememberLockRef.current = true;
-    try {
-      while (profileRef.current.autoRemember) {
-        const chat = chatRef.current;
-        const overflowAt = Math.max(0, chat.length - CONTEXT_WINDOW);
-        if (overflowAt === 0) break;
-        const overflow = chat.slice(0, overflowAt).filter((m) => !m.scanned);
-        if (overflow.length < 10) break;
-        const batch = overflow.slice(0, 24);
-        const result = await rememberOverflow({
-          data: {
-            overflow: batch,
-            lookahead: chat.slice(overflowAt, overflowAt + 10),
-            memories: memoriesRef.current,
-          },
-        });
-        if (!result.consumedIds.length) break;
-        const marked = new Set(result.consumedIds);
-        const nextChat = chatRef.current.map((m) =>
-          marked.has(m.id) ? { ...m, scanned: true } : m,
-        );
-        chatRef.current = nextChat;
-        setMessages(nextChat);
-        void markRoomMessagesScanned({ data: { ids: result.consumedIds } });
-        const cursor = result.consumedIds[result.consumedIds.length - 1];
-        if (cursor) {
-          const nextProfile = lockedProfile({ ...profileRef.current, memoryCursor: cursor });
-          profileRef.current = nextProfile;
-          setProfile(nextProfile);
-        }
-        if (result.fact) {
-          const nextMem = mergeFacts(
-            memoriesRef.current,
-            [result.fact],
-            result.at || Date.now(),
-          );
-          memoriesRef.current = nextMem;
-          setMemories(nextMem);
-        }
-      }
-    } finally {
-      rememberLockRef.current = false;
-    }
-  }
-
   function resumeCallListen(turn: number) {
     if (!callActiveRef.current) return;
     window.setTimeout(() => {
@@ -322,7 +251,7 @@ export function VoiceRoom() {
   const sendTurn = useCallback(
     async (
       sayRaw: string,
-      opts?: { history?: ChatMessage[]; existingUser?: ChatMessage },
+      opts?: { existingUser?: ChatMessage },
     ) => {
       const say = sayRaw.trim();
       if (!say) return;
@@ -335,7 +264,6 @@ export function VoiceRoom() {
       setEditingId(null);
       voice.setError(null);
 
-      const history = (opts?.history ?? chatRef.current).slice(-CONTEXT_WINDOW);
       const at = Date.now();
       const userMsg: ChatMessage = opts?.existingUser ?? {
         id: newId(),
@@ -351,6 +279,8 @@ export function VoiceRoom() {
         createdAt: (userMsg.createdAt || at) + 1,
       };
       if (opts?.existingUser) {
+        const idx = chatRef.current.findIndex((m) => m.id === userMsg.id);
+        const history = idx >= 0 ? chatRef.current.slice(0, idx) : chatRef.current;
         setMessages([...history, userMsg, reply]);
       } else {
         setMessages((prev) => [...dropIncompleteReplies(prev, pendingIdsRef.current), userMsg, reply]);
@@ -368,48 +298,49 @@ export function VoiceRoom() {
       let persistAt = 0;
       let paintHandle = 0;
       let latestDisplay = "";
-      const persistReply = (text: string) => {
+      let replyId = reply.id;
+      const persistReply = (text: string, id = replyId) => {
         const display = stripSpeechTags(text);
-        inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
+        inflightRef.current = { id, createdAt: reply.createdAt, text };
         if (!display) return;
-        void appendRoomMessage({ data: { ...reply, text: display } });
+        void appendRoomMessage({ data: { ...reply, id, text: display } });
       };
       const flushPaint = () => {
         paintHandle = 0;
         const display = latestDisplay;
         setMessages((prev) =>
-          prev.map((m) => (m.id === reply.id ? { ...m, text: display } : m)),
+          prev.map((m) => (m.id === replyId || m.id === reply.id ? { ...m, id: replyId, text: display } : m)),
         );
       };
       const paintText = (text: string, force = false) => {
         const display = stripSpeechTags(text);
-        inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
+        inflightRef.current = { id: replyId, createdAt: reply.createdAt, text };
         latestDisplay = display;
         if (force) {
           if (paintHandle) cancelAnimationFrame(paintHandle);
           paintHandle = 0;
           flushPaint();
-          persistReply(text);
           return;
         }
         if (!paintHandle) paintHandle = requestAnimationFrame(flushPaint);
         const now = Date.now();
-        if (now - persistAt > 400) {
-          persistAt = now;
-          persistReply(text);
-        }
+        if (now - persistAt > 400) persistAt = now;
       };
       try {
         await streamTalk(
           {
             text: say,
+            userMsgId: userMsg.id,
+            userCreatedAt: userMsg.createdAt || at,
             profile: lockedProfile(profileRef.current),
-            history,
-            memories: memoriesRef.current,
             nowMs: Date.now(),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
           },
           (event) => {
+            if (event.t === "timing") {
+              if (import.meta.env.DEV) console.info("[talk]", event.k, event.ms);
+              return;
+            }
             if (event.t === "text") {
               full += event.d;
               paintText(full);
@@ -423,24 +354,36 @@ export function VoiceRoom() {
             }
             if (event.t === "done") {
               full = event.speech || full;
+              if (event.replyId) {
+                pendingIdsRef.current.delete(reply.id);
+                pendingIdsRef.current.delete(event.replyId);
+                replyId = event.replyId;
+              }
               paintText(full, true);
-              persistReply(full);
+              persistReply(full, replyId);
               pendingIdsRef.current.delete(reply.id);
-              if (inflightRef.current?.id === reply.id) inflightRef.current = null;
+              pendingIdsRef.current.delete(replyId);
+              if (inflightRef.current?.id === reply.id || inflightRef.current?.id === replyId) {
+                inflightRef.current = null;
+              }
               const display = stripSpeechTags(full);
-              const finalMsg = { ...reply, text: display };
-              setMessages((prev) => prev.map((m) => (m.id === reply.id ? finalMsg : m)));
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === reply.id || m.id === replyId ? { ...reply, id: replyId, text: display } : m,
+                ),
+              );
               if (turn === turnRef.current) sealPlayback();
               if (turn !== turnRef.current) return;
               if (clips.length && streamAudioCovers(clips, display)) {
-                spokenCacheRef.current.set(reply.id, {
+                spokenCacheRef.current.set(replyId, {
                   bytes: concatBytes(clips),
                   mimeType: clipMime,
                 });
               } else {
+                spokenCacheRef.current.delete(replyId);
                 spokenCacheRef.current.delete(reply.id);
                 if (display && !profileRef.current.muted) {
-                  void playFull(reply.id, full, turn);
+                  void playFull(replyId, full, turn);
                 }
               }
               return;
@@ -461,8 +404,9 @@ export function VoiceRoom() {
               clipMime = event.m;
               enqueuePlayback(bytes, event.m);
             } else if (event.t === "err") {
-              persistReply(full);
+              persistReply(full, replyId);
               pendingIdsRef.current.delete(reply.id);
+              pendingIdsRef.current.delete(replyId);
               sealPlayback();
               setBanner(event.m);
               setStatus("error");
@@ -624,16 +568,15 @@ export function VoiceRoom() {
     busyRef.current = true;
     const idx = chatRef.current.findIndex((m) => m.id === current.id);
     if (idx < 0) return;
-    const history = chatRef.current.slice(0, idx);
     const updated: ChatMessage = { ...current, text };
     const removed = chatRef.current.slice(idx + 1);
-    setMessages([...history, updated]);
+    setMessages([...chatRef.current.slice(0, idx), updated]);
     setEditingId(null);
     void updateRoomMessage({ data: updated });
     if (removed.length) {
       void deleteRoomMessages({ data: { ids: removed.map((m) => m.id) } });
     }
-    await sendTurn(text, { history, existingUser: updated });
+    await sendTurn(text, { existingUser: updated });
   }
 
   const recording = voice.status === "recording";
@@ -671,11 +614,16 @@ export function VoiceRoom() {
             <div>
               <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
               <p className="text-xs text-subtle">
-                {call.active ? "通话中" : memories.length > 0 ? `记得 ${memories.length} 件事` : "在"}
+                {call.active ? "通话中" : "在"}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" aria-label="日记" asChild>
+              <Link to="/diary">
+                <BookOpen className="size-5" />
+              </Link>
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -838,24 +786,7 @@ export function VoiceRoom() {
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           profile={profile}
-          memories={memories}
           onSave={(next) => setProfile(lockedProfile(next))}
-          onAddMemory={(text, at) => setMemories((list) => addManualMemory(list, text, at))}
-          onUpdateMemory={(id, text, at) => setMemories((list) => updateMemory(list, id, text, at))}
-          onDeleteMemory={(id) => setMemories((list) => list.filter((m) => m.id !== id))}
-          onConsolidateMemories={async () => {
-            const result = await consolidateMemories({
-              data: {
-                memories: memoriesRef.current,
-                nowMs: Date.now(),
-                timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-              },
-            });
-            if (!result.ok || result.facts.length === 0) return;
-            const next = replaceMemories(result.facts);
-            memoriesRef.current = next;
-            setMemories(next);
-          }}
           onClearChat={() => {
             setMessages([]);
             setProfile((p) => lockedProfile({ ...p, memoryCursor: "" }));
