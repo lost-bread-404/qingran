@@ -58,13 +58,19 @@ export function startRecorder(recorder: MediaRecorder, timeslice = 250) {
   }
 }
 
+export function qingranNativePresent() {
+  if (typeof window === "undefined") return false;
+  const native = (window as Window & { QingranNative?: { present?: boolean } }).QingranNative;
+  return Boolean(native?.present);
+}
+
 export function micAudioConstraints(): MediaTrackConstraints {
   return {
     echoCancellation: true,
-    // Keep breaths, sobs, and quiet cues — noise suppression wipes them.
     noiseSuppression: false,
     autoGainControl: false,
     channelCount: 1,
+    sampleRate: { ideal: 48000 },
   };
 }
 

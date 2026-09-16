@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  blobToBase64,
   acquireMic,
   currentMic,
   getSpeechRecognitionCtor,
@@ -12,9 +11,10 @@ import {
   usesBrowserStt,
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
+import { hearUtterance } from "@/lib/lover/hear";
+import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
-import { transcribeVoice } from "@/lib/lover/server";
-import { finishHeard, browserSttReady, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
+import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import {
   LISTEN_WARMUP_MS,
   isHoldVoiced,
@@ -53,6 +53,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const rafRef = useRef(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const pcmTapRef = useRef<PcmTap | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const onUtteranceRef = useRef(onUtterance);
@@ -85,6 +86,12 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     sourceRef.current = null;
     analyserRef.current = null;
+    try {
+      pcmTapRef.current?.dispose();
+    } catch {
+      /* ignore */
+    }
+    pcmTapRef.current = null;
     try {
       recorderRef.current?.state === "recording" && recorderRef.current.stop();
     } catch {
@@ -126,21 +133,21 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   const beginUtterance = useCallback(() => {
     const stream = streamRef.current;
-    if (!stream || recorderRef.current) return;
+    if (!stream || phaseRef.current === "speaking-you") return;
     chunksRef.current = [];
+    pcmTapRef.current?.start();
     const mime = pickRecorderMime();
-    const recorder = mime
-      ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 128000 })
-      : new MediaRecorder(stream);
-    recorder.ondataavailable = (ev) => {
-      if (ev.data.size > 0) chunksRef.current.push(ev.data);
-    };
-    recorderRef.current = recorder;
     try {
+      const recorder = mime
+        ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 128000 })
+        : new MediaRecorder(stream);
+      recorder.ondataavailable = (ev) => {
+        if (ev.data.size > 0) chunksRef.current.push(ev.data);
+      };
+      recorderRef.current = recorder;
       startRecorder(recorder);
     } catch {
       recorderRef.current = null;
-      return;
     }
     const now = performance.now();
     speechStartRef.current = now;
@@ -194,6 +201,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     recorderRef.current = null;
     chunksRef.current = [];
+    void pcmTapRef.current?.stop();
     framesRef.current = [];
     finalTextRef.current = "";
     interimRef.current = "";
@@ -209,7 +217,16 @@ export function useCall({ onUtterance, prompt }: Options) {
     await new Promise((resolve) => window.setTimeout(resolve, 180));
     const liveText = (finalTextRef.current || interimRef.current).trim();
     const frames = framesRef.current.slice();
-    const blob = await collectRecording();
+    const samples = (await pcmTapRef.current?.stop()) ?? new Float32Array(0);
+    const wav = wavFromTap(samples, ctxRef.current?.sampleRate ?? 48000);
+    const fallback = wav ? null : await collectRecording();
+    if (wav) {
+      try {
+        recorderRef.current?.state === "recording" && recorderRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+    }
     recorderRef.current = null;
     chunksRef.current = [];
     setMicEnabled(streamRef.current, false);
@@ -218,30 +235,13 @@ export function useCall({ onUtterance, prompt }: Options) {
     interimRef.current = "";
     lastTextAtRef.current = 0;
 
-    let heard = "";
-    let words: { text?: string; start?: number; end?: number }[] = [];
-    if (browserSttReady(liveText)) {
-      heard = finishHeard("", liveText, undefined, frames);
-    } else if (blob && blob.size >= 40) {
-      try {
-        const result = await transcribeVoice({
-          data: {
-            audioBase64: await blobToBase64(blob),
-            mimeType: blob.type || "audio/webm",
-            prompt: promptRef.current,
-          },
-        });
-        if (result.ok) {
-          heard = result.text.trim();
-          words = result.words ?? [];
-        }
-      } catch {
-        /* fall through */
-      }
-      heard = finishHeard(heard, liveText, words, frames);
-    } else {
-      heard = finishHeard("", liveText, undefined, frames);
-    }
+    const heard = await hearUtterance({
+      wav,
+      fallback,
+      liveText,
+      frames,
+      prompt: promptRef.current,
+    });
     if (!liveRef.current) return;
     if (!heard) {
       setError("我没听清，再说一遍。");
@@ -404,6 +404,11 @@ export function useCall({ onUtterance, prompt }: Options) {
         source.connect(analyser);
         sourceRef.current = source;
         analyserRef.current = analyser;
+        try {
+          pcmTapRef.current = await attachPcmTap(ctx, source);
+        } catch {
+          pcmTapRef.current = null;
+        }
       }
     } catch {
       setError("麦克风被关掉了。打开权限再通话。");
@@ -486,6 +491,12 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     if (ctxRef.current && stream) {
       try {
+        pcmTapRef.current?.dispose();
+      } catch {
+        /* ignore */
+      }
+      pcmTapRef.current = null;
+      try {
         sourceRef.current?.disconnect();
       } catch {
         /* ignore */
@@ -498,6 +509,11 @@ export function useCall({ onUtterance, prompt }: Options) {
         source.connect(analyser);
         sourceRef.current = source;
         analyserRef.current = analyser;
+        try {
+          pcmTapRef.current = await attachPcmTap(ctxRef.current, source);
+        } catch {
+          pcmTapRef.current = null;
+        }
       } catch {
         /* iOS can reject a second source until the next gesture */
       }

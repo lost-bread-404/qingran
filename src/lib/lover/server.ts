@@ -206,11 +206,12 @@ export const transcribeVoice = createServerFn({ method: "POST" })
     if (bytes.length > 12_000_000) return { ok: false as const, error: "这段有点太长。" };
 
     const form = new FormData();
+    form.append("language", "zh");
     form.append("filler_words", "true");
     form.append("vad_threshold", "0");
     form.append(
       "prompt",
-      "中文。鼻音写成嗯、嗯嗯、啊、呜呜。不要写成呵呵。短促的嗯不要写成算了。",
+      "中文口语原文。嗯、啊、呜、哈照实写，不要省略语气词，不要翻译。",
     );
     for (const term of sttKeyterms(data.prompt)) form.append("keyterm", term);
     const blob = new Blob([new Uint8Array(bytes)], { type: mime });

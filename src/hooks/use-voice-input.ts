@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  blobToBase64,
   acquireMic,
   getSpeechRecognitionCtor,
   isAppleTouch,
@@ -11,9 +10,10 @@ import {
   usesBrowserStt,
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
+import { hearUtterance } from "@/lib/lover/hear";
+import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
-import { transcribeVoice } from "@/lib/lover/server";
-import { browserSttReady, finishHeard, mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
+import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 
 export type VoiceInputStatus = "idle" | "recording" | "transcribing";
 
@@ -42,6 +42,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
   const promptRef = useRef(prompt ?? "");
   const framesRef = useRef<ProsodyFrame[]>([]);
   const analyseRef = useRef<{ ctx: AudioContext; source: MediaStreamAudioSourceNode } | null>(null);
+  const pcmTapRef = useRef<PcmTap | null>(null);
 
   const speechSupported = usesBrowserStt();
   const recorderSupported =
@@ -73,6 +74,12 @@ export function useVoiceInput({ lang, prompt }: Options) {
     }
     recRef.current = null;
     try {
+      pcmTapRef.current?.dispose();
+    } catch {
+      /* ignore */
+    }
+    pcmTapRef.current = null;
+    try {
       analyseRef.current?.source.disconnect();
       void analyseRef.current?.ctx.close();
     } catch {
@@ -83,7 +90,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
   useEffect(() => () => teardownMedia(), [teardownMedia]);
 
-  const startPulse = useCallback((stream: MediaStream) => {
+  const startPulse = useCallback(async (stream: MediaStream) => {
     framesRef.current = [];
     const t0 = performance.now();
     const Ctor =
@@ -97,7 +104,13 @@ export function useVoiceInput({ lang, prompt }: Options) {
     analyser.smoothingTimeConstant = 0.2;
     source.connect(analyser);
     analyseRef.current = { ctx, source };
-    const data = new Uint8Array(analyser.fftSize);
+    try {
+      const tap = await attachPcmTap(ctx, source);
+      pcmTapRef.current = tap;
+      tap.start();
+    } catch {
+      pcmTapRef.current = null;
+    }
     const tick = () => {
       const frame = sampleProsody(analyser, ctx.sampleRate, (performance.now() - t0) / 1000, true);
       framesRef.current.push(frame);
@@ -128,7 +141,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
         if (session !== sessionRef.current) return;
         mediaRef.current = stream;
         setMicReady(true);
-        startPulse(stream);
+        await startPulse(stream);
 
         const mime = pickRecorderMime();
         const recorder = mime
@@ -213,35 +226,18 @@ export function useVoiceInput({ lang, prompt }: Options) {
     await stopRecognition(recRef.current);
     const liveText = (finalTextRef.current || interimRef.current).trim();
     const frames = framesRef.current.slice();
-
-    const blob = await collectRecording(session);
+    const samples = (await pcmTapRef.current?.stop()) ?? new Float32Array(0);
+    const wav = wavFromTap(samples, analyseRef.current?.ctx.sampleRate ?? 48000);
+    const fallback = wav ? null : await collectRecording(session);
     teardownMedia();
 
-    let heard = "";
-    let words: { text?: string; start?: number; end?: number }[] = [];
-    if (browserSttReady(liveText)) {
-      heard = finishHeard("", liveText, undefined, frames);
-    } else if (blob && blob.size >= 40) {
-      try {
-        const audioBase64 = await blobToBase64(blob);
-        const result = await transcribeVoice({
-          data: {
-            audioBase64,
-            mimeType: blob.type || "audio/webm",
-            prompt: promptRef.current,
-          },
-        });
-        if (result.ok) {
-          heard = result.text.trim();
-          words = result.words ?? [];
-        }
-      } catch {
-        /* fall through */
-      }
-      heard = finishHeard(heard, liveText, words, frames);
-    } else {
-      heard = finishHeard("", liveText, undefined, frames);
-    }
+    const heard = await hearUtterance({
+      wav,
+      fallback,
+      liveText,
+      frames,
+      prompt: promptRef.current,
+    });
 
     setInterim("");
     interimRef.current = "";
