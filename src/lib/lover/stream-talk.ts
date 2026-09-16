@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { buildSystemPrompt, formatClock } from "./prompt";
 import { spokenForTts } from "./speech-tags";
-import { shouldFlushSpoken, ttsRequestBody, ttsSpeed } from "./tts";
+import { ttsRequestBody, ttsSpeed } from "./tts";
 import type { ChatMessage, Memory, Profile } from "./types";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
@@ -77,8 +77,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   }
 
   let full = "";
-  let pending = "";
-  let firstSpoken = true;
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -105,18 +103,11 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       }
       if (!token) continue;
       full += token;
-      pending += token;
       emit({ t: "text", d: token });
-      if (shouldFlushSpoken(pending, firstSpoken)) {
-        tts.push(pending);
-        pending = "";
-        firstSpoken = false;
-      }
     }
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
-  if (pending.trim()) tts.push(pending);
   const speech = full.trim();
   emit({ t: "text_end", speech });
   if (!speech) {
@@ -125,6 +116,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     return;
   }
 
+  tts.push(speech);
   await tts.finish();
 
   if (!tts.complete) {
