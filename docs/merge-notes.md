@@ -44,3 +44,19 @@
 - `package.json`：`test:app`（只跑 `src/`）、`demo:offline`、`analyze`、`engines.node >= 22.18.0`。`test` 分别跑 scripts 和 `test:app`，前者失败不会跳过后者。
 - eval / demo 用 `node --import ./scripts/eval/register-alias.mjs --experimental-strip-types ...`。
 - 备份 v2 加入 `brain_turns` / `qr_mind_history` / `brain_daily_digest`（`brain_log` 仍不进备份，走导出）。
+
+## 本 branch 新增（费用）
+
+- migration `0008_spend.sql`：`spend_events` / `spend_daily` / `spend_alerts` / `spend_overrides` / `spend_reconcile` / `spend_rate`。
+- 新组件 `src/components/lover/brain-spend-page.tsx`（Diary「费用」tab）；设置抽屉加一行跳到 `/diary#spend`。
+- `talk.ts` 开头检查限额和每分钟 20 次；熔断时 SSE `code: "spend_breaker"`。`voice-room.tsx` 只加了这个 code 分支，通话逻辑未改。
+- `stream-talk.ts` 的 `LiveTts` 和 `server.ts` 的 `speakAsLover` / `transcribeVoice` **只追加了记账**，合成 / 转写路径没动。合并到 `ios-microphone` 时保留这些 `recordTtsSpend` / `recordSttSpend` 调用。
+- 环境变量：`QR_SPEND_DAY_SOFT/HARD/BREAKER`、`QR_SPEND_MONTH_SOFT/HARD/BREAKER`（美元，默认 15/30/50 和 100/150/200）。
+- 备份 v2 加入上述 spend 表。
+
+## 操作说明.md 需要补的步骤
+
+1. 开启 xAI 自动续费**之前**，先打开设置 → 费用，确认每日 / 每月软、硬、熔断金额。
+2. 如 xAI 控制台支持设置月度消费上限，建议设为 **$250**，作为应用限额外面的最后一道闸。
+3. 熔断后在费用页再输入一次登录密码，才能「今天继续使用」或「本月继续使用」。
+

@@ -140,6 +140,14 @@ export const MODEL_PRICES: Record<string, { input: number; cached: number; outpu
   "grok-4.20-0309-reasoning": { input: 1.25, cached: 0.2, output: 2.5 },
 };
 
+export const VOICE_PRICES = {
+  ttsPerMillionChars: 15,
+  sttRestPerHour: 0.1,
+  sttStreamingPerHour: 0.2,
+};
+
+export const PRICES_CHECKED_AT = "2026-09";
+
 export const LOG_FULL_DAYS = 90;
 
 export const QR_VOICE_READS_DIARY = process.env.QR_VOICE_READS_DIARY !== "false";

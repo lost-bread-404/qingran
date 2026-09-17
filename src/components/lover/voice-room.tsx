@@ -413,7 +413,11 @@ export function VoiceRoom() {
               pendingIdsRef.current.delete(reply.id);
               pendingIdsRef.current.delete(replyId);
               sealPlayback();
-              setBanner(event.m);
+              setBanner(
+                event.code === "spend_breaker"
+                  ? "今日（或本月）费用异常，已暂停。可在设置中确认后继续。"
+                  : event.m,
+              );
               setStatus("error");
             }
           },

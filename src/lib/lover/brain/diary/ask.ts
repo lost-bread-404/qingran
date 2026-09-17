@@ -248,6 +248,9 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
 }
 
 export async function askDiary(question: string): Promise<{ text: string; ok: boolean }> {
+  const { checkSpend } = await import("../spend/check.ts");
+  const hold = await checkSpend("ask");
+  if (!hold.allow) return { text: "今天的费用已到上限，问日记明天再用。", ok: false };
   const previous: unknown[] = [];
   for (let i = 0; i < 8; i++) {
     const result = await callModel("ask", {

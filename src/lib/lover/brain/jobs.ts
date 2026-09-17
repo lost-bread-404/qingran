@@ -9,14 +9,19 @@ import { canStartJob, retryDelayMs, timeoutFor } from "./jobs-policy.ts";
 import {
   claimJob,
   cleanupOldJobs,
+  deferJob,
+  deferPendingUntil,
   finishJob,
   insertJob,
   newerReflectExists,
   peekNextJob,
+  restoreClaim,
   skipOldReflect,
 } from "./store.ts";
 import { newId } from "../storage.ts";
 import type { BrainJob, JobType } from "./types.ts";
+import { checkSpend } from "./spend/check.ts";
+import { SPEND_RATE_ERR } from "./spend/rate.ts";
 
 export { canStartJob } from "./jobs-policy.ts";
 
@@ -103,6 +108,11 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
     const remaining = budgetMs - (Date.now() - wall0);
     const peek = await peekNextJob(now());
     if (!peek) break;
+    const hold = await checkSpend(peek.type);
+    if (!hold.allow) {
+      await deferJob(peek.id, hold.resumeAt ?? now() + 3_600_000, `spend:${hold.level}`);
+      continue;
+    }
     if (!canStartJob(peek.type, remaining)) break;
     const job = await claimJob(now(), timeoutFor(peek.type) + LOCK_SLACK_MS, peek.id);
     if (!job) continue;
@@ -111,6 +121,11 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
       ran += 1;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (message === SPEND_RATE_ERR || (err as { code?: string }).code === SPEND_RATE_ERR) {
+        await restoreClaim(job.id, job.attempts);
+        await deferPendingUntil(now() + 10 * 60_000, "spend-rate");
+        break;
+      }
       if (job.attempts < JOB_MAX_ATTEMPTS) {
         const delay = retryDelayMs(job.attempts);
         await finishJob(job.id, "pending", { runAfter: now() + delay, error: message });

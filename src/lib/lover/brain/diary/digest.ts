@@ -11,6 +11,7 @@ import {
   notesForDay,
 } from "../store.ts";
 import { isoWeek } from "../time.ts";
+import { routePriority } from "../spend/policy.ts";
 
 export type DailyDigestData = {
   day: string;
@@ -38,6 +39,7 @@ export type DailyDigestData = {
     jobs: Array<{ type: string; status: string; ms: number | null; error: string | null }>;
     routes: Record<string, { n: number; tokensIn: number; tokensOut: number; tokensCached: number; cost: number; timeouts: number }>;
     hot: { packP50: number | null; ttftP50: number | null; ttftP95: number | null; staleRate: number; avgMemories: number };
+    spend: { usd: number; byBand: Record<string, number>; alerts: number; deferred: number };
   };
 };
 
@@ -88,6 +90,12 @@ function md(data: DailyDigestData): string {
     );
   }
   if (data.system.hot.ttftP50 != null) lines.push(`TTFT p50 ${data.system.hot.ttftP50}ms / p95 ${data.system.hot.ttftP95}ms。`);
+  if (data.system.spend) {
+    const b = data.system.spend.byBand;
+    lines.push(
+      `费用 $${data.system.spend.usd.toFixed(4)}（P0 ${b.P0 ?? 0} / P1 ${b.P1 ?? 0} / P2 ${b.P2 ?? 0} / P3 ${b.P3 ?? 0}）。警报 ${data.system.spend.alerts}，延后 job ${data.system.spend.deferred}。`,
+    );
+  }
   return lines.join("\n");
 }
 
@@ -246,8 +254,34 @@ export async function writeDailyDigest(day: string): Promise<void> {
         staleRate: turns.length ? turns.filter((t) => t.mind_stale).length / turns.length : 0,
         avgMemories: memCounts.length ? memCounts.reduce((a, b) => a + b, 0) / memCounts.length : 0,
       },
+      spend: { usd: 0, byBand: { P0: 0, P1: 0, P2: 0, P3: 0 }, alerts: 0, deferred: 0 },
     },
   };
+
+  try {
+    const spendRows = await db.query<{ route: string; usd: number }>(
+      `select route, usd from spend_daily where day = $1`,
+      [day],
+    );
+    const alerts = await db.query<{ n: number }>(`select count(*)::int as n from spend_alerts where day = $1`, [day]);
+    const deferred = await db.query<{ n: number }>(
+      `select count(*)::int as n from brain_jobs where last_error like 'spend:%' and status = 'pending'`,
+    );
+    const byBand: Record<string, number> = { P0: 0, P1: 0, P2: 0, P3: 0 };
+    let usd = 0;
+    for (const r of spendRows) {
+      usd += Number(r.usd) || 0;
+      byBand[`P${routePriority(r.route)}`] += Number(r.usd) || 0;
+    }
+    data.system.spend = {
+      usd,
+      byBand,
+      alerts: Number(alerts[0]?.n) || 0,
+      deferred: Number(deferred[0]?.n) || 0,
+    };
+  } catch {
+    /* spend tables may not exist yet in old snapshots */
+  }
 
   const markdown = md(data);
   const ts = now();

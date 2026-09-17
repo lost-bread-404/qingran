@@ -150,6 +150,30 @@ export function buildUsageReport(rows: JsonlRow[]): string {
   if (!err.size) lines.push("- （没有失败记录）");
   lines.push("");
 
+  const costDays = new Map<string, number>();
+  for (const l of logs) {
+    const at = num(l.at);
+    const day = at != null ? new Date(at).toISOString().slice(0, 10) : String(l.day ?? "unknown");
+    costDays.set(day, (costDays.get(day) ?? 0) + (num(l.cost_usd) ?? 0));
+  }
+  const monthKeys = [...costDays.keys()].filter((d) => d.length >= 7);
+  const thisMonth = monthKeys.sort().at(-1)?.slice(0, 7);
+  if (thisMonth) {
+    const days = [...costDays.entries()].filter(([d]) => d.startsWith(thisMonth));
+    const spent = days.reduce((s, [, v]) => s + v, 0);
+    const n = days.length || 1;
+    const dim = 30;
+    lines.push("## 费用预测");
+    lines.push(`- ${thisMonth} 已花 $${spent.toFixed(4)}，按 ${n} 天外推全月 $${((spent / n) * dim).toFixed(2)}`);
+    lines.push("");
+  }
+
+  const alerts = rows.filter((r) => r.table === "spend_alerts");
+  lines.push("## 警报");
+  if (!alerts.length) lines.push("- （没有警报记录）");
+  for (const a of alerts) lines.push(`- ${a.level} ${a.scope} ${a.detail ?? ""}`);
+  lines.push("");
+
   const good = turns.filter((t) => t.feedback === "good");
   const bad = turns.filter((t) => t.feedback === "bad");
   if (good.length || bad.length) {

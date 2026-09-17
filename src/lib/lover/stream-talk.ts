@@ -13,7 +13,7 @@ export type TalkStreamEvent =
   | { t: "audio"; i: number; b: string; m: string; replace?: boolean }
   | { t: "timing"; k: string; ms: number }
   | { t: "done"; speech: string; replyId?: string }
-  | { t: "err"; m: string };
+  | { t: "err"; m: string; code?: string };
 
 export type TalkStreamInput = {
   text: string;
@@ -35,10 +35,11 @@ export type TalkStreamResult = {
   ttftMs: number | null;
   firstAudioMs: number | null;
   model: string;
+  ttsChars: number;
 };
 
 export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<TalkStreamResult> {
-  const empty: TalkStreamResult = { usage: null, ttftMs: null, firstAudioMs: null, model: "" };
+  const empty: TalkStreamResult = { usage: null, ttftMs: null, firstAudioMs: null, model: "", ttsChars: 0 };
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) {
     emit({ t: "err", m: "这会儿连不上。" });
@@ -147,23 +148,28 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   if (!speech) {
     tts.abort();
     emit({ t: "err", m: "她好像走神了，再说一次。" });
-    return { usage, ttftMs, firstAudioMs, model: route.model };
+    return { usage, ttftMs, firstAudioMs, model: route.model, ttsChars: tts.chars };
   }
 
   await tts.finish();
 
+  let ttsChars = tts.chars;
   if (!tts.complete) {
     const clip = await speakRest(apiKey, speech, speed);
-    if (clip?.b) timedEmit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
+    if (clip?.b) {
+      timedEmit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
+      ttsChars = spokenForTts(speech).length;
+    }
   }
 
   emit({ t: "done", speech, replyId: data.replyId });
-  return { usage, ttftMs, firstAudioMs, model: route.model };
+  return { usage, ttftMs, firstAudioMs, model: route.model, ttsChars };
 }
 
 class LiveTts {
   gotAudio = false;
   complete = false;
+  chars = 0;
   private socket: WebSocket | null = null;
   private opened = false;
   private failed = false;
@@ -231,6 +237,7 @@ class LiveTts {
   push(text: string) {
     const spoken = text.replace(/\r/g, "").trim();
     if (!spoken || this.failed || this.closed) return;
+    this.chars += spoken.length;
     if (!this.opened) {
       this.queued.push(spoken);
       return;

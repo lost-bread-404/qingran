@@ -14,4 +14,6 @@ test("usage-report covers latency, cost, and errors from fixture", () => {
   assert.match(md, /新增 1，替换 1/);
   assert.match(md, /reflect: 1 次/);
   assert.match(md, /命中率 0\.71/);
+  assert.match(md, /费用预测/);
+  assert.match(md, /synth paused/);
 });

@@ -15,6 +15,9 @@ import { enqueuePeriodicIfDue } from "../../src/lib/lover/brain/diary/dusk.ts";
 import { drainJobs, enqueue } from "../../src/lib/lover/brain/jobs.ts";
 import * as S from "../../src/lib/lover/brain/store.ts";
 import { loadHotContext } from "../../src/lib/lover/brain/voice/pack.ts";
+import { checkSpend } from "../../src/lib/lover/brain/spend/check.ts";
+import { recordSpend, resetSpendSnap } from "../../src/lib/lover/brain/spend/ledger.ts";
+import { defaultSpendLimits } from "../../src/lib/lover/brain/spend/policy.ts";
 import { DEFAULT_PROFILE, lockedProfile } from "../../src/lib/lover/types.ts";
 
 const TZ = "America/New_York";
@@ -350,6 +353,43 @@ async function main() {
     console.log(`\nmock xAI calls: ${calls}`);
     console.log("by schema:", JSON.stringify(callsByRoute));
     if ((callsByRoute.day_log ?? 0) > 6) failures.push(`1.2 too many day_log calls: ${callsByRoute.day_log}`);
+
+    hr("spend");
+    const spendRows = await db.query<{ day: string; route: string; usd: number; calls: number }>(
+      "select day, route, usd, calls from spend_daily order by day, route",
+    );
+    for (const r of spendRows) {
+      console.log(`  ${r.day} ${r.route} $${Number(r.usd).toFixed(4)} ×${r.calls}`);
+    }
+    resetSpendSnap();
+    await S.patchMeta({
+      spendLimits: { ...defaultSpendLimits(), daySoft: 0.000001, dayHard: 100, dayBreaker: 200 },
+    });
+    resetSpendSnap();
+    const softVoice = await checkSpend("voice");
+    const softReflect = await checkSpend("reflect");
+    const softSynth = await checkSpend("synth");
+    if (!softVoice.allow || !softReflect.allow) failures.push("soft cap must not stop voice/reflect");
+    if (softSynth.allow) failures.push("soft cap should pause synth");
+
+    await recordSpend({ kind: "llm", route: "voice", usd: 0.02 });
+    resetSpendSnap();
+    await S.patchMeta({
+      spendLimits: { ...defaultSpendLimits(), daySoft: 0.000001, dayHard: 0.000002, dayBreaker: 0.01 },
+    });
+    resetSpendSnap();
+    const br = await checkSpend("voice");
+    console.log(`- breaker decision: allow=${br.allow} level=${br.level} resumeAt=${br.resumeAt}`);
+    if (br.allow || br.level !== "breaker") failures.push("breaker should block /api/talk");
+    await enqueue("synth", "synth:breaker-demo", { week: "2026-W38" });
+    await drainJobs(5_000);
+    const syn = await db.query<{ attempts: number; status: string; run_after: number; last_error: string | null }>(
+      "select attempts, status, run_after, last_error from brain_jobs where dedupe_key = 'synth:breaker-demo'",
+    );
+    if (syn[0]?.status !== "pending") failures.push("breaker synth should stay pending");
+    if (Number(syn[0]?.attempts) !== 0) failures.push("breaker synth must not consume attempts");
+    if (!String(syn[0]?.last_error ?? "").startsWith("spend:")) failures.push("breaker synth should record spend defer");
+    if (!(Number(syn[0]?.run_after) > Date.now() - 86_400_000)) failures.push("breaker synth run_after missing");
 
     result.calls = calls;
     result.callsByRoute = callsByRoute;

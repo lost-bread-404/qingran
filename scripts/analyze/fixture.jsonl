@@ -4,3 +4,4 @@
 {"table":"brain_log","route":"dusk","model":"grok-4.3","ok":false,"error":"timeout","tokens_in":200,"tokens_out":0,"tokens_cached":0,"cost_usd":0,"step":"dusk:grok-4.3","at":1758000000000}
 {"table":"mem_history","op":"ADD","row_id":"n1"}
 {"table":"mem_history","op":"SUPERSEDE","row_id":"n0"}
+{"table":"spend_alerts","level":"soft","scope":"day","detail":"synth paused"}

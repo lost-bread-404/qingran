@@ -7,7 +7,7 @@ export type TalkStreamEvent =
   | { t: "audio"; i: number; b: string; m: string; replace?: boolean }
   | { t: "timing"; k: string; ms: number }
   | { t: "done"; speech: string; replyId?: string }
-  | { t: "err"; m: string };
+  | { t: "err"; m: string; code?: string };
 
 export type TalkClientInput = {
   text: string;
@@ -31,6 +31,10 @@ export async function streamTalk(
   });
   if (!res.ok || !res.body) {
     if (onUnauthorized(res)) return;
+    if (res.status === 429) {
+      onEvent({ t: "err", m: "请求太频繁了，稍等一下。", code: "rate" });
+      return;
+    }
     onEvent({ t: "err", m: "这会儿连不上。" });
     return;
   }

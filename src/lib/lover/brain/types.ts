@@ -78,6 +78,14 @@ export type BrainMeta = {
   lastReportMonth: string;
   timeZone: string;
   coreIndex?: { version: number; day: string; ids: string[] };
+  spendLimits?: {
+    daySoft: number;
+    dayHard: number;
+    dayBreaker: number;
+    monthSoft: number;
+    monthHard: number;
+    monthBreaker: number;
+  };
 };
 
 export const EMPTY_META: BrainMeta = {

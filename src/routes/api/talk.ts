@@ -8,6 +8,9 @@ import { appendBrainLog, upsertMessage } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
 import { estimateCostUsd, parseUsage } from "@/lib/lover/brain/usage";
 import { loadHotContext } from "@/lib/lover/brain/voice/pack";
+import { checkSpend, recordLlmSpend, recordTtsSpend } from "@/lib/lover/brain/spend/check";
+import { talkRateHit } from "@/lib/lover/brain/spend/rate";
+import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
 import { lockedProfile, type Profile } from "@/lib/lover/types";
 import { runTalkStream, type TalkStreamEvent } from "@/lib/lover/stream-talk";
@@ -32,6 +35,27 @@ export const Route = createFileRoute("/api/talk")({
           body = (await request.json()) as TalkBody;
         } catch {
           return Response.json({ t: "err", m: "先说一句。" }, { status: 400 });
+        }
+
+        const session = parseCookie(request.headers.get("cookie"));
+        const sessionKey = sha256Hex(session || request.headers.get("x-forwarded-for") || "anon").slice(0, 16);
+        const rate = await talkRateHit(sessionKey);
+        if (rate.limited) {
+          return Response.json({ t: "err", m: "请求太频繁了，稍等一下。", code: "rate" }, { status: 429 });
+        }
+
+        const hold = await checkSpend("voice");
+        if (!hold.allow) {
+          const msg =
+            hold.scope === "month"
+              ? "本月费用异常，已暂停。可在设置中确认后继续。"
+              : "今日费用异常，已暂停。可在设置中确认后继续。";
+          return new Response(`data: ${JSON.stringify({ t: "err", m: msg, code: "spend_breaker" })}\n\n`, {
+            headers: {
+              "Content-Type": "text/event-stream; charset=utf-8",
+              "Cache-Control": "no-cache, no-transform",
+            },
+          });
         }
 
         const encoder = new TextEncoder();
@@ -116,7 +140,7 @@ export const Route = createFileRoute("/api/talk")({
                 .filter((m) => m.role !== "system")
                 .map((m) => `${m.role}: ${m.content}`)
                 .join("\n");
-              await appendBrainLog({
+              const logId = await appendBrainLog({
                 step: `voice:${streamResult.model || "voice"}`,
                 ok: !failed && Boolean(display),
                 ms: totalMs,
@@ -135,6 +159,16 @@ export const Route = createFileRoute("/api/talk")({
                 costUsd,
                 error: failed ? "stream-error" : null,
               });
+              await recordLlmSpend({
+                route: "voice",
+                model: streamResult.model || "voice",
+                usage,
+                inputText: sys + hist,
+                outputText: display,
+                turnSeq: userCreatedAt,
+                logId,
+              });
+              if (streamResult.ttsChars) await recordTtsSpend(streamResult.ttsChars, userCreatedAt);
               await insertBrainTurn({
                 turnSeq: userCreatedAt,
                 userMsgId,

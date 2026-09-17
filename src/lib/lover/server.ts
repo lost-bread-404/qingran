@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { VOICE_IO } from "./brain/config";
+import { recordSttSpend, recordTtsSpend } from "./brain/spend/check";
 import { spokenForTts } from "./speech-tags";
 import { restoreSpeechText, sttKeyterms } from "./stt-text";
 import { ttsRequestBody, ttsSpeed } from "./tts";
@@ -39,6 +40,7 @@ export const speakAsLover = createServerFn({ method: "POST" })
     }
 
     const buf = Buffer.from(await res.arrayBuffer());
+    void recordTtsSpend(text.length);
     return {
       ok: true as const,
       mimeType: res.headers.get("content-type") || `audio/pcm;rate=${VOICE_IO.sampleRate}`,
@@ -91,6 +93,9 @@ export const transcribeVoice = createServerFn({ method: "POST" })
       const fallback = (body.words ?? []).map((w) => w.text ?? "").join("").trim();
       text = restoreSpeechText(fallback);
     }
+    const lastEnd = (body.words ?? []).reduce((m, w) => Math.max(m, Number(w.end) || 0), 0);
+    const seconds = lastEnd > 0 ? lastEnd : bytes.length / (VOICE_IO.sampleRate * 2);
+    void recordSttSpend(seconds, false);
     return { ok: true as const, text, words: body.words ?? [] };
   });
 
