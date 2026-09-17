@@ -1,9 +1,16 @@
-import { Pencil, Volume2 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { ChevronDown, Pencil, Volume2 } from "lucide-react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { pairMessages } from "@/lib/lover/pair-messages";
 import type { ChatMessage } from "@/lib/lover/types";
+
+const PIN_PX = 96;
+const PAGE_UP_SCREENS = 3;
+
+export type TranscriptHandle = {
+  pageUp: () => void;
+};
 
 type Props = {
   messages: ChatMessage[];
@@ -21,24 +28,55 @@ type Props = {
   onEditSave?: () => void;
 };
 
-export function Transcript({
-  messages,
-  partnerName,
-  statusLine,
-  thinking,
-  keyboardPad = 0,
-  editableId,
-  editingId,
-  editDraft,
-  onPlay,
-  onEditStart,
-  onEditDraft,
-  onEditCancel,
-  onEditSave,
-}: Props) {
+function nearBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < PIN_PX;
+}
+
+function scrollBehavior(): ScrollBehavior {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
+export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcript(
+  {
+    messages,
+    partnerName,
+    statusLine,
+    thinking,
+    keyboardPad = 0,
+    editableId,
+    editingId,
+    editDraft,
+    onPlay,
+    onEditStart,
+    onEditDraft,
+    onEditCancel,
+    onEditSave,
+  },
+  ref,
+) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const pinRef = useRef(true);
+  const [away, setAway] = useState(false);
+
+  const jumpToBottom = () => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    pinRef.current = true;
+    setAway(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: scrollBehavior() });
+  };
+
+  const pageUp = () => {
+    const el = scrollerRef.current;
+    if (!el || el.scrollTop <= 0) return;
+    pinRef.current = false;
+    setAway(true);
+    const step = Math.max(el.clientHeight * PAGE_UP_SCREENS, 1);
+    el.scrollTo({ top: Math.max(0, el.scrollTop - step), behavior: scrollBehavior() });
+  };
+
+  useImperativeHandle(ref, () => ({ pageUp }), []);
 
   useEffect(() => {
     const el = scrollerRef.current;
@@ -82,13 +120,16 @@ export function Transcript({
   const pairs = pairMessages(messages);
 
   return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
     <div
       ref={scrollerRef}
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [touch-action:pan-y]"
       style={{ paddingBottom: Math.max(16, keyboardPad + (editingId ? 12 : 0)) }}
       onScroll={(e) => {
         const el = e.currentTarget;
-        pinRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+        const pinned = nearBottom(el);
+        pinRef.current = pinned;
+        setAway(!pinned);
       }}
     >
       <div className="flex min-h-full w-full flex-col justify-end gap-8">
@@ -173,5 +214,16 @@ export function Transcript({
         ) : null}
       </div>
     </div>
+    {away ? (
+      <button
+        type="button"
+        aria-label="回到最新"
+        onClick={jumpToBottom}
+        className="absolute bottom-3 left-1/2 z-10 flex size-11 -translate-x-1/2 items-center justify-center rounded-full bg-surface-2 text-subtle shadow-lamp transition-colors duration-150 hover:text-fg"
+      >
+        <ChevronDown className="size-4" />
+      </button>
+    ) : null}
+    </div>
   );
-}
+});

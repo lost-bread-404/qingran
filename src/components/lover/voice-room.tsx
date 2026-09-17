@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CallButton } from "@/components/lover/call-button";
 import { MicButton } from "@/components/lover/mic-button";
 import { SettingsDrawer } from "@/components/lover/settings-drawer";
-import { Transcript } from "@/components/lover/transcript";
+import { Transcript, type TranscriptHandle } from "@/components/lover/transcript";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useCall } from "@/hooks/use-call";
@@ -92,6 +92,7 @@ export function VoiceRoom() {
   const hearRef = useRef<() => void>(() => undefined);
   const deafenRef = useRef<() => void>(() => undefined);
   const spokenCacheRef = useRef(new Map<string, { bytes: Uint8Array<ArrayBuffer>; mimeType: string }>());
+  const transcriptRef = useRef<TranscriptHandle>(null);
   const viewport = useVisualViewportHeight();
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
   const [scriptedHave, setScriptedHave] = useState<Record<string, number>>({});
@@ -663,8 +664,15 @@ export function VoiceRoom() {
       style={{ top: viewport.offsetTop, height: viewport.height }}
     >
       <div className="mx-auto flex h-full min-h-0 w-full max-w-lg flex-col overflow-hidden">
-        <header className="relative z-10 flex shrink-0 items-center justify-between bg-bg/80 px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm">
-          <div className="flex items-center gap-3">
+        <header
+          className="relative z-10 flex shrink-0 items-center justify-between bg-bg/80 px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm"
+          onClick={() => transcriptRef.current?.pageUp()}
+        >
+          <button
+            type="button"
+            aria-label="往上看更早的对话"
+            className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          >
             <div
               className={cn(
                 "lamp-orb size-10 rounded-full",
@@ -678,8 +686,12 @@ export function VoiceRoom() {
                 {call.active ? "通话中" : memories.length > 0 ? `记得 ${memories.length} 件事` : "在"}
               </p>
             </div>
-          </div>
-          <div className="flex items-center gap-1">
+          </button>
+          <div
+            className="flex items-center gap-1"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <Button
               variant="ghost"
               size="sm"
@@ -768,6 +780,7 @@ export function VoiceRoom() {
         ) : (
           <>
             <Transcript
+              ref={transcriptRef}
               messages={messages}
               partnerName="清然"
               statusLine={statusLine}
