@@ -17,6 +17,40 @@ export type AdapterOutcome = HearingAdapterOutcome;
 
 const USER_PROMPT = "转写这段中文口语。按系统说明输出严格 JSON。";
 
+const MODERATION_RE =
+  /data_inspection_failed|datainspectionfailed|ip_infringement_suspect|ipinfringementsuspect|custom_role_blocked|customroleblocked|internalerror\.algo\.datainspection/i;
+
+const GEMINI_SAFETY_SETTINGS = [
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+] as const;
+
+export function isModerationHttpError(status: number, raw: string): boolean {
+  if (status !== 400 && status !== 403) return false;
+  return MODERATION_RE.test(raw);
+}
+
+export function classifyGeminiResponse(body: {
+  promptFeedback?: { blockReason?: string };
+  candidates?: { finishReason?: string }[];
+}): "refusal" | "schema" | "ok" {
+  const block = (body.promptFeedback?.blockReason ?? "").toUpperCase();
+  if (block && block !== "BLOCK_REASON_UNSPECIFIED") return "refusal";
+  const finish = (body.candidates?.[0]?.finishReason ?? "").toUpperCase();
+  if (finish === "SAFETY" || finish === "PROHIBITED_CONTENT" || finish === "BLOCKLIST" || finish === "SPII") {
+    return "refusal";
+  }
+  if (finish === "MAX_TOKENS") return "schema";
+  return "ok";
+}
+
+export function clipFallbackRaw(raw?: string | null): string | null {
+  if (!raw) return null;
+  return raw.slice(0, 2000);
+}
+
 export async function hearWithQwen(audioBase64: string): Promise<AdapterOutcome> {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   const model = HEARING.qwen.model;
@@ -57,6 +91,7 @@ export async function hearWithGemini(audioBase64: string): Promise<AdapterOutcom
             ],
           },
         ],
+        safetySettings: GEMINI_SAFETY_SETTINGS,
         generationConfig: {
           temperature: 0,
           responseMimeType: "application/json",
@@ -69,24 +104,42 @@ export async function hearWithGemini(audioBase64: string): Promise<AdapterOutcom
     const latency_ms = Date.now() - started;
     const body = (await res.json().catch(() => ({}))) as {
       error?: { message?: string };
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      promptFeedback?: { blockReason?: string };
+      candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[];
       usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
     };
+    const rawBody = JSON.stringify(body).slice(0, 2000);
     if (!res.ok) {
+      const msg = body.error?.message || rawBody || `gemini ${res.status}`;
       return {
         ok: false,
-        reason: res.status === 408 ? "timeout" : "http",
-        raw: body.error?.message || `gemini ${res.status}`,
+        reason: res.status === 408 ? "timeout" : isModerationHttpError(res.status, msg) ? "refusal" : "http",
+        raw: msg,
+        latency_ms,
+        provider: "gemini",
+        model,
+      };
+    }
+    const verdict = classifyGeminiResponse(body);
+    if (verdict === "refusal") {
+      return {
+        ok: false,
+        reason: "refusal",
+        raw: rawBody,
         latency_ms,
         provider: "gemini",
         model,
       };
     }
     const raw = body.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-    return finishParse("gemini", model, raw, latency_ms, {
+    const parsed = finishParse("gemini", model, raw, latency_ms, {
       in: body.usageMetadata?.promptTokenCount,
       out: body.usageMetadata?.candidatesTokenCount,
     });
+    if (verdict === "schema" && !parsed.ok) {
+      return { ok: false, reason: "schema", raw, latency_ms, provider: "gemini", model };
+    }
+    return parsed;
   } catch (err) {
     return failFromError("gemini", model, started, err);
   }
@@ -166,9 +219,9 @@ async function openaiAudioChat(input: {
   url: string;
   apiKey: string;
   audioBase64: string;
-  audioStyle: "input_audio" | "audio_url";
   extra?: Record<string, unknown>;
   preferStream: boolean;
+  audioStyle: "input_audio" | "audio_url";
 }): Promise<AdapterOutcome> {
   const started = Date.now();
   const timeout = hearingTimeoutMs();
@@ -205,17 +258,23 @@ async function openaiAudioChat(input: {
   try {
     let res = await tryOnce(input.preferStream);
     if (!res.ok && input.preferStream && (res.status === 400 || res.status === 422)) {
-      res = await tryOnce(false);
+      const peek = await res.clone().text().catch(() => "");
+      if (!isModerationHttpError(res.status, peek)) {
+        res = await tryOnce(false);
+      }
     } else if (!res.ok && !input.preferStream && (res.status === 400 || res.status === 422)) {
-      res = await tryOnce(true);
+      const peek = await res.clone().text().catch(() => "");
+      if (!isModerationHttpError(res.status, peek)) {
+        res = await tryOnce(true);
+      }
     }
     const latency_ms = Date.now() - started;
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       return {
         ok: false,
-        reason: res.status === 408 ? "timeout" : "http",
-        raw: errText.slice(0, 500),
+        reason: res.status === 408 ? "timeout" : isModerationHttpError(res.status, errText) ? "refusal" : "http",
+        raw: errText.slice(0, 2000),
         latency_ms,
         provider: input.provider,
         model: input.model,
@@ -350,7 +409,7 @@ function failFromError(
   return {
     ok: false,
     reason,
-    raw: message.slice(0, 300),
+    raw: message.slice(0, 2000),
     latency_ms,
     provider,
     model,

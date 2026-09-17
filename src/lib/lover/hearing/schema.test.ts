@@ -11,6 +11,7 @@ import { assignSplits } from "./split.ts";
 import { cer, cueTokenF1, fieldAccuracy, selfConsistency } from "./metrics.ts";
 import { chooseHearing } from "./select.ts";
 import { HEARING } from "./config.ts";
+import { classifyGeminiResponse, clipFallbackRaw, isModerationHttpError } from "./http.ts";
 
 describe("hearing schema", () => {
   it("parses strict json and tagged text", () => {
@@ -139,5 +140,25 @@ describe("hearing schema", () => {
     assert.equal(score.textAgree, 1);
     assert.equal(score.tokens, 1);
     assert.equal(score.noise, 1);
+  });
+
+  it("classifies dashscope inspection 400 as refusal", () => {
+    const raw = JSON.stringify({
+      error: { code: "data_inspection_failed", message: "Input data may contain inappropriate content." },
+    });
+    assert.equal(isModerationHttpError(400, raw), true);
+    assert.equal(isModerationHttpError(400, "DataInspectionFailed"), true);
+    assert.equal(isModerationHttpError(400, "IPInfringementSuspect"), true);
+    assert.equal(isModerationHttpError(400, "InternalError.Algo.DataInspectionFailed"), true);
+    assert.equal(isModerationHttpError(400, "The audio format is illegal"), false);
+    assert.equal(isModerationHttpError(422, raw), false);
+  });
+
+  it("classifies gemini SAFETY as refusal and MAX_TOKENS as schema", () => {
+    assert.equal(classifyGeminiResponse({ promptFeedback: { blockReason: "SAFETY" } }), "refusal");
+    assert.equal(classifyGeminiResponse({ candidates: [{ finishReason: "SAFETY" }] }), "refusal");
+    assert.equal(classifyGeminiResponse({ candidates: [{ finishReason: "MAX_TOKENS" }] }), "schema");
+    assert.equal(classifyGeminiResponse({ candidates: [{ finishReason: "STOP" }] }), "ok");
+    assert.equal(clipFallbackRaw("x".repeat(2500))?.length, 2000);
   });
 });

@@ -2,11 +2,12 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { newId } from "../storage";
 import { HEARING, isHearingProvider, SCRIPTED_CATEGORIES, type HearingProviderId } from "./config.ts";
-import { hearWithGemini, hearWithQwen, hearWithSelfhost, warmupSelfhost, type AdapterOutcome } from "./http.ts";
+import { hearWithGemini, hearWithQwen, hearWithSelfhost, warmupSelfhost, clipFallbackRaw, type AdapterOutcome } from "./http.ts";
 import { hearingCueSchema, type HearingCue, type HearingResult } from "./schema.ts";
 import { assignSplits } from "./split.ts";
 import { transcribeWithXai, xaiAsHearing } from "./xai.ts";
 import { chooseHearing } from "./select.ts";
+import { deleteHearingWav, putHearingWav, readHearingWav } from "./blob.ts";
 
 export type HearingTurnPatch = {
   id: string;
@@ -25,6 +26,7 @@ export type HearingTurnPatch = {
   refusal?: boolean;
   fallback?: boolean;
   fallback_reason?: string;
+  fallback_raw?: string | null;
   cold_start_ms?: number;
 };
 
@@ -137,6 +139,7 @@ export const runHearing = createServerFn({ method: "POST" })
       refusal,
       fallback,
       fallback_reason,
+      fallback_raw: clipFallbackRaw(outcome && !outcome.ok ? outcome.raw : undefined),
     });
 
     let clipId: string | undefined;
@@ -284,8 +287,10 @@ export const getHearingClipAudio = createServerFn({ method: "POST" })
       select audio_wav, blob_pathname from qingran_hearing_clips where id = ${data.id}
     `;
     const wav = rows[0]?.audio_wav;
-    if (!wav) return { ok: false as const, error: "没有这段录音。" };
-    return { ok: true as const, audioBase64: wav, mimeType: "audio/wav" };
+    if (wav) return { ok: true as const, audioBase64: wav, mimeType: "audio/wav" };
+    const fromBlob = rows[0]?.blob_pathname ? await readHearingWav(rows[0].blob_pathname) : null;
+    if (!fromBlob) return { ok: false as const, error: "没有这段录音。" };
+    return { ok: true as const, audioBase64: fromBlob, mimeType: "audio/wav" };
   });
 
 export const saveHearingGold = createServerFn({ method: "POST" })
@@ -333,6 +338,10 @@ export const deleteHearingClip = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     assertLab(data.password);
     const sql = await getSql();
+    const rows = await sql<{ blob_pathname: string | null }>`
+      select blob_pathname from qingran_hearing_clips where id = ${data.id}
+    `;
+    await deleteHearingWav(rows[0]?.blob_pathname);
     await sql`delete from qingran_hearing_clips where id = ${data.id}`;
     return { ok: true as const };
   });
@@ -377,11 +386,12 @@ export const exportHearingClips = createServerFn({ method: "POST" })
       relabel_gold_cues: unknown;
       relabel_noise_only: boolean | null;
       audio_wav: string | null;
+      blob_pathname: string | null;
     }>`
       select id, created_at::text as created_at, duration_ms, source, category, split,
              xai_text, hearing_text, hearing_json, live_text,
              gold_text, gold_cues, noise_only, skip,
-             relabel_gold_text, relabel_gold_cues, relabel_noise_only, audio_wav
+             relabel_gold_text, relabel_gold_cues, relabel_noise_only, audio_wav, blob_pathname
       from qingran_hearing_clips
       order by created_at asc
     `;
@@ -389,26 +399,28 @@ export const exportHearingClips = createServerFn({ method: "POST" })
       kind: "qingran-hearing-eval",
       version: 1,
       exportedAt: Date.now(),
-      clips: rows.map((row) => ({
-        id: row.id,
-        createdAt: row.created_at,
-        durationMs: Number(row.duration_ms) || 0,
-        source: row.source,
-        category: row.category,
-        split: row.split,
-        xaiText: row.xai_text ?? "",
-        hearingText: row.hearing_text ?? "",
-        hearing: asHearing(row.hearing_json),
-        liveText: row.live_text ?? "",
-        goldText: row.gold_text ?? "",
-        goldCues: parseCues(row.gold_cues),
-        noiseOnly: Boolean(row.noise_only),
-        skip: Boolean(row.skip),
-        relabelGoldText: row.relabel_gold_text ?? "",
-        relabelGoldCues: parseCues(row.relabel_gold_cues),
-        relabelNoiseOnly: row.relabel_noise_only,
-        audioBase64: row.audio_wav ?? "",
-      })),
+      clips: await Promise.all(
+        rows.map(async (row) => ({
+          id: row.id,
+          createdAt: row.created_at,
+          durationMs: Number(row.duration_ms) || 0,
+          source: row.source,
+          category: row.category,
+          split: row.split,
+          xaiText: row.xai_text ?? "",
+          hearingText: row.hearing_text ?? "",
+          hearing: asHearing(row.hearing_json),
+          liveText: row.live_text ?? "",
+          goldText: row.gold_text ?? "",
+          goldCues: parseCues(row.gold_cues),
+          noiseOnly: Boolean(row.noise_only),
+          skip: Boolean(row.skip),
+          relabelGoldText: row.relabel_gold_text ?? "",
+          relabelGoldCues: parseCues(row.relabel_gold_cues),
+          relabelNoiseOnly: row.relabel_noise_only,
+          audioBase64: row.audio_wav || (row.blob_pathname ? (await readHearingWav(row.blob_pathname)) ?? "" : ""),
+        })),
+      ),
     };
   });
 
@@ -444,7 +456,7 @@ async function upsertTurn(patch: HearingTurnPatch) {
       insert into qingran_hearing_turns (
         id, provider, model, speech_start, endpoint_fired, upload_start, stt_done,
         grok_done, tts_first_audio, latency_ms, tokens_in, tokens_out, cost_usd,
-        refusal, fallback, fallback_reason, cold_start_ms
+        refusal, fallback, fallback_reason, fallback_raw, cold_start_ms
       )
       values (
         ${patch.id},
@@ -463,6 +475,7 @@ async function upsertTurn(patch: HearingTurnPatch) {
         ${Boolean(patch.refusal)},
         ${Boolean(patch.fallback)},
         ${patch.fallback_reason ?? null},
+        ${patch.fallback_raw ?? null},
         ${patch.cold_start_ms ?? null}
       )
       on conflict (id) do update set
@@ -481,6 +494,7 @@ async function upsertTurn(patch: HearingTurnPatch) {
         refusal = excluded.refusal or qingran_hearing_turns.refusal,
         fallback = excluded.fallback or qingran_hearing_turns.fallback,
         fallback_reason = coalesce(excluded.fallback_reason, qingran_hearing_turns.fallback_reason),
+        fallback_raw = coalesce(excluded.fallback_raw, qingran_hearing_turns.fallback_raw),
         cold_start_ms = coalesce(excluded.cold_start_ms, qingran_hearing_turns.cold_start_ms)
     `;
   } catch {
@@ -500,7 +514,9 @@ async function insertClip(input: {
 }): Promise<string> {
   const id = newId();
   const sql = await getSql();
-  const pathname = `hearing/${id}.wav`;
+  const bytes = Buffer.from(input.audioBase64, "base64");
+  const storedPath = await putHearingWav(id, bytes);
+  const audioWav = storedPath ? null : input.audioBase64;
   await sql`
     insert into qingran_hearing_clips (
       id, duration_ms, sample_rate, source, category, blob_pathname, audio_wav,
@@ -512,8 +528,8 @@ async function insertClip(input: {
       16000,
       ${input.source},
       ${input.category ?? null},
-      ${pathname},
-      ${input.audioBase64},
+      ${storedPath},
+      ${audioWav},
       ${input.xaiText},
       ${input.tagged},
       ${input.hearing ? JSON.stringify(input.hearing) : null}::jsonb,

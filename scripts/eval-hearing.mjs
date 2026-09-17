@@ -77,7 +77,7 @@ for (const clip of clips) {
     let predText = "";
     let predCues = [];
     let predNoise = false;
-    let refusal = false;
+    let hardRefusal = false;
     let latency = 0;
     let cost = 0;
     let error = "";
@@ -101,7 +101,7 @@ for (const clip of clips) {
           predNoise = outcome.result.noise_only;
           cost = outcome.result.cost_usd ?? 0;
         } else {
-          refusal = outcome.reason === "refusal";
+          hardRefusal = outcome.reason === "refusal";
           error = outcome.reason;
         }
       }
@@ -110,6 +110,7 @@ for (const clip of clips) {
       latency = Date.now() - started;
     }
 
+    const softRefusal = !hardRefusal && predNoise && !goldNoise ? 1 : 0;
     rows.push({
       clip_id: clip.id,
       provider,
@@ -121,7 +122,9 @@ for (const clip of clips) {
       emotion_acc: fieldAccuracy(goldCues, predCues, "emotion"),
       gold_noise: goldNoise,
       pred_noise: predNoise,
-      refusal: refusal ? 1 : 0,
+      hard_refusal: hardRefusal ? 1 : 0,
+      soft_refusal: softRefusal,
+      refusal: hardRefusal ? 1 : 0,
       latency_ms: latency,
       cost_usd: cost,
       error,
@@ -151,7 +154,8 @@ for (const provider of providers) {
       `emotion=${mean(subset, "emotion_acc").toFixed(3)}`,
       `noiseP=${noise.precision.toFixed(3)}`,
       `noiseR=${noise.recall.toFixed(3)}`,
-      `refusal=${mean(subset, "refusal").toFixed(3)}`,
+      `hardRefusal=${mean(subset, "hard_refusal").toFixed(3)}`,
+      `softRefusal=${mean(subset, "soft_refusal").toFixed(3)}`,
       `p50=${percentile(lat, 50).toFixed(0)}ms`,
       `p95=${percentile(lat, 95).toFixed(0)}ms`,
       `cost=$${mean(subset, "cost_usd").toFixed(4)}`,
@@ -177,6 +181,8 @@ const header = Object.keys(rows[0] || {
   emotion_acc: 0,
   gold_noise: false,
   pred_noise: false,
+  hard_refusal: 0,
+  soft_refusal: 0,
   refusal: 0,
   latency_ms: 0,
   cost_usd: 0,

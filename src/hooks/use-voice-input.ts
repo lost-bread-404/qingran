@@ -11,6 +11,8 @@ import {
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
 import { hearUtterance } from "@/lib/lover/hear";
+import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { warmupHearing } from "@/lib/lover/hearing/store";
 import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
@@ -213,6 +215,11 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
     recordingRef.current = true;
     setStatus("recording");
+    if (getHearingSession().provider === "selfhost") {
+      void warmupHearing({ data: { provider: "selfhost" } }).then((result) => {
+        if (result.cold) setHearingSession({ coldStartMs: result.latency_ms });
+      });
+    }
   }, [lang, recorderSupported, speechSupported, startPulse]);
 
   const stop = useCallback(async (): Promise<string> => {

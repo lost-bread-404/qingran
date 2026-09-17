@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { backupFilename, makeBackup, parseBackup, type QingranBackup } from "@/lib/lover/backup";
+import { LogoutButton } from "@/components/lover/logout-button";
 import { HEARING_PROVIDERS, type HearingProviderId } from "@/lib/lover/hearing/config";
 import {
   resolveManualMemory,
@@ -219,6 +220,7 @@ export function SettingsDrawer({
               导入备份
             </Button>
             {backupStatus ? <p className="text-sm text-subtle">{backupStatus}</p> : null}
+            <LogoutButton />
           </div>
         </div>
       ) : tab === "hearing" ? (
