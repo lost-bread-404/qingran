@@ -18,7 +18,6 @@ export function stripSpeechTags(text: string): string {
 export function spokenForTts(text: string): string {
   let spoken = text.replace(/\r/g, "").trim();
   spoken = spoken.replace(/[「」『』“”""]/g, "");
-  spoken = spoken.replace(/\n{2,}/g, " [pause] ");
   spoken = spoken.replace(/\n+/g, " ");
   spoken = spoken.replace(/[ \t]{2,}/g, " ").trim();
   if (spoken.length > 1400) spoken = `${spoken.slice(0, 1400).trim()}`;

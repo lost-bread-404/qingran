@@ -161,7 +161,7 @@ class LiveTts {
       codec: "pcm",
       sample_rate: "24000",
       text_normalization: "true",
-      optimize_streaming_latency: "1",
+      optimize_streaming_latency: "0",
       speed: String(this.speed),
     });
     const url = `wss://api.x.ai/v1/tts?${params.toString()}`;
@@ -196,7 +196,7 @@ class LiveTts {
   }
 
   push(text: string) {
-    const spoken = text.replace(/\r/g, "").trim();
+    const spoken = spokenForTts(text);
     if (!spoken || this.failed || this.closed) return;
     if (!this.opened) {
       this.queued.push(spoken);

@@ -4,8 +4,8 @@ const SILENCE =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
 const PCM_RATE = 24_000;
-const START_SEC = 0.42;
-const HOLD_SEC = 0.3;
+const START_SEC = 0.68;
+const HOLD_SEC = 0.32;
 const SLICE_SEC = 0.18;
 export const VOICE_GAIN = 0.5;
 
