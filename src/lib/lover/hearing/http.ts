@@ -8,6 +8,7 @@ import {
   type HearingProviderId,
 } from "./config.ts";
 import { HEARING_INSTRUCTION } from "./instruction.ts";
+import { NBEST_INSTRUCTION } from "./nbest.ts";
 import { looksLikeRefusal, parseHearingJson, type HearingResult } from "./schema.ts";
 import type { HearingAdapterOutcome, HearingFailReason } from "./select.ts";
 
@@ -15,7 +16,19 @@ export type AdapterFail = Extract<HearingAdapterOutcome, { ok: false }>;
 export type AdapterOk = Extract<HearingAdapterOutcome, { ok: true }>;
 export type AdapterOutcome = HearingAdapterOutcome;
 
+export type HearingCallOpts = {
+  context?: string;
+  nbest?: boolean;
+};
+
 const USER_PROMPT = "转写这段中文口语。按系统说明输出严格 JSON。";
+
+export function hearingSystemPrompt(opts?: HearingCallOpts): string {
+  const parts = [HEARING_INSTRUCTION];
+  if (opts?.nbest) parts.push(NBEST_INSTRUCTION);
+  if (opts?.context?.trim()) parts.push(opts.context.trim());
+  return parts.join("\n\n");
+}
 
 const MODERATION_RE =
   /data_inspection_failed|datainspectionfailed|ip_infringement_suspect|ipinfringementsuspect|custom_role_blocked|customroleblocked|internalerror\.algo\.datainspection/i;
@@ -51,7 +64,7 @@ export function clipFallbackRaw(raw?: string | null): string | null {
   return raw.slice(0, 2000);
 }
 
-export async function hearWithQwen(audioBase64: string): Promise<AdapterOutcome> {
+export async function hearWithQwen(audioBase64: string, opts?: HearingCallOpts): Promise<AdapterOutcome> {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   const model = HEARING.qwen.model;
   if (!apiKey) return missing("qwen", model);
@@ -64,10 +77,11 @@ export async function hearWithQwen(audioBase64: string): Promise<AdapterOutcome>
     audioStyle: "input_audio",
     extra: { modalities: ["text"] },
     preferStream: true,
+    opts,
   });
 }
 
-export async function hearWithGemini(audioBase64: string): Promise<AdapterOutcome> {
+export async function hearWithGemini(audioBase64: string, opts?: HearingCallOpts): Promise<AdapterOutcome> {
   const apiKey = process.env.GEMINI_API_KEY;
   const model = HEARING.gemini.model;
   if (!apiKey) return missing("gemini", model);
@@ -81,7 +95,7 @@ export async function hearWithGemini(audioBase64: string): Promise<AdapterOutcom
         "x-goog-api-key": apiKey,
       },
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: HEARING_INSTRUCTION }] },
+        system_instruction: { parts: [{ text: hearingSystemPrompt(opts) }] },
         contents: [
           {
             role: "user",
@@ -145,7 +159,7 @@ export async function hearWithGemini(audioBase64: string): Promise<AdapterOutcom
   }
 }
 
-export async function hearWithSelfhost(audioBase64: string): Promise<AdapterOutcome> {
+export async function hearWithSelfhost(audioBase64: string, opts?: HearingCallOpts): Promise<AdapterOutcome> {
   const base = selfhostBaseUrl();
   const model = selfhostModel();
   if (!base) return missing("selfhost", model);
@@ -158,6 +172,7 @@ export async function hearWithSelfhost(audioBase64: string): Promise<AdapterOutc
     audioStyle: "audio_url",
     extra: { response_format: { type: "json_object" } },
     preferStream: false,
+    opts,
   });
   if (first.ok || first.reason === "timeout" || first.reason === "refusal") return first;
   return openaiAudioChat({
@@ -169,6 +184,7 @@ export async function hearWithSelfhost(audioBase64: string): Promise<AdapterOutc
     audioStyle: "input_audio",
     extra: { response_format: { type: "json_object" } },
     preferStream: false,
+    opts,
   });
 }
 
@@ -222,6 +238,7 @@ async function openaiAudioChat(input: {
   extra?: Record<string, unknown>;
   preferStream: boolean;
   audioStyle: "input_audio" | "audio_url";
+  opts?: HearingCallOpts;
 }): Promise<AdapterOutcome> {
   const started = Date.now();
   const timeout = hearingTimeoutMs();
@@ -230,7 +247,7 @@ async function openaiAudioChat(input: {
     temperature: 0,
     max_tokens: 800,
     messages: [
-      { role: "system", content: HEARING_INSTRUCTION },
+      { role: "system", content: hearingSystemPrompt(input.opts) },
       {
         role: "user",
         content: [

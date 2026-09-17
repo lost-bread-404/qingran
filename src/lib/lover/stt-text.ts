@@ -243,7 +243,7 @@ export function extractKeyterms(prompt: string): string[] {
 export function sttKeyterms(prompt?: string): string[] {
   const extra = prompt ? extractKeyterms(prompt) : [];
   const all = [...extra, ...STT_KEYTERMS];
-  return [...new Set(all)].slice(0, 80);
+  return [...new Set(all)].slice(0, 100);
 }
 
 export function isMostlyFiller(text: string): boolean {

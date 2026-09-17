@@ -58,6 +58,8 @@ export function SettingsDrawer({
   const [hearingProvider, setHearingProvider] = useState<HearingProviderId>(profile.hearingProvider);
   const [captureAudio, setCaptureAudio] = useState(profile.captureAudio);
   const [scriptedCapture, setScriptedCapture] = useState(profile.scriptedCapture);
+  const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
+  const [hearingNbest, setHearingNbest] = useState(profile.hearingNbest);
   const [newFact, setNewFact] = useState("");
   const [newAt, setNewAt] = useState(() => toDatetimeLocal(Date.now()));
   const [newTimeTouched, setNewTimeTouched] = useState(false);
@@ -75,6 +77,8 @@ export function SettingsDrawer({
       setHearingProvider(profile.hearingProvider);
       setCaptureAudio(profile.captureAudio);
       setScriptedCapture(profile.scriptedCapture);
+      setDebugHearing(profile.debugHearing);
+      setHearingNbest(profile.hearingNbest);
       setTab("prompt");
       setNewAt(toDatetimeLocal(Date.now()));
       setNewTimeTouched(false);
@@ -89,6 +93,8 @@ export function SettingsDrawer({
       hearingProvider,
       captureAudio,
       scriptedCapture,
+      debugHearing,
+      hearingNbest,
     });
     onOpenChange(false);
   }
@@ -245,6 +251,30 @@ export function SettingsDrawer({
                 ))}
               </div>
             </div>
+            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={debugHearing}
+                onChange={(e) => setDebugHearing(e.target.checked)}
+              />
+              <span>
+                <span className="block text-sm">调试模式</span>
+                <span className="block text-xs text-subtle">默认开。关掉后不显示确认入口，也不存任何录音。</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={hearingNbest}
+                onChange={(e) => setHearingNbest(e.target.checked)}
+              />
+              <span>
+                <span className="block text-sm">n-best 候选</span>
+                <span className="block text-xs text-subtle">默认关。打开后不确定的词会写成 {"{A|B}"}。</span>
+              </span>
+            </label>
             <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
               <input
                 type="checkbox"

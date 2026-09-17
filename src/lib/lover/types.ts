@@ -15,6 +15,8 @@ export type Profile = {
   hearingProvider: HearingProviderId;
   captureAudio: boolean;
   scriptedCapture: boolean;
+  debugHearing: boolean;
+  hearingNbest: boolean;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -26,6 +28,7 @@ export type ChatMessage = {
   createdAt: number;
   kind?: MessageKind;
   scanned?: boolean;
+  voiceTurnId?: string;
 };
 
 export type Memory = {
@@ -55,6 +58,8 @@ export const DEFAULT_PROFILE: Profile = {
   hearingProvider: DEFAULT_HEARING_PROVIDER,
   captureAudio: false,
   scriptedCapture: false,
+  debugHearing: true,
+  hearingNbest: false,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -74,6 +79,8 @@ type LooseProfile = Partial<Profile> & {
   hearingProvider?: string;
   captureAudio?: boolean;
   scriptedCapture?: boolean;
+  debugHearing?: boolean;
+  hearingNbest?: boolean;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -89,6 +96,8 @@ export function lockedProfile(input?: unknown): Profile {
       : DEFAULT_HEARING_PROVIDER,
     captureAudio: Boolean(raw.captureAudio),
     scriptedCapture: Boolean(raw.scriptedCapture),
+    debugHearing: raw.debugHearing !== false,
+    hearingNbest: Boolean(raw.hearingNbest),
   };
 }
 

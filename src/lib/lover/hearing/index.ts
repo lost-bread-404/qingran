@@ -10,3 +10,8 @@ export {
 export { formatTaggedText, parseHearingJson, stripCueTags } from "./schema.ts";
 export type { HearingCue, HearingResult } from "./schema.ts";
 export { getHearingSession, setHearingSession } from "./session.ts";
+export { buildHearingContext, stripHearingMarkup } from "./context.ts";
+export { extractTfIdfTerms } from "./keyterms.ts";
+export { detectAudioRoute } from "./route.ts";
+export { goldTierFor, isGoldSource } from "./gold.ts";
+export { summarizeCoverage } from "./coverage.ts";

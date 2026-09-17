@@ -2,12 +2,25 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { newId } from "../storage";
 import { HEARING, isHearingProvider, SCRIPTED_CATEGORIES, type HearingProviderId } from "./config.ts";
-import { hearWithGemini, hearWithQwen, hearWithSelfhost, warmupSelfhost, clipFallbackRaw, type AdapterOutcome } from "./http.ts";
-import { hearingCueSchema, type HearingCue, type HearingResult } from "./schema.ts";
+import {
+  hearWithGemini,
+  hearWithQwen,
+  hearWithSelfhost,
+  warmupSelfhost,
+  clipFallbackRaw,
+  type AdapterOutcome,
+  type HearingCallOpts,
+} from "./http.ts";
+import { hearingCueSchema, type CueEmotion, type HearingCue, type HearingResult } from "./schema.ts";
 import { assignSplits } from "./split.ts";
 import { transcribeWithXai, xaiAsHearing } from "./xai.ts";
 import { chooseHearing } from "./select.ts";
 import { deleteHearingWav, putHearingWav, readHearingWav } from "./blob.ts";
+import { isNoiseDisagreement, shouldDropAsNoise } from "./noise.ts";
+import { goldTierFor, isGoldSource, type GoldSource } from "./gold.ts";
+import { summarizeCoverage } from "./coverage.ts";
+import { EMOTIONS } from "./schema.ts";
+import type { AudioRoute, HearingMode } from "./route.ts";
 
 export type HearingTurnPatch = {
   id: string;
@@ -28,7 +41,10 @@ export type HearingTurnPatch = {
   fallback_reason?: string;
   fallback_raw?: string | null;
   cold_start_ms?: number;
+  disagreement?: boolean;
 };
+
+export type LabClipFilter = "all" | "confirmed" | "unconfirmed" | "disagreement";
 
 export type RunHearingInput = {
   audioBase64: string;
@@ -43,6 +59,12 @@ export type RunHearingInput = {
   speech_start?: number;
   endpoint_fired?: number;
   upload_start?: number;
+  context?: string;
+  nbest?: boolean;
+  extraKeyterms?: string[];
+  debugHearing?: boolean;
+  mode?: HearingMode;
+  audioRoute?: AudioRoute;
 };
 
 export type RunHearingOutput = {
@@ -55,6 +77,7 @@ export type RunHearingOutput = {
   xaiText: string;
   liveText: string;
   noise_only: boolean;
+  disagreement: boolean;
   fallback: boolean;
   fallback_reason?: string;
   refusal: boolean;
@@ -91,13 +114,18 @@ export const runHearing = createServerFn({ method: "POST" })
     const provider = isHearingProvider(data.provider) ? data.provider : "xai";
     const turnId = data.turnId || newId();
     const upload_start = data.upload_start || Date.now();
+    const callOpts: HearingCallOpts = {
+      context: data.context,
+      nbest: Boolean(data.nbest),
+    };
     const xaiPromise = transcribeWithXai({
       audioBase64: data.audioBase64,
       mimeType: data.mimeType,
       prompt: data.prompt,
+      extraKeyterms: data.extraKeyterms,
     });
     const hearingPromise: Promise<AdapterOutcome | null> =
-      provider === "xai" ? Promise.resolve(null) : dispatchProvider(provider, data.audioBase64);
+      provider === "xai" ? Promise.resolve(null) : dispatchProvider(provider, data.audioBase64, callOpts);
     const [xai, outcome] = await Promise.all([xaiPromise, hearingPromise]);
 
     const picked = chooseHearing({ provider, outcome, xai });
@@ -112,6 +140,7 @@ export const runHearing = createServerFn({ method: "POST" })
         xaiText: "",
         liveText: data.liveText ?? "",
         noise_only: true,
+        disagreement: false,
         fallback: false,
         refusal: false,
         latency_ms: xai.latency_ms,
@@ -121,7 +150,11 @@ export const runHearing = createServerFn({ method: "POST" })
       };
     }
 
-    const { used, hearing, fallback, fallback_reason, tagged, xaiText, words, refusal } = picked;
+    const { used, hearing, fallback, fallback_reason, xaiText, words, refusal } = picked;
+    const providerNoise = Boolean(hearing?.noise_only && used !== "xai");
+    const disagreement = isNoiseDisagreement(providerNoise, xaiText);
+    const drop = shouldDropAsNoise(providerNoise, xaiText);
+    const tagged = drop ? "" : disagreement ? xaiText : picked.tagged;
     const stt_done = Date.now();
 
     await upsertTurn({
@@ -140,6 +173,7 @@ export const runHearing = createServerFn({ method: "POST" })
       fallback,
       fallback_reason,
       fallback_raw: clipFallbackRaw(outcome && !outcome.ok ? outcome.raw : undefined),
+      disagreement,
     });
 
     let clipId: string | undefined;
@@ -154,6 +188,10 @@ export const runHearing = createServerFn({ method: "POST" })
           hearing,
           tagged: used === "xai" ? xaiText : tagged,
           liveText: data.liveText ?? "",
+          turnId,
+          mode: data.mode,
+          audioRoute: data.audioRoute,
+          disagreement,
         });
       } catch {
         clipId = undefined;
@@ -169,7 +207,8 @@ export const runHearing = createServerFn({ method: "POST" })
       text: hearing?.text ?? xaiText,
       xaiText,
       liveText: data.liveText ?? "",
-      noise_only: Boolean(hearing?.noise_only && used !== "xai"),
+      noise_only: drop,
+      disagreement,
       fallback,
       fallback_reason,
       refusal,
@@ -207,6 +246,9 @@ export const saveHearingClip = createServerFn({ method: "POST" })
       source?: "real" | "scripted";
       category?: string;
       hearing?: HearingResult | null;
+      turnId?: string;
+      mode?: HearingMode;
+      audioRoute?: AudioRoute;
     }) => input,
   )
   .handler(async ({ data }) => {
@@ -219,15 +261,59 @@ export const saveHearingClip = createServerFn({ method: "POST" })
       hearing: data.hearing ?? null,
       tagged: data.tagged ?? "",
       liveText: data.liveText ?? "",
+      turnId: data.turnId,
+      mode: data.mode,
+      audioRoute: data.audioRoute,
+      disagreement: false,
     });
     return { ok: true as const, clipId };
   });
 
+export const confirmHearingClip = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      turnId: string;
+      goldText: string;
+      goldSource: GoldSource;
+      utteranceEmotion?: string | null;
+    }) => input,
+  )
+  .handler(async ({ data }) => {
+    if (!isGoldSource(data.goldSource)) throw new Error("bad-gold-source");
+    const emotion = isEmotion(data.utteranceEmotion) ? data.utteranceEmotion : null;
+    const tier = goldTierFor({
+      source: data.goldSource,
+      emotionSet: Boolean(emotion),
+      hasCues: false,
+    });
+    const sql = await getSql();
+    const rows = await sql<{ id: string; gold_cues: unknown }>`
+      select id, gold_cues from qingran_hearing_clips where turn_id = ${data.turnId}
+      order by created_at desc
+      limit 1
+    `;
+    const clip = rows[0];
+    if (!clip) return { ok: false as const, error: "没有这段录音。" };
+    const hasCues = Array.isArray(clip.gold_cues) && clip.gold_cues.length > 0;
+    const nextTier = hasCues ? 3 : tier;
+    await sql`
+      update qingran_hearing_clips
+      set gold_text = ${data.goldText},
+          gold_source = ${data.goldSource},
+          gold_tier = ${nextTier},
+          utterance_emotion = ${emotion},
+          stt_text = coalesce(stt_text, hearing_text, xai_text)
+      where id = ${clip.id}
+    `;
+    return { ok: true as const, clipId: clip.id, goldTier: nextTier };
+  });
+
 export const listHearingClips = createServerFn({ method: "POST" })
-  .validator((input: { password: string; relabel?: boolean }) => input)
+  .validator((input: { password: string; relabel?: boolean; filter?: LabClipFilter }) => input)
   .handler(async ({ data }) => {
     assertLab(data.password);
     const sql = await getSql();
+    const filter = data.filter ?? "all";
     const rows = await sql<{
       id: string;
       created_at: string;
@@ -246,36 +332,52 @@ export const listHearingClips = createServerFn({ method: "POST" })
       relabel_gold_text: string | null;
       relabel_gold_cues: unknown;
       relabel_noise_only: boolean | null;
+      gold_source: string | null;
+      stt_text: string | null;
+      gold_tier: number | null;
+      utterance_emotion: string | null;
+      mode: string | null;
+      audio_route: string | null;
+      turn_id: string | null;
+      disagreement: boolean | null;
+      storage_backend: string | null;
+      blob_error: string | null;
     }>`
       select id, created_at::text as created_at, duration_ms, source, category, split,
              xai_text, hearing_text, hearing_json, live_text,
              gold_text, gold_cues, noise_only, skip,
-             relabel_gold_text, relabel_gold_cues, relabel_noise_only
+             relabel_gold_text, relabel_gold_cues, relabel_noise_only,
+             gold_source, stt_text, gold_tier, utterance_emotion, mode, audio_route,
+             turn_id, disagreement, storage_backend, blob_error
       from qingran_hearing_clips
-      order by created_at desc
+      where ${filter === "confirmed" ? sql`gold_source is not null` : sql`true`}
+        and ${filter === "unconfirmed" ? sql`gold_source is null` : sql`true`}
+        and ${filter === "disagreement" ? sql`disagreement = true` : sql`true`}
+      order by disagreement desc, created_at desc
       limit 400
     `;
     return {
       ok: true as const,
-      clips: rows.map((row) => ({
-        id: row.id,
-        createdAt: row.created_at,
-        durationMs: Number(row.duration_ms) || 0,
-        source: row.source,
-        category: row.category,
-        split: row.split,
-        xaiText: row.xai_text ?? "",
-        hearingText: row.hearing_text ?? "",
-        hearing: asHearing(row.hearing_json),
-        liveText: row.live_text ?? "",
-        goldText: data.relabel ? "" : (row.gold_text ?? ""),
-        goldCues: data.relabel ? [] : parseCues(row.gold_cues),
-        noiseOnly: data.relabel ? false : Boolean(row.noise_only),
-        skip: Boolean(row.skip),
-        hasGold: Boolean(row.gold_text || row.gold_cues),
-        hasRelabel: Boolean(row.relabel_gold_text || row.relabel_gold_cues),
-      })),
+      clips: rows.map((row) => mapClipRow(row, data.relabel)),
     };
+  });
+
+export const hearingLabStats = createServerFn({ method: "POST" })
+  .validator((input: { password: string }) => input)
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    const sql = await getSql();
+    const [turnCount] = await sql<{ n: number }>`select count(*)::int as n from qingran_hearing_turns`;
+    const clips = await sql<{
+      category: string | null;
+      mode: string | null;
+      gold_source: string | null;
+      storage_backend: string | null;
+    }>`
+      select category, mode, gold_source, storage_backend from qingran_hearing_clips where skip = false
+    `;
+    const coverage = summarizeCoverage(clips, Number(turnCount?.n) || 0);
+    return { ok: true as const, totalTurns: Number(turnCount?.n) || 0, coverage };
   });
 
 export const getHearingClipAudio = createServerFn({ method: "POST" })
@@ -303,6 +405,7 @@ export const saveHearingGold = createServerFn({ method: "POST" })
       goldCues?: HearingCue[];
       noiseOnly?: boolean;
       skip?: boolean;
+      utteranceEmotion?: string | null;
     }) => input,
   )
   .handler(async ({ data }) => {
@@ -321,12 +424,44 @@ export const saveHearingGold = createServerFn({ method: "POST" })
         where id = ${data.id}
       `;
     } else {
+      const existing = await sql<{
+        gold_source: string | null;
+        stt_text: string | null;
+        hearing_text: string | null;
+        xai_text: string | null;
+        utterance_emotion: string | null;
+      }>`
+        select gold_source, stt_text, hearing_text, xai_text, utterance_emotion
+        from qingran_hearing_clips where id = ${data.id}
+      `;
+      const row = existing[0];
+      const stt = row?.stt_text || row?.hearing_text || row?.xai_text || "";
+      const goldText = data.goldText ?? "";
+      const source = row?.gold_source
+        ? row.gold_source
+        : goldText && goldText !== stt
+          ? "edited"
+          : "confirmed";
+      const emotion = isEmotion(data.utteranceEmotion)
+        ? data.utteranceEmotion
+        : isEmotion(row?.utterance_emotion)
+          ? row?.utterance_emotion
+          : null;
+      const tier = goldTierFor({
+        source,
+        emotionSet: Boolean(emotion),
+        hasCues: cues.length > 0,
+      });
       await sql`
         update qingran_hearing_clips
-        set gold_text = ${data.goldText ?? ""},
+        set gold_text = ${goldText},
             gold_cues = ${JSON.stringify(cues)}::jsonb,
             noise_only = ${Boolean(data.noiseOnly)},
-            skip = ${Boolean(data.skip)}
+            skip = ${Boolean(data.skip)},
+            gold_source = ${source},
+            gold_tier = ${tier},
+            utterance_emotion = ${emotion},
+            stt_text = coalesce(stt_text, hearing_text, xai_text)
         where id = ${data.id}
       `;
     }
@@ -387,17 +522,28 @@ export const exportHearingClips = createServerFn({ method: "POST" })
       relabel_noise_only: boolean | null;
       audio_wav: string | null;
       blob_pathname: string | null;
+      gold_source: string | null;
+      stt_text: string | null;
+      gold_tier: number | null;
+      utterance_emotion: string | null;
+      mode: string | null;
+      audio_route: string | null;
+      turn_id: string | null;
+      disagreement: boolean | null;
+      storage_backend: string | null;
     }>`
       select id, created_at::text as created_at, duration_ms, source, category, split,
              xai_text, hearing_text, hearing_json, live_text,
              gold_text, gold_cues, noise_only, skip,
-             relabel_gold_text, relabel_gold_cues, relabel_noise_only, audio_wav, blob_pathname
+             relabel_gold_text, relabel_gold_cues, relabel_noise_only, audio_wav, blob_pathname,
+             gold_source, stt_text, gold_tier, utterance_emotion, mode, audio_route,
+             turn_id, disagreement, storage_backend
       from qingran_hearing_clips
       order by created_at asc
     `;
     return {
       kind: "qingran-hearing-eval",
-      version: 1,
+      version: 2,
       exportedAt: Date.now(),
       clips: await Promise.all(
         rows.map(async (row) => ({
@@ -419,6 +565,15 @@ export const exportHearingClips = createServerFn({ method: "POST" })
           relabelGoldCues: parseCues(row.relabel_gold_cues),
           relabelNoiseOnly: row.relabel_noise_only,
           audioBase64: row.audio_wav || (row.blob_pathname ? (await readHearingWav(row.blob_pathname)) ?? "" : ""),
+          goldSource: row.gold_source,
+          sttText: row.stt_text ?? "",
+          goldTier: row.gold_tier,
+          utteranceEmotion: row.utterance_emotion,
+          mode: row.mode,
+          audioRoute: row.audio_route,
+          turnId: row.turn_id,
+          disagreement: Boolean(row.disagreement),
+          storageBackend: row.storage_backend,
         })),
       ),
     };
@@ -442,10 +597,10 @@ export const scriptedQuota = createServerFn({ method: "GET" }).handler(async () 
   };
 });
 
-async function dispatchProvider(provider: HearingProviderId, audioBase64: string) {
-  if (provider === "qwen") return hearWithQwen(audioBase64);
-  if (provider === "gemini") return hearWithGemini(audioBase64);
-  if (provider === "selfhost") return hearWithSelfhost(audioBase64);
+async function dispatchProvider(provider: HearingProviderId, audioBase64: string, opts?: HearingCallOpts) {
+  if (provider === "qwen") return hearWithQwen(audioBase64, opts);
+  if (provider === "gemini") return hearWithGemini(audioBase64, opts);
+  if (provider === "selfhost") return hearWithSelfhost(audioBase64, opts);
   return xaiAsHearing("", 0);
 }
 
@@ -456,7 +611,7 @@ async function upsertTurn(patch: HearingTurnPatch) {
       insert into qingran_hearing_turns (
         id, provider, model, speech_start, endpoint_fired, upload_start, stt_done,
         grok_done, tts_first_audio, latency_ms, tokens_in, tokens_out, cost_usd,
-        refusal, fallback, fallback_reason, fallback_raw, cold_start_ms
+        refusal, fallback, fallback_reason, fallback_raw, cold_start_ms, disagreement
       )
       values (
         ${patch.id},
@@ -476,7 +631,8 @@ async function upsertTurn(patch: HearingTurnPatch) {
         ${Boolean(patch.fallback)},
         ${patch.fallback_reason ?? null},
         ${patch.fallback_raw ?? null},
-        ${patch.cold_start_ms ?? null}
+        ${patch.cold_start_ms ?? null},
+        ${Boolean(patch.disagreement)}
       )
       on conflict (id) do update set
         provider = coalesce(excluded.provider, qingran_hearing_turns.provider),
@@ -495,7 +651,8 @@ async function upsertTurn(patch: HearingTurnPatch) {
         fallback = excluded.fallback or qingran_hearing_turns.fallback,
         fallback_reason = coalesce(excluded.fallback_reason, qingran_hearing_turns.fallback_reason),
         fallback_raw = coalesce(excluded.fallback_raw, qingran_hearing_turns.fallback_raw),
-        cold_start_ms = coalesce(excluded.cold_start_ms, qingran_hearing_turns.cold_start_ms)
+        cold_start_ms = coalesce(excluded.cold_start_ms, qingran_hearing_turns.cold_start_ms),
+        disagreement = excluded.disagreement or qingran_hearing_turns.disagreement
     `;
   } catch {
     /* preview without migration still runs */
@@ -511,16 +668,25 @@ async function insertClip(input: {
   hearing: HearingResult | null;
   tagged: string;
   liveText: string;
+  turnId?: string;
+  mode?: HearingMode;
+  audioRoute?: AudioRoute;
+  disagreement: boolean;
 }): Promise<string> {
   const id = newId();
   const sql = await getSql();
   const bytes = Buffer.from(input.audioBase64, "base64");
-  const storedPath = await putHearingWav(id, bytes);
+  const stored = await putHearingWav(id, bytes);
+  const storedPath = stored.pathname;
+  const blobError = stored.error;
+  const storageBackend = storedPath ? "blob" : "db";
   const audioWav = storedPath ? null : input.audioBase64;
+  const sttText = input.tagged || input.xaiText;
   await sql`
     insert into qingran_hearing_clips (
       id, duration_ms, sample_rate, source, category, blob_pathname, audio_wav,
-      xai_text, hearing_text, hearing_json, live_text
+      xai_text, hearing_text, hearing_json, live_text,
+      blob_error, storage_backend, stt_text, mode, audio_route, turn_id, disagreement
     )
     values (
       ${id},
@@ -533,7 +699,14 @@ async function insertClip(input: {
       ${input.xaiText},
       ${input.tagged},
       ${input.hearing ? JSON.stringify(input.hearing) : null}::jsonb,
-      ${input.liveText}
+      ${input.liveText},
+      ${blobError},
+      ${storageBackend},
+      ${sttText},
+      ${input.mode ?? null},
+      ${input.audioRoute ?? null},
+      ${input.turnId ?? null},
+      ${Boolean(input.disagreement)}
     )
   `;
   return id;
@@ -562,4 +735,70 @@ function parseCues(value: unknown): HearingCue[] {
     .map((item) => hearingCueSchema.safeParse(item))
     .filter((r) => r.success)
     .map((r) => r.data);
+}
+
+function isEmotion(value: unknown): value is CueEmotion {
+  return typeof value === "string" && (EMOTIONS as readonly string[]).includes(value);
+}
+
+function mapClipRow(
+  row: {
+    id: string;
+    created_at: string;
+    duration_ms: number | null;
+    source: string;
+    category: string | null;
+    split: string | null;
+    xai_text: string | null;
+    hearing_text: string | null;
+    hearing_json: unknown;
+    live_text: string | null;
+    gold_text: string | null;
+    gold_cues: unknown;
+    noise_only: boolean | null;
+    skip: boolean;
+    relabel_gold_text: string | null;
+    relabel_gold_cues: unknown;
+    relabel_noise_only: boolean | null;
+    gold_source: string | null;
+    stt_text: string | null;
+    gold_tier: number | null;
+    utterance_emotion: string | null;
+    mode: string | null;
+    audio_route: string | null;
+    turn_id: string | null;
+    disagreement: boolean | null;
+    storage_backend: string | null;
+    blob_error: string | null;
+  },
+  relabel?: boolean,
+) {
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    durationMs: Number(row.duration_ms) || 0,
+    source: row.source,
+    category: row.category,
+    split: row.split,
+    xaiText: row.xai_text ?? "",
+    hearingText: row.hearing_text ?? "",
+    hearing: asHearing(row.hearing_json),
+    liveText: row.live_text ?? "",
+    goldText: relabel ? "" : (row.gold_text ?? ""),
+    goldCues: relabel ? [] : parseCues(row.gold_cues),
+    noiseOnly: relabel ? false : Boolean(row.noise_only),
+    skip: Boolean(row.skip),
+    hasGold: Boolean(row.gold_source || row.gold_text || row.gold_cues),
+    hasRelabel: Boolean(row.relabel_gold_text || row.relabel_gold_cues),
+    goldSource: relabel ? null : row.gold_source,
+    sttText: row.stt_text ?? row.hearing_text ?? row.xai_text ?? "",
+    goldTier: relabel ? null : row.gold_tier,
+    utteranceEmotion: relabel ? null : row.utterance_emotion,
+    mode: row.mode,
+    audioRoute: row.audio_route,
+    turnId: row.turn_id,
+    disagreement: Boolean(row.disagreement),
+    storageBackend: row.storage_backend,
+    blobError: row.blob_error,
+  };
 }

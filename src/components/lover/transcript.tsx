@@ -21,11 +21,13 @@ type Props = {
   editableId?: string | null;
   editingId?: string | null;
   editDraft?: string;
+  debugHearing?: boolean;
   onPlay?: (id: string, text: string) => void;
   onEditStart?: (id: string) => void;
   onEditDraft?: (text: string) => void;
   onEditCancel?: () => void;
   onEditSave?: () => void;
+  onConfirmStart?: (id: string) => void;
 };
 
 function nearBottom(el: HTMLElement): boolean {
@@ -46,11 +48,13 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     editableId,
     editingId,
     editDraft,
+    debugHearing,
     onPlay,
     onEditStart,
     onEditDraft,
     onEditCancel,
     onEditSave,
+    onConfirmStart,
   },
   ref,
 ) {
@@ -168,21 +172,13 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                   </div>
                 </div>
               ) : (
-                <div className="flex items-end justify-end gap-2">
-                  {editableId === pair.user.id && onEditStart ? (
-                    <button
-                      type="button"
-                      aria-label="改这句话"
-                      onClick={() => onEditStart(pair.user!.id)}
-                      className="mb-1 shrink-0 text-subtle transition-colors duration-150 hover:text-fg"
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
-                  ) : null}
-                  <p className="max-w-[min(20rem,85%)] whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
-                    {pair.user.text}
-                  </p>
-                </div>
+                <UserBubble
+                  user={pair.user}
+                  editable={editableId === pair.user.id}
+                  debugHearing={debugHearing}
+                  onEditStart={onEditStart}
+                  onConfirmStart={onConfirmStart}
+                />
               )
             ) : null}
             {pair.assistant?.text.trim() ? (
@@ -227,3 +223,43 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     </div>
   );
 });
+
+function UserBubble({
+  user,
+  editable,
+  debugHearing,
+  onEditStart,
+  onConfirmStart,
+}: {
+  user: ChatMessage;
+  editable: boolean;
+  debugHearing?: boolean;
+  onEditStart?: (id: string) => void;
+  onConfirmStart?: (id: string) => void;
+}) {
+  const canConfirm = Boolean(debugHearing && user.voiceTurnId && onConfirmStart);
+  return (
+    <div className="flex items-end justify-end gap-2">
+      {editable && onEditStart ? (
+        <button
+          type="button"
+          aria-label="改这句话"
+          onClick={() => onEditStart(user.id)}
+          className="mb-1 shrink-0 text-subtle transition-colors duration-150 hover:text-fg"
+        >
+          <Pencil className="size-3.5" />
+        </button>
+      ) : null}
+      <p
+        className={`max-w-[min(20rem,85%)] whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg${
+          canConfirm ? " cursor-pointer" : ""
+        }`}
+        onClick={() => {
+          if (canConfirm) onConfirmStart?.(user.id);
+        }}
+      >
+        {user.text}
+      </p>
+    </div>
+  );
+}

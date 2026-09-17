@@ -1,6 +1,7 @@
 import { blobToBase64 } from "./audio";
 import { runHearing } from "./hearing/store";
 import { getHearingSession, setHearingSession } from "./hearing/session";
+import { shouldDropAsNoise } from "./hearing/noise";
 import { transcribeVoice } from "./server";
 import { finishHeard } from "./stt-text";
 import type { ProsodyFrame } from "./prosody";
@@ -34,6 +35,7 @@ export async function hearUtterance(input: {
   const audioBase64 = await blobToBase64(clip);
   const mimeType = clip.type || "audio/wav";
   const provider: HearingProviderId = session.provider;
+  const persist = session.debugHearing || session.capture || session.scripted;
 
   try {
     const result = await runHearing({
@@ -43,17 +45,23 @@ export async function hearUtterance(input: {
         liveText: input.liveText,
         prompt: input.prompt,
         provider,
-        capture: session.capture || session.scripted,
+        capture: persist,
         source: session.source,
         category: session.category ?? undefined,
         turnId,
         speech_start: input.speech_start,
         endpoint_fired: input.endpoint_fired,
         upload_start,
+        context: session.context || undefined,
+        nbest: session.nbest,
+        extraKeyterms: session.extraKeyterms,
+        debugHearing: session.debugHearing,
+        mode: session.mode,
+        audioRoute: session.audioRoute,
       },
     });
     if (result.quota) throw new Error(QUOTA_HINT);
-    if (result.noise_only) return "";
+    if (shouldDropAsNoise(result.noise_only, result.xaiText)) return "";
     if (result.provider !== "xai" && result.tagged) return result.tagged;
     return finishHeard(result.xaiText, input.liveText, result.words, input.frames);
   } catch (err) {

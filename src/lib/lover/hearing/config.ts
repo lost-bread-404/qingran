@@ -49,6 +49,8 @@ export const SCRIPTED_CATEGORIES = [
   { id: "sleepy", label: "困倦", quota: 8 },
   { id: "noise", label: "纯噪音", quota: 10 },
   { id: "sentence", label: "带语气的句子", quota: 16 },
+  { id: "codeswitch", label: "中英夹杂", quota: 12 },
+  { id: "homophone", label: "同音词", quota: 10 },
 ] as const;
 
 export type ScriptedCategoryId = (typeof SCRIPTED_CATEGORIES)[number]["id"];

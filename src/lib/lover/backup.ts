@@ -76,5 +76,6 @@ function cloneMessage(m: ChatMessage): ChatMessage {
     createdAt: Number(m.createdAt) || 0,
     kind,
     scanned: m.scanned ? true : undefined,
+    voiceTurnId: m.voiceTurnId ? String(m.voiceTurnId) : undefined,
   };
 }

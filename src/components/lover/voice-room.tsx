@@ -1,6 +1,7 @@
 import { Settings, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CallButton } from "@/components/lover/call-button";
+import { ConfirmTurn } from "@/components/lover/confirm-turn";
 import { MicButton } from "@/components/lover/mic-button";
 import { SettingsDrawer } from "@/components/lover/settings-drawer";
 import { Transcript, type TranscriptHandle } from "@/components/lover/transcript";
@@ -36,13 +37,16 @@ import {
 } from "@/lib/lover/room";
 import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
-import { stripCueTags } from "@/lib/lover/hearing/schema";
+import { type CueEmotion } from "@/lib/lover/hearing/schema";
+import { buildHearingContext, extractContextKeyterms, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
+import { extractTfIdfTerms } from "@/lib/lover/hearing/keyterms";
+import { detectAudioRoute } from "@/lib/lover/hearing/route";
 import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
 import { newId } from "@/lib/lover/storage";
 import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import { getHearingSession, nextScriptedCategory, setHearingSession } from "@/lib/lover/hearing/session";
-import { patchHearingTurn, scriptedQuota } from "@/lib/lover/hearing/store";
+import { confirmHearingClip, patchHearingTurn, scriptedQuota } from "@/lib/lover/hearing/store";
 import {
   CONTEXT_WINDOW,
   DEFAULT_PROFILE,
@@ -76,6 +80,8 @@ export function VoiceRoom() {
   const [banner, setBanner] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const busyRef = useRef(false);
   const turnRef = useRef(0);
   const memoriesRef = useRef<Memory[]>([]);
@@ -99,12 +105,29 @@ export function VoiceRoom() {
 
   useEffect(() => {
     profileRef.current = profile;
+    const context = buildHearingContext(
+      chatRef.current
+        .filter((m) => m.kind !== "steer" && m.kind !== "setting")
+        .map((m) => ({ role: m.role, text: m.text })),
+    );
+    const extraKeyterms = mergeKeyterms(
+      extractTfIdfTerms(
+        [{ text: profile.systemPrompt }, ...memoriesRef.current.map((m) => ({ text: m.text }))],
+        50,
+      ),
+      extractContextKeyterms(context, 50),
+    );
     setHearingSession({
       provider: profile.hearingProvider,
       capture: profile.captureAudio,
       scripted: profile.scriptedCapture,
+      debugHearing: profile.debugHearing,
+      nbest: profile.hearingNbest,
+      mode: callActiveRef.current ? "call" : "text",
+      context,
+      extraKeyterms,
     });
-  }, [profile]);
+  }, [profile, messages.length, memories]);
   useEffect(() => {
     memoriesRef.current = memories;
   }, [memories]);
@@ -334,14 +357,18 @@ export function VoiceRoom() {
     void playFull(id, speech, turn);
   };
 
+  useEffect(() => {
+    void detectAudioRoute().then((route) => setHearingSession({ audioRoute: route }));
+  }, [hydrated]);
+
   const sendTurn = useCallback(
     async (
       sayRaw: string,
-      opts?: { history?: ChatMessage[]; existingUser?: ChatMessage },
+      opts?: { history?: ChatMessage[]; existingUser?: ChatMessage; voiceTurnId?: string },
     ) => {
       const tagged = sayRaw.trim();
       if (!tagged) return;
-      const say = stripCueTags(tagged).trim() || tagged;
+      const say = stripHearingMarkup(tagged).trim() || tagged;
       if (!opts?.existingUser && busyRef.current) return;
       const turn = ++turnRef.current;
       busyRef.current = true;
@@ -359,6 +386,7 @@ export function VoiceRoom() {
         text: say,
         createdAt: at,
         kind: "say",
+        voiceTurnId: opts?.voiceTurnId,
       };
       const reply: ChatMessage = {
         id: newId(),
@@ -419,6 +447,8 @@ export function VoiceRoom() {
         }
       };
       try {
+        const ac = new AbortController();
+        abortRef.current = ac;
         await streamTalk(
           {
             text: tagged,
@@ -489,6 +519,7 @@ export function VoiceRoom() {
               setStatus("error");
             }
           },
+          ac.signal,
         );
       } catch (err) {
         persistReply(full);
@@ -530,7 +561,7 @@ export function VoiceRoom() {
   const call = useCall({
     prompt: profile.systemPrompt,
     onUtterance: async (text) => {
-      await sendTurn(text);
+      await sendTurn(text, { voiceTurnId: getHearingSession().lastTurnId ?? undefined });
     },
   });
 
@@ -538,6 +569,10 @@ export function VoiceRoom() {
     callActiveRef.current = call.active;
     hearRef.current = call.hear;
     deafenRef.current = call.deafen;
+    setHearingSession({ mode: call.active ? "call" : "text" });
+    if (call.active) {
+      void detectAudioRoute().then((route) => setHearingSession({ audioRoute: route }));
+    }
   }, [call.active, call.hear, call.deafen]);
 
   const finishHold = useCallback(async () => {
@@ -550,7 +585,7 @@ export function VoiceRoom() {
       const el = getPlaybackElement();
       el.muted = false;
       setStatus("idle");
-      if (text) void sendTurn(text);
+      if (text) void sendTurn(text, { voiceTurnId: getHearingSession().lastTurnId ?? undefined });
     } finally {
       finishingHoldRef.current = false;
     }
@@ -639,6 +674,48 @@ export function VoiceRoom() {
       void deleteRoomMessages({ data: { ids: removed.map((m) => m.id) } });
     }
     await sendTurn(text, { history, existingUser: updated });
+  }
+
+  async function saveConfirm(goldText: string, source: "confirmed" | "edited", emotion: CueEmotion | null) {
+    const msg = chatRef.current.find((m) => m.id === confirmId);
+    if (!msg?.voiceTurnId) {
+      setConfirmId(null);
+      return;
+    }
+    setConfirmBusy(true);
+    try {
+      await confirmHearingClip({
+        data: {
+          turnId: msg.voiceTurnId,
+          goldText,
+          goldSource: source,
+          utteranceEmotion: emotion,
+        },
+      });
+      if (source === "edited" && goldText.trim() && goldText.trim() !== msg.text.trim()) {
+        const idx = chatRef.current.findIndex((m) => m.id === msg.id);
+        const next = idx >= 0 ? chatRef.current[idx + 1] : undefined;
+        const alreadySent = next?.role === "assistant" && Boolean(next.text.trim());
+        const updated: ChatMessage = { ...msg, text: goldText };
+        void updateRoomMessage({ data: updated });
+        if (alreadySent) {
+          setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
+        } else {
+          abortRef.current?.abort();
+          stopPlayback();
+          const history = idx >= 0 ? chatRef.current.slice(0, idx) : chatRef.current;
+          const removed = idx >= 0 ? chatRef.current.slice(idx + 1) : [];
+          setMessages([...history, updated]);
+          if (removed.length) {
+            void deleteRoomMessages({ data: { ids: removed.map((m) => m.id) } });
+          }
+          await sendTurn(goldText, { history, existingUser: updated, voiceTurnId: msg.voiceTurnId });
+        }
+      }
+    } finally {
+      setConfirmBusy(false);
+      setConfirmId(null);
+    }
   }
 
   const recording = voice.status === "recording";
@@ -788,6 +865,7 @@ export function VoiceRoom() {
               editableId={editable?.id ?? null}
               editingId={editingId}
               editDraft={editDraft}
+              debugHearing={profile.debugHearing}
               onPlay={(id, text) => {
                 void unlockPlayback();
                 void playFull(id, text, turnRef.current);
@@ -811,6 +889,7 @@ export function VoiceRoom() {
                 if (call.active) call.hear();
               }}
               onEditSave={() => void saveEdit()}
+              onConfirmStart={(id) => setConfirmId(id)}
             />
 
             {editingId ? null : (
@@ -867,6 +946,14 @@ export function VoiceRoom() {
             )}
           </>
         )}
+
+        <ConfirmTurn
+          open={Boolean(confirmId)}
+          sttText={messages.find((m) => m.id === confirmId)?.text ?? ""}
+          busy={confirmBusy}
+          onClose={() => setConfirmId(null)}
+          onConfirm={(goldText, source, emotion) => void saveConfirm(goldText, source, emotion)}
+        />
 
         <SettingsDrawer
           open={settingsOpen}

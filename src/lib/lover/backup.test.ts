@@ -14,7 +14,7 @@ test("round-trips prompt, memories, and chat", () => {
     }),
     memories: [{ id: "m1", text: "Rosie 怕冷", createdAt: 1, updatedAt: 2 }],
     messages: [
-      { id: "u1", role: "user", text: "在吗", createdAt: 3 },
+      { id: "u1", role: "user", text: "在吗", createdAt: 3, voiceTurnId: "turn-1" },
       { id: "a1", role: "assistant", text: "在。", createdAt: 4 },
     ],
   });
@@ -22,8 +22,11 @@ test("round-trips prompt, memories, and chat", () => {
   assert.ok(parsed);
   assert.equal(parsed.profile.systemPrompt, "你就是清然。");
   assert.equal(parsed.profile.memoryCursor, "abc");
+  assert.equal(parsed.profile.debugHearing, true);
+  assert.equal(parsed.profile.hearingNbest, false);
   assert.equal(parsed.memories[0]?.text, "Rosie 怕冷");
   assert.equal(parsed.messages[1]?.text, "在。");
+  assert.equal(parsed.messages[0]?.voiceTurnId, "turn-1");
 });
 
 test("rejects random json so a wrong file cannot wipe the room", () => {

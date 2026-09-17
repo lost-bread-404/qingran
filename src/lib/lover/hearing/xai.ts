@@ -1,5 +1,6 @@
 import { restoreSpeechText, sttKeyterms } from "../stt-text.ts";
 import { isQuotaHint, readXaiFail } from "../xai-error.ts";
+import { mergeKeyterms } from "./context.ts";
 import { HEARING } from "./config.ts";
 import type { AdapterOutcome } from "./http.ts";
 
@@ -24,6 +25,7 @@ export async function transcribeWithXai(input: {
   audioBase64: string;
   mimeType: string;
   prompt?: string;
+  extraKeyterms?: string[];
 }): Promise<XaiStt | XaiSttFail> {
   const started = Date.now();
   const apiKey = process.env.XAI_API_KEY;
@@ -38,11 +40,12 @@ export async function transcribeWithXai(input: {
   }
 
   const form = new FormData();
-  form.append("language", "zh");
   form.append("filler_words", "true");
   form.append("vad_threshold", "0");
-  form.append("prompt", "中文口语原文。嗯、啊、呜、哈照实写，不要省略语气词，不要翻译。");
-  for (const term of sttKeyterms(input.prompt)) form.append("keyterm", term);
+  form.append("prompt", "口语原文。中英夹杂时英文保留英文。嗯、啊、呜、哈照实写，不要省略语气词，不要翻译。");
+  for (const term of mergeKeyterms(sttKeyterms(input.prompt), input.extraKeyterms)) {
+    form.append("keyterm", term);
+  }
   const blob = new Blob([new Uint8Array(bytes)], { type: mime });
   form.append("file", blob, filenameFor(mime));
 

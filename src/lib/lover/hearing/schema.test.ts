@@ -10,8 +10,8 @@ import {
 import { assignSplits } from "./split.ts";
 import { cer, cueTokenF1, fieldAccuracy, selfConsistency } from "./metrics.ts";
 import { chooseHearing } from "./select.ts";
-import { HEARING } from "./config.ts";
-import { classifyGeminiResponse, clipFallbackRaw, isModerationHttpError } from "./http.ts";
+import { HEARING, SCRIPTED_CATEGORIES } from "./config.ts";
+import { classifyGeminiResponse, clipFallbackRaw, hearingSystemPrompt, isModerationHttpError } from "./http.ts";
 
 describe("hearing schema", () => {
   it("parses strict json and tagged text", () => {
@@ -160,5 +160,29 @@ describe("hearing schema", () => {
     assert.equal(classifyGeminiResponse({ candidates: [{ finishReason: "MAX_TOKENS" }] }), "schema");
     assert.equal(classifyGeminiResponse({ candidates: [{ finishReason: "STOP" }] }), "ok");
     assert.equal(clipFallbackRaw("x".repeat(2500))?.length, 2000);
+  });
+
+  it("applies n-best alt tags and keeps codeswitch categories", () => {
+    const parsed = parseHearingJson(
+      JSON.stringify({
+        text: "今天好累",
+        cues: [],
+        utterance_emotion: "neutral",
+        noise_only: false,
+        alternatives: [{ span: "天", candidates: ["天", "填"] }],
+      }),
+    );
+    assert.equal(formatTaggedText(parsed), "今{天|填}好累");
+    assert.ok(SCRIPTED_CATEGORIES.some((c) => c.id === "codeswitch" && c.quota === 12));
+    assert.ok(SCRIPTED_CATEGORIES.some((c) => c.id === "homophone" && c.quota === 10));
+  });
+
+  it("appends n-best and context to the hearing system prompt", () => {
+    const base = hearingSystemPrompt();
+    const withBoth = hearingSystemPrompt({ nbest: true, context: "对话上下文：\nRosie：在吗" });
+    assert.ok(withBoth.includes(base));
+    assert.ok(withBoth.includes("alternatives"));
+    assert.ok(withBoth.includes("对话上下文"));
+    assert.ok(!base.includes("对话上下文"));
   });
 });

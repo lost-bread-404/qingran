@@ -1,20 +1,35 @@
+export type PutHearingResult = {
+  pathname: string | null;
+  error: string | null;
+};
+
 export function hearingBlobPath(id: string): string {
   return `hearing/${id}.wav`;
 }
 
-export async function putHearingWav(id: string, bytes: Buffer): Promise<string | null> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
+async function putOnce(pathname: string, bytes: Buffer): Promise<void> {
+  const { put } = await import("@vercel/blob");
+  await put(pathname, bytes, {
+    access: "private",
+    contentType: "audio/wav",
+    addRandomSuffix: false,
+  });
+}
+
+export async function putHearingWav(id: string, bytes: Buffer): Promise<PutHearingResult> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return { pathname: null, error: null };
   const pathname = hearingBlobPath(id);
   try {
-    const { put } = await import("@vercel/blob");
-    await put(pathname, bytes, {
-      access: "private",
-      contentType: "audio/wav",
-      addRandomSuffix: false,
-    });
-    return pathname;
-  } catch {
-    return null;
+    await putOnce(pathname, bytes);
+    return { pathname, error: null };
+  } catch (first) {
+    try {
+      await putOnce(pathname, bytes);
+      return { pathname, error: null };
+    } catch (second) {
+      const message = second instanceof Error ? second.message : "blob_put_failed";
+      return { pathname: null, error: message.slice(0, 500) };
+    }
   }
 }
 

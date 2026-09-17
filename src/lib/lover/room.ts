@@ -210,6 +210,7 @@ function encodeStoredMessage(msg: ChatMessage): string {
   let text = msg.text;
   if (msg.kind === "steer") text = `⟦走向⟧${text}`;
   else if (msg.kind === "setting") text = `⟦设定⟧${text}`;
+  if (msg.voiceTurnId) text = `⟦听:${msg.voiceTurnId}⟧${text}`;
   if (msg.scanned) text = `⟦已扫⟧${text}`;
   return text;
 }
@@ -223,9 +224,15 @@ function decodeStoredMessage(row: {
   let text = row.body;
   let scanned = false;
   let kind: MessageKind | undefined;
+  let voiceTurnId: string | undefined;
   if (text.startsWith("⟦已扫⟧")) {
     scanned = true;
     text = text.slice(4);
+  }
+  const hear = text.match(/^⟦听:([^⟧]+)⟧/);
+  if (hear) {
+    voiceTurnId = hear[1];
+    text = text.slice(hear[0].length);
   }
   if (text.startsWith("⟦走向⟧")) {
     kind = "steer";
@@ -241,6 +248,7 @@ function decodeStoredMessage(row: {
     createdAt: Number(row.created_at),
     kind,
     scanned: scanned || undefined,
+    voiceTurnId,
   };
 }
 

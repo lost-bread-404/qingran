@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { applyAltTags, clipAlternatives } from "./nbest.ts";
 
 export const CONTOURS = ["rising", "falling", "flat", "wavering"] as const;
 export const LENGTHS = ["short", "long"] as const;
@@ -38,11 +39,17 @@ export const hearingCueSchema = z.object({
   event: z.enum(EVENTS).optional(),
 });
 
+export const hearingAlternativeSchema = z.object({
+  span: z.string().min(1).max(40),
+  candidates: z.array(z.string().min(1).max(40)).min(2).max(2),
+});
+
 export const hearingModelSchema = z.object({
   text: z.string(),
   cues: z.array(hearingCueSchema).max(32),
   utterance_emotion: z.enum(EMOTIONS),
   noise_only: z.boolean(),
+  alternatives: z.array(hearingAlternativeSchema).max(2).optional(),
 });
 
 export type HearingModelOutput = z.infer<typeof hearingModelSchema>;
@@ -108,6 +115,7 @@ function normalizeHearingJson(value: unknown): unknown {
     cues,
     utterance_emotion: row.utterance_emotion ?? "neutral",
     noise_only: Boolean(row.noise_only),
+    alternatives: clipAlternatives(row.alternatives),
   };
 }
 
@@ -116,9 +124,9 @@ export function formatTaggedText(result: HearingModelOutput): string {
   if (result.noise_only) return "";
   if (!text && result.cues.length === 0) return "";
   if (!result.cues.length) {
-    return result.utterance_emotion === "neutral"
-      ? text
-      : `${text}〔｜${result.utterance_emotion}〕`;
+    const base =
+      result.utterance_emotion === "neutral" ? text : `${text}〔｜${result.utterance_emotion}〕`;
+    return result.alternatives?.length ? applyAltTags(base, result.alternatives) : base;
   }
 
   let used = text;
@@ -140,6 +148,7 @@ export function formatTaggedText(result: HearingModelOutput): string {
   if (result.utterance_emotion !== "neutral" && last?.emotion !== result.utterance_emotion) {
     used += `〔｜${result.utterance_emotion}〕`;
   }
+  if (result.alternatives?.length) used = applyAltTags(used, result.alternatives);
   return used.trim();
 }
 
