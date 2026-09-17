@@ -15,7 +15,6 @@ import { dropIncompleteReplies } from "@/lib/lover/pair-messages";
 import {
   enqueuePlayback,
   getPlaybackElement,
-  isPlaybackUnlocked,
   kickAudio,
   playMp3Bytes,
   resumeAudio,
@@ -30,6 +29,7 @@ import {
   deleteRoomMessages,
   loadRoom,
   markRoomMessagesScanned,
+  restoreRoomBackup,
   saveRoomMemories,
   saveRoomProfile,
   updateRoomMessage,
@@ -38,6 +38,7 @@ import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
 import { newId } from "@/lib/lover/storage";
+import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import {
   CONTEXT_WINDOW,
@@ -87,7 +88,6 @@ export function VoiceRoom() {
   const callActiveRef = useRef(false);
   const hearRef = useRef<() => void>(() => undefined);
   const deafenRef = useRef<() => void>(() => undefined);
-  const reviveRef = useRef<(gesture?: boolean) => void>(() => undefined);
   const spokenCacheRef = useRef(new Map<string, { bytes: Uint8Array<ArrayBuffer>; mimeType: string }>());
   const viewport = useVisualViewportHeight();
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
@@ -190,34 +190,20 @@ export function VoiceRoom() {
         },
       });
     };
-    const wake = () => {
-      if (document.visibilityState === "hidden") {
+    const stopLife = listenAppLifecycle({
+      onBackground: () => {
         persistInflight();
-        return;
-      }
-      void kickAudio();
-      reviveRef.current();
-    };
-    const onHide = () => persistInflight();
-    const onGesture = () => {
-      void kickAudio();
-      reviveRef.current(true);
-    };
-    document.addEventListener("visibilitychange", wake);
-    window.addEventListener("pageshow", wake);
-    window.addEventListener("focus", wake);
-    window.addEventListener("pagehide", onHide);
-    window.addEventListener("beforeunload", onHide);
-    document.addEventListener("pointerdown", onGesture, { capture: true });
-    document.addEventListener("touchstart", onGesture, { capture: true });
+        if (callActiveRef.current) return;
+        stopPlayback();
+        turnRef.current += 1;
+        busyRef.current = false;
+        setStatus((s) => (s === "speaking" || s === "thinking" ? "idle" : s));
+      },
+    });
+    window.addEventListener("beforeunload", persistInflight);
     return () => {
-      document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("pageshow", wake);
-      window.removeEventListener("focus", wake);
-      window.removeEventListener("pagehide", onHide);
-      window.removeEventListener("beforeunload", onHide);
-      document.removeEventListener("pointerdown", onGesture, { capture: true } as EventListenerOptions);
-      document.removeEventListener("touchstart", onGesture, { capture: true } as EventListenerOptions);
+      stopLife();
+      window.removeEventListener("beforeunload", persistInflight);
     };
   }, []);
 
@@ -272,7 +258,7 @@ export function VoiceRoom() {
     if (!callActiveRef.current) return;
     window.setTimeout(() => {
       if (callActiveRef.current && turn === turnRef.current) hearRef.current();
-    }, 420);
+    }, 80);
   }
 
   const playFull = useCallback(async (id: string, speech: string, turn: number) => {
@@ -508,10 +494,7 @@ export function VoiceRoom() {
     callActiveRef.current = call.active;
     hearRef.current = call.hear;
     deafenRef.current = call.deafen;
-    reviveRef.current = (gesture?: boolean) => {
-      void call.revive(gesture ? { gesture: true } : undefined);
-    };
-  }, [call.active, call.hear, call.deafen, call.revive]);
+  }, [call.active, call.hear, call.deafen]);
 
   const finishHold = useCallback(async () => {
     if (finishingHoldRef.current) return;
@@ -571,34 +554,11 @@ export function VoiceRoom() {
       return;
     }
     if (voice.status === "recording") voice.cancel();
-    if (!isPlaybackUnlocked()) await unlockPlayback();
     stopPlayback();
     setComposerOpen(false);
     setEditingId(null);
     setBanner(null);
     await call.start();
-  }
-
-  function bargeIn() {
-    if (!call.active) return;
-    if (status !== "speaking" && status !== "thinking") return;
-    stopPlayback();
-    turnRef.current += 1;
-    busyRef.current = false;
-    const cur = inflightRef.current;
-    const display = cur ? stripSpeechTags(cur.text) : "";
-    if (cur && display) {
-      void appendRoomMessage({
-        data: {
-          id: cur.id,
-          role: "assistant",
-          text: display,
-          createdAt: cur.createdAt,
-        },
-      });
-    }
-    setStatus("idle");
-    call.hear();
   }
 
   async function submitComposer() {
@@ -649,7 +609,7 @@ export function VoiceRoom() {
         : status === "thinking"
           ? "她在想"
           : status === "speaking"
-            ? "清然在说 · 点灯可打断"
+            ? "清然在说"
             : "你说，说完停两秒"
     : "";
 
@@ -667,7 +627,6 @@ export function VoiceRoom() {
                 status === "idle" && !recording && !call.active && "lamp-breathe",
               )}
               aria-hidden
-              onClick={bargeIn}
             />
             <div>
               <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
@@ -812,10 +771,10 @@ export function VoiceRoom() {
                 <p className="min-h-4 max-w-xs text-center text-xs text-subtle">
                   {call.active
                     ? status === "speaking"
-                      ? "点灯打断 · 点按钮挂断"
+                      ? "点按钮挂断"
                       : call.phase === "speaking-you"
                         ? "说完停两秒再发给她"
-                        : call.error || "通话中"
+                        : "通话中"
                     : recording
                       ? voice.interim.trim() || "松开发送"
                       : transcribing
@@ -842,6 +801,7 @@ export function VoiceRoom() {
           onOpenChange={setSettingsOpen}
           profile={profile}
           memories={memories}
+          messages={messages}
           onSave={(next) => setProfile(lockedProfile(next))}
           onAddMemory={(text, at) => setMemories((list) => addManualMemory(list, text, at))}
           onUpdateMemory={(id, text, at) => setMemories((list) => updateMemory(list, id, text, at))}
@@ -863,6 +823,25 @@ export function VoiceRoom() {
             setMessages([]);
             setProfile((p) => lockedProfile({ ...p, memoryCursor: "" }));
             void clearRoomMessages();
+          }}
+          onRestoreBackup={async (backup) => {
+            if (call.active) {
+              call.hangup();
+              stopPlayback();
+              setStatus("idle");
+            }
+            await restoreRoomBackup({
+              data: {
+                profile: backup.profile,
+                memories: backup.memories,
+                messages: backup.messages,
+              },
+            });
+            setProfile(lockedProfile(backup.profile));
+            setMemories(backup.memories);
+            setMessages(backup.messages);
+            memoriesRef.current = backup.memories;
+            chatRef.current = backup.messages;
           }}
         />
       </div>

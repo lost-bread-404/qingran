@@ -73,7 +73,7 @@ export function Transcript({
           {partnerName}
         </p>
         <p className="mt-3 max-w-xs text-sm leading-relaxed text-muted">
-          我在。按住下面的按钮说话，或点电话免提。
+          按住下面的按钮说话，或点电话。
         </p>
       </div>
     );

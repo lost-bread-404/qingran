@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   acquireMic,
+  acquireMicFromGesture,
   currentMic,
   getSpeechRecognitionCtor,
+  isAppleTouch,
+  micFailHint,
   micUsable,
   pauseMic,
   pickRecorderMime,
@@ -11,8 +14,15 @@ import {
   usesBrowserStt,
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
+import {
+  listenAppLifecycle,
+  listenAudioSession,
+  pageIsHidden,
+} from "@/lib/lover/audio-session";
 import { hearUtterance } from "@/lib/lover/hear";
+import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
 import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
+import { keepPlaybackAlive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import {
@@ -51,6 +61,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const lastTextAtRef = useRef(0);
   const listenReadyAtRef = useRef(0);
   const rafRef = useRef(0);
+  const intervalRef = useRef(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const pcmTapRef = useRef<PcmTap | null>(null);
@@ -63,6 +74,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const finalTextRef = useRef("");
   const interimRef = useRef("");
   const framesRef = useRef<ProsodyFrame[]>([]);
+  const nativeHangupRef = useRef(false);
 
   useEffect(() => {
     onUtteranceRef.current = onUtterance;
@@ -79,6 +91,8 @@ export function useCall({ onUtterance, prompt }: Options) {
   const teardownMedia = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
+    if (intervalRef.current) window.clearInterval(intervalRef.current);
+    intervalRef.current = 0;
     try {
       sourceRef.current?.disconnect();
     } catch {
@@ -122,6 +136,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     deafRef.current = true;
     setActive(false);
     setPhaseBoth("idle");
+    stopCallHold();
     teardownMedia();
     try {
       void wakeLockRef.current?.release();
@@ -129,6 +144,7 @@ export function useCall({ onUtterance, prompt }: Options) {
       /* ignore */
     }
     wakeLockRef.current = null;
+    if (!nativeHangupRef.current) nativeEndCall();
   }, [teardownMedia]);
 
   const beginUtterance = useCallback(() => {
@@ -330,6 +346,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   }, [abortUtterance, beginUtterance, flushUtterance]);
 
   const startSpeechRec = () => {
+    if (pageIsHidden()) return;
     if (!usesBrowserStt()) return;
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) return;
@@ -368,12 +385,15 @@ export function useCall({ onUtterance, prompt }: Options) {
       if ((addition || live).trim()) lastTextAtRef.current = performance.now();
     };
     rec.onend = () => {
-      if (liveRef.current && !deafRef.current) {
-        try {
-          rec.start();
-        } catch {
-          /* Chrome restarts noisily */
-        }
+      if (liveRef.current && !deafRef.current && !pageIsHidden()) {
+        window.setTimeout(() => {
+          if (!liveRef.current || deafRef.current || pageIsHidden()) return;
+          try {
+            rec.start();
+          } catch {
+            /* Chrome restarts noisily */
+          }
+        }, isAppleTouch() ? 160 : 0);
       }
     };
     recRef.current = rec;
@@ -387,8 +407,10 @@ export function useCall({ onUtterance, prompt }: Options) {
   const start = useCallback(async () => {
     if (liveRef.current) return;
     setError(null);
+    nativeStartCall();
+    void unlockPlayback();
     try {
-      const stream = await acquireMic();
+      const stream = await acquireMicFromGesture();
       streamRef.current = stream;
       const AudioCtx =
         window.AudioContext ||
@@ -410,8 +432,9 @@ export function useCall({ onUtterance, prompt }: Options) {
           pcmTapRef.current = null;
         }
       }
-    } catch {
-      setError("麦克风被关掉了。打开权限再通话。");
+    } catch (err) {
+      nativeEndCall();
+      setError(micFailHint(err));
       hangup();
       return;
     }
@@ -424,6 +447,11 @@ export function useCall({ onUtterance, prompt }: Options) {
     setMicEnabled(streamRef.current, true);
     startSpeechRec();
     rafRef.current = requestAnimationFrame(tick);
+    if (intervalRef.current) window.clearInterval(intervalRef.current);
+    intervalRef.current = window.setInterval(() => {
+      if (liveRef.current && !rafRef.current) rafRef.current = requestAnimationFrame(tick);
+    }, 80);
+    startCallHold();
     try {
       wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? null;
     } catch {
@@ -456,11 +484,15 @@ export function useCall({ onUtterance, prompt }: Options) {
     interimRef.current = "";
     lastTextAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
-    startSpeechRec();
+    if (!pageIsHidden()) startSpeechRec();
   }, []);
 
   const revive = useCallback(async (opts?: { gesture?: boolean }) => {
     if (!liveRef.current) return;
+    if (pageIsHidden() && !opts?.gesture) {
+      keepPlaybackAlive();
+      return;
+    }
     try {
       if (ctxRef.current?.state === "closed") ctxRef.current = null;
       else if (ctxRef.current?.state === "suspended") await ctxRef.current.resume();
@@ -544,7 +576,36 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
   }, [tick]);
 
+  useEffect(() => {
+    if (!active) return;
+    const restoreAfterReturn = () => {
+      if (!liveRef.current) return;
+      keepPlaybackAlive();
+      if (pageIsHidden()) return;
+      void revive();
+    };
+    const stopLife = listenAppLifecycle({
+      onForeground: restoreAfterReturn,
+    });
+    const stopSession = listenAudioSession({
+      onActive: restoreAfterReturn,
+    });
+    return () => {
+      stopLife();
+      stopSession();
+    };
+  }, [active, revive]);
+
   useEffect(() => () => hangup(), [hangup]);
+
+  useEffect(() => {
+    return listenNativeHangup(() => {
+      if (!liveRef.current) return;
+      nativeHangupRef.current = true;
+      hangup();
+      nativeHangupRef.current = false;
+    });
+  }, [hangup]);
 
   return {
     active,
