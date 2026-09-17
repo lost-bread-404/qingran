@@ -13,6 +13,7 @@ import {
 import type { BrainLogRow, Mind, Note, PortraitRow, Subject } from "@/lib/lover/brain/types";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/lover/memory";
 import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
+import { LogoutButton } from "@/components/lover/logout-button";
 import { DEFAULT_SYSTEM_PROMPT, type Profile } from "@/lib/lover/types";
 import { cn } from "@/lib/utils";
 
@@ -223,6 +224,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
             <BrainBackupPanel />
+            <LogoutButton />
             <div className="flex gap-2">
               <Input
                 value={query}

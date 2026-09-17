@@ -63,6 +63,15 @@ export function keepFinding(c: LiftCounts, lift: number, maxP = FINDING_MAX_P): 
   return classifyFinding(c, lift, maxP) != null;
 }
 
+/** finding 优先于 clue；同档再比 score。 */
+export function preferLag(
+  next: { tier: Finding["tier"]; score: number },
+  best: { tier: Finding["tier"]; score: number },
+): boolean {
+  if (next.tier !== best.tier) return next.tier === "finding";
+  return next.score > best.score;
+}
+
 function meetsBase(c: LiftCounts, lift: number): boolean {
   return (
     c.n11 >= FINDING_MIN_N11 &&
@@ -206,7 +215,7 @@ export function lagAnalysis(
     const tier = classifyFinding(counts, lift);
     if (!tier) continue;
     const score = scoreOf(counts, lift);
-    if (!best || score > best.score) best = { lag: k, counts, lift, score, tier };
+    if (!best || preferLag({ tier, score }, best)) best = { lag: k, counts, lift, score, tier };
   }
   if (!best) return null;
   return {

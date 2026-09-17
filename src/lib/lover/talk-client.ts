@@ -1,4 +1,5 @@
 import type { Profile } from "./types";
+import { onUnauthorized } from "@/lib/auth-lite/on-unauthorized";
 
 export type TalkStreamEvent =
   | { t: "text"; d: string }
@@ -29,6 +30,7 @@ export async function streamTalk(
     signal,
   });
   if (!res.ok || !res.body) {
+    if (onUnauthorized(res)) return;
     onEvent({ t: "err", m: "这会儿连不上。" });
     return;
   }

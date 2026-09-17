@@ -8,6 +8,7 @@ import {
   keepFinding,
   lagAnalysis,
   liftOf,
+  preferLag,
   recoveryAnalysis,
   safetyFlag,
   sayDoByTag,
@@ -216,4 +217,11 @@ test("classifyFinding splits finding vs clue by p-value", () => {
   assert.equal(classifyFinding(weak, liftOf(weak)), null);
   // 恢复路径：达标后一律 clue
   assert.equal(keepFinding(mid, 1.6, 0.05), true);
+});
+
+test("preferLag picks finding over a higher-score clue", () => {
+  assert.equal(preferLag({ tier: "finding", score: 1 }, { tier: "clue", score: 99 }), true);
+  assert.equal(preferLag({ tier: "clue", score: 99 }, { tier: "finding", score: 1 }), false);
+  assert.equal(preferLag({ tier: "finding", score: 3 }, { tier: "finding", score: 2 }), true);
+  assert.equal(preferLag({ tier: "clue", score: 1 }, { tier: "clue", score: 2 }), false);
 });

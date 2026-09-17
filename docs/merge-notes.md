@@ -9,8 +9,8 @@
 | `use-call.ts`、`use-voice-input.ts`、`playback.ts` | 以 `ios-microphone` 为准 |
 | `voice-room.tsx` | 保留 ios-microphone 的通话 UI，再叠：去掉客户端 memory、`done` 时结束本轮、timing 事件、`warmBrain()` 一行、日记入口 |
 | `settings-drawer.tsx` | 保留 ios-microphone 的通话与备份 UI，再叠本 branch 的笔记 / 画像 / 内心，并加上 `BrainBackupPanel` |
-| `talk-client.ts` | 保留 ios-microphone 的通话客户端，叠 timing 事件 |
-| `package.json` | 合并双方依赖与脚本（`eval`、brain 测试、`@vercel/functions`） |
+| `talk-client.ts` | 保留 ios-microphone 的通话客户端，叠 timing 事件，并保留 401 跳转那一行（`onUnauthorized`） |
+| `package.json` | 合并双方依赖与脚本（`eval`、brain 测试、`@vercel/functions`、auth-lite 测试） |
 
 ## 备份
 
@@ -22,10 +22,17 @@
 
 - `vercel.json`：`regions: ["iad1"]`（和 Neon US East 同区）；三条 cron 打到 `/api/cron/brain?slot=1|2|3`，调度 `0 10/11/12 * * *`（UTC，对应纽约夏令时早上 6–8 点，都在 04:00 日界之后）。Hobby 每个表达式每天最多一次，所以拆成三个小时把积压的 synth / report 分段跑完。slot 参数路由忽略。
 - **maxDuration**：Nitro 3 + TanStack Start 把 SSR 和 `createServerFn` 打进同一条 Vercel Function，`waitUntil` 的 270s drain 无法只加在 cron 上。因此 `vite.config.ts` 里 `nitro({ vercel: { functions: { maxDuration: 300 } } })` 全局设成 300s。**不要**再用 `functionRules` 给 `/api/cron/brain` 单独复制一份——Nitro 会把整个 server bundle 再拷一份（[nitro#4233](https://github.com/nitrojs/nitro/issues/4233)），而 Diary 触发的 waitUntil 也跑在同一条 function 上。Hobby Fluid 上限就是 300s。
-- 环境变量：新增 **`CRON_SECRET`**。Vercel Cron 会带 `Authorization: Bearer $CRON_SECRET`。本地没设 `CRON_SECRET` 时允许从 localhost 调 `/api/cron/brain`。
+- 环境变量：新增 **`CRON_SECRET`**、**`APP_PASSWORD`**。Vercel Cron 会带 `Authorization: Bearer $CRON_SECRET`。本地没设 `CRON_SECRET` 时允许从 localhost 调 `/api/cron/brain`。
+
+## 密码门
+
+合并时把本 branch 的 `server/middleware/00-auth.ts`、`server/routes/login.get.ts`、`server/routes/api/login.post.ts`、`server/routes/api/logout.post.ts`、`src/lib/auth-lite/`、`src/components/lover/logout-button.tsx`、`migrations/0006_auth_attempts.sql` **原样保留**。`talk-client.ts` 冲突时保留 401 跳转那一行。本地 `vite dev` 不跑 Nitro middleware，不需要登录；生产未设 `APP_PASSWORD` 时除 cron 外一律 503。
 
 ## `操作说明.md` 需要补的步骤
 
 1. 在 Vercel 项目 Settings → Environment Variables 加上 `CRON_SECRET`（随机长字符串）。
-2. 确认 Functions region 为 `iad1`，与 Neon AWS US East 相同。
-3. 第 6 步「搬记忆」改为使用设置里的「导出完整备份 / 导入备份」（v2，含日记）。旧 v1 JSON 仍可导入。
+2. 加上 `APP_PASSWORD`（建议 ≥ 16 位随机字符），Production / Preview / Development 都勾上。
+3. 确认 Functions region 为 `iad1`，与 Neon AWS US East 相同。
+4. 第 6 步「搬记忆」改为使用设置里的「导出完整备份 / 导入备份」（v2，含日记）。旧 v1 JSON 仍可导入。
+5. iPhone 上第一次打开清然 App 会看到登录页，输入一次密码即可，之后长期保持登录（WKWebView 默认数据存储会记住 cookie）。
+6. 忘记密码或怀疑泄露：在 Vercel 修改 `APP_PASSWORD` 并重新部署，所有设备需要重新登录。
