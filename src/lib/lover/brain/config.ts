@@ -150,6 +150,15 @@ export const PRICES_CHECKED_AT = "2026-09";
 
 export const LOG_FULL_DAYS = 90;
 
+function envNum(name: string, fallback: number): number {
+  const n = Number(process.env[name] ?? fallback);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+export const LOG_TEXT_DAYS = envNum("QR_LOG_TEXT_DAYS", 7);
+export const SNAPSHOT_DAYS = envNum("QR_SNAPSHOT_DAYS", 90);
+export const DB_LIMIT_MB = envNum("QR_DB_LIMIT_MB", 512);
+
 export const QR_VOICE_READS_DIARY = process.env.QR_VOICE_READS_DIARY !== "false";
 export const QR_CARE_CHECKIN = process.env.QR_CARE_CHECKIN === "true";
 

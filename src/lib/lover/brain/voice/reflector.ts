@@ -2,7 +2,6 @@ import { QR_VOICE_READS_DIARY, REFLECT_WINDOW } from "../config.ts";
 import { callModel } from "../llm.ts";
 import { validateMind } from "../mind-parse.ts";
 import {
-  appendBrainLog,
   getMeta,
   getMind,
   getProfilePrompt,
@@ -12,12 +11,15 @@ import {
   listPortrait,
   listThemes,
   listThemeWeeks,
+  patchBrainLog,
   saveMind,
 } from "../store.ts";
 import { formatClock, localDay } from "../time.ts";
 import { now } from "../clock.ts";
 import { fillReflectTurn } from "../observability.ts";
-import type { Finding, IndexItem, Mind, PortraitRow, Theme } from "../types.ts";
+import { rememberBlock, rememberCharter, type ReflectRefs } from "../log-refs.ts";
+import { resolveTz } from "../tz.ts";
+import type { Finding, IndexItem, Mind, PortraitRow, StoredMessage, Theme } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { REFLECTOR_SYSTEM } from "./prompts.ts";
 import {
@@ -72,6 +74,12 @@ const MIND_SCHEMA = {
 };
 
 export { validateMind } from "../mind-parse.ts";
+
+export function formatReflectConversation(history: StoredMessage[], timeZone: string): string {
+  return history
+    .map((m) => `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "Rosie" : "清然"}：${m.text}`)
+    .join("\n");
+}
 
 export type ReflectorParts = {
   charter: string;
@@ -161,7 +169,7 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     getProfilePrompt(),
   ]);
 
-  const tz = meta.timeZone || "UTC";
+  const tz = resolveTz(meta.timeZone);
   const day = localDay(now(), tz);
   const coreIndex = await getCoreIndexItems(day);
   const coreIds = new Set(coreIndex.map((i) => i.id));
@@ -205,9 +213,8 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     }
   }
 
-  const convo = history
-    .map((m) => `[${formatClock(m.createdAt, tz)}] ${m.role === "user" ? "Rosie" : "清然"}：${m.text}`)
-    .join("\n");
+  const convo = formatReflectConversation(history, tz);
+  const clockText = formatClock(now(), tz);
 
   const packed = buildReflectorInput({
     charter: systemPrompt,
@@ -217,11 +224,25 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     themes: themesPacked,
     findings: findingsPacked,
     coreIndex,
-    clock: formatClock(now(), tz),
+    clock: clockText,
     relatedIndex,
     oldMind: old,
     conversation: convo,
   });
+
+  const [charterHash, blockBHash] = await Promise.all([
+    rememberCharter(systemPrompt),
+    rememberBlock("reflect_b", packed.stable),
+  ]);
+  const refs: ReflectRefs = {
+    charterHash,
+    blockBHash,
+    relatedIds: relatedIndex.map((i) => i.id),
+    oldMindTurnSeq: old.turn_seq,
+    recentMessageIds: history.map((m) => m.id),
+    clockText,
+    timeZone: tz,
+  };
 
   const result = await callModel("reflect", {
     system: packed.system,
@@ -229,16 +250,12 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     inputParts: [packed.stable, packed.turn],
     schema: MIND_SCHEMA,
     jobId,
+    turnSeq,
+    refs,
+    outputRef: `mind:${turnSeq}`,
   });
   if (!result.ok || !result.json) {
-    await appendBrainLog({
-      jobId,
-      step: "reflect:keep-old",
-      ok: false,
-      note: "timeout-or-parse",
-      route: "reflect",
-      error: "timeout-or-parse",
-    });
+    await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
     await fillReflectTurn(turnSeq, false, result.ms, "timeout-or-parse");
     return null;
   }
@@ -246,6 +263,9 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
   const next = validateMind(result.json, old, allowed);
   next.turn_seq = turnSeq;
   const saved = await saveMind(next, turnSeq, { model: result.model, ms: result.ms });
+  if (!saved) {
+    await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
+  }
   await fillReflectTurn(turnSeq, saved, result.ms, saved ? null : "stale");
   return saved ? next : old;
 }

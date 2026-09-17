@@ -2,19 +2,39 @@
 
 清然自己记账、自己停。xAI 开了自动续费之后，不能靠账户余额用完才停。
 
-## 价格表
+## 价格表与实际金额
 
 来源：https://docs.x.ai/developers/models 与 Voice API 定价，`PRICES_CHECKED_AT` 在 `src/lib/lover/brain/config.ts`。
 
-- 文本：`MODEL_PRICES` 每 1M tokens 的 input / cached / output。prompt ≥ 20 万 tokens 时整单翻倍（本项目的 prompt 远小于这个阈值）。
+- 文本：`MODEL_PRICES` 每 1M tokens 的 input / cached / output。prompt ≥ 20 万 tokens 时整单翻倍。
 - reasoning tokens **不包含在** `output_tokens` / `completion_tokens` 里，按输出价另计。
 - TTS：$15 / 1M 字符；STT REST $0.10 / 小时，streaming $0.20 / 小时。
 
-核对方法：改模型时同时改 `MODEL_CLASSES`、`MODEL_CAPS`、`MODEL_PRICES`，对照 xAI 文档。有 `usage` 时按 token 计；缺失时按字符估算（汉字 ≈ 1 token，其他 4 字符 ≈ 1 token），`estimated=true`。
+Responses / Chat Completions 会返回 `usage.cost_in_usd_ticks`。换算：**1 USD = 10^10 ticks**（`usd = ticks / 10_000_000_000`）。Streaming 最后一块带 usage（`stream_options.include_usage`）。
 
-xAI Responses / Chat Completions 会返回 `usage.cost_in_usd_ticks`（实际账单）。目前仍用价格表估算，方便和明细对上。对账差异超过 10% 时先核对价格表。
+TTS / STT **不返回** ticks，按价格表入账（`cost_source = price_table`）。
 
-**没有**用普通 `XAI_API_KEY` 就能拉账户账单的公开 API。Management API 的 `/v1/billing/teams/{team_id}/usage` 需要 team id 和管理凭证，所以对账保持手动：Diary → 费用 → 输入控制台看到的实际金额。
+入账优先级：
+
+| 情况 | `usd` | `usd_est` | `cost_source` |
+|---|---|---|---|
+| 有 `cost_in_usd_ticks` | 实际金额 | 价格表估算 | `xai` |
+| 有 token usage、无 ticks | 价格表估算 | 同左 | `price_table` |
+| usage 缺失 | 字符估算 | 同左 | `char_estimate` |
+
+费用页显示本月 `cost_source=xai` 的占比，以及按 route 的 `usd` 与 `usd_est` 偏差；超过 10% 标红并提示检查 `MODEL_PRICES`。对账区块旁有「xAI 实际金额合计」。
+
+**没有**用普通 `XAI_API_KEY` 就能拉账户账单的公开 API。Management API 的 `/v1/billing/teams/{team_id}/usage` 需要 team id 和管理凭证，所以对账保持手动。
+
+## `store: false`
+
+所有 Responses 请求默认 `store: false`（`QR_XAI_STORE`，只有设为 `true` 才打开）。本项目每轮自行发送完整上下文，不用 `previous_response_id`。
+
+上线后对比开启前后 reflect 的缓存命中率。如果命中率明显下降，把默认改回 `true`，并在这里记下结论。
+
+## 月度汇总
+
+`spend_monthly(month, route, model, usd, calls, tokens_in, tokens_cached, tokens_out)` 在每次 `recordSpend` 时累加；90 天删除 `spend_events` 明细前会补写缺失的月度行。`spend_daily` 仍按日保留。`spend_rate` 只留 24 小时。
 
 ## 限额档位
 
@@ -29,7 +49,7 @@ xAI Responses / Chat Completions 会返回 `usage.cost_in_usd_ticks`（实际账
 - 硬：再暂停 P2（archive / dusk / portrait / assign / ask）
 - 熔断：连 Voice / TTS / STT / Reflector 也停
 
-被暂停的后台任务保持 `pending`，不增加 `attempts`，`run_after` 到次日 04:30（或下月 1 日 04:30）。
+被暂停的后台任务保持 `pending`，不增加 `attempts`，`run_after` 到次日 04:30（或下月 1 日 04:30）。时区回退 `America/New_York`。
 
 ## 熔断后怎么恢复
 

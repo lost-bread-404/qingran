@@ -3,12 +3,13 @@ import { enqueueArchiveIfNeeded } from "@/lib/lover/brain/archivist";
 import { assertModelConfig, DRAIN_BUDGET_MS } from "@/lib/lover/brain/config";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
 import { drainJobs, enqueue } from "@/lib/lover/brain/jobs";
-import { insertBrainTurn } from "@/lib/lover/brain/observability";
-import { appendBrainLog, upsertMessage } from "@/lib/lover/brain/store";
+import { upsertMessage } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
-import { estimateCostUsd, parseUsage } from "@/lib/lover/brain/usage";
+import { parseUsage } from "@/lib/lover/brain/usage";
 import { loadHotContext } from "@/lib/lover/brain/voice/pack";
-import { checkSpend, recordLlmSpend, recordTtsSpend } from "@/lib/lover/brain/spend/check";
+import { recordVoiceTurn } from "@/lib/lover/brain/voice-log";
+import { syncTalkTimeZone } from "@/lib/lover/brain/log-refs";
+import { checkSpend } from "@/lib/lover/brain/spend/check";
 import { talkRateHit } from "@/lib/lover/brain/spend/rate";
 import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
@@ -44,6 +45,7 @@ export const Route = createFileRoute("/api/talk")({
           return Response.json({ t: "err", m: "请求太频繁了，稍等一下。", code: "rate" }, { status: 429 });
         }
 
+        const timeZone = await syncTalkTimeZone(body.timeZone);
         const hold = await checkSpend("voice");
         if (!hold.allow) {
           const msg =
@@ -81,7 +83,6 @@ export const Route = createFileRoute("/api/talk")({
               const text = String(body.text ?? "");
               const profile = lockedProfile(body.profile);
               const nowMs = Number(body.nowMs) || Date.now();
-              const timeZone = String(body.timeZone || "UTC");
               const userMsgId = String(body.userMsgId || newId());
               const userCreatedAt = Number(body.userCreatedAt) || nowMs;
               const replyId = newId();
@@ -134,61 +135,20 @@ export const Route = createFileRoute("/api/talk")({
               if (!failed) send({ t: "done", speech, replyId });
 
               const usage = parseUsage(streamResult.usage);
-              const costUsd = estimateCostUsd(streamResult.model, usage);
-              const sys = ctx.messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
-              const hist = ctx.messages
-                .filter((m) => m.role !== "system")
-                .map((m) => `${m.role}: ${m.content}`)
-                .join("\n");
-              const logId = await appendBrainLog({
-                step: `voice:${streamResult.model || "voice"}`,
-                ok: !failed && Boolean(display),
-                ms: totalMs,
-                inputChars: sys.length + hist.length,
-                raw: display.slice(0, 4000),
-                route: "voice",
+              await recordVoiceTurn({
+                ctx,
+                replyId,
+                display,
+                failed,
                 model: streamResult.model || null,
-                turnSeq: userCreatedAt,
-                inputSystem: sys,
-                inputUser: hist,
-                outputText: display,
-                tokensIn: usage.tokensIn,
-                tokensCached: usage.tokensCached,
-                tokensOut: usage.tokensOut,
-                tokensReasoning: usage.tokensReasoning,
-                costUsd,
-                error: failed ? "stream-error" : null,
-              });
-              await recordLlmSpend({
-                route: "voice",
-                model: streamResult.model || "voice",
                 usage,
-                inputText: sys + hist,
-                outputText: display,
-                turnSeq: userCreatedAt,
-                logId,
-              });
-              if (streamResult.ttsChars) await recordTtsSpend(streamResult.ttsChars, userCreatedAt);
-              await insertBrainTurn({
-                turnSeq: userCreatedAt,
-                userMsgId,
-                replyMsgId: display ? replyId : null,
-                localDay: localDay(userCreatedAt, timeZone),
-                sessionId: ctx.sessionId,
-                mindTurnSeq: ctx.mindTurnSeq,
-                mindAgeMs: ctx.mindAgeMs,
-                mindStale: ctx.mindStale,
-                pickedIds: ctx.pickedIds,
-                fallbackIds: ctx.fallbackIds,
-                careHint: ctx.careHint,
-                tail: ctx.tail,
-                replyChars: display.length,
-                packMs: ctx.packMs,
-                dbFirstMs: ctx.dbFirstMs,
+                totalMs,
                 ttftMs,
                 firstAudioMs,
-                totalMs,
-                voiceModel: streamResult.model || null,
+                userCreatedAt,
+                userMsgId,
+                localDay: localDay(userCreatedAt, timeZone),
+                ttsChars: streamResult.ttsChars,
               });
 
               await enqueue("reflect", `reflect:${userCreatedAt}`, { turnSeq: userCreatedAt });

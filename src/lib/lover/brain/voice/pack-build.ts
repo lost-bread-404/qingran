@@ -25,6 +25,12 @@ function portraitBlock(rows: PortraitRow[]): string {
   return text;
 }
 
+export function renderVoiceLongterm(selfSummary: string, bondSummary: string, portrait: PortraitRow[]): string {
+  return `【我自己】${selfSummary || "（还在过自己的日子）"}
+【我们】${bondSummary || "（还在一点点建立）"}
+【我眼中的她】${portraitBlock(portrait)}`;
+}
+
 function formatMemories(notes: Note[], timeZone: string): string {
   if (!notes.length) return "（这一刻没有特别要提起的）";
   return notes
@@ -49,6 +55,7 @@ export function buildTail(opts: {
   timeZone: string;
   careHint: boolean;
   nowMs?: number;
+  stale?: boolean;
 }): string {
   let reading = readingLine(opts.mind);
   let threads = opts.mind.threads.join("；");
@@ -58,10 +65,8 @@ export function buildTail(opts: {
   };
   const mindAge = (opts.nowMs ?? 0) - (opts.mind.updated_at ?? 0);
   const stale =
-    !mindIsEmpty(opts.mind) &&
-    Boolean(opts.nowMs) &&
-    Boolean(opts.mind.updated_at) &&
-    mindAge >= SESSION_GAP_MS;
+    opts.stale ??
+    (!mindIsEmpty(opts.mind) && Boolean(opts.nowMs) && Boolean(opts.mind.updated_at) && mindAge > SESSION_GAP_MS);
 
   const inner = mindIsEmpty(opts.mind)
     ? ""
@@ -125,17 +130,18 @@ ${QINGRAN_STANCE_ONE_LINE}
 
 export function buildVoiceMessages(opts: {
   charter: string;
-  selfSummary: string;
-  bondSummary: string;
-  portrait: PortraitRow[];
+  selfSummary?: string;
+  bondSummary?: string;
+  portrait?: PortraitRow[];
+  longterm?: string;
   history: StoredMessage[];
   tail: string;
   userText: string;
 }): VoiceChatMessage[] {
   const charter = opts.charter.trim() || "你就是清然。正在和 Rosie 语音通话。";
-  const long = `【我自己】${opts.selfSummary || "（还在过自己的日子）"}
-【我们】${opts.bondSummary || "（还在一点点建立）"}
-【我眼中的她】${portraitBlock(opts.portrait)}`;
+  const long =
+    opts.longterm ??
+    renderVoiceLongterm(opts.selfSummary ?? "", opts.bondSummary ?? "", opts.portrait ?? []);
   const history = opts.history.slice(-HISTORY_WINDOW).map((m) => ({
     role: m.role as "user" | "assistant",
     content: m.text,

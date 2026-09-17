@@ -95,7 +95,7 @@ export const EMPTY_META: BrainMeta = {
   lastDuskDay: "",
   lastSynthWeek: "",
   lastReportMonth: "",
-  timeZone: "UTC",
+  timeZone: "America/New_York",
 };
 
 export type DayLog = {

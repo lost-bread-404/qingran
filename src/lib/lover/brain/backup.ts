@@ -47,6 +47,7 @@ export const BACKUP_TABLES: TableSpec[] = [
       ["archived_at", "int"],
       ["session_id", "text"],
       ["local_day", "text"],
+      ["edited_at", "int"],
     ],
   },
   {
@@ -313,6 +314,11 @@ export const BACKUP_TABLES: TableSpec[] = [
       ["reflect_error", "text"],
       ["feedback", "text"],
       ["created_at", "int"],
+      ["code_version", "text"],
+      ["charter_hash", "text"],
+      ["longterm_hash", "text"],
+      ["history_ids", "text[]"],
+      ["clock_text", "text"],
     ],
   },
   {
@@ -358,6 +364,8 @@ export const BACKUP_TABLES: TableSpec[] = [
       ["turn_seq", "int"],
       ["job_id", "text"],
       ["log_id", "int"],
+      ["usd_est", "num"],
+      ["cost_source", "text"],
     ],
   },
   {
@@ -403,6 +411,51 @@ export const BACKUP_TABLES: TableSpec[] = [
       ["period", "text"],
       ["created_at", "int"],
       ["note", "text"],
+    ],
+  },
+  {
+    name: "qr_charter_versions",
+    pk: ["hash"],
+    columns: [
+      ["hash", "text"],
+      ["text", "text"],
+      ["first_seen", "int"],
+      ["last_seen", "int"],
+    ],
+  },
+  {
+    name: "qr_block_snapshots",
+    pk: ["hash"],
+    columns: [
+      ["hash", "text"],
+      ["kind", "text"],
+      ["text", "text"],
+      ["first_seen", "int"],
+      ["last_seen", "int"],
+    ],
+  },
+  {
+    name: "qingran_message_edits",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["message_id", "text"],
+      ["before", "text"],
+      ["at", "int"],
+    ],
+  },
+  {
+    name: "spend_monthly",
+    pk: ["month", "route", "model"],
+    columns: [
+      ["month", "text"],
+      ["route", "text"],
+      ["model", "text"],
+      ["usd", "num"],
+      ["calls", "int"],
+      ["tokens_in", "int"],
+      ["tokens_cached", "int"],
+      ["tokens_out", "int"],
     ],
   },
 ];

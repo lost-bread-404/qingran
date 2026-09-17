@@ -13,6 +13,7 @@ import {
   upsertDayFactor,
 } from "../store.ts";
 import { afterBoundary, localDay, overnightValue, previousIsoWeek, previousMonth, shiftDay, yesterday } from "../time.ts";
+import { resolveTz } from "../tz.ts";
 import type { DayLog } from "../types.ts";
 import { archiveDaySync } from "../archivist.ts";
 import { updatePortraitSelfBond } from "../voice/nightly.ts";
@@ -274,7 +275,7 @@ ${notes.map((n) => n.text).join("\n")}
   for (const f of factors) {
     let value: 1 | 0 | null = null;
     if (f.name === "熬夜") {
-      value = overnightValue(last, (await getMeta()).timeZone || "UTC");
+      value = overnightValue(last, resolveTz((await getMeta()).timeZone));
     }
     if (value == null) {
       const j = judgedMap.get(f.id);

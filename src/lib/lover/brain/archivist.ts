@@ -69,6 +69,18 @@ const SCHEMA = {
 
 export { validateOps };
 
+export function buildArchivistInput(pending: StoredMessage[], candidates: Note[]): string {
+  return `输出 JSON：{"ops":[...]}
+
+【已有相关笔记】（id|日期|subject|text）
+${candidates.map((n) => `${n.id}|${n.localDay}|${n.subject}|${n.text}`).join("\n") || "（没有）"}
+
+【对话】（id|时间|说话人|内容）
+${pending
+  .map((m) => `${m.id}|${new Date(m.createdAt).toISOString()}|${m.role === "user" ? "Rosie" : "清然"}|${m.text}`)
+  .join("\n")}`;
+}
+
 async function candidateNotes(batch: StoredMessage[]): Promise<Note[]> {
   const { mini, items } = await getMemoryIndex();
   const query = batch.map((m) => m.text).join(" ").slice(0, 800);
@@ -97,19 +109,17 @@ export async function runArchivist(ids: string[], jobId?: string): Promise<void>
   if (!pending.length) return;
 
   const candidates = await candidateNotes(pending);
+  const input = buildArchivistInput(pending, candidates);
+  const refs = {
+    batchMessageIds: pending.map((m) => m.id),
+    candidateNoteIds: candidates.map((n) => n.id),
+  };
   const result = await callModel("archive", {
     system: ARCHIVIST_SYSTEM,
-    input: `输出 JSON：{"ops":[...]}
-
-【已有相关笔记】（id|日期|subject|text）
-${candidates.map((n) => `${n.id}|${n.localDay}|${n.subject}|${n.text}`).join("\n") || "（没有）"}
-
-【对话】（id|时间|说话人|内容）
-${pending
-  .map((m) => `${m.id}|${new Date(m.createdAt).toISOString()}|${m.role === "user" ? "Rosie" : "清然"}|${m.text}`)
-  .join("\n")}`,
+    input,
     schema: SCHEMA,
     jobId,
+    refs,
   });
   if (!result.ok) throw new Error("archivist-llm-failed");
   const rawOps = Array.isArray((result.json as { ops?: unknown })?.ops)

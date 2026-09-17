@@ -40,6 +40,8 @@ export type DailyDigestData = {
     routes: Record<string, { n: number; tokensIn: number; tokensOut: number; tokensCached: number; cost: number; timeouts: number }>;
     hot: { packP50: number | null; ttftP50: number | null; ttftP95: number | null; staleRate: number; avgMemories: number };
     spend: { usd: number; byBand: Record<string, number>; alerts: number; deferred: number };
+    dbBytes?: number | null;
+    dbDeltaBytes?: number | null;
   };
 };
 
@@ -95,6 +97,12 @@ function md(data: DailyDigestData): string {
     lines.push(
       `费用 $${data.system.spend.usd.toFixed(4)}（P0 ${b.P0 ?? 0} / P1 ${b.P1 ?? 0} / P2 ${b.P2 ?? 0} / P3 ${b.P3 ?? 0}）。警报 ${data.system.spend.alerts}，延后 job ${data.system.spend.deferred}。`,
     );
+  }
+  if (data.system.dbBytes != null) {
+    const mb = (data.system.dbBytes / 1024 / 1024).toFixed(2);
+    const delta =
+      data.system.dbDeltaBytes != null ? `，当日 ${data.system.dbDeltaBytes >= 0 ? "+" : ""}${(data.system.dbDeltaBytes / 1024).toFixed(1)} KB` : "";
+    lines.push(`数据库 ${mb} MB${delta}。`);
   }
   return lines.join("\n");
 }
@@ -281,6 +289,23 @@ export async function writeDailyDigest(day: string): Promise<void> {
     };
   } catch {
     /* spend tables may not exist yet in old snapshots */
+  }
+
+  try {
+    const { brainDbSize } = await import("../db-size.ts");
+    const size = await brainDbSize();
+    data.system.dbBytes = size.totalBytes;
+    const prev = await db.query<{ bytes: number }>(
+      `select (data->'system'->>'dbBytes')::bigint as bytes
+       from brain_daily_digest where day < $1 and data->'system'->>'dbBytes' is not null
+       order by day desc limit 1`,
+      [day],
+    );
+    if (size.totalBytes != null && prev[0]?.bytes != null) {
+      data.system.dbDeltaBytes = size.totalBytes - Number(prev[0].bytes);
+    }
+  } catch {
+    /* PGLite 没有 pg_database_size 时跳过 */
   }
 
   const markdown = md(data);

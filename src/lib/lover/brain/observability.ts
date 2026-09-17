@@ -1,6 +1,5 @@
 import { getSql } from "../../db.ts";
 import { now } from "./clock.ts";
-import { LOG_FULL_DAYS } from "./config.ts";
 
 function textArray(values: string[]): string {
   const escaped = values.map((v) => `"${String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`);
@@ -27,6 +26,11 @@ export type BrainTurnRow = {
   firstAudioMs?: number | null;
   totalMs?: number | null;
   voiceModel?: string | null;
+  codeVersion?: string | null;
+  charterHash?: string | null;
+  longtermHash?: string | null;
+  historyIds?: string[];
+  clockText?: string | null;
 };
 
 export async function insertBrainTurn(row: BrainTurnRow): Promise<void> {
@@ -36,20 +40,26 @@ export async function insertBrainTurn(row: BrainTurnRow): Promise<void> {
       `insert into brain_turns (
          turn_seq, user_msg_id, reply_msg_id, local_day, session_id,
          mind_turn_seq, mind_age_ms, mind_stale, picked_ids, fallback_ids, care_hint,
-         tail, reply_chars, pack_ms, db_first_ms, ttft_ms, first_audio_ms, total_ms, voice_model, created_at
+         tail, reply_chars, pack_ms, db_first_ms, ttft_ms, first_audio_ms, total_ms, voice_model, created_at,
+         code_version, charter_hash, longterm_hash, history_ids, clock_text
        ) values (
-         $1,$2,$3,$4,$5,$6,$7,$8,$9::text[],$10::text[],$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+         $1,$2,$3,$4,$5,$6,$7,$8,$9::text[],$10::text[],$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+         $21,$22,$23,$24::text[],$25
        )
        on conflict (turn_seq) do update set
          reply_msg_id = excluded.reply_msg_id,
-         tail = excluded.tail,
          reply_chars = excluded.reply_chars,
          pack_ms = excluded.pack_ms,
          db_first_ms = excluded.db_first_ms,
          ttft_ms = excluded.ttft_ms,
          first_audio_ms = excluded.first_audio_ms,
          total_ms = excluded.total_ms,
-         voice_model = excluded.voice_model`,
+         voice_model = excluded.voice_model,
+         code_version = excluded.code_version,
+         charter_hash = excluded.charter_hash,
+         longterm_hash = excluded.longterm_hash,
+         history_ids = excluded.history_ids,
+         clock_text = excluded.clock_text`,
       [
         row.turnSeq,
         row.userMsgId,
@@ -62,7 +72,7 @@ export async function insertBrainTurn(row: BrainTurnRow): Promise<void> {
         textArray(row.pickedIds ?? []),
         textArray(row.fallbackIds ?? []),
         Boolean(row.careHint),
-        row.tail ?? null,
+        null,
         row.replyChars ?? null,
         row.packMs ?? null,
         row.dbFirstMs ?? null,
@@ -71,6 +81,11 @@ export async function insertBrainTurn(row: BrainTurnRow): Promise<void> {
         row.totalMs ?? null,
         row.voiceModel ?? null,
         now(),
+        row.codeVersion ?? null,
+        row.charterHash ?? null,
+        row.longtermHash ?? null,
+        textArray(row.historyIds ?? []),
+        row.clockText ?? null,
       ],
     );
   } catch {
@@ -116,29 +131,8 @@ export async function appendMindHistory(
 }
 
 export async function trimOldLogs(nowMs = now()): Promise<void> {
-  const cutoff = nowMs - LOG_FULL_DAYS * 86_400_000;
-  try {
-    const db = await getSql();
-    await db.query(
-      `update brain_log
-       set raw = left(coalesce(output_text, raw, ''), 500),
-           input_system = null,
-           input_user = null,
-           output_text = null,
-           trimmed = true
-       where at < $1 and trimmed = false
-         and (input_system is not null or input_user is not null or coalesce(length(output_text), 0) > 500)`,
-      [cutoff],
-    );
-    await db.query(
-      `update brain_turns
-       set tail = left(tail, 500)
-       where created_at < $1 and tail is not null and length(tail) > 500`,
-      [cutoff],
-    );
-  } catch {
-    /* ignore */
-  }
+  const { runRetention } = await import("./retention.ts");
+  await runRetention(nowMs);
 }
 
 export type ExportTable =

@@ -54,9 +54,26 @@
 - 环境变量：`QR_SPEND_DAY_SOFT/HARD/BREAKER`、`QR_SPEND_MONTH_SOFT/HARD/BREAKER`（美元，默认 15/30/50 和 100/150/200）。
 - 备份 v2 加入上述 spend 表。
 
+## 本 branch 新增（引用式日志）
+
+- migration `0009_log_refs.sql`：`qr_charter_versions`、`qr_block_snapshots`、`qingran_message_edits`、`brain_log` 的 `code_version/refs/output_ref/cost_usd_est`、`brain_turns` 的 hashes、`brain_log_raw`、`spend_events.usd_est/cost_source`、`spend_monthly`。
+- `talk.ts` 不再把完整 system/history 写入 `brain_log`，改为 `recordVoiceTurn` 存引用；`brain_turns.tail` 不再写。
+- `updateRoomMessage` 走 `updateMessageText`，会写 `qingran_message_edits`（合并到 `ios-microphone` 时保留）。
+- 新环境变量：`QR_LOG_TEXT_DAYS`（默认 7）、`QR_SNAPSHOT_DAYS`（默认 90）、`QR_LOG_RAW_HOURS`（默认 0）、`QR_DB_LIMIT_MB`（默认 512，Neon 免费档 0.5GB）、`QR_XAI_STORE`（默认 false）。
+- Vercel 需要提供 `VERCEL_GIT_COMMIT_SHA`（默认已提供）；本地日志 `code_version=dev`。
+- 备份 v2 加入 charter/snapshot/edits/spend_monthly 以及 messages.edited_at、turns 的 hash 字段、spend_events 的 usd_est/cost_source。
+
+未覆盖决策（选了最简单可测的）：
+
+- `VoiceRefs` 额外记下 `timeZone`、`mindAgeMs`，重建 `formatMindAge` 才能与当时一致。
+- `spend_monthly` 在每次 `recordSpend` 时累加，不只在删除明细时写。
+- TTS/STT 没有 ticks，固定 `price_table`。
+- 仍未接 Management API。
+- PGLite 上 `UPDATE … FROM (SELECT … LIMIT)` 和 `= any($1::text[])` 不可靠，保留策略改成 `id in (select … limit 500)`，用 `with u as (update … returning) select count(*)` 计数。
+- 冻结时钟下 `messageAsOf` 看 `createdAt > t` 会丢掉同一毫秒的回复，所以 demo / golden / replay 把 assistant 的 `createdAt` 写成 `turn.at`（不再 +1）。
+
 ## 操作说明.md 需要补的步骤
 
 1. 开启 xAI 自动续费**之前**，先打开设置 → 费用，确认每日 / 每月软、硬、熔断金额。
 2. 如 xAI 控制台支持设置月度消费上限，建议设为 **$250**，作为应用限额外面的最后一道闸。
 3. 熔断后在费用页再输入一次登录密码，才能「今天继续使用」或「本月继续使用」。
-

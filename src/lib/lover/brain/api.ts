@@ -42,6 +42,7 @@ import { evaluateIfDue, startExperiment } from "./diary/experiments.ts";
 import { buildReportData } from "./diary/report.ts";
 import { safetyFlag } from "./diary/stats.ts";
 import { localDay, shiftDay } from "./time.ts";
+import { resolveTz } from "./tz.ts";
 import { newId } from "../storage.ts";
 import {
   convertV1,
@@ -57,7 +58,7 @@ import {
 import type { Profile } from "../types.ts";
 
 export const brainGetOverview = createServerFn({ method: "GET" }).handler(async () => {
-  const tz = (await getMeta()).timeZone || "UTC";
+  const tz = resolveTz((await getMeta()).timeZone);
   const today = localDay(now(), tz);
   const from = shiftDay(today, -90);
   const [days, episodes, findings, factors, meta] = await Promise.all([
@@ -108,7 +109,7 @@ export const brainGetTheme = createServerFn({ method: "POST" })
 export const brainGetIntentions = createServerFn({ method: "GET" }).handler(async () => listIntentions());
 
 export const brainGetExperiments = createServerFn({ method: "GET" }).handler(async () => {
-  await evaluateIfDue(localDay(now(), (await getMeta()).timeZone || "UTC"));
+  await evaluateIfDue(localDay(now(), resolveTz((await getMeta()).timeZone)));
   return listExperiments();
 });
 
@@ -128,20 +129,20 @@ export const brainRunJobs = createServerFn({ method: "POST" })
     );
     const ts = now();
     if (types.includes("dusk")) {
-      const tz = (await getMeta()).timeZone || "UTC";
+      const tz = resolveTz((await getMeta()).timeZone);
       const day = shiftDay(localDay(ts, tz), 0);
       // 独立的 dedupe key：不占用自动 dusk 的 `dusk:<day>`，当天结束后仍会完整重跑
       await enqueue("dusk", `dusk-manual:${day}:${ts}`, { day, manual: true }, ts, true);
     }
     if (types.includes("synth")) {
       const { currentIsoWeek } = await import("./time");
-      const tz = (await getMeta()).timeZone || "UTC";
+      const tz = resolveTz((await getMeta()).timeZone);
       const week = currentIsoWeek(ts, tz);
       await enqueue("synth", `synth-manual:${week}:${ts}`, { week, manual: true }, ts, true);
     }
     if (types.includes("report")) {
       const { previousMonth, yearMonth, localDay: ld } = await import("./time");
-      const tz = (await getMeta()).timeZone || "UTC";
+      const tz = resolveTz((await getMeta()).timeZone);
       const month = yearMonth(shiftDay(ld(ts, tz), -1));
       await enqueue("report", `report:${month}`, { month }, ts, true);
     }
@@ -153,7 +154,7 @@ export const brainRunJobs = createServerFn({ method: "POST" })
 export const brainRunDue = createServerFn({ method: "POST" })
   .validator((input: { timeZone?: string }) => input ?? {})
   .handler(async ({ data }) => {
-    const tz = data?.timeZone || (await getMeta()).timeZone || "UTC";
+    const tz = resolveTz(data?.timeZone || (await getMeta()).timeZone);
     const { enqueuePeriodicIfDue } = await import("./diary/dusk");
     await enqueuePeriodicIfDue(now(), tz);
     await runInBackground(() => runJobsNow(LONG_DRAIN_MS));
@@ -189,7 +190,7 @@ export const brainSaveNote = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const ts = now();
-    const tz = (await getMeta()).timeZone || "UTC";
+    const tz = resolveTz((await getMeta()).timeZone);
     const existing = data.id ? await getNote(data.id) : null;
     const note: Note = {
       id: existing?.id || `n:${newId()}`,
@@ -288,7 +289,7 @@ export const brainImportV1 = createServerFn({ method: "POST" })
     if (!raw || raw.kind !== "qingran-backup" || raw.version !== 1) {
       return { inserted: 0, updated: 0, skipped: 0, error: "not-v1" as const };
     }
-    const tz = (await getMeta()).timeZone || "UTC";
+    const tz = resolveTz((await getMeta()).timeZone);
     const converted = convertV1(raw, tz);
     await saveProfile(converted.profile);
     let inserted = 0;
@@ -372,12 +373,34 @@ export const brainGetCallLog = createServerFn({ method: "POST" })
     const { getSql } = await import("../../db.ts");
     const db = await getSql();
     const rows = await db.query<Record<string, unknown>>("select * from brain_log where id = $1", [data.id]);
-    return asJson(rows[0] ?? null);
+    const row = asJson(rows[0] ?? null) as Record<string, unknown> | null;
+    if (!row) return null;
+    const rebuilt = await (await import("./rebuild.ts")).rebuildFromLog({
+      id: Number(row.id),
+      route: row.route ? String(row.route) : null,
+      turn_seq: row.turn_seq == null ? null : Number(row.turn_seq),
+    });
+    return { ...row, rebuilt: asJson(rebuilt) };
   });
+
+export const brainRebuildPrompt = createServerFn({ method: "POST" })
+  .validator((input: { turnSeq?: number; logId?: number; route?: string }) => input)
+  .handler(async ({ data }) => {
+    const { rebuildArchiveInput, rebuildReflectorInput, rebuildVoiceMessages } = await import("./rebuild.ts");
+    if (data.route === "archive" && data.logId) return rebuildArchiveInput(data.logId);
+    if (data.route === "reflect" && data.turnSeq != null) return rebuildReflectorInput(data.turnSeq);
+    if (data.turnSeq != null) return rebuildVoiceMessages(data.turnSeq);
+    return { messages: [], warnings: ["缺少参数"] };
+  });
+
+export const brainGetDbSize = createServerFn({ method: "GET" }).handler(async () => {
+  const { brainDbSize } = await import("./db-size.ts");
+  return brainDbSize();
+});
 
 export const brainExportLogs = createServerFn({ method: "POST" })
   .validator(
-    (input: { from: number; to: number; table?: string; cursor?: string }) => input,
+    (input: { from: number; to: number; table?: string; cursor?: string; rebuild?: boolean }) => input,
   )
   .handler(async ({ data }) => {
     const mod = await import("./observability.ts");
@@ -391,7 +414,22 @@ export const brainExportLogs = createServerFn({ method: "POST" })
       table,
       cursor: data.cursor,
     });
-    return { table: page.table, rows: asJson(page.rows), next: page.next };
+    const rebuild = data.rebuild !== false;
+    let rows = asJson(page.rows) as Record<string, unknown>[];
+    if (rebuild && page.table === "brain_log") {
+      const { rebuildFromLog } = await import("./rebuild.ts");
+      rows = await Promise.all(
+        rows.map(async (row) => {
+          const rebuilt = await rebuildFromLog({
+            id: Number(row.id),
+            route: row.route ? String(row.route) : null,
+            turn_seq: row.turn_seq == null ? null : Number(row.turn_seq),
+          });
+          return rebuilt ? { ...row, rebuilt } : row;
+        }),
+      );
+    }
+    return { table: page.table, rows: asJson(rows), next: page.next };
   });
 
 export { buildReportData, convertV1 };

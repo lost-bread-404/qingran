@@ -6,6 +6,7 @@ import { getSql } from "../../../db.ts";
 import { now } from "../clock.ts";
 import { getMeta, patchMeta } from "../store.ts";
 import { localDay, shiftDay } from "../time.ts";
+import { resolveTz } from "../tz.ts";
 import { insertOverride, listOverrides, loadTotals, resolvedLimits } from "./ledger.ts";
 import {
   defaultSpendLimits,
@@ -49,6 +50,8 @@ export type SpendEventRow = {
   chars: number | null;
   seconds: number | null;
   usd: number;
+  usd_est: number | null;
+  cost_source: string | null;
   estimated: boolean;
   turn_seq: number | null;
   job_id: string | null;
@@ -108,6 +111,8 @@ function mapEvent(r: Record<string, unknown>): SpendEventRow {
     chars: asNumOrNull(r.chars),
     seconds: asNumOrNull(r.seconds),
     usd: asNum(r.usd),
+    usd_est: asNumOrNull(r.usd_est),
+    cost_source: asStrOrNull(r.cost_source),
     estimated: r.estimated === true || r.estimated === "t",
     turn_seq: asNumOrNull(r.turn_seq),
     job_id: asStrOrNull(r.job_id),
@@ -117,7 +122,7 @@ function mapEvent(r: Record<string, unknown>): SpendEventRow {
 
 export const brainGetSpendOverview = createServerFn({ method: "GET" }).handler(async () => {
   const [meta, limits, totals] = await Promise.all([getMeta(), resolvedLimits(), loadTotals(true)]);
-  const tz = meta.timeZone || "UTC";
+  const tz = resolveTz(meta.timeZone);
   const overrides = await listOverrides(totals.day, totals.month);
   const decision = spendDecision("voice", totals.dayUsd, totals.monthUsd, limits, overrides, now(), tz);
   const dayOfMonth = Number(totals.day.slice(8, 10)) || 1;
@@ -191,6 +196,25 @@ export const brainGetSpendOverview = createServerFn({ method: "GET" }).handler(a
     estimated_usd: asNum(r.estimated_usd),
     entered_at: asNum(r.entered_at),
   }));
+  const srcRaw = await db.query<{ src: string | null; usd: number; n: number }>(
+    `select cost_source as src, coalesce(sum(usd),0)::real as usd, count(*)::int as n
+     from spend_events where month = $1 group by cost_source`,
+    [totals.month],
+  );
+  const xaiUsd = srcRaw.filter((r) => r.src === "xai").reduce((s, r) => s + asNum(r.usd), 0);
+  const allUsd = srcRaw.reduce((s, r) => s + asNum(r.usd), 0);
+  const xaiShare = allUsd > 0 ? xaiUsd / allUsd : 0;
+  const devRaw = await db.query<{ route: string; usd: number; usd_est: number }>(
+    `select route, coalesce(sum(usd),0)::real as usd, coalesce(sum(usd_est),0)::real as usd_est
+     from spend_events where month = $1 group by route`,
+    [totals.month],
+  );
+  const routeDeviation = devRaw.map((r) => {
+    const usd = asNum(r.usd);
+    const est = asNum(r.usd_est);
+    const deviation = est === 0 ? (usd === 0 ? 0 : 1) : Math.abs(usd - est) / est;
+    return { route: asStr(r.route), usd, usdEst: est, deviation };
+  });
   return {
     day: totals.day,
     month: totals.month,
@@ -206,6 +230,9 @@ export const brainGetSpendOverview = createServerFn({ method: "GET" }).handler(a
     top,
     alerts,
     reconcile,
+    xaiShare,
+    xaiUsd,
+    routeDeviation,
   };
 });
 
@@ -217,7 +244,7 @@ export const brainListSpendEvents = createServerFn({ method: "POST" })
     const route = data.route || "";
     const rows = await db.query<Record<string, unknown>>(
       `select id, at, day, month, kind, route, model, tokens_in, tokens_cached, tokens_out,
-              tokens_reasoning, chars, seconds, usd, estimated, turn_seq, job_id, log_id
+              tokens_reasoning, chars, seconds, usd, estimated, turn_seq, job_id, log_id, usd_est, cost_source
        from spend_events
        where ($1 = '' or day = $1) and ($2 = '' or route = $2)
        order by at desc limit $3`,
@@ -247,7 +274,7 @@ export const brainSpendOverride = createServerFn({ method: "POST" })
       return { ok: false as const, error: "密码不对。" };
     }
     const meta = await getMeta();
-    const tz = meta.timeZone || "UTC";
+    const tz = resolveTz(meta.timeZone);
     const day = localDay(ts, tz);
     const period = data.scope === "month" ? day.slice(0, 7) : day;
     await insertOverride(data.scope, period, "password");
@@ -282,7 +309,7 @@ export const brainExportSpendCsv = createServerFn({ method: "POST" })
     const db = await getSql();
     const rows = await db.query<Record<string, unknown>>(
       `select id, at, day, month, kind, route, model, tokens_in, tokens_cached, tokens_out,
-              tokens_reasoning, chars, seconds, usd, estimated, turn_seq, job_id, log_id
+              tokens_reasoning, chars, seconds, usd, estimated, turn_seq, job_id, log_id, usd_est, cost_source
        from spend_events where month = $1 order by at`,
       [data.month],
     );
@@ -299,7 +326,7 @@ export const brainExportSpendCsv = createServerFn({ method: "POST" })
 
 export const brainArchiveOldSpend = createServerFn({ method: "POST" }).handler(async () => {
   const meta = await getMeta();
-  const tz = meta.timeZone || "UTC";
+  const tz = resolveTz(meta.timeZone);
   const cutoff = shiftDay(localDay(now(), tz), -365);
   const db = await getSql();
   const rows = await db.query<{ n: number }>(

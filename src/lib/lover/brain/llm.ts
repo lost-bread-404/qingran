@@ -8,9 +8,10 @@ import {
 } from "./config.ts";
 import { appendBrainLog } from "./store.ts";
 import { extractJson } from "./text.ts";
-import { estimateCostUsd, parseUsage } from "./usage.ts";
+import { parseUsage, settleLlmCost } from "./usage.ts";
 import { checkSpend, recordLlmSpend } from "./spend/check.ts";
 import { jobRateHit, SPEND_RATE_ERR } from "./spend/rate.ts";
+import { codeVersion, HIGH_FREQ_ROUTES, maybeWriteRawLog, xaiStoreEnabled } from "./log-refs.ts";
 
 export { extractJson };
 
@@ -40,6 +41,10 @@ export type CallModelInput = {
   tools?: ToolDef[];
   previous?: unknown[];
   jobId?: string;
+  turnSeq?: number | null;
+  refs?: unknown;
+  outputRef?: string | null;
+  keepOutputText?: boolean;
 };
 
 export type CallModelResult = {
@@ -51,6 +56,7 @@ export type CallModelResult = {
   model: string;
   effort: Effort;
   ms: number;
+  logId?: number | null;
   usage?: {
     tokensIn: number | null;
     tokensCached: number | null;
@@ -161,24 +167,29 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     ms: Date.now() - started,
   });
 
+  const high = HIGH_FREQ_ROUTES.has(route);
+  const failLog = {
+    jobId: input.jobId,
+    step: `${route}:${resolved.model}`,
+    ok: false,
+    ms: 0,
+    inputChars: inputCharsOf(input),
+    raw: "",
+    route,
+    model: resolved.model,
+    effort: resolved.effort == null ? null : String(resolved.effort),
+    turnSeq: input.turnSeq ?? null,
+    codeVersion: codeVersion(),
+    refs: input.refs ?? null,
+    outputRef: input.outputRef ?? null,
+    inputSystem: high ? null : input.system,
+    inputUser: high ? null : joinedUser(input),
+  };
+
   const hold = await checkSpend(route);
   if (!hold.allow) {
     const result = fail(SPEND_HOLD_ERR);
-    await appendBrainLog({
-      jobId: input.jobId,
-      step: `${route}:${resolved.model}`,
-      ok: false,
-      ms: result.ms,
-      inputChars: inputCharsOf(input),
-      raw: "",
-      note: SPEND_HOLD_ERR,
-      route,
-      model: resolved.model,
-      effort: resolved.effort == null ? null : String(resolved.effort),
-      inputSystem: input.system,
-      inputUser: joinedUser(input),
-      error: SPEND_HOLD_ERR,
-    });
+    await appendBrainLog({ ...failLog, ms: result.ms, note: SPEND_HOLD_ERR, error: SPEND_HOLD_ERR });
     return result;
   }
 
@@ -191,21 +202,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
 
   if (!apiKey) {
     const result = fail("no-key");
-    await appendBrainLog({
-      jobId: input.jobId,
-      step: `${route}:${resolved.model}`,
-      ok: false,
-      ms: result.ms,
-      inputChars: inputCharsOf(input),
-      raw: "",
-      note: "no-key",
-      route,
-      model: resolved.model,
-      effort: resolved.effort == null ? null : String(resolved.effort),
-      inputSystem: input.system,
-      inputUser: joinedUser(input),
-      error: "no-key",
-    });
+    await appendBrainLog({ ...failLog, ms: result.ms, note: "no-key", error: "no-key" });
     return result;
   }
 
@@ -214,6 +211,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     model: resolved.model,
     input: [{ role: "system", content: input.system }, ...parts.map((content) => ({ role: "user", content }))],
     max_output_tokens: resolved.maxOutput,
+    store: xaiStoreEnabled(),
   };
   if (resolved.effort) body.reasoning = { effort: resolved.effort };
   if (input.schema) {
@@ -229,6 +227,20 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
   if (input.tools?.length) body.tools = input.tools;
   if (input.previous?.length) body.input = [...(body.input as unknown[]), ...input.previous];
   if (route === "reflect") body.prompt_cache_key = REFLECT_PROMPT_CACHE_KEY;
+
+  const skipOutput = high && route === "reflect" && !input.keepOutputText;
+  const baseLog = {
+    jobId: input.jobId,
+    route,
+    model: resolved.model,
+    effort: resolved.effort == null ? null : String(resolved.effort),
+    turnSeq: input.turnSeq ?? null,
+    codeVersion: codeVersion(),
+    refs: input.refs ?? null,
+    outputRef: input.outputRef ?? null,
+    inputSystem: high ? null : input.system,
+    inputUser: high ? null : joinedUser(input),
+  };
 
   try {
     const res = await fetch("https://api.x.ai/v1/responses", {
@@ -247,28 +259,25 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     const ms = Date.now() - started;
     const usageRaw = (raw && typeof raw === "object" ? (raw as { usage?: unknown }).usage : null) ?? null;
     const usage = parseUsage(usageRaw);
-    const costUsd = estimateCostUsd(resolved.model, usage);
+    const settled = settleLlmCost(resolved.model, usage, input.system + joinedUser(input), text);
     const logId = await appendBrainLog({
-      jobId: input.jobId,
+      ...baseLog,
       step: `${route}:${resolved.model}`,
       ok: res.ok,
       ms,
       inputChars: inputCharsOf(input),
       raw: text.slice(0, 4000),
       note: res.ok ? null : `http ${res.status}`,
-      route,
-      model: resolved.model,
-      effort: resolved.effort == null ? null : String(resolved.effort),
-      inputSystem: input.system,
-      inputUser: joinedUser(input),
-      outputText: text,
-      tokensIn: usage.tokensIn,
+      outputText: skipOutput ? null : text,
+      tokensIn: usage.tokensIn ?? settled.tokensIn ?? null,
       tokensCached: usage.tokensCached,
-      tokensOut: usage.tokensOut,
+      tokensOut: usage.tokensOut ?? settled.tokensOut ?? null,
       tokensReasoning: usage.tokensReasoning,
-      costUsd,
+      costUsd: settled.usd,
+      costUsdEst: settled.usdEst,
       error: res.ok ? null : `http ${res.status}`,
     });
+    await maybeWriteRawLog(logId, { system: input.system, user: userPartsOf(input) });
     await recordLlmSpend({
       route,
       model: resolved.model,
@@ -277,8 +286,9 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       outputText: text,
       jobId: input.jobId,
       logId,
+      turnSeq: input.turnSeq,
     });
-    if (!res.ok) return { ...fail("http"), ms, raw };
+    if (!res.ok) return { ...fail("http"), ms, raw, logId };
     return {
       ok: true,
       text,
@@ -288,7 +298,8 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       model: resolved.model,
       effort: resolved.effort,
       ms,
-      usage: { ...usage, costUsd },
+      logId,
+      usage: { ...usage, costUsd: settled.usd },
     };
   } catch (err) {
     if (err instanceof Error && (err.message === SPEND_RATE_ERR || (err as { code?: string }).code === SPEND_RATE_ERR)) {
@@ -296,21 +307,16 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     }
     const ms = Date.now() - started;
     const timedOut = err instanceof Error && /timeout|aborted/i.test(err.message);
-    await appendBrainLog({
-      jobId: input.jobId,
+    const logId = await appendBrainLog({
+      ...baseLog,
       step: `${route}:${resolved.model}`,
       ok: false,
       ms,
       inputChars: inputCharsOf(input),
       raw: "",
       note: timedOut ? "timeout" : "error",
-      route,
-      model: resolved.model,
-      effort: resolved.effort == null ? null : String(resolved.effort),
-      inputSystem: input.system,
-      inputUser: joinedUser(input),
       error: timedOut ? "timeout" : "error",
     });
-    return { ...fail(timedOut ? "timeout" : "error"), ms };
+    return { ...fail(timedOut ? "timeout" : "error"), ms, logId };
   }
 }

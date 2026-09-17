@@ -1,5 +1,6 @@
 import type { Profile } from "../../types.ts";
-import { HISTORY_WINDOW, QR_CARE_CHECKIN, SESSION_GAP_MS } from "../config.ts";
+import { HISTORY_WINDOW, SESSION_GAP_MS } from "../config.ts";
+import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import {
   getDay,
   getMessage,
@@ -13,9 +14,9 @@ import { formatClock, localDay } from "../time.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { pickHotNotes } from "./retrieve.ts";
-import { buildTail, buildVoiceMessages } from "./pack-build.ts";
+import { buildTail, buildVoiceMessages, renderVoiceLongterm } from "./pack-build.ts";
 
-export { buildTail, buildVoiceMessages } from "./pack-build.ts";
+export { buildTail, buildVoiceMessages, renderVoiceLongterm } from "./pack-build.ts";
 
 export type HotContext = {
   messages: VoiceChatMessage[];
@@ -30,6 +31,12 @@ export type HotContext = {
   pickedIds: string[];
   fallbackIds: string[];
   careHint: boolean;
+  charterHash: string;
+  longtermHash: string;
+  historyIds: string[];
+  clockText: string;
+  timeZone: string;
+  refs: VoiceRefs;
 };
 
 export async function loadHotContext(input: {
@@ -68,7 +75,7 @@ export async function loadHotContext(input: {
   const pickedIds = notes.filter((n) => (mind.memory_ids ?? []).includes(n.id)).map((n) => n.id);
   const fallbackIds = notes.filter((n) => !(mind.memory_ids ?? []).includes(n.id)).map((n) => n.id);
   let careHint = false;
-  if (QR_CARE_CHECKIN) {
+  if (process.env.QR_CARE_CHECKIN === "true") {
     const day = localDay(input.nowMs, input.timeZone);
     const log = await getDay(day);
     const asked = history.some(
@@ -79,25 +86,48 @@ export async function loadHotContext(input: {
 
   const liveMind = mind.turn_seq ? mind : EMPTY_MIND;
   const mindAgeMs = liveMind.updated_at ? input.nowMs - liveMind.updated_at : 0;
-  const mindStale = Boolean(liveMind.updated_at) && mindAgeMs >= SESSION_GAP_MS;
+  const mindStale = Boolean(liveMind.updated_at) && mindAgeMs > SESSION_GAP_MS;
+  const clockText = formatClock(input.nowMs, input.timeZone);
   const tail = buildTail({
-    clock: formatClock(input.nowMs, input.timeZone),
+    clock: clockText,
     mind: liveMind,
     notes,
     timeZone: input.timeZone,
     careHint,
     nowMs: input.nowMs,
+    stale: mindStale && Boolean(liveMind.updated_at) && liveMind.turn_seq > 0,
   });
 
+  const longterm = renderVoiceLongterm(meta.selfSummary, meta.bondSummary, portrait);
+  const charter = input.profile.systemPrompt;
+  const [charterHash, longtermHash] = await Promise.all([
+    rememberCharter(charter.trim() || "你就是清然。正在和 Rosie 语音通话。"),
+    rememberBlock("voice_longterm", longterm),
+  ]);
+
   const messages = buildVoiceMessages({
-    charter: input.profile.systemPrompt,
-    selfSummary: meta.selfSummary,
-    bondSummary: meta.bondSummary,
-    portrait,
+    charter,
+    longterm,
     history,
     tail,
     userText: input.text,
   });
+
+  const historyIds = history.map((m) => m.id);
+  const refs: VoiceRefs = {
+    charterHash,
+    longtermHash,
+    historyIds,
+    mindTurnSeq: liveMind.turn_seq,
+    mindStale,
+    pickedIds,
+    fallbackIds,
+    careHint,
+    clockText,
+    userMsgId: input.userMsgId,
+    timeZone: input.timeZone,
+    mindAgeMs,
+  };
 
   return {
     messages,
@@ -112,5 +142,11 @@ export async function loadHotContext(input: {
     pickedIds,
     fallbackIds,
     careHint,
+    charterHash,
+    longtermHash,
+    historyIds,
+    clockText,
+    timeZone: input.timeZone,
+    refs,
   };
 }

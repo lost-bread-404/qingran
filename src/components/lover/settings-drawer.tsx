@@ -9,6 +9,7 @@ import {
   brainResetMind,
   brainSaveLongLayer,
   brainSaveNote,
+  brainGetDbSize,
 } from "@/lib/lover/brain/api";
 import type { BrainLogRow, Mind, Note, PortraitRow, Subject } from "@/lib/lover/brain/types";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/lover/memory";
@@ -45,6 +46,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [busy, setBusy] = useState(false);
   const [newTopic, setNewTopic] = useState("");
   const [newBody, setNewBody] = useState("");
+  const [dbWarn, setDbWarn] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -66,6 +68,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setPortrait(layer.portrait);
     setMind(layer.mind);
     setLog(layer.log);
+    void brainGetDbSize()
+      .then((s) => setDbWarn(Boolean(s.warn)))
+      .catch(() => setDbWarn(false));
   }
 
   function savePrompt() {
@@ -224,6 +229,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
             <BrainBackupPanel />
+            {dbWarn ? (
+              <p className="text-sm text-live">数据库已用超过 70%，请到日记「系统档案」查看容量。</p>
+            ) : null}
             <a href="/diary#spend" className="text-sm text-subtle underline-offset-2 hover:underline">
               费用
             </a>

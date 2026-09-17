@@ -3,9 +3,11 @@ import { Button } from "@/components/ui/button";
 import {
   brainExportLogs,
   brainGetCallLog,
+  brainGetDbSize,
   brainGetDigest,
   brainGetDigests,
   brainGetTurnTrace,
+  brainRebuildPrompt,
 } from "@/lib/lover/brain/api";
 import { cn } from "@/lib/utils";
 
@@ -28,11 +30,14 @@ export function BrainSystemArchive() {
   const [call, setCall] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [dbSize, setDbSize] = useState<Awaited<ReturnType<typeof brainGetDbSize>> | null>(null);
+  const [rebuild, setRebuild] = useState<{ messages: Array<{ role: string; content: string }>; warnings: string[] } | null>(null);
 
   useEffect(() => {
     void brainGetDigests()
       .then(setRows)
       .catch(() => setError("档案这会儿读不出来。"));
+    void brainGetDbSize().then(setDbSize).catch(() => null);
   }, []);
 
   useEffect(() => {
@@ -114,6 +119,34 @@ export function BrainSystemArchive() {
   return (
     <section className="flex flex-col gap-5">
       {error ? <p className="text-sm text-live">{error}</p> : null}
+      {dbSize ? (
+        <div className={cn("rounded-xl p-4 text-sm", dbSize.warn ? "bg-live/10 text-live" : "bg-surface")}>
+          <p>
+            数据库 {dbSize.totalBytes == null ? "（本环境无法计量）" : `${(dbSize.totalBytes / 1024 / 1024).toFixed(1)} MB`}
+            {" / "}
+            {dbSize.limitMb} MB
+            {dbSize.usedRatio != null ? `（${Math.round(dbSize.usedRatio * 100)}%）` : ""}
+          </p>
+          {dbSize.warn ? <p className="mt-1 text-xs">已超过容量的 70%，请检查保留策略或导出后清理。</p> : null}
+          {dbSize.growth30dBytes != null ? (
+            <p className="mt-1 text-xs text-subtle">
+              近 30 天 {dbSize.growth30dBytes >= 0 ? "+" : ""}
+              {(dbSize.growth30dBytes / 1024).toFixed(0)} KB
+              {dbSize.fillDate ? ` · 预计 ${dbSize.fillDate} 写满` : ""}
+            </p>
+          ) : null}
+          {dbSize.tables.length ? (
+            <ul className="mt-2 flex flex-col gap-0.5 text-xs text-subtle">
+              {dbSize.tables.slice(0, 8).map((t) => (
+                <li key={t.name} className="flex justify-between gap-3">
+                  <span>{t.name}</span>
+                  <span>{(t.bytes / 1024).toFixed(1)} KB</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" disabled={exporting} onClick={() => void downloadLogs()}>
           {exporting ? "导出中…" : "导出日志"}
@@ -173,7 +206,12 @@ export function BrainSystemArchive() {
                 <button
                   type="button"
                   className="w-full rounded-lg bg-surface-2 px-3 py-2 text-left text-xs"
-                  onClick={() => void brainGetTurnTrace({ data: { turnSeq: Number(t.turn_seq) } }).then(setTrace)}
+                  onClick={() =>
+                    void brainGetTurnTrace({ data: { turnSeq: Number(t.turn_seq) } }).then((row) => {
+                      setTrace(row);
+                      void brainRebuildPrompt({ data: { turnSeq: Number(t.turn_seq), route: "voice" } }).then(setRebuild);
+                    })
+                  }
                 >
                   #{String(t.turn_seq)} pack {String(t.pack_ms ?? "–")}ms / TTFT {String(t.ttft_ms ?? "–")}ms
                   {t.mind_stale ? " · 过期内心" : ""}
@@ -212,9 +250,25 @@ export function BrainSystemArchive() {
                   type="button"
                   className="w-full rounded-md bg-surface-2 px-3 py-2 text-left text-xs"
                   onClick={() =>
-                    void brainGetCallLog({ data: { id: Number(l.id) } }).then((row) =>
-                      setCall(row && typeof row === "object" ? (row as Record<string, unknown>) : null),
-                    )
+                    void brainGetCallLog({ data: { id: Number(l.id) } }).then((row) => {
+                      const rec = row && typeof row === "object" ? (row as Record<string, unknown>) : null;
+                      setCall(rec);
+                      const rebuilt = rec?.rebuilt as { messages?: unknown; warnings?: string[] } | undefined;
+                      if (rebuilt?.messages) {
+                        setRebuild({
+                          messages: rebuilt.messages as Array<{ role: string; content: string }>,
+                          warnings: rebuilt.warnings ?? [],
+                        });
+                      } else {
+                        void brainRebuildPrompt({
+                          data: {
+                            logId: Number(l.id),
+                            turnSeq: l.turn_seq == null ? undefined : Number(l.turn_seq),
+                            route: l.route ? String(l.route) : undefined,
+                          },
+                        }).then(setRebuild);
+                      }
+                    })
                   }
                 >
                   {String(l.route ?? l.step)} · {String(l.model ?? "")} · in {String(l.tokens_in ?? "?")} / out{" "}
@@ -223,6 +277,20 @@ export function BrainSystemArchive() {
               </li>
             ))}
           </ul>
+        </div>
+      ) : null}
+      {rebuild ? (
+        <div className="rounded-xl bg-surface p-3 text-xs leading-relaxed">
+          {rebuild.warnings.length ? (
+            <ul className="mb-2 text-live">
+              {rebuild.warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          ) : null}
+          <pre className="overflow-x-auto whitespace-pre-wrap">
+            {rebuild.messages.map((m, i) => `【${m.role} ${i + 1}】\n${m.content}`).join("\n\n")}
+          </pre>
         </div>
       ) : null}
       {call ? (

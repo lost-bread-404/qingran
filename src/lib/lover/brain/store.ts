@@ -323,6 +323,27 @@ export async function upsertMessage(msg: {
   };
 }
 
+export async function updateMessageText(id: string, text: string, kind?: StoredMessage["kind"]): Promise<void> {
+  const existing = await getMessage(id);
+  const db = await getSql();
+  const next = text.slice(0, 4000);
+  const ts = now();
+  if (existing && existing.text !== next) {
+    await db.query(
+      `insert into qingran_message_edits (message_id, before, at) values ($1,$2,$3)`,
+      [id, existing.text, ts],
+    );
+  }
+  if (kind) {
+    await db.query(
+      `update qingran_messages set body = $2, kind = $3, edited_at = $4 where id = $1`,
+      [id, next, kind, ts],
+    );
+  } else {
+    await db.query(`update qingran_messages set body = $2, edited_at = $3 where id = $1`, [id, next, ts]);
+  }
+}
+
 export async function unarchivedOverflow(limit: number): Promise<StoredMessage[]> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
@@ -1380,7 +1401,11 @@ export async function appendBrainLog(row: {
   tokensOut?: number | null;
   tokensReasoning?: number | null;
   costUsd?: number | null;
+  costUsdEst?: number | null;
   error?: string | null;
+  codeVersion?: string | null;
+  refs?: unknown;
+  outputRef?: string | null;
 }): Promise<number | null> {
   try {
     const db = await getSql();
@@ -1388,9 +1413,11 @@ export async function appendBrainLog(row: {
       `insert into brain_log (
          job_id, step, ok, ms, input_chars, raw, note, at,
          route, model, effort, turn_seq, input_system, input_user, output_text,
-         tokens_in, tokens_cached, tokens_out, tokens_reasoning, cost_usd, error, trimmed
+         tokens_in, tokens_cached, tokens_out, tokens_reasoning, cost_usd, error, trimmed,
+         code_version, refs, output_ref, cost_usd_est
        ) values (
-         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,false
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,false,
+         $22,$23::jsonb,$24,$25
        ) returning id`,
       [
         row.jobId ?? null,
@@ -1414,12 +1441,40 @@ export async function appendBrainLog(row: {
         row.tokensReasoning ?? null,
         row.costUsd ?? null,
         row.error ?? null,
+        row.codeVersion ?? null,
+        row.refs == null ? null : JSON.stringify(row.refs),
+        row.outputRef ?? null,
+        row.costUsdEst ?? null,
       ],
     );
     return rows[0]?.id != null ? asInt(rows[0].id) : null;
   } catch {
     /* logging must never break talk */
     return null;
+  }
+}
+
+export async function patchBrainLog(
+  id: number | null | undefined,
+  patch: { outputText?: string | null; outputRef?: string | null },
+): Promise<void> {
+  if (!id) return;
+  try {
+    const db = await getSql();
+    const sets: string[] = [];
+    const params: unknown[] = [id];
+    if ("outputText" in patch) {
+      params.push(patch.outputText ?? null);
+      sets.push(`output_text = $${params.length}`);
+    }
+    if ("outputRef" in patch) {
+      params.push(patch.outputRef ?? null);
+      sets.push(`output_ref = $${params.length}`);
+    }
+    if (!sets.length) return;
+    await db.query(`update brain_log set ${sets.join(", ")} where id = $1`, params);
+  } catch {
+    /* ignore */
   }
 }
 

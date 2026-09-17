@@ -34,21 +34,39 @@ type DiaryDump = {
   factorNames: Record<string, string>;
 };
 
-async function main() {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const scenariosDir = join(here, "scenarios");
-  const outDir = join(here, "../../out");
-  mkdirSync(outDir, { recursive: true });
-  const files = readdirSync(scenariosDir)
-    .filter((f) => f.endsWith(".jsonl"))
-    .sort();
+function stddev(xs: number[]): number {
+  if (xs.length < 2) return 0;
+  const m = mean(xs);
+  return Math.sqrt(xs.reduce((s, x) => s + (x - m) ** 2, 0) / (xs.length - 1));
+}
 
+function parseArgs(argv: string[]) {
+  let repeat = 1;
+  let routes = "";
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--repeat") repeat = Math.max(1, Number(argv[++i]) || 1);
+    if (argv[i] === "--routes") routes = argv[++i] || "";
+  }
+  return { repeat, routes };
+}
+
+function applyRoutes(spec: string) {
+  if (!spec.trim()) return;
+  for (const part of spec.split(",")) {
+    const [cls, model] = part.split("=").map((s) => s.trim());
+    if (cls && model) process.env[`QR_CLASS_${cls}_MODEL`] = model;
+  }
+}
+
+async function runOnce(files: string[], scenariosDir: string, outDir: string) {
   const pack: number[] = [];
   const ttft: number[] = [];
   const qingranRows: Array<Record<string, number>> = [];
   let handed = 0;
   let judged = 0;
   const diaryLines: string[] = [];
+  const reflectMs: number[] = [];
+  const costs: number[] = [];
 
   for (const file of files) {
     const path = join(scenariosDir, file);
@@ -94,7 +112,26 @@ async function main() {
       }
     }
   }
+  return { pack, ttft, qingranRows, handed, judged, diaryLines, reflectMs, costs };
+}
 
+async function main() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const scenariosDir = join(here, "scenarios");
+  const outDir = join(here, "../../out");
+  mkdirSync(outDir, { recursive: true });
+  const { repeat, routes } = parseArgs(process.argv.slice(2));
+  applyRoutes(routes);
+  const files = readdirSync(scenariosDir)
+    .filter((f) => f.endsWith(".jsonl"))
+    .sort();
+
+  const runs = [];
+  for (let i = 0; i < repeat; i++) {
+    if (repeat > 1) console.log(`[eval] repeat ${i + 1}/${repeat}`);
+    runs.push(await runOnce(files, scenariosDir, outDir));
+  }
+  const last = runs[runs.length - 1]!;
   const scale = [
     "felt_seen",
     "logic",
@@ -113,34 +150,41 @@ async function main() {
     "handed_back",
   ] as const;
 
+  const metric = (pick: (r: (typeof last)) => number[]) => {
+    const means = runs.map((r) => mean(pick(r)));
+    return { mean: mean(means), sd: stddev(means) };
+  };
+
   const lines = [
     "# Eval report",
     "",
-    `scenarios: ${files.length}`,
+    `scenarios: ${files.length} · repeat ${repeat}`,
+    routes ? `routes override: ${routes}` : "",
     "",
     "## 清然侧",
     "",
-    `| 指标 | 均值 |`,
-    `|---|---|`,
-    ...[...binary, ...scale].map(
-      (k) => `| ${k} | ${mean(qingranRows.map((r) => Number(r[k] ?? 0))).toFixed(2)} |`,
-    ),
+    `| 指标 | 均值 | 标准差 |`,
+    `|---|---|---|`,
+    ...[...binary, ...scale].map((k) => {
+      const m = metric((r) => r.qingranRows.map((row) => Number(row[k] ?? 0)));
+      return `| ${k} | ${m.mean.toFixed(2)} | ${m.sd.toFixed(2)} |`;
+    }),
     "",
-    `handed_back 比例：${judged ? (handed / judged).toFixed(2) : "n/a"}（${handed}/${judged}）`,
+    `handed_back 比例：${last.judged ? (last.handed / last.judged).toFixed(2) : "n/a"}（${last.handed}/${last.judged}）`,
     "",
     "## 日记侧预埋规律 recall",
     "",
-    ...(diaryLines.length ? diaryLines : ["- （没有可核对的日记 scenario）"]),
+    ...(last.diaryLines.length ? last.diaryLines : ["- （没有可核对的日记 scenario）"]),
     "",
     "## 延迟",
     "",
-    `| | p50 | p95 |`,
-    `|---|---|---|`,
-    `| pack_ms | ${pct(pack, 0.5)} | ${pct(pack, 0.95)} |`,
-    `| ttft_ms | ${pct(ttft, 0.5)} | ${pct(ttft, 0.95)} |`,
+    `| | p50 | p95 | 均值 | 标准差 |`,
+    `|---|---|---|---|---|`,
+    `| pack_ms | ${pct(last.pack, 0.5)} | ${pct(last.pack, 0.95)} | ${mean(last.pack).toFixed(0)} | ${stddev(last.pack).toFixed(0)} |`,
+    `| ttft_ms | ${pct(last.ttft, 0.5)} | ${pct(last.ttft, 0.95)} | ${mean(last.ttft).toFixed(0)} | ${stddev(last.ttft).toFixed(0)} |`,
     "",
   ];
-  const markdown = lines.join("\n");
+  const markdown = lines.filter((l, i) => l !== "" || lines[i - 1] !== "").join("\n");
   writeFileSync(join(outDir, "report.md"), markdown);
   console.log(markdown);
 }

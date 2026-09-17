@@ -7,7 +7,7 @@ process.env.XAI_API_KEY = "mock";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { setClock } from "../../src/lib/lover/brain/clock.ts";
+import { setClock, now } from "../../src/lib/lover/brain/clock.ts";
 import { LONG_DRAIN_MS } from "../../src/lib/lover/brain/config.ts";
 import { openIsolatedSql } from "../../src/lib/lover/brain/eval-db.ts";
 import { enqueueArchiveIfNeeded } from "../../src/lib/lover/brain/archivist.ts";
@@ -15,6 +15,8 @@ import { enqueuePeriodicIfDue } from "../../src/lib/lover/brain/diary/dusk.ts";
 import { drainJobs, enqueue } from "../../src/lib/lover/brain/jobs.ts";
 import * as S from "../../src/lib/lover/brain/store.ts";
 import { loadHotContext } from "../../src/lib/lover/brain/voice/pack.ts";
+import { recordVoiceTurn } from "../../src/lib/lover/brain/voice-log.ts";
+import { rebuildArchiveInput, rebuildReflectorInput, rebuildVoiceMessages } from "../../src/lib/lover/brain/rebuild.ts";
 import { checkSpend } from "../../src/lib/lover/brain/spend/check.ts";
 import { recordSpend, resetSpendSnap } from "../../src/lib/lover/brain/spend/ledger.ts";
 import { defaultSpendLimits } from "../../src/lib/lover/brain/spend/policy.ts";
@@ -160,6 +162,9 @@ async function mockReply(name: string, input: string): Promise<unknown> {
 }
 
 const realFetch = globalThis.fetch;
+const capturedVoice = new Map<number, string>();
+const capturedReflect = new Map<number, string>();
+const capturedArchive: string[] = [];
 let lastReflectB: string | null = null;
 const reflectSegments: Array<{ a: number; b: number; c: number; bSame: boolean | null }> = [];
 globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -186,6 +191,10 @@ globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     );
     reflectSegments.push({ a: A.length, b: B.length, c: C.length, bSame: lastReflectB == null ? null : sameB });
     lastReflectB = B;
+    capturedReflect.set(now(), JSON.stringify(body.input));
+  }
+  if (name === "archive_ops" && Array.isArray(body.input)) {
+    capturedArchive.push(JSON.stringify(body.input));
   }
   const out = await mockReply(name, input);
   calls += 1;
@@ -235,7 +244,22 @@ async function main() {
       show("hot path pack_ms / db_first_ms", `${ctx.packMs} / ${ctx.dbFirstMs}`);
       const tail = ctx.messages[ctx.messages.length - 2];
       show("注入给 Voice 的动态 tail", tail?.content ?? "");
-      await S.upsertMessage({ id: `a:${t.at}`, role: "assistant", text: t.reply, createdAt: t.at + 1, timeZone: TZ });
+      await S.upsertMessage({ id: `a:${t.at}`, role: "assistant", text: t.reply, createdAt: t.at, timeZone: TZ });
+      await recordVoiceTurn({
+        ctx,
+        replyId: `a:${t.at}`,
+        display: t.reply,
+        failed: false,
+        model: "voice",
+        usage: { tokensIn: 20, tokensCached: 0, tokensOut: 8, tokensReasoning: 0, costTicks: null },
+        totalMs: ctx.packMs,
+        ttftMs: 1,
+        firstAudioMs: null,
+        userCreatedAt: t.at,
+        userMsgId: `u:${t.at}`,
+        localDay: new Date(t.at).toISOString().slice(0, 10),
+      });
+      capturedVoice.set(t.at, JSON.stringify(ctx.messages));
       show("清然（mock 回复）", t.reply);
       await enqueue("reflect", `reflect:${t.at}`, { turnSeq: t.at });
       await enqueueArchiveIfNeeded(t.at);
@@ -390,6 +414,46 @@ async function main() {
     if (Number(syn[0]?.attempts) !== 0) failures.push("breaker synth must not consume attempts");
     if (!String(syn[0]?.last_error ?? "").startsWith("spend:")) failures.push("breaker synth should record spend defer");
     if (!(Number(syn[0]?.run_after) > Date.now() - 86_400_000)) failures.push("breaker synth run_after missing");
+
+    hr("引用式日志 / 重建");
+    const fullLogs = await db.query<Record<string, unknown>>(`select * from brain_log order by id`);
+    const avgBytes = fullLogs.length
+      ? fullLogs.reduce((s, r) => s + JSON.stringify(r).length, 0) / fullLogs.length
+      : 0;
+    const snaps = await db.query<{ n: number }>(`select count(*)::int as n from qr_block_snapshots`);
+    console.log(`- 每轮日志平均字节 ${avgBytes.toFixed(0)}`);
+    console.log(`- qr_block_snapshots 行数 ${snaps[0]?.n ?? 0}`);
+    if (avgBytes > 2048) failures.push(`log avg bytes ${avgBytes.toFixed(0)} > 2048`);
+    for (const [turnSeq, orig] of capturedVoice) {
+      const rebuilt = await rebuildVoiceMessages(turnSeq);
+      if (JSON.stringify(rebuilt.messages) !== orig) {
+        failures.push(`rebuild voice mismatch ${turnSeq}: ${rebuilt.warnings.join(";")}`);
+      }
+    }
+    const reflectLogs = await db.query<{ turn_seq: number }>(
+      `select turn_seq from brain_log where route = 'reflect' and turn_seq is not null order by id`,
+    );
+    for (const row of reflectLogs) {
+      const rebuilt = await rebuildReflectorInput(Number(row.turn_seq));
+      const orig = capturedReflect.get(Number(row.turn_seq));
+      if (orig && JSON.stringify(rebuilt.messages) !== orig) {
+        failures.push(`rebuild reflect mismatch ${row.turn_seq}: ${rebuilt.warnings.join(";")}`);
+      }
+    }
+    const archiveLogs = await db.query<{ id: number }>(`select id from brain_log where route = 'archive' order by id`);
+    for (let i = 0; i < archiveLogs.length; i++) {
+      const rebuilt = await rebuildArchiveInput(Number(archiveLogs[i]!.id));
+      const orig = capturedArchive[i];
+      if (orig && JSON.stringify(rebuilt.messages) !== orig) {
+        failures.push(`rebuild archive mismatch ${archiveLogs[i]!.id}: ${rebuilt.warnings.join(";")}`);
+      }
+    }
+    const high = await db.query<{ route: string; input_system: string | null; input_user: string | null }>(
+      `select route, input_system, input_user from brain_log where route in ('voice','reflect','archive')`,
+    );
+    for (const row of high) {
+      if (row.input_system || row.input_user) failures.push(`${row.route} still stores full input`);
+    }
 
     result.calls = calls;
     result.callsByRoute = callsByRoute;

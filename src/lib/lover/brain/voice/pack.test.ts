@@ -121,3 +121,34 @@ test("stale mind omits intent and rosie_now and explains the gap", () => {
   assert.match(tail, /先重新感受她现在的状态/);
   assert.match(tail, /今晚让她 1 点前睡/);
 });
+
+test("stale uses strict greater-than session gap", () => {
+  const mind = {
+    ...EMPTY_MIND,
+    turn_seq: 2,
+    updated_at: 1,
+    undercurrent: "怕",
+    my_view: "要睡",
+    lead_plan: ["早点睡"],
+    intent: "拉她去睡觉",
+    rosie_now: "她刚说累",
+  };
+  const atGap = buildTail({
+    clock: "x",
+    mind,
+    notes: [],
+    timeZone: "UTC",
+    careHint: false,
+    nowMs: 1 + 30 * 60_000,
+  });
+  assert.match(atGap, /你此刻的内心/);
+  const over = buildTail({
+    clock: "x",
+    mind,
+    notes: [],
+    timeZone: "UTC",
+    careHint: false,
+    nowMs: 1 + 30 * 60_000 + 1,
+  });
+  assert.match(over, /你上次的内心/);
+});

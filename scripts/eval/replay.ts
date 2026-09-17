@@ -23,7 +23,11 @@ import {
   upsertMessage,
 } from "../../src/lib/lover/brain/store.ts";
 import { loadHotContext } from "../../src/lib/lover/brain/voice/pack.ts";
+import { recordVoiceTurn } from "../../src/lib/lover/brain/voice-log.ts";
+import { rebuildReflectorInput, rebuildVoiceMessages } from "../../src/lib/lover/brain/rebuild.ts";
 import { DEFAULT_PROFILE, lockedProfile } from "../../src/lib/lover/types.ts";
+import { parseUsage } from "../../src/lib/lover/brain/usage.ts";
+import { localDay } from "../../src/lib/lover/brain/time.ts";
 
 export type ScenarioTurn = { at: number; user: string };
 
@@ -31,7 +35,7 @@ const TZ = "America/New_York";
 
 export async function completeVoice(
   messages: Array<{ role: string; content: string }>,
-): Promise<{ text: string; ttftMs: number }> {
+): Promise<{ text: string; ttftMs: number; usage: unknown }> {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) throw new Error("XAI_API_KEY is required");
   const route = resolveRoute("voice");
@@ -47,6 +51,7 @@ export async function completeVoice(
       temperature: 0.85,
       max_tokens: route.maxOutput,
       stream: true,
+      stream_options: { include_usage: true },
       messages,
     }),
     signal: AbortSignal.timeout(route.timeoutMs),
@@ -57,6 +62,7 @@ export async function completeVoice(
   let buf = "";
   let text = "";
   let ttftMs = 0;
+  let usage: unknown = null;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -71,7 +77,9 @@ export async function completeVoice(
       try {
         const json = JSON.parse(payload) as {
           choices?: Array<{ delta?: { content?: string } }>;
+          usage?: unknown;
         };
+        if (json.usage) usage = json.usage;
         const piece = json.choices?.[0]?.delta?.content ?? "";
         if (piece) {
           if (!ttftMs) ttftMs = Date.now() - t0;
@@ -82,7 +90,7 @@ export async function completeVoice(
       }
     }
   }
-  return { text: text.trim(), ttftMs: ttftMs || Date.now() - t0 };
+  return { text: text.trim(), ttftMs: ttftMs || Date.now() - t0, usage };
 }
 
 export async function replayFile(
@@ -127,9 +135,27 @@ export async function replayFile(
           id: `a:${turn.at}`,
           role: "assistant",
           text: voice.text.slice(0, 4000),
-          createdAt: turn.at + 1,
+          createdAt: turn.at,
           timeZone: TZ,
         });
+      }
+      await recordVoiceTurn({
+        ctx,
+        replyId: `a:${turn.at}`,
+        display: voice.text,
+        failed: !voice.text,
+        model: resolveRoute("voice").model,
+        usage: parseUsage(voice.usage),
+        totalMs: voice.ttftMs,
+        ttftMs: voice.ttftMs,
+        firstAudioMs: null,
+        userCreatedAt: turn.at,
+        userMsgId: `u:${turn.at}`,
+        localDay: localDay(turn.at, TZ),
+      });
+      const rebuiltVoice = await rebuildVoiceMessages(turn.at);
+      if (JSON.stringify(rebuiltVoice.messages) !== JSON.stringify(ctx.messages)) {
+        throw new Error(`rebuild voice mismatch ${name} ${turn.at}: ${rebuiltVoice.warnings.join(";")}`);
       }
       transcript.push({ role: "user", text: turn.user, createdAt: turn.at });
       if (voice.text) {
@@ -139,6 +165,10 @@ export async function replayFile(
       await enqueueArchiveIfNeeded(turn.at);
       await enqueuePeriodicIfDue(turn.at, TZ);
       await drainJobs(LONG_DRAIN_MS);
+      const rebuiltReflect = await rebuildReflectorInput(turn.at);
+      if (rebuiltReflect.warnings.some((w) => w.includes("缺失"))) {
+        throw new Error(`rebuild reflect missing ${name} ${turn.at}: ${rebuiltReflect.warnings.join(";")}`);
+      }
     }
 
     mkdirSync(outDir, { recursive: true });

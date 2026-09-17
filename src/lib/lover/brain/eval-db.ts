@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { installTestSql, type Sql } from "../../db.ts";
 import { pendingMigrations } from "../../../../scripts/migration-plan.mjs";
 import { resetRetrieveCache } from "./voice/retrieve.ts";
+import { resetLogRefCache } from "./log-refs.ts";
 
 const OID_INT8 = 20;
 const OID_DATE = 1082;
@@ -60,11 +61,13 @@ export async function openIsolatedSql(): Promise<{ sql: Sql; close: () => Promis
   const sql = toSql(pg);
   installTestSql(sql);
   resetRetrieveCache();
+  resetLogRefCache();
   return {
     sql,
     close: async () => {
       installTestSql(null);
       resetRetrieveCache();
+      resetLogRefCache();
       await pg.close();
     },
   };

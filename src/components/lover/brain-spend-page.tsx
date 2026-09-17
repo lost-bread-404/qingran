@@ -201,6 +201,9 @@ export function BrainSpendPage() {
 
       <div className="text-sm">
         <p className="mb-2 text-xs text-subtle">本月分解 · 每轮对话均 ${data.avgTurn.toFixed(4)}</p>
+        <p className="mb-2 text-xs text-subtle">
+          xAI 实际金额合计 ${asNum(data.xaiUsd).toFixed(4)} · 占比 {(asNum(data.xaiShare) * 100).toFixed(0)}%
+        </p>
         <ul className="flex flex-col gap-1">
           {data.monthEvents.map((r, i) => (
             <li key={`${r.route}-${r.model}-${i}`} className="flex justify-between gap-3">
@@ -213,6 +216,16 @@ export function BrainSpendPage() {
             </li>
           ))}
         </ul>
+        {Array.isArray(data.routeDeviation) && data.routeDeviation.length ? (
+          <ul className="mt-2 flex flex-col gap-1 text-xs">
+            {data.routeDeviation.map((r) => (
+              <li key={r.route} className={r.deviation > 0.1 ? "text-live" : "text-subtle"}>
+                {r.route} 实际 ${r.usd.toFixed(4)} / 估算 ${r.usdEst.toFixed(4)}
+                {r.deviation > 0.1 ? " · 偏差超过 10%，请检查价格表" : ""}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
 
       <div>
@@ -373,6 +386,7 @@ export function BrainSpendPage() {
 
       <div className="flex flex-col gap-2">
         <p className="text-xs text-subtle">对账 · 输入 xAI 控制台本月实际金额</p>
+        <p className="text-xs text-subtle">xAI 实际金额合计 ${asNum(data.xaiUsd).toFixed(4)}</p>
         <Input value={actual} onChange={(e) => setActual(e.target.value)} placeholder="实际美元" />
         <Button
           size="sm"

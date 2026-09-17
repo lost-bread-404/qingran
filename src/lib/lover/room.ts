@@ -130,13 +130,9 @@ export const clearRoomMessages = createServerFn({ method: "POST" }).handler(
 export const updateRoomMessage = createServerFn({ method: "POST" })
   .validator((input: ChatMessage) => input)
   .handler(async ({ data }) => {
-    const sql = await getSql();
     const kind = data.kind === "steer" || data.kind === "setting" ? data.kind : "say";
-    await sql`
-      update qingran_messages
-      set body = ${data.text.slice(0, 4000)}, kind = ${kind}
-      where id = ${data.id}
-    `;
+    const { updateMessageText } = await import("./brain/store");
+    await updateMessageText(data.id, data.text, kind);
     return { ok: true as const };
   });
 

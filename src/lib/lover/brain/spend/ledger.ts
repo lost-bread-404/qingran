@@ -2,7 +2,9 @@ import { getSql } from "../../../db.ts";
 import { now } from "../clock.ts";
 import { getMeta } from "../store.ts";
 import { localDay } from "../time.ts";
+import { resolveTz } from "../tz.ts";
 import { defaultSpendLimits, type SpendLimits, type SpendLevel, type SpendScope } from "./policy.ts";
+import type { CostSource } from "../usage.ts";
 
 export type SpendEventInput = {
   kind: "llm" | "tts" | "stt";
@@ -15,6 +17,8 @@ export type SpendEventInput = {
   chars?: number | null;
   seconds?: number | null;
   usd: number;
+  usdEst?: number | null;
+  costSource?: CostSource | null;
   estimated?: boolean;
   turnSeq?: number | null;
   jobId?: string | null;
@@ -44,7 +48,7 @@ export async function resolvedLimits(): Promise<SpendLimits> {
 
 export async function loadTotals(force = false): Promise<TotalsSnap> {
   const meta = await getMeta();
-  const tz = meta.timeZone || "UTC";
+  const tz = resolveTz(meta.timeZone);
   const ts = now();
   const day = localDay(ts, tz);
   const month = day.slice(0, 7);
@@ -74,7 +78,7 @@ export async function loadTotals(force = false): Promise<TotalsSnap> {
 export async function recordSpend(ev: SpendEventInput): Promise<void> {
   try {
     const meta = await getMeta();
-    const tz = meta.timeZone || "UTC";
+    const tz = resolveTz(meta.timeZone);
     const ts = ev.at ?? now();
     const day = localDay(ts, tz);
     const month = day.slice(0, 7);
@@ -83,8 +87,9 @@ export async function recordSpend(ev: SpendEventInput): Promise<void> {
       `insert into spend_events (
          at, day, month, kind, route, model,
          tokens_in, tokens_cached, tokens_out, tokens_reasoning,
-         chars, seconds, usd, estimated, turn_seq, job_id, log_id
-       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+         chars, seconds, usd, estimated, turn_seq, job_id, log_id,
+         usd_est, cost_source
+       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
       [
         ts,
         day,
@@ -103,6 +108,8 @@ export async function recordSpend(ev: SpendEventInput): Promise<void> {
         ev.turnSeq ?? null,
         ev.jobId ?? null,
         ev.logId ?? null,
+        ev.usdEst ?? null,
+        ev.costSource ?? null,
       ],
     );
     await db.query(
@@ -111,6 +118,25 @@ export async function recordSpend(ev: SpendEventInput): Promise<void> {
          usd = spend_daily.usd + excluded.usd,
          calls = spend_daily.calls + 1`,
       [day, ev.route, ev.usd],
+    );
+    await db.query(
+      `insert into spend_monthly (month, route, model, usd, calls, tokens_in, tokens_cached, tokens_out)
+       values ($1,$2,$3,$4,1,$5,$6,$7)
+       on conflict (month, route, model) do update set
+         usd = spend_monthly.usd + excluded.usd,
+         calls = spend_monthly.calls + 1,
+         tokens_in = spend_monthly.tokens_in + excluded.tokens_in,
+         tokens_cached = spend_monthly.tokens_cached + excluded.tokens_cached,
+         tokens_out = spend_monthly.tokens_out + excluded.tokens_out`,
+      [
+        month,
+        ev.route,
+        ev.model ?? "",
+        ev.usd,
+        ev.tokensIn ?? 0,
+        ev.tokensCached ?? 0,
+        ev.tokensOut ?? 0,
+      ],
     );
     if (snap && snap.day === day) {
       snap.dayUsd += ev.usd;
@@ -142,7 +168,7 @@ export async function writeAlert(
 ): Promise<boolean> {
   try {
     const meta = await getMeta();
-    const tz = meta.timeZone || "UTC";
+    const tz = resolveTz(meta.timeZone);
     const ts = now();
     const day = localDay(ts, tz);
     const month = day.slice(0, 7);
