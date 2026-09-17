@@ -25,6 +25,7 @@ import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { keepPlaybackAlive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
+import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
 import {
   LISTEN_WARMUP_MS,
   isHoldVoiced,
@@ -251,13 +252,26 @@ export function useCall({ onUtterance, prompt }: Options) {
     interimRef.current = "";
     lastTextAtRef.current = 0;
 
-    const heard = await hearUtterance({
-      wav,
-      fallback,
-      liveText,
-      frames,
-      prompt: promptRef.current,
-    });
+    let heard = "";
+    try {
+      heard = (await hearUtterance({
+        wav,
+        fallback,
+        liveText,
+        frames,
+        prompt: promptRef.current,
+      })) ?? "";
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (isQuotaHint(message)) {
+        setError(QUOTA_HINT);
+        deafRef.current = false;
+        setMicEnabled(streamRef.current, true);
+        listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
+        setPhaseBoth("listening");
+        return;
+      }
+    }
     if (!liveRef.current) return;
     if (!heard) {
       setError("我没听清，再说一遍。");

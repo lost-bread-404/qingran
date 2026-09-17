@@ -1,4 +1,5 @@
 import type { ChatMessage, Memory, Profile } from "./types";
+import { xaiFailHint } from "./xai-error";
 
 export type TalkStreamEvent =
   | { t: "text"; d: string }
@@ -28,7 +29,8 @@ export async function streamTalk(
     signal,
   });
   if (!res.ok || !res.body) {
-    onEvent({ t: "err", m: "这会儿连不上。" });
+    const body = await res.text().catch(() => "");
+    onEvent({ t: "err", m: xaiFailHint(res.status, body) });
     return;
   }
 

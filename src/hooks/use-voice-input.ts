@@ -14,6 +14,7 @@ import { hearUtterance } from "@/lib/lover/hear";
 import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
+import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
 
 export type VoiceInputStatus = "idle" | "recording" | "transcribing";
 
@@ -231,13 +232,22 @@ export function useVoiceInput({ lang, prompt }: Options) {
     const fallback = wav ? null : await collectRecording(session);
     teardownMedia();
 
-    const heard = await hearUtterance({
-      wav,
-      fallback,
-      liveText,
-      frames,
-      prompt: promptRef.current,
-    });
+    let heard = "";
+    try {
+      heard = (await hearUtterance({
+        wav,
+        fallback,
+        liveText,
+        frames,
+        prompt: promptRef.current,
+      })) ?? "";
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      setStatus("idle");
+      stopLockRef.current = false;
+      setError(isQuotaHint(message) ? QUOTA_HINT : "我没听清，再说一遍。");
+      return "";
+    }
 
     setInterim("");
     interimRef.current = "";

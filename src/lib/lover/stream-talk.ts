@@ -3,6 +3,7 @@ import { buildSystemPrompt, formatClock } from "./prompt";
 import { spokenForTts } from "./speech-tags";
 import { ttsRequestBody, ttsSpeed } from "./tts";
 import type { ChatMessage, Memory, Profile } from "./types";
+import { readXaiFail } from "./xai-error";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
 const MAX_HISTORY = 60;
@@ -72,7 +73,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   if (!res.ok || !res.body) {
     tts.abort();
-    emit({ t: "err", m: `想你的时候卡住了（${res.status}）。` });
+    emit({ t: "err", m: await readXaiFail(res) });
     return;
   }
 
@@ -121,7 +122,11 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   if (!tts.complete) {
     const clip = await speakRest(apiKey, speech, speed);
-    if (clip?.b) emit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
+    if (clip && "fail" in clip && clip.fail) {
+      emit({ t: "err", m: clip.fail });
+      return;
+    }
+    if (clip && "b" in clip) emit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
   }
 
   emit({ t: "done", speech });
@@ -273,7 +278,11 @@ class LiveTts {
   }
 }
 
-async function speakRest(apiKey: string, text: string, speed: number): Promise<{ b: string; m: string } | null> {
+async function speakRest(
+  apiKey: string,
+  text: string,
+  speed: number,
+): Promise<{ b: string; m: string; fail?: undefined } | { fail: string } | null> {
   const spoken = spokenForTts(text);
   if (!spoken) return null;
   try {
@@ -286,7 +295,7 @@ async function speakRest(apiKey: string, text: string, speed: number): Promise<{
       body: JSON.stringify(ttsRequestBody(spoken, "zh", speed)),
       signal: AbortSignal.timeout(40_000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { fail: await readXaiFail(res) };
     const buf = Buffer.from(await res.arrayBuffer());
     return {
       b: buf.toString("base64"),

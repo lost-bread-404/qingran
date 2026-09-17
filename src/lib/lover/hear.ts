@@ -2,6 +2,7 @@ import { blobToBase64 } from "./audio";
 import { transcribeVoice } from "./server";
 import { finishHeard } from "./stt-text";
 import type { ProsodyFrame } from "./prosody";
+import { QUOTA_HINT, isQuotaHint } from "./xai-error";
 
 type SttWord = { text?: string; start?: number; end?: number };
 
@@ -28,9 +29,11 @@ export async function hearUtterance(input: {
     if (result.ok) {
       text = result.text.trim();
       words = result.words ?? [];
+    } else if (isQuotaHint(result.error)) {
+      throw new Error(QUOTA_HINT);
     }
-  } catch {
-    /* fall through */
+  } catch (err) {
+    if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
   return finishHeard(text, input.liveText, words, input.frames);
 }

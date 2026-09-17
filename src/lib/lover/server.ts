@@ -12,6 +12,7 @@ import { spokenForTts } from "./speech-tags";
 import { restoreSpeechText, sttKeyterms } from "./stt-text";
 import { ttsRequestBody, ttsSpeed } from "./tts";
 import type { ChatMessage, Memory } from "./types";
+import { isQuotaHint, readXaiFail } from "./xai-error";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
 
@@ -184,7 +185,7 @@ export const speakAsLover = createServerFn({ method: "POST" })
     });
 
     if (!res.ok) {
-      return { ok: false as const, error: `tts-${res.status}` };
+      return { ok: false as const, error: await readXaiFail(res) };
     }
 
     const buf = Buffer.from(await res.arrayBuffer());
@@ -226,7 +227,8 @@ export const transcribeVoice = createServerFn({ method: "POST" })
     });
 
     if (!res.ok) {
-      return { ok: false as const, error: `没听清（${res.status}）。` };
+      const hint = await readXaiFail(res);
+      return { ok: false as const, error: isQuotaHint(hint) ? hint : `没听清（${res.status}）。` };
     }
 
     const body = (await res.json()) as {
