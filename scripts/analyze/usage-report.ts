@@ -81,15 +81,16 @@ export function buildUsageReport(rows: JsonlRow[]): string {
   for (const [id, n] of top) lines.push(`  - ${id} × ${n}`);
   lines.push("");
 
-  const byRoute = new Map<string, { n: number; tin: number; tout: number; cost: number }>();
+  const byRoute = new Map<string, { n: number; tin: number; tout: number; cached: number; cost: number }>();
   const byModel = new Map<string, { n: number; cost: number }>();
   for (const l of logs) {
     const route = String(l.route ?? String(l.step ?? "").split(":")[0] ?? "other");
     const model = String(l.model ?? "");
-    const rec = byRoute.get(route) ?? { n: 0, tin: 0, tout: 0, cost: 0 };
+    const rec = byRoute.get(route) ?? { n: 0, tin: 0, tout: 0, cached: 0, cost: 0 };
     rec.n += 1;
     rec.tin += num(l.tokens_in) ?? 0;
     rec.tout += num(l.tokens_out) ?? 0;
+    rec.cached += num(l.tokens_cached) ?? 0;
     rec.cost += num(l.cost_usd) ?? 0;
     byRoute.set(route, rec);
     if (model) {
@@ -101,10 +102,32 @@ export function buildUsageReport(rows: JsonlRow[]): string {
   }
   lines.push("## 成本");
   for (const [route, r] of [...byRoute.entries()].sort()) {
-    lines.push(`- ${route}: ${r.n} 次, in ${r.tin}, out ${r.tout}, $${r.cost.toFixed(4)}`);
+    const hit = r.tin ? r.cached / r.tin : 0;
+    const avg = r.n ? r.cost / r.n : 0;
+    lines.push(
+      `- ${route}: ${r.n} 次, in ${r.tin}, cached ${r.cached}, 命中率 ${hit.toFixed(2)}, out ${r.tout}, $${r.cost.toFixed(4)}, 每轮 $${avg.toFixed(4)}`,
+    );
   }
   for (const [model, r] of [...byModel.entries()].sort()) {
     lines.push(`- 模型 ${model}: ${r.n} 次, $${r.cost.toFixed(4)}`);
+  }
+  const byDay = new Map<string, { n: number; cost: number; tin: number; cached: number }>();
+  for (const l of logs) {
+    const at = num(l.at);
+    const day = at != null ? new Date(at).toISOString().slice(0, 10) : "unknown";
+    const rec = byDay.get(day) ?? { n: 0, cost: 0, tin: 0, cached: 0 };
+    rec.n += 1;
+    rec.cost += num(l.cost_usd) ?? 0;
+    rec.tin += num(l.tokens_in) ?? 0;
+    rec.cached += num(l.tokens_cached) ?? 0;
+    byDay.set(day, rec);
+  }
+  if (byDay.size) {
+    lines.push("- 按天：");
+    for (const [day, r] of [...byDay.entries()].sort()) {
+      const hit = r.tin ? r.cached / r.tin : 0;
+      lines.push(`  - ${day}: ${r.n} 次, 命中率 ${hit.toFixed(2)}, $${r.cost.toFixed(4)}`);
+    }
   }
   lines.push("");
 

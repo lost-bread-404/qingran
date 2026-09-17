@@ -10,7 +10,7 @@ export type Effort = "none" | "low" | "medium" | "high" | "xhigh" | null;
 
 export const MODEL_CLASSES: Record<ModelClass, { model: string; effort: Effort }> = {
   REALTIME: { model: "grok-4.20-0309-non-reasoning", effort: null },
-  FAST_THINKER: { model: "grok-4.6", effort: "low" },
+  FAST_THINKER: { model: "grok-4.3", effort: "low" },
   WORKHORSE: { model: "grok-4.3", effort: "low" },
   ANALYST: { model: "grok-4.3", effort: "medium" },
   DEEP_THINKER: { model: "grok-4.6", effort: "high" },
@@ -105,6 +105,9 @@ export const ARCHIVE_BATCH_MAX = 40;
 export const ARCHIVE_MIN_OVERFLOW = 8;
 export const SESSION_GAP_MS = 30 * 60_000;
 export const INDEX_MAX_ITEMS = 150;
+export const INDEX_CORE_MAX = 60; // 放在 Reflector B 段（可缓存）
+export const INDEX_RELATED_MAX = 30; // 放在 Reflector C 段（每轮变化）
+export const REFLECT_PROMPT_CACHE_KEY = "qingran-reflect";
 export const PICK_MAX = 6;
 export const HOT_FALLBACK_K = 2;
 export const MIND_MAX_CHARS = 500;

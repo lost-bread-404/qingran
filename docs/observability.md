@@ -46,3 +46,18 @@ npm run analyze -- path/to/export.jsonl
 6. 有 `feedback` 时：好 / 差回复的 tail 长度和注入记忆数
 
 价格表随模型一起改：`MODEL_CLASSES`、`MODEL_CAPS`、`MODEL_PRICES` 写在 `src/lib/lover/brain/config.ts`。
+
+## Prompt cache
+
+xAI 按 messages 数组**从头开始的精确前缀**计费；Responses API 用请求体里的 `prompt_cache_key` 把同一类请求打到同一台机器（等同 Chat Completions 的 `x-grok-conv-id`）。文档没有要求别的会话 header。
+
+Reflector 的 `callModel("reflect")` 固定传 `prompt_cache_key: "qingran-reflect"`（`REFLECT_PROMPT_CACHE_KEY`）。输入拆成三段：
+
+| 段 | 位置 | 何时变 |
+|---|---|---|
+| A | `system`：指令 + 立场 + 人设 | 几乎不变 |
+| B | 第 1 条 `user`：self / bond / portrait / 规律 / 核心 index | 日界或 `notesVersion` |
+| C | 第 2 条 `user`：时钟、相关 index、旧 mind、最近对话 | 每轮 |
+
+对比上线前后，看 `brain_log` 里 `route=reflect` 的 `tokens_cached / tokens_in` 和 `cost_usd`。Diary「系统档案」每日汇总会显示 Reflector 缓存命中率和平均每轮费用；`usage-report` 按 route 输出命中率和按天趋势。
+

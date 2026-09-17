@@ -230,9 +230,6 @@ export async function runSynth(
     system: DIARY_ANALYST_SYSTEM,
     input: `维护主题。CREATE 需要至少 3 条笔记支持。user_feedback=rejected 的不能重建。
 
-【未归类笔记】
-${unassigned.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n").slice(0, 8000)}
-
 【现有主题】
 ${themes
   .map((t) => {
@@ -244,7 +241,10 @@ ${themes
       .join(",");
     return `${t.id}|${t.name}|${t.definition}|members=${counts[t.id] ?? 0}|feedback=${t.userFeedback ?? ""}|weeks=${recent}`;
   })
-  .join("\n")}`,
+  .join("\n")}
+
+【未归类笔记】
+${unassigned.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n").slice(0, 8000)}`,
     schema: THEME_OPS_SCHEMA,
     jobId,
   });
@@ -388,17 +388,17 @@ ${days
     system: DIARY_ANALYST_SYSTEM,
     input: `发现新的 factors。同一轮最多新增 5 个。rejected 的不能重建。
 
-【day logs】
-${recentDays
-  .map((d) => `${d.day}|e=${d.energy}|m=${d.mood}|${d.summary}|wins=${JSON.stringify(d.wins)}|avoided=${JSON.stringify(d.avoided)}`)
-  .join("\n")
-  .slice(0, 8000)}
-
 【factors】
 ${factors.map((f) => `${f.id}|${f.name}|${f.definition}|outcome=${f.isOutcome}|feedback=${f.userFeedback ?? ""}`).join("\n")}
 
 【findings】
-${findings.slice(0, 20).map((f) => `${f.kind}|${f.antecedentId}->${f.outcomeId}|lag=${f.lag}|lift=${f.lift}`).join("\n")}`,
+${findings.slice(0, 20).map((f) => `${f.kind}|${f.antecedentId}->${f.outcomeId}|lag=${f.lag}|lift=${f.lift}`).join("\n")}
+
+【day logs】
+${recentDays
+  .map((d) => `${d.day}|e=${d.energy}|m=${d.mood}|${d.summary}|wins=${JSON.stringify(d.wins)}|avoided=${JSON.stringify(d.avoided)}`)
+  .join("\n")
+  .slice(0, 8000)}`,
     schema: FACTOR_OPS_SCHEMA,
     jobId,
   });

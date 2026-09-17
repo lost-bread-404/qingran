@@ -1,6 +1,7 @@
 import {
   applyAvailabilityFallback,
   checkModelAvailability,
+  REFLECT_PROMPT_CACHE_KEY,
   resolveRoute,
   type Effort,
   type Route,
@@ -32,6 +33,7 @@ export type ToolCall = {
 export type CallModelInput = {
   system: string;
   input: string;
+  inputParts?: string[];
   schema?: JsonSchema;
   tools?: ToolDef[];
   previous?: unknown[];
@@ -126,6 +128,19 @@ function parseJsonLoose(text: string): unknown {
   }
 }
 
+function userPartsOf(input: CallModelInput): string[] {
+  if (input.inputParts && input.inputParts.length) return input.inputParts;
+  return [input.input];
+}
+
+function joinedUser(input: CallModelInput): string {
+  return userPartsOf(input).join("\n-----\n");
+}
+
+function inputCharsOf(input: CallModelInput): number {
+  return input.system.length + userPartsOf(input).reduce((s, p) => s + p.length, 0);
+}
+
 export async function callModel(route: Route, input: CallModelInput): Promise<CallModelResult> {
   const started = Date.now();
   const apiKey = process.env.XAI_API_KEY;
@@ -149,25 +164,23 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       step: `${route}:${resolved.model}`,
       ok: false,
       ms: result.ms,
-      inputChars: input.system.length + input.input.length,
+      inputChars: inputCharsOf(input),
       raw: "",
       note: "no-key",
       route,
       model: resolved.model,
       effort: resolved.effort == null ? null : String(resolved.effort),
       inputSystem: input.system,
-      inputUser: input.input,
+      inputUser: joinedUser(input),
       error: "no-key",
     });
     return result;
   }
 
+  const parts = userPartsOf(input);
   const body: Record<string, unknown> = {
     model: resolved.model,
-    input: [
-      { role: "system", content: input.system },
-      { role: "user", content: input.input },
-    ],
+    input: [{ role: "system", content: input.system }, ...parts.map((content) => ({ role: "user", content }))],
     max_output_tokens: resolved.maxOutput,
   };
   if (resolved.effort) body.reasoning = { effort: resolved.effort };
@@ -183,6 +196,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
   }
   if (input.tools?.length) body.tools = input.tools;
   if (input.previous?.length) body.input = [...(body.input as unknown[]), ...input.previous];
+  if (route === "reflect") body.prompt_cache_key = REFLECT_PROMPT_CACHE_KEY;
 
   try {
     const res = await fetch("https://api.x.ai/v1/responses", {
@@ -207,14 +221,14 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       step: `${route}:${resolved.model}`,
       ok: res.ok,
       ms,
-      inputChars: input.system.length + input.input.length,
+      inputChars: inputCharsOf(input),
       raw: text.slice(0, 4000),
       note: res.ok ? null : `http ${res.status}`,
       route,
       model: resolved.model,
       effort: resolved.effort == null ? null : String(resolved.effort),
       inputSystem: input.system,
-      inputUser: input.input,
+      inputUser: joinedUser(input),
       outputText: text,
       tokensIn: usage.tokensIn,
       tokensCached: usage.tokensCached,
@@ -243,14 +257,14 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       step: `${route}:${resolved.model}`,
       ok: false,
       ms,
-      inputChars: input.system.length + input.input.length,
+      inputChars: inputCharsOf(input),
       raw: "",
       note: timedOut ? "timeout" : "error",
       route,
       model: resolved.model,
       effort: resolved.effort == null ? null : String(resolved.effort),
       inputSystem: input.system,
-      inputUser: input.input,
+      inputUser: joinedUser(input),
       error: timedOut ? "timeout" : "error",
     });
     return { ...fail(timedOut ? "timeout" : "error"), ms };

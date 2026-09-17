@@ -202,7 +202,10 @@ export async function runDusk(
 
   const dayResult = await callModel("dusk", {
     system: DUSK_DAY_SYSTEM,
-    input: `日期 ${day}
+    input: `按下面材料整理这一天。
+
+【进行中的 intentions】
+${intentions.map((i) => `${i.id}|${i.status}|${i.tag ?? ""}|${i.text}`).join("\n") || "（没有）"}
 
 【日记笔记】
 ${notes.map((n) => `${n.id}|${n.text}`).join("\n") || "（没有）"}
@@ -210,8 +213,7 @@ ${notes.map((n) => `${n.id}|${n.text}`).join("\n") || "（没有）"}
 【Rosie 的话】
 ${rosieText || "（没有）"}
 
-【进行中的 intentions】
-${intentions.map((i) => `${i.id}|${i.status}|${i.tag ?? ""}|${i.text}`).join("\n") || "（没有）"}`,
+日期 ${day}`,
     schema: DAY_SCHEMA,
     jobId,
   });
@@ -249,8 +251,10 @@ ${intentions.map((i) => `${i.id}|${i.status}|${i.tag ?? ""}|${i.text}`).join("\n
   const factors = await listFactors(true);
   const factorResult = await callModel("dusk", {
     system: DUSK_DAY_SYSTEM,
-    input: `日期 ${day}
-根据这一天的 day log 和笔记，判定每个 factor 的 value：1、0 或 null（未知）。不要猜。
+    input: `根据这一天的材料，判定每个 factor 的 value：1、0 或 null（未知）。不要猜。
+
+【factors】
+${factors.map((f) => `${f.id}|${f.name}|${f.definition}`).join("\n")}
 
 【day log】
 ${JSON.stringify({ day, summary: log.summary, energy: log.energy, mood: log.mood, body: log.body, did: log.did, avoided: log.avoided, events: log.events, wins: log.wins })}
@@ -258,8 +262,7 @@ ${JSON.stringify({ day, summary: log.summary, energy: log.energy, mood: log.mood
 【笔记】
 ${notes.map((n) => n.text).join("\n")}
 
-【factors】
-${factors.map((f) => `${f.id}|${f.name}|${f.definition}`).join("\n")}`,
+日期 ${day}`,
     schema: FACTOR_SCHEMA,
     jobId,
   });

@@ -157,6 +157,8 @@ async function mockReply(name: string, input: string): Promise<unknown> {
 }
 
 const realFetch = globalThis.fetch;
+let lastReflectB: string | null = null;
+const reflectSegments: Array<{ a: number; b: number; c: number; bSame: boolean | null }> = [];
 globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
   const u = String(url);
   if (!u.startsWith("https://api.x.ai/")) {
@@ -164,11 +166,24 @@ globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
   }
   const body = JSON.parse(String(init?.body ?? "{}")) as {
     text?: { format?: { name?: string } };
-    input?: Array<{ content: string }>;
+    input?: Array<{ role?: string; content: string }>;
     messages?: Array<{ content: string }>;
+    prompt_cache_key?: string;
   };
   const name = body.text?.format?.name ?? "voice";
   const input = (body.input ?? body.messages ?? []).map((m) => m.content).join("\n");
+  if (name === "mind" && Array.isArray(body.input)) {
+    const A = body.input.find((m) => m.role === "system")?.content ?? "";
+    const users = body.input.filter((m) => m.role === "user");
+    const B = users[0]?.content ?? "";
+    const C = users[1]?.content ?? "";
+    const sameB = lastReflectB != null && lastReflectB === B;
+    console.log(
+      `- Reflector 分段：A=${A.length} B=${B.length} C=${C.length} B与上一轮相同=${lastReflectB == null ? "（首轮）" : sameB ? "是" : "否"}`,
+    );
+    reflectSegments.push({ a: A.length, b: B.length, c: C.length, bSame: lastReflectB == null ? null : sameB });
+    lastReflectB = B;
+  }
   const out = await mockReply(name, input);
   calls += 1;
   callsByRoute[name] = (callsByRoute[name] ?? 0) + 1;
@@ -338,6 +353,7 @@ async function main() {
 
     result.calls = calls;
     result.callsByRoute = callsByRoute;
+    result.reflectSegments = reflectSegments;
     result.failures = failures;
 
     const outDir = join(dirname(fileURLToPath(import.meta.url)), "../../out");

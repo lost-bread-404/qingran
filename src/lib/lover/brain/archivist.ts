@@ -99,15 +99,15 @@ export async function runArchivist(ids: string[], jobId?: string): Promise<void>
   const candidates = await candidateNotes(pending);
   const result = await callModel("archive", {
     system: ARCHIVIST_SYSTEM,
-    input: `【已有相关笔记】（id|日期|subject|text）
+    input: `输出 JSON：{"ops":[...]}
+
+【已有相关笔记】（id|日期|subject|text）
 ${candidates.map((n) => `${n.id}|${n.localDay}|${n.subject}|${n.text}`).join("\n") || "（没有）"}
 
 【对话】（id|时间|说话人|内容）
 ${pending
   .map((m) => `${m.id}|${new Date(m.createdAt).toISOString()}|${m.role === "user" ? "Rosie" : "清然"}|${m.text}`)
-  .join("\n")}
-
-输出 JSON：{"ops":[...]}`,
+  .join("\n")}`,
     schema: SCHEMA,
     jobId,
   });

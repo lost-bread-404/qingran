@@ -1,6 +1,6 @@
 {"table":"brain_turns","turn_seq":1,"pack_ms":24,"db_first_ms":1,"ttft_ms":80,"first_audio_ms":200,"mind_stale":false,"picked_ids":["n1"],"fallback_ids":[],"reflect_ok":true,"feedback":null,"tail":"now"}
 {"table":"brain_turns","turn_seq":2,"pack_ms":9,"db_first_ms":0,"ttft_ms":120,"first_audio_ms":300,"mind_stale":true,"picked_ids":["n1"],"fallback_ids":["n2"],"reflect_ok":false,"feedback":"bad","tail":"old"}
-{"table":"brain_log","route":"reflect","model":"grok-4.6","ok":true,"tokens_in":700,"tokens_out":200,"cost_usd":0.002,"step":"reflect:grok-4.6"}
-{"table":"brain_log","route":"dusk","model":"grok-4.3","ok":false,"error":"timeout","tokens_in":200,"tokens_out":0,"cost_usd":0,"step":"dusk:grok-4.3"}
+{"table":"brain_log","route":"reflect","model":"grok-4.6","ok":true,"tokens_in":700,"tokens_cached":500,"tokens_out":200,"cost_usd":0.002,"step":"reflect:grok-4.6","at":1758000000000}
+{"table":"brain_log","route":"dusk","model":"grok-4.3","ok":false,"error":"timeout","tokens_in":200,"tokens_out":0,"tokens_cached":0,"cost_usd":0,"step":"dusk:grok-4.3","at":1758000000000}
 {"table":"mem_history","op":"ADD","row_id":"n1"}
 {"table":"mem_history","op":"SUPERSEDE","row_id":"n0"}

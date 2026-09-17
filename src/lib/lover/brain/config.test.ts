@@ -18,6 +18,7 @@ test("route overrides class, env route beats class", () => {
   const reflect = resolveRoute("reflect");
   assert.equal(reflect.cls, "FAST_THINKER");
   assert.equal(reflect.effort, "low");
+  assert.equal(MODEL_CLASSES.FAST_THINKER.model, "grok-4.3");
 });
 
 test("every route timeout fits in LONG_DRAIN_MS with 10s slack", () => {

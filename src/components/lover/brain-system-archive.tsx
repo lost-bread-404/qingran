@@ -46,11 +46,18 @@ export function BrainSystemArchive() {
   const summary = useMemo(() => {
     const last30 = rows.slice(0, 30);
     return last30.map((r) => {
-      const data = (r.data ?? {}) as { system?: { routes?: Record<string, { n?: number; cost?: number }> } };
+      const data = (r.data ?? {}) as {
+        system?: {
+          routes?: Record<string, { n?: number; cost?: number; tokensIn?: number; tokensCached?: number }>;
+        };
+      };
       const routes = data.system?.routes ?? {};
       const cost = Object.values(routes).reduce((s, x) => s + asNum(x.cost), 0);
       const calls = Object.values(routes).reduce((s, x) => s + asNum(x.n), 0);
-      return { day: r.day, cost, calls };
+      const reflect = routes.reflect ?? {};
+      const hit = asNum(reflect.tokensIn) ? asNum(reflect.tokensCached) / asNum(reflect.tokensIn) : 0;
+      const avg = asNum(reflect.n) ? asNum(reflect.cost) / asNum(reflect.n) : 0;
+      return { day: r.day, cost, calls, reflectHit: hit, reflectAvg: avg, reflectN: asNum(reflect.n) };
     });
   }, [rows]);
 
@@ -126,6 +133,9 @@ export function BrainSystemArchive() {
                 <span>{s.day.slice(5)}</span>
                 <span className="text-subtle">
                   {s.calls} 次 · ${s.cost.toFixed(3)}
+                  {s.reflectN
+                    ? ` · 内心缓存 ${(s.reflectHit * 100).toFixed(0)}% · $${s.reflectAvg.toFixed(4)}/轮`
+                    : ""}
                 </span>
               </li>
             ))}

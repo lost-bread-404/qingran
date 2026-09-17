@@ -1,10 +1,20 @@
 import MiniSearch from "minisearch";
-import { HOT_FALLBACK_K, PICK_MAX } from "../config.ts";
-import { bumpRecall, getMeta, getNote, listIndexNotes, listNotesByIds } from "../store.ts";
+import { HOT_FALLBACK_K, INDEX_CORE_MAX, INDEX_RELATED_MAX, PICK_MAX } from "../config.ts";
+import {
+  bumpRecall,
+  getMeta,
+  getNote,
+  heavyRecentNotes,
+  listIndexNotes,
+  listNotesByIds,
+  patchMeta,
+} from "../store.ts";
 import { tokenizeMemory, formatIndexLine } from "../text.ts";
 import type { IndexItem, Note } from "../types.ts";
 
 export { tokenizeMemory, formatIndexLine };
+
+export const FALLBACK_MIN_SCORE = 0.3;
 
 type Cache = {
   version: number;
@@ -37,7 +47,97 @@ export async function getMemoryIndex(): Promise<{ items: IndexItem[]; mini: Mini
   return { items, mini };
 }
 
-const FALLBACK_MIN_SCORE = 0.3;
+export function noteAsIndex(n: Note, score = 0): IndexItem {
+  return {
+    id: n.id,
+    text: n.text,
+    subject: n.subject,
+    lens: n.lens,
+    weight: n.weight,
+    happenedAt: n.happenedAt,
+    localDay: n.localDay,
+    recallCount: n.recallCount,
+    score,
+  };
+}
+
+/** 核心集合：notesVersion + 本地日期不变时复用 ids，不按实时 recency 重排。 */
+export function resolveCoreIndex(
+  cached: { version: number; day: string; ids: string[] } | null | undefined,
+  notesVersion: number,
+  day: string,
+  scored: IndexItem[],
+): { ids: string[]; refresh: boolean } {
+  if (cached && cached.version === notesVersion && cached.day === day) {
+    return { ids: cached.ids, refresh: false };
+  }
+  return { ids: scored.slice(0, INDEX_CORE_MAX).map((i) => i.id), refresh: true };
+}
+
+export function assembleRelatedIndex(opts: {
+  coreIds: Set<string>;
+  recentHeavy: IndexItem[];
+  searchHits: Array<{ id: string; score: number }>;
+  itemsById: Map<string, IndexItem>;
+  max?: number;
+}): IndexItem[] {
+  const max = opts.max ?? INDEX_RELATED_MAX;
+  const picked: Array<{ item: IndexItem; searchScore: number }> = [];
+  const seen = new Set<string>();
+  for (const item of opts.recentHeavy) {
+    if (opts.coreIds.has(item.id) || seen.has(item.id)) continue;
+    picked.push({ item, searchScore: Number.POSITIVE_INFINITY });
+    seen.add(item.id);
+    if (picked.length >= max) break;
+  }
+  const hits = [...opts.searchHits].sort((a, b) => b.score - a.score);
+  for (const hit of hits) {
+    if (picked.length >= max) break;
+    if (hit.score < FALLBACK_MIN_SCORE) continue;
+    if (opts.coreIds.has(hit.id) || seen.has(hit.id)) continue;
+    const item = opts.itemsById.get(hit.id);
+    if (!item) continue;
+    picked.push({ item, searchScore: hit.score });
+    seen.add(hit.id);
+  }
+  picked.sort((a, b) => b.searchScore - a.searchScore || a.item.id.localeCompare(b.item.id));
+  return picked.map((p) => p.item);
+}
+
+export async function getCoreIndexItems(day: string): Promise<IndexItem[]> {
+  const meta = await getMeta();
+  const cached = resolveCoreIndex(meta.coreIndex, meta.notesVersion, day, []);
+  if (!cached.refresh) {
+    const notes = await listNotesByIds(cached.ids);
+    return notes
+      .filter((n) => n.status === "active")
+      .map((n) => noteAsIndex(n))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+  const scored = await listIndexNotes();
+  const resolved = resolveCoreIndex(meta.coreIndex, meta.notesVersion, day, scored);
+  await patchMeta({ coreIndex: { version: meta.notesVersion, day, ids: resolved.ids } });
+  const byId = new Map(scored.map((i) => [i.id, i]));
+  return resolved.ids
+    .map((id) => byId.get(id))
+    .filter((i): i is IndexItem => Boolean(i))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export async function getRelatedIndexItems(query: string, coreIds: Set<string>): Promise<IndexItem[]> {
+  const { items, mini } = await getMemoryIndex();
+  const recent = await heavyRecentNotes(7, 4);
+  const recentItems = recent.map((n) => noteAsIndex(n)).filter((i) => !coreIds.has(i.id));
+  const hits = query.trim() ? mini.search(query, { boost: { text: 2 } }) : [];
+  const byId = new Map(items.map((i) => [i.id, i]));
+  for (const i of recentItems) byId.set(i.id, i);
+  return assembleRelatedIndex({
+    coreIds,
+    recentHeavy: recentItems,
+    searchHits: hits.map((h) => ({ id: String(h.id), score: Number(h.score) || 0 })),
+    itemsById: byId,
+  });
+}
 
 export async function pickHotNotes(mindIds: string[], query: string): Promise<Note[]> {
   const { items, mini } = await getMemoryIndex();

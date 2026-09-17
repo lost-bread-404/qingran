@@ -77,6 +77,7 @@ export type BrainMeta = {
   lastSynthWeek: string;
   lastReportMonth: string;
   timeZone: string;
+  coreIndex?: { version: number; day: string; ids: string[] };
 };
 
 export const EMPTY_META: BrainMeta = {

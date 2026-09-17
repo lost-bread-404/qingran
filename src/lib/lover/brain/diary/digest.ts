@@ -36,7 +36,7 @@ export type DailyDigestData = {
   };
   system: {
     jobs: Array<{ type: string; status: string; ms: number | null; error: string | null }>;
-    routes: Record<string, { n: number; tokensIn: number; tokensOut: number; cost: number; timeouts: number }>;
+    routes: Record<string, { n: number; tokensIn: number; tokensOut: number; tokensCached: number; cost: number; timeouts: number }>;
     hot: { packP50: number | null; ttftP50: number | null; ttftP95: number | null; staleRate: number; avgMemories: number };
   };
 };
@@ -80,6 +80,13 @@ function md(data: DailyDigestData): string {
   const cost = Object.values(data.system.routes).reduce((s, r) => s + r.cost, 0);
   const calls = Object.values(data.system.routes).reduce((s, r) => s + r.n, 0);
   lines.push(`模型调用 ${calls} 次，估算 $${cost.toFixed(4)}。`);
+  const reflect = data.system.routes.reflect;
+  if (reflect && reflect.n) {
+    const hit = reflect.tokensIn ? reflect.tokensCached / reflect.tokensIn : 0;
+    lines.push(
+      `Reflector 缓存命中 ${(hit * 100).toFixed(0)}%，平均每轮 $${(reflect.cost / reflect.n).toFixed(4)}。`,
+    );
+  }
   if (data.system.hot.ttftP50 != null) lines.push(`TTFT p50 ${data.system.hot.ttftP50}ms / p95 ${data.system.hot.ttftP95}ms。`);
   return lines.join("\n");
 }
@@ -133,11 +140,12 @@ export async function writeDailyDigest(day: string): Promise<void> {
     step: string;
     tokens_in: number | null;
     tokens_out: number | null;
+    tokens_cached: number | null;
     cost_usd: number | null;
     error: string | null;
     ok: boolean;
   }>(
-    `select route, step, tokens_in, tokens_out, cost_usd, error, ok from brain_log
+    `select route, step, tokens_in, tokens_out, tokens_cached, cost_usd, error, ok from brain_log
      where at >= $1 and at < $2`,
     [
       Date.parse(`${day}T00:00:00Z`) - 12 * 3_600_000,
@@ -166,10 +174,11 @@ export async function writeDailyDigest(day: string): Promise<void> {
   const routes: DailyDigestData["system"]["routes"] = {};
   for (const l of logs) {
     const route = l.route || (l.step.split(":")[0] ?? "other");
-    routes[route] ??= { n: 0, tokensIn: 0, tokensOut: 0, cost: 0, timeouts: 0 };
+    routes[route] ??= { n: 0, tokensIn: 0, tokensOut: 0, tokensCached: 0, cost: 0, timeouts: 0 };
     routes[route]!.n += 1;
     routes[route]!.tokensIn += Number(l.tokens_in) || 0;
     routes[route]!.tokensOut += Number(l.tokens_out) || 0;
+    routes[route]!.tokensCached += Number(l.tokens_cached) || 0;
     routes[route]!.cost += Number(l.cost_usd) || 0;
     if (!l.ok && /timeout/i.test(String(l.error ?? ""))) routes[route]!.timeouts += 1;
   }

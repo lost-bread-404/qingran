@@ -14,13 +14,17 @@ import {
   listThemeWeeks,
   saveMind,
 } from "../store.ts";
-import { formatClock } from "../time.ts";
+import { formatClock, localDay } from "../time.ts";
 import { now } from "../clock.ts";
 import { fillReflectTurn } from "../observability.ts";
-import type { Mind } from "../types.ts";
+import type { Finding, IndexItem, Mind, PortraitRow, Theme } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { REFLECTOR_SYSTEM } from "./prompts.ts";
-import { formatIndexLine, getMemoryIndex } from "./retrieve.ts";
+import {
+  formatIndexLine,
+  getCoreIndexItems,
+  getRelatedIndexItems,
+} from "./retrieve.ts";
 
 const MIND_SCHEMA = {
   name: "mind",
@@ -69,19 +73,107 @@ const MIND_SCHEMA = {
 
 export { validateMind } from "../mind-parse.ts";
 
+export type ReflectorParts = {
+  charter: string;
+  selfSummary: string;
+  bondSummary: string;
+  portrait: PortraitRow[];
+  themes: Array<Theme & { weekHint?: string }>;
+  findings: Array<{ id: string; line: string }>;
+  coreIndex: IndexItem[];
+  clock: string;
+  relatedIndex: IndexItem[];
+  oldMind: Mind;
+  conversation: string;
+};
+
+export type ReflectorPacked = { system: string; stable: string; turn: string };
+
+function findingLine(
+  f: Finding,
+  nameOf: (id: string) => string,
+): string {
+  return f.kind === "recovery"
+    ? `- 「${nameOf(f.outcomeId)}」期间出现「${nameOf(f.antecedentId)}」后，常在 1–2 天内好转（${f.n11} 次）`
+    : `- 「${nameOf(f.antecedentId)}」之后${f.lag ? ` ${f.lag} 天内` : "当天"}常出现「${nameOf(f.outcomeId)}」（${f.n11} 次，是平时的 ${f.lift.toFixed(1)} 倍）`;
+}
+
+/** A = system（几乎不变），B = 第一段 user（日/记忆库变），C = 第二段 user（每轮变）。 */
+export function buildReflectorInput(parts: ReflectorParts): ReflectorPacked {
+  const portrait = parts.portrait
+    .filter((p) => p.status === "active")
+    .slice()
+    .sort((a, b) => a.topic.localeCompare(b.topic) || a.id.localeCompare(b.id));
+  const themes = parts.themes.slice().sort((a, b) => a.id.localeCompare(b.id));
+  const findings = parts.findings.slice().sort((a, b) => a.id.localeCompare(b.id));
+  const core = parts.coreIndex.slice().sort((a, b) => a.id.localeCompare(b.id));
+
+  const system = `${REFLECTOR_SYSTEM}
+
+【人设】
+${parts.charter}`;
+
+  let stable = `【我自己】
+${parts.selfSummary || "（还没有）"}
+
+【我们】
+${parts.bondSummary || "（还没有）"}
+
+【我眼中的她】
+${portrait.map((p) => `${p.topic}：${p.body}`).join("\n") || "（还在认识她）"}
+`;
+  if (themes.length) {
+    stable +=
+      "\n【她的长期规律·主题】\n" +
+      themes.map((t) => `- ${t.name}：${t.definition}（${t.weekHint ?? "尚无周统计"}）`).join("\n") +
+      "\n";
+  }
+  if (findings.length) {
+    stable += "\n【她的长期规律·发现】\n" + findings.map((f) => f.line).join("\n") + "\n";
+  }
+  stable += `\n【记忆 index · 核心】
+${core.map(formatIndexLine).join("\n") || "（还没有）"}`;
+
+  const turn = `现在是${parts.clock}。
+
+【记忆 index · 相关】
+${parts.relatedIndex.map(formatIndexLine).join("\n") || "（还没有）"}
+
+【上一刻的内心】
+${JSON.stringify(parts.oldMind, (k, v) => (k === "turn_seq" || k === "updated_at" ? undefined : v))}
+
+【最近对话】
+${parts.conversation || "（还没有）"}
+
+请按 schema 输出内心。不要输出 recent_intents 和 turn_seq。从【记忆 index · 核心】和【记忆 index · 相关】中挑选 memory_ids，最多 6 个。`;
+
+  return { system, stable, turn };
+}
+
 export async function runReflector(turnSeq: number, jobId?: string): Promise<Mind | null> {
   const old = await getMind();
   if (old.turn_seq >= turnSeq) return old;
 
-  const [meta, history, portrait, index, systemPrompt] = await Promise.all([
+  const [meta, history, portrait, systemPrompt] = await Promise.all([
     getMeta(),
     listHistoryWindow(null, REFLECT_WINDOW),
     listPortrait(),
-    getMemoryIndex(),
     getProfilePrompt(),
   ]);
 
-  let diaryBlock = "";
+  const tz = meta.timeZone || "UTC";
+  const day = localDay(now(), tz);
+  const coreIndex = await getCoreIndexItems(day);
+  const coreIds = new Set(coreIndex.map((i) => i.id));
+  const rosieLast = history
+    .filter((m) => m.role === "user")
+    .slice(-4)
+    .map((m) => m.text);
+  const query = [...rosieLast, ...(old.threads ?? []), ...(old.lead_plan ?? [])].filter(Boolean).join("\n");
+  const relatedIndex = await getRelatedIndexItems(query, coreIds);
+
+  const themesPacked: ReflectorParts["themes"] = [];
+  const findingsPacked: ReflectorParts["findings"] = [];
   if (QR_VOICE_READS_DIARY) {
     const [themes, findings, weeks, factors] = await Promise.all([
       listThemes(true),
@@ -91,77 +183,50 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     ]);
     const factorName = new Map(factors.map((f) => [f.id, f.name]));
     const nameOf = (id: string) => factorName.get(id) ?? id;
-    const usableThemes = themes.filter((t) => t.userFeedback !== "rejected").slice(0, 8);
     const weekMap = new Map<string, string>();
-    for (const w of weeks.sort((a, b) => b.week.localeCompare(a.week))) {
+    for (const w of weeks.slice().sort((a, b) => b.week.localeCompare(a.week))) {
       if (!weekMap.has(w.themeId)) {
         weekMap.set(w.themeId, `${w.week} 提到 ${w.mentions} 次`);
       }
     }
-    if (usableThemes.length) {
-      diaryBlock +=
-        "【她的长期规律·主题】\n" +
-        usableThemes
-          .map((t) => `- ${t.name}：${t.definition}（${weekMap.get(t.id) ?? "尚无周统计"}）`)
-          .join("\n") +
-        "\n";
+    for (const t of themes
+      .filter((x) => x.userFeedback !== "rejected")
+      .slice()
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .slice(0, 8)) {
+      themesPacked.push({ ...t, weekHint: weekMap.get(t.id) });
     }
-    const usableFindings = findings
-      .filter((f) => f.userFeedback !== "rejected" && f.kind !== "cooccur" && f.tier === "finding")
-      .slice(0, 5);
-    if (usableFindings.length) {
-      diaryBlock +=
-        "【她的长期规律·发现】\n" +
-        usableFindings
-          .map((f) =>
-            f.kind === "recovery"
-              ? `- 「${nameOf(f.outcomeId)}」期间出现「${nameOf(f.antecedentId)}」后，常在 1–2 天内好转（${f.n11} 次）`
-              : `- 「${nameOf(f.antecedentId)}」之后${f.lag ? ` ${f.lag} 天内` : "当天"}常出现「${nameOf(f.outcomeId)}」（${f.n11} 次，是平时的 ${f.lift.toFixed(1)} 倍）`,
-          )
-          .join("\n") +
-        "\n";
+    for (const f of findings
+      .filter((x) => x.userFeedback !== "rejected" && x.kind !== "cooccur" && x.tier === "finding")
+      .slice()
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .slice(0, 5)) {
+      findingsPacked.push({ id: f.id, line: findingLine(f, nameOf) });
     }
   }
 
-  const portraitText = portrait
-    .filter((p) => p.status === "active")
-    .map((p) => `${p.topic}：${p.body}`)
-    .join("\n");
-  const indexText = index.items.map(formatIndexLine).join("\n");
-  const tz = meta.timeZone || "UTC";
   const convo = history
     .map((m) => `[${formatClock(m.createdAt, tz)}] ${m.role === "user" ? "Rosie" : "清然"}：${m.text}`)
     .join("\n");
 
-  const user = `【人设】
-${systemPrompt}
-
-现在是${formatClock(now(), tz)}。
-
-【我自己】
-${meta.selfSummary || "（还没有）"}
-
-【我们】
-${meta.bondSummary || "（还没有）"}
-
-【我眼中的她】
-${portraitText || "（还在认识她）"}
-
-${diaryBlock}
-【上一刻的内心】
-${JSON.stringify({ ...old, recent_intents: old.recent_intents, turn_seq: undefined })}
-
-【最近对话】
-${convo || "（还没有）"}
-
-【记忆 index】
-${indexText || "（还没有）"}
-
-请按 schema 输出内心。不要输出 recent_intents 和 turn_seq。`;
+  const packed = buildReflectorInput({
+    charter: systemPrompt,
+    selfSummary: meta.selfSummary,
+    bondSummary: meta.bondSummary,
+    portrait,
+    themes: themesPacked,
+    findings: findingsPacked,
+    coreIndex,
+    clock: formatClock(now(), tz),
+    relatedIndex,
+    oldMind: old,
+    conversation: convo,
+  });
 
   const result = await callModel("reflect", {
-    system: REFLECTOR_SYSTEM,
-    input: user,
+    system: packed.system,
+    input: packed.stable,
+    inputParts: [packed.stable, packed.turn],
     schema: MIND_SCHEMA,
     jobId,
   });
@@ -177,7 +242,8 @@ ${indexText || "（还没有）"}
     await fillReflectTurn(turnSeq, false, result.ms, "timeout-or-parse");
     return null;
   }
-  const next = validateMind(result.json, old, new Set(index.items.map((i) => i.id)));
+  const allowed = new Set([...coreIndex, ...relatedIndex].map((i) => i.id));
+  const next = validateMind(result.json, old, allowed);
   next.turn_seq = turnSeq;
   const saved = await saveMind(next, turnSeq, { model: result.model, ms: result.ms });
   await fillReflectTurn(turnSeq, saved, result.ms, saved ? null : "stale");
