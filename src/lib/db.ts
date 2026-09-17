@@ -1,4 +1,7 @@
-import { pendingMigrations } from "../../scripts/migration-plan.mjs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { isMigrationFile, pendingMigrations } from "../../scripts/migration-plan.mjs";
 
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
@@ -138,11 +141,7 @@ async function createPgliteSql(): Promise<Sql> {
   // passes serialized on a global chain so concurrent callers never
   // double-apply.
   const migrate = async (): Promise<void> => {
-    const migrations = import.meta.glob("/migrations/*.sql", {
-      query: "?raw",
-      import: "default",
-      eager: true,
-    }) as Record<string, string>;
+    const migrations = loadMigrationFiles();
     const doneRows = await pg.query<{ name: string }>(
       "select name from _migrations",
     );
@@ -151,7 +150,7 @@ async function createPgliteSql(): Promise<Sql> {
       // Apply + record atomically (parity with scripts/migrate.mjs) so a failed
       // statement can't leave a file half-applied but untracked.
       await pg.transaction(async (tx) => {
-        await tx.exec(migrations[path]);
+        await tx.exec(migrations[path] ?? migrations[name] ?? "");
         await tx.query("insert into _migrations (name) values ($1)", [name]);
       });
     }
@@ -166,6 +165,39 @@ async function createPgliteSql(): Promise<Sql> {
     const result = await pg.query<T>(text, params);
     return result.rows;
   });
+}
+
+function loadMigrationFiles(): Record<string, string> {
+  const globFn = (import.meta as ImportMeta & { glob?: unknown }).glob;
+  if (typeof globFn === "function") {
+    try {
+      const bundled = (
+        globFn as (
+          pattern: string,
+          opts: { query: string; import: string; eager: boolean },
+        ) => Record<string, string>
+      )("/migrations/*.sql", {
+        query: "?raw",
+        import: "default",
+        eager: true,
+      });
+      if (bundled && Object.keys(bundled).length) return bundled;
+    } catch {
+      /* Node 22: import.meta.glob is not a function */
+    }
+  }
+  try {
+    const dir = join(dirname(fileURLToPath(import.meta.url)), "../../migrations");
+    if (!existsSync(dir)) return {};
+    const out: Record<string, string> = {};
+    for (const name of readdirSync(dir)) {
+      if (!isMigrationFile(name)) continue;
+      out[name] = readFileSync(join(dir, name), "utf8");
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 let sqlPromise: Promise<Sql> | null = null;

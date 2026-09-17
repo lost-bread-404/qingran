@@ -88,10 +88,23 @@ export async function writeNarrative(data: unknown, jobId?: string): Promise<str
 
 export async function runReport(month: string, jobId?: string): Promise<void> {
   if (!/^\d{4}-\d{2}$/.test(month)) return;
+  const { start, end } = monthRange(month);
+  const days = await listDays(start, end);
+  if (!days.some((d) => d.coverage !== "none")) {
+    await upsertReport({
+      id: month,
+      periodStart: start,
+      periodEnd: end,
+      data: { month, empty: true, okDays: 0 },
+      narrative: "本月没有数据。",
+      createdAt: now(),
+    });
+    await patchMeta({ lastReportMonth: month });
+    return;
+  }
   const data = await buildReportData(month);
   await proposeExperiments(data, jobId);
   const narrative = await writeNarrative(data, jobId);
-  const { start, end } = monthRange(month);
   await upsertReport({
     id: month,
     periodStart: start,

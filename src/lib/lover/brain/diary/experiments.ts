@@ -3,7 +3,7 @@ import { now as wallClock } from "../clock.ts";
 import { listDayFactors, listExperiments, listFactors, upsertExperiment } from "../store.ts";
 import { daysInclusive, shiftDay } from "../time.ts";
 import type { Experiment } from "../types.ts";
-import { newId } from "@/lib/lover/storage";
+import { newId } from "../../storage.ts";
 
 const SCHEMA = {
   name: "experiments",

@@ -92,3 +92,32 @@ test("care checkin line is opt-in", () => {
   assert.doesNotMatch(off, /今天过得怎么样/);
   assert.match(on, /今天过得怎么样/);
 });
+
+test("stale mind omits intent and rosie_now and explains the gap", () => {
+  const mind = {
+    ...EMPTY_MIND,
+    turn_seq: 4,
+    updated_at: Date.UTC(2026, 8, 15, 14, 0, 0),
+    rosie_now: "她刚说：嘴里长溃疡了好疼",
+    undercurrent: "她其实是怕自己不够好",
+    my_view: "熬夜换不来安全感",
+    lead_plan: ["今晚让她 1 点前睡"],
+    intent: "温柔但坚定地让她放下手机",
+    threads: ["周五 Citadel 面试"],
+  };
+  const tail = buildTail({
+    clock: "星期三 19:00",
+    mind,
+    notes: [],
+    timeZone: "UTC",
+    careHint: false,
+    nowMs: Date.UTC(2026, 8, 16, 19, 0, 0),
+  });
+  assert.doesNotMatch(tail, /她刚说：嘴里长溃疡了好疼/);
+  assert.doesNotMatch(tail, /温柔但坚定地让她放下手机/);
+  assert.doesNotMatch(tail, /你此刻的内心/);
+  assert.match(tail, /你上次的内心/);
+  assert.match(tail, /小时前的想法|天前的想法/);
+  assert.match(tail, /先重新感受她现在的状态/);
+  assert.match(tail, /今晚让她 1 点前睡/);
+});

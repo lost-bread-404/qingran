@@ -16,6 +16,7 @@ import {
 } from "../store.ts";
 import { formatClock } from "../time.ts";
 import { now } from "../clock.ts";
+import { fillReflectTurn } from "../observability.ts";
 import type { Mind } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { REFLECTOR_SYSTEM } from "./prompts.ts";
@@ -170,12 +171,16 @@ ${indexText || "（还没有）"}
       step: "reflect:keep-old",
       ok: false,
       note: "timeout-or-parse",
+      route: "reflect",
+      error: "timeout-or-parse",
     });
+    await fillReflectTurn(turnSeq, false, result.ms, "timeout-or-parse");
     return null;
   }
   const next = validateMind(result.json, old, new Set(index.items.map((i) => i.id)));
   next.turn_seq = turnSeq;
-  const saved = await saveMind(next, turnSeq);
+  const saved = await saveMind(next, turnSeq, { model: result.model, ms: result.ms });
+  await fillReflectTurn(turnSeq, saved, result.ms, saved ? null : "stale");
   return saved ? next : old;
 }
 

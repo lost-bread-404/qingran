@@ -7,6 +7,7 @@ import {
 } from "./config.ts";
 import { appendBrainLog } from "./store.ts";
 import { extractJson } from "./text.ts";
+import { estimateCostUsd, parseUsage } from "./usage.ts";
 
 export { extractJson };
 
@@ -46,6 +47,13 @@ export type CallModelResult = {
   model: string;
   effort: Effort;
   ms: number;
+  usage?: {
+    tokensIn: number | null;
+    tokensCached: number | null;
+    tokensOut: number | null;
+    tokensReasoning: number | null;
+    costUsd: number | null;
+  };
 };
 
 function outputText(raw: unknown): string {
@@ -144,6 +152,12 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       inputChars: input.system.length + input.input.length,
       raw: "",
       note: "no-key",
+      route,
+      model: resolved.model,
+      effort: resolved.effort == null ? null : String(resolved.effort),
+      inputSystem: input.system,
+      inputUser: input.input,
+      error: "no-key",
     });
     return result;
   }
@@ -185,10 +199,9 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     const toolCalls = outputToolCalls(raw);
     const json = parseJsonLoose(text);
     const ms = Date.now() - started;
-    const usage = (raw && typeof raw === "object" ? (raw as { usage?: Record<string, unknown> }).usage : null) ?? {};
-    const detailsIn = (usage.input_tokens_details as Record<string, unknown> | undefined) ?? {};
-    const detailsOut = (usage.output_tokens_details as Record<string, unknown> | undefined) ?? {};
-    const note = `model=${resolved.model} effort=${String(resolved.effort)} in=${usage.input_tokens ?? "?"} cached=${detailsIn.cached_tokens ?? usage.cached_tokens ?? "?"} out=${usage.output_tokens ?? "?"} reason=${detailsOut.reasoning_tokens ?? usage.reasoning_tokens ?? "?"}`;
+    const usageRaw = (raw && typeof raw === "object" ? (raw as { usage?: unknown }).usage : null) ?? null;
+    const usage = parseUsage(usageRaw);
+    const costUsd = estimateCostUsd(resolved.model, usage);
     await appendBrainLog({
       jobId: input.jobId,
       step: `${route}:${resolved.model}`,
@@ -196,7 +209,19 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       ms,
       inputChars: input.system.length + input.input.length,
       raw: text.slice(0, 4000),
-      note,
+      note: res.ok ? null : `http ${res.status}`,
+      route,
+      model: resolved.model,
+      effort: resolved.effort == null ? null : String(resolved.effort),
+      inputSystem: input.system,
+      inputUser: input.input,
+      outputText: text,
+      tokensIn: usage.tokensIn,
+      tokensCached: usage.tokensCached,
+      tokensOut: usage.tokensOut,
+      tokensReasoning: usage.tokensReasoning,
+      costUsd,
+      error: res.ok ? null : `http ${res.status}`,
     });
     if (!res.ok) return { ...fail("http"), ms, raw };
     return {
@@ -208,6 +233,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       model: resolved.model,
       effort: resolved.effort,
       ms,
+      usage: { ...usage, costUsd },
     };
   } catch (err) {
     const ms = Date.now() - started;
@@ -220,6 +246,12 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       inputChars: input.system.length + input.input.length,
       raw: "",
       note: timedOut ? "timeout" : "error",
+      route,
+      model: resolved.model,
+      effort: resolved.effort == null ? null : String(resolved.effort),
+      inputSystem: input.system,
+      inputUser: input.input,
+      error: timedOut ? "timeout" : "error",
     });
     return { ...fail(timedOut ? "timeout" : "error"), ms };
   }

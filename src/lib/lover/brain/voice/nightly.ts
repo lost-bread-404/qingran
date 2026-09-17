@@ -10,7 +10,7 @@ import {
   upsertPortrait,
 } from "../store.ts";
 import { clipChars } from "../time.ts";
-import { newId } from "@/lib/lover/storage";
+import { newId } from "../../storage.ts";
 import { QINGRAN_STANCE } from "./prompts.ts";
 
 const SCHEMA = {

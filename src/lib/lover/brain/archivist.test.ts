@@ -97,6 +97,34 @@ test("similar ADD becomes SUPERSEDE", () => {
   assert.equal(out[0]!.supersede, "old");
 });
 
+test("SUPERSEDE unions source_ids and keeps a link to the old note", () => {
+  const batch = [msg({ id: "u2", role: "user", text: "论文还是没动", createdAt: 200, localDay: "2026-09-16" })];
+  const existing = note({
+    id: "old",
+    text: "Rosie 晚上想写论文但一直开始不了，说打开电脑就想躺",
+    sourceIds: ["u1"],
+    localDay: "2026-09-14",
+  });
+  const out = validateOps(
+    [
+      {
+        op: "ADD",
+        text: "Rosie 晚上想写论文但一直开始不了，说打开电脑就想躺",
+        subject: "rosie",
+        lens: ["diary"],
+        from_rosie: true,
+        source_ids: ["u2"],
+      },
+    ],
+    batch,
+    [existing],
+  );
+  assert.equal(out[0]!.supersede, "old");
+  assert.ok(out[0]!.note.sourceIds.includes("u1"));
+  assert.ok(out[0]!.note.sourceIds.includes("u2"));
+  assert.ok(out[0]!.note.links.includes("old"));
+});
+
 test("empty lens or source outside batch is dropped", () => {
   const batch = [msg({ id: "u1", role: "user", text: "hi" })];
   const out = validateOps(

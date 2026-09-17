@@ -156,22 +156,36 @@ export async function bumpNotesVersion(): Promise<number> {
 
 export async function getMind(): Promise<Mind> {
   const db = await getSql();
-  const rows = await db.query<{ data: unknown; turn_seq: unknown }>(
-    "select data, turn_seq from qr_mind where id = 1",
+  const rows = await db.query<{ data: unknown; turn_seq: unknown; updated_at: unknown }>(
+    "select data, turn_seq, updated_at from qr_mind where id = 1",
   );
   const data = asJson<Partial<Mind>>(rows[0]?.data, {});
-  return { ...EMPTY_MIND, ...data, turn_seq: asInt(rows[0]?.turn_seq, data.turn_seq ?? 0) };
+  return {
+    ...EMPTY_MIND,
+    ...data,
+    turn_seq: asInt(rows[0]?.turn_seq, data.turn_seq ?? 0),
+    updated_at: asInt(rows[0]?.updated_at, 0) || undefined,
+  };
 }
 
-export async function saveMind(mind: Mind, expectedTurn: number): Promise<boolean> {
+export async function saveMind(mind: Mind, expectedTurn: number, meta?: { model?: string; ms?: number }): Promise<boolean> {
   const db = await getSql();
+  const ts = now();
   const rows = await db.query<{ id: number }>(
     `update qr_mind
      set data = $1::jsonb, turn_seq = $2, updated_at = $3
      where id = 1 and turn_seq < $2
      returning id`,
-    [JSON.stringify(mind), expectedTurn, now()],
+    [JSON.stringify(mind), expectedTurn, ts],
   );
+  if (rows.length > 0) {
+    try {
+      const { appendMindHistory } = await import("./observability.ts");
+      await appendMindHistory(expectedTurn, mind, meta?.model, meta?.ms);
+    } catch {
+      /* ignore */
+    }
+  }
   return rows.length > 0;
 }
 
@@ -523,6 +537,7 @@ export async function listNotes(filter: {
   fromDay?: string;
   toDay?: string;
   status?: NoteStatus;
+  statuses?: NoteStatus[];
   lens?: Lens;
   fromRosie?: boolean;
   limit?: number;
@@ -535,6 +550,10 @@ export async function listNotes(filter: {
     where.push(clause.replace("?", `$${params.length}`));
   };
   if (filter.status) add("status = ?", filter.status);
+  else if (filter.statuses?.length) {
+    params.push(pgTextArray(filter.statuses));
+    where.push(`status = any($${params.length}::text[])`);
+  }
   else {
     add("status <> ?", "archived");
     add("status <> ?", "pending");
@@ -565,12 +584,22 @@ export async function listNotes(filter: {
 export async function notesForDay(day: string, diaryFromRosie = false): Promise<Note[]> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
-    `select * from mem_notes where local_day = $1 and status = 'active' order by happened_at asc`,
+    `select * from mem_notes
+     where local_day = $1 and status in ('active','superseded')
+     order by happened_at asc`,
     [day],
   );
   const notes = rows.map(rowNote);
   if (!diaryFromRosie) return notes;
   return notes.filter((n) => n.fromRosie && n.lens.includes("diary"));
+}
+
+export async function firstMessageLocalDay(): Promise<string | null> {
+  const db = await getSql();
+  const rows = await db.query<{ d: string | null }>(
+    `select min(local_day) as d from qingran_messages where local_day is not null and local_day <> ''`,
+  );
+  return rows[0]?.d ? String(rows[0].d) : null;
 }
 
 export async function heavyRecentNotes(days: number, minWeight: number): Promise<Note[]> {
@@ -942,7 +971,7 @@ export async function notesWithoutTheme(limit: number): Promise<Note[]> {
   const cutoffDay = shiftDay(localDay(now(), "UTC"), -60);
   const rows = await db.query<Record<string, unknown>>(
     `select n.* from mem_notes n
-     where n.status = 'active' and n.from_rosie = true and 'diary' = any(n.lens)
+     where n.status in ('active','superseded') and n.from_rosie = true and 'diary' = any(n.lens)
        and n.local_day >= $1
        and not exists (select 1 from diary_theme_members m where m.note_id = n.id)
      order by n.happened_at desc limit $2`,
@@ -1308,13 +1337,60 @@ export async function cleanupOldJobs(now: number): Promise<void> {
 }
 
 export async function appendBrainLog(row: {
-  jobId?: string | null; step: string; ok: boolean; ms?: number | null; inputChars?: number | null; raw?: string | null; note?: string | null;
+  jobId?: string | null;
+  step: string;
+  ok: boolean;
+  ms?: number | null;
+  inputChars?: number | null;
+  raw?: string | null;
+  note?: string | null;
+  route?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  turnSeq?: number | null;
+  inputSystem?: string | null;
+  inputUser?: string | null;
+  outputText?: string | null;
+  tokensIn?: number | null;
+  tokensCached?: number | null;
+  tokensOut?: number | null;
+  tokensReasoning?: number | null;
+  costUsd?: number | null;
+  error?: string | null;
 }): Promise<void> {
   try {
     const db = await getSql();
     await db.query(
-      `insert into brain_log (job_id, step, ok, ms, input_chars, raw, note, at) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [row.jobId ?? null, row.step, row.ok, row.ms ?? null, row.inputChars ?? null, (row.raw ?? "").slice(0, 4000), row.note ?? null, now()],
+      `insert into brain_log (
+         job_id, step, ok, ms, input_chars, raw, note, at,
+         route, model, effort, turn_seq, input_system, input_user, output_text,
+         tokens_in, tokens_cached, tokens_out, tokens_reasoning, cost_usd, error, trimmed
+       ) values (
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,false
+       )`,
+      [
+        row.jobId ?? null,
+        row.step,
+        row.ok,
+        row.ms ?? null,
+        row.inputChars ?? null,
+        (row.raw ?? "").slice(0, 4000),
+        row.note ?? null,
+        now(),
+        row.route ?? null,
+        row.model ?? null,
+        row.effort ?? null,
+        row.turnSeq ?? null,
+        row.inputSystem ?? null,
+        row.inputUser ?? null,
+        row.outputText ?? null,
+        row.tokensIn ?? null,
+        row.tokensCached ?? null,
+        row.tokensOut ?? null,
+        row.tokensReasoning ?? null,
+        row.costUsd ?? null,
+        row.error ?? null,
+      ],
     );
   } catch {
     /* logging must never break talk */
@@ -1334,6 +1410,17 @@ export async function listBrainLog(limit = 50): Promise<BrainLogRow[]> {
     raw: r.raw ? String(r.raw) : null,
     note: r.note ? String(r.note) : null,
     at: asInt(r.at),
+    route: r.route ? String(r.route) : null,
+    model: r.model ? String(r.model) : null,
+    effort: r.effort ? String(r.effort) : null,
+    turnSeq: asIntOrNull(r.turn_seq),
+    tokensIn: asIntOrNull(r.tokens_in),
+    tokensCached: asIntOrNull(r.tokens_cached),
+    tokensOut: asIntOrNull(r.tokens_out),
+    tokensReasoning: asIntOrNull(r.tokens_reasoning),
+    costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
+    error: r.error ? String(r.error) : null,
+    trimmed: asBool(r.trimmed),
   }));
 }
 

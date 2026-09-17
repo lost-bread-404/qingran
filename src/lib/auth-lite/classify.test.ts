@@ -18,6 +18,8 @@ test("whitelist: login, cron, static assets", () => {
   assert.equal(isPublicPath("GET", "/__grok/install/styles.css"), true);
   assert.equal(isPublicPath("GET", "/og.jpg"), true);
   assert.equal(isPublicPath("GET", "/icons/foo.png"), true);
+  assert.equal(isPublicPath("GET", "/__grok/secret"), false);
+  assert.equal(isPublicPath("GET", "/__grok/anything.js"), false);
 });
 
 test("protected paths are not public", () => {

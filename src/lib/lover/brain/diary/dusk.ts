@@ -2,6 +2,7 @@ import { enqueue } from "../jobs.ts";
 import { now } from "../clock.ts";
 import { callModel } from "../llm.ts";
 import {
+  firstMessageLocalDay,
   getMeta,
   listFactors,
   messagesOnDay,
@@ -10,14 +11,15 @@ import {
   patchMeta,
   upsertDay,
   upsertDayFactor,
-  upsertIntention,
 } from "../store.ts";
-import { afterBoundary, localDay, overnightValue, shiftDay, yesterday } from "../time.ts";
-import type { DayLog, Intention } from "../types.ts";
+import { afterBoundary, localDay, overnightValue, previousIsoWeek, previousMonth, shiftDay, yesterday } from "../time.ts";
+import type { DayLog } from "../types.ts";
 import { archiveDaySync } from "../archivist.ts";
 import { updatePortraitSelfBond } from "../voice/nightly.ts";
 import { DUSK_DAY_SYSTEM } from "./prompts.ts";
-import { newId } from "@/lib/lover/storage";
+import { applyIntentionOps, type IntentionOp } from "./intentions.ts";
+import { recomputeStats } from "./recompute.ts";
+import { writeDailyDigest } from "./digest.ts";
 
 const DAY_SCHEMA = {
   name: "day_log",
@@ -133,6 +135,39 @@ function ternary(v: unknown): -1 | 0 | 1 | null {
   return null;
 }
 
+async function writeEmptyDay(day: string, notes: { id: string }[]): Promise<void> {
+  const ts = now();
+  const log: DayLog = {
+    day,
+    summary: "",
+    energy: null,
+    mood: null,
+    body: null,
+    did: [],
+    avoided: [],
+    events: [],
+    wins: [],
+    firstActive: null,
+    lastActive: null,
+    msgCount: 0,
+    coverage: "none",
+    noteIds: notes.map((n) => n.id),
+    version: 1,
+    updatedAt: ts,
+  };
+  await upsertDay(log);
+  const factors = await listFactors(true);
+  for (const f of factors) {
+    await upsertDayFactor({
+      day,
+      factorId: f.id,
+      version: f.version,
+      value: null,
+      evidenceIds: [],
+    });
+  }
+}
+
 export async function runDusk(
   day: string,
   jobId?: string,
@@ -143,6 +178,17 @@ export async function runDusk(
 
   const messages = await messagesOnDay(day);
   const notes = await notesForDay(day, true);
+  const empty = messages.length === 0 && notes.length === 0;
+
+  if (empty && !opts.manual) {
+    await writeEmptyDay(day, notes);
+    await recomputeStats();
+    await writeDailyDigest(day);
+    const meta = await getMeta();
+    if (!meta.lastDuskDay || meta.lastDuskDay < day) await patchMeta({ lastDuskDay: day });
+    return;
+  }
+
   const first = messages[0]?.createdAt ?? null;
   const last = messages[messages.length - 1]?.createdAt ?? null;
   const cover = coverageOf(messages.length, notes.length);
@@ -195,56 +241,19 @@ ${intentions.map((i) => `${i.id}|${i.status}|${i.tag ?? ""}|${i.text}`).join("\n
   };
   await upsertDay(log);
 
-  const known = new Map(intentions.map((i) => [i.id, i]));
   const ops = Array.isArray(parsed.intention_ops)
-    ? (parsed.intention_ops as Array<Record<string, unknown>>)
+    ? (parsed.intention_ops as IntentionOp[])
     : [];
-  for (const op of ops) {
-    const kind = String(op.op ?? "");
-    const evidence = Array.isArray(op.evidence_ids) ? op.evidence_ids.map(String) : [];
-    if (kind === "ADD") {
-      const text = String(op.text ?? "").trim();
-      if (!text) continue;
-      const row: Intention = {
-        id: newId(),
-        text,
-        tag: String(op.tag ?? "") || null,
-        statedAt: ts,
-        targetDay: String(op.target_day ?? "") || null,
-        status: "open",
-        startedAt: null,
-        doneAt: null,
-        lastEvidenceAt: ts,
-        evidenceIds: evidence,
-        updatedAt: ts,
-      };
-      await upsertIntention(row);
-      continue;
-    }
-    const id = String(op.id ?? "");
-    const cur = known.get(id);
-    if (!cur) continue;
-    const next = { ...cur, evidenceIds: [...cur.evidenceIds, ...evidence], lastEvidenceAt: ts, updatedAt: ts };
-    if (kind === "START") {
-      next.status = "started";
-      next.startedAt = next.startedAt ?? ts;
-    } else if (kind === "DONE") {
-      next.status = "done";
-      next.doneAt = ts;
-      if (!next.startedAt) next.startedAt = ts;
-    } else if (kind === "DROP") {
-      next.status = "dropped";
-    }
-    await upsertIntention(next);
-  }
+  await applyIntentionOps(day, ops, ts);
 
   const factors = await listFactors(true);
   const factorResult = await callModel("dusk", {
     system: DUSK_DAY_SYSTEM,
-    input: `根据这一天的 day log 和笔记，判定每个 factor 的 value：1、0 或 null（未知）。不要猜。
+    input: `日期 ${day}
+根据这一天的 day log 和笔记，判定每个 factor 的 value：1、0 或 null（未知）。不要猜。
 
 【day log】
-${JSON.stringify({ summary: log.summary, energy: log.energy, mood: log.mood, body: log.body, did: log.did, avoided: log.avoided, events: log.events, wins: log.wins })}
+${JSON.stringify({ day, summary: log.summary, energy: log.energy, mood: log.mood, body: log.body, did: log.did, avoided: log.avoided, events: log.events, wins: log.wins })}
 
 【笔记】
 ${notes.map((n) => n.text).join("\n")}
@@ -280,6 +289,8 @@ ${factors.map((f) => `${f.id}|${f.name}|${f.definition}`).join("\n")}`,
   }
 
   await updatePortraitSelfBond(day, jobId);
+  await recomputeStats();
+  await writeDailyDigest(day);
   // 手动整理（通常是还没结束的今天）不推进 lastDuskDay，这一天结束后自动 dusk 仍会完整重跑
   if (!opts.manual) {
     const meta = await getMeta();
@@ -292,23 +303,27 @@ export async function enqueuePeriodicIfDue(nowMs: number, timeZone: string): Pro
   if (meta.timeZone !== timeZone) await patchMeta({ timeZone });
   if (!afterBoundary(nowMs, timeZone)) return;
 
+  const first = await firstMessageLocalDay();
+  if (!first) return;
+
   const yest = yesterday(nowMs, timeZone);
-  let last = meta.lastDuskDay || shiftDay(yest, -14);
+  const today = localDay(nowMs, timeZone);
+  const floor = shiftDay(today, -14);
+  const earliest = first > floor ? first : floor;
+  let last = meta.lastDuskDay && meta.lastDuskDay >= earliest ? meta.lastDuskDay : shiftDay(earliest, -1);
   let guard = 0;
   while (last < yest && guard < 14) {
     last = shiftDay(last, 1);
+    if (last < earliest) continue;
     await enqueue("dusk", `dusk:${last}`, { day: last });
     guard += 1;
   }
 
-  const { previousIsoWeek, previousMonth } = await import("../time");
-  // 周分析处理的是刚结束的上一周
   const week = previousIsoWeek(nowMs, timeZone);
   if (meta.lastSynthWeek < week) {
     await enqueue("synth", `synth:${week}`, { week });
   }
   const month = previousMonth(nowMs, timeZone);
-  const today = localDay(nowMs, timeZone);
   if (today.slice(8) >= "01" && meta.lastReportMonth < month) {
     await enqueue("report", `report:${month}`, { month });
   }

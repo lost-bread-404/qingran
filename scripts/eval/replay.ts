@@ -182,7 +182,11 @@ export async function replayFile(
 
 export type ScenarioTurnFile = ScenarioTurn;
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === `file://${process.argv[1]}` || process.argv.includes("--help")) {
+  if (process.argv.includes("--help") || process.argv[2] === "--help") {
+    console.log("usage: replay.ts <scenario.jsonl>");
+    process.exit(0);
+  }
   const rel = process.argv[2];
   if (!rel) {
     console.error("usage: replay.ts <scenario.jsonl>");

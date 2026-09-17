@@ -3,6 +3,7 @@ export type AuthDecision = "next" | "redirect" | "unauthorized";
 const PUBLIC_EXACT = new Set([
   "/__grok/manifest.webmanifest",
   "/__grok/manifest.json",
+  "/__grok/icon-180.png",
   "/og.jpg",
   "/x-banner.jpg",
 ]);
@@ -10,7 +11,7 @@ const PUBLIC_EXACT = new Set([
 const PUBLIC_PREFIX = [
   "/assets/",
   "/icons/",
-  "/__grok/",
+  "/__grok/install/",
 ];
 
 const PUBLIC_STARTS = ["/favicon", "/apple-touch-icon"];

@@ -51,6 +51,7 @@ import {
   saveProfile,
   type BackupCursor,
   type BackupRow,
+  type Json,
   type V1Backup,
 } from "./backup.ts";
 import type { Profile } from "../types.ts";
@@ -301,6 +302,96 @@ export const brainImportV1 = createServerFn({ method: "POST" })
     }
     await finishImport({ v1: true });
     return { inserted, updated, skipped };
+  });
+
+function asJson(value: unknown): Json {
+  return JSON.parse(JSON.stringify(value ?? null)) as Json;
+}
+
+export const brainGetDigests = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("../../db.ts");
+  const db = await getSql();
+  const rows = await db.query<{ day: string; markdown: string; data: unknown; updated_at: number }>(
+    "select day, markdown, data, updated_at from brain_daily_digest order by day desc limit 90",
+  );
+  return rows.map((r) => ({
+    day: r.day,
+    markdown: r.markdown,
+    data: asJson(r.data),
+    updated_at: Number(r.updated_at),
+  }));
+});
+
+export const brainGetDigest = createServerFn({ method: "POST" })
+  .validator((input: { day: string }) => input)
+  .handler(async ({ data }) => {
+    const { getSql } = await import("../../db.ts");
+    const db = await getSql();
+    const rows = await db.query<{ day: string; markdown: string; data: unknown; updated_at: number }>(
+      "select day, markdown, data, updated_at from brain_daily_digest where day = $1",
+      [data.day],
+    );
+    const turns = await db.query<Record<string, unknown>>(
+      "select turn_seq, user_msg_id, reply_msg_id, mind_stale, pack_ms, ttft_ms, total_ms, reply_chars, picked_ids, fallback_ids from brain_turns where local_day = $1 order by turn_seq",
+      [data.day],
+    );
+    const logs = await db.query<Record<string, unknown>>(
+      `select id, route, model, step, ok, ms, tokens_in, tokens_out, tokens_cached, tokens_reasoning, cost_usd, error, at
+       from brain_log where route is not null
+       order by at desc limit 200`,
+    );
+    const digest = rows[0]
+      ? { day: rows[0].day, markdown: rows[0].markdown, data: asJson(rows[0].data), updated_at: Number(rows[0].updated_at) }
+      : null;
+    return { digest, turns: asJson(turns), logs: asJson(logs) };
+  });
+
+export const brainGetTurnTrace = createServerFn({ method: "POST" })
+  .validator((input: { turnSeq: number }) => input)
+  .handler(async ({ data }) => {
+    const { getSql } = await import("../../db.ts");
+    const db = await getSql();
+    const turns = await db.query<Record<string, unknown>>(
+      "select * from brain_turns where turn_seq = $1",
+      [data.turnSeq],
+    );
+    const mind = await db.query<Record<string, unknown>>(
+      "select * from qr_mind_history where turn_seq = $1",
+      [data.turnSeq],
+    );
+    const logs = await db.query<Record<string, unknown>>(
+      "select * from brain_log where turn_seq = $1 order by id",
+      [data.turnSeq],
+    );
+    return { turn: asJson(turns[0] ?? null), mind: asJson(mind[0] ?? null), logs: asJson(logs) };
+  });
+
+export const brainGetCallLog = createServerFn({ method: "POST" })
+  .validator((input: { id: number }) => input)
+  .handler(async ({ data }) => {
+    const { getSql } = await import("../../db.ts");
+    const db = await getSql();
+    const rows = await db.query<Record<string, unknown>>("select * from brain_log where id = $1", [data.id]);
+    return asJson(rows[0] ?? null);
+  });
+
+export const brainExportLogs = createServerFn({ method: "POST" })
+  .validator(
+    (input: { from: number; to: number; table?: string; cursor?: string }) => input,
+  )
+  .handler(async ({ data }) => {
+    const mod = await import("./observability.ts");
+    const tables = ["brain_turns", "brain_log", "qr_mind_history", "mem_history", "brain_daily_digest", "brain_jobs"] as const;
+    const table = tables.includes(data.table as (typeof tables)[number])
+      ? (data.table as (typeof tables)[number])
+      : undefined;
+    const page = await mod.exportLogPage({
+      from: data.from,
+      to: data.to,
+      table,
+      cursor: data.cursor,
+    });
+    return { table: page.table, rows: asJson(page.rows), next: page.next };
   });
 
 export { buildReportData, convertV1 };

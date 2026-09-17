@@ -30,19 +30,16 @@ export async function isLimited(ip: string, nowMs: number): Promise<boolean> {
 
 export async function failAttempt(ip: string, nowMs: number): Promise<AttemptState> {
   const db = await getSql();
-  const row = await readAttempt(ip);
-  let fails = 1;
-  let windowStart = nowMs;
-  if (row && nowMs - row.windowStart < ATTEMPT_WINDOW_MS) {
-    fails = row.fails + 1;
-    windowStart = row.windowStart;
-  }
-  await db.query(
-    `insert into auth_attempts (ip, fails, window_start)
-     values ($1, $2, $3)
-     on conflict (ip) do update set fails = excluded.fails, window_start = excluded.window_start`,
-    [ip, fails, windowStart],
+  const rows = await db.query<{ fails: number; window_start: number }>(
+    `insert into auth_attempts (ip, fails, window_start) values ($1, 1, $2)
+     on conflict (ip) do update set
+       fails = case when $2 - auth_attempts.window_start >= $3 then 1 else auth_attempts.fails + 1 end,
+       window_start = case when $2 - auth_attempts.window_start >= $3 then $2 else auth_attempts.window_start end
+     returning fails, window_start`,
+    [ip, nowMs, ATTEMPT_WINDOW_MS],
   );
+  const fails = Number(rows[0]?.fails) || 1;
+  const windowStart = Number(rows[0]?.window_start) || nowMs;
   return { fails, windowStart, limited: fails >= ATTEMPT_MAX_FAILS };
 }
 

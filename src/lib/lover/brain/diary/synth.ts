@@ -4,7 +4,7 @@ import { callModel } from "../llm.ts";
 import {
   addThemeMember,
   getFactorByName,
-  listDayFactors,
+  getNote,
   listDays,
   listFactors,
   listFindings,
@@ -14,26 +14,19 @@ import {
   notesForTheme,
   notesWithoutTheme,
   patchMeta,
-  replaceEpisodes,
   themeMemberCounts,
   upsertDayFactor,
   upsertFactor,
-  upsertFinding,
   upsertTheme,
   upsertThemeWeek,
   getMeta,
 } from "../store.ts";
-import { daysInclusive, isoWeek, isoWeekStart, shiftDay } from "../time.ts";
+import { isoWeek, isoWeekStart, shiftDay } from "../time.ts";
 import type { Factor, Theme } from "../types.ts";
 import { DIARY_ANALYST_SYSTEM } from "./prompts.ts";
-import {
-  buildEpisodes,
-  computeAllFindings,
-  seriesFromDayFactors,
-} from "./stats.ts";
-import { newId } from "@/lib/lover/storage";
+import { recomputeStats } from "./recompute.ts";
+import { newId } from "../../storage.ts";
 import { getMemoryIndex } from "../voice/retrieve.ts";
-import { getNote } from "../store.ts";
 
 const ASSIGN_SCHEMA = {
   name: "theme_assign",
@@ -214,9 +207,16 @@ export async function runSynth(
     toDay: end,
     fromRosie: true,
     lens: "diary",
-    status: "active",
+    statuses: ["active", "superseded"],
     limit: 400,
   });
+  const weekDays = await listDays(start, end);
+  const hasCoverage = weekDays.some((d) => d.coverage !== "none");
+  if (!opts.manual && weekNotes.length === 0 && !hasCoverage) {
+    const meta = await getMeta();
+    if (!meta.lastSynthWeek || meta.lastSynthWeek < week) await patchMeta({ lastSynthWeek: week });
+    return;
+  }
   let themes = await listThemes(true);
   const ids = weekNotes.map((n) => n.id);
   for (let i = 0; i < ids.length; i += 40) {
@@ -318,7 +318,7 @@ ${themes
   }
 
   themes = await listThemes(true);
-  const diaryNotes = await listNotes({ fromRosie: true, lens: "diary", status: "active", limit: 2000 });
+  const diaryNotes = await listNotes({ fromRosie: true, lens: "diary", statuses: ["active", "superseded"], limit: 2000 });
   for (const theme of changed) {
     const { mini } = await getMemoryIndex();
     const hits = mini.search(`${theme.name} ${theme.definition}`).slice(0, 80);
@@ -331,10 +331,16 @@ ${themes
   const days = await listDays(start60, end);
   for (const theme of themes) {
     const members = await notesForTheme(theme.id);
-    const byWeek = new Map<string, number>();
+    const byId = new Map(members.map((n) => [n.id, n]));
+    const byWeek = new Map<string, Set<string>>();
     for (const n of members) {
+      if (n.status !== "active" && n.status !== "superseded") continue;
       const w = isoWeek(n.localDay);
-      byWeek.set(w, (byWeek.get(w) ?? 0) + 1);
+      let cur = n;
+      while (cur.supersededBy && byId.has(cur.supersededBy)) cur = byId.get(cur.supersededBy)!;
+      const set = byWeek.get(w) ?? new Set();
+      set.add(cur.id);
+      byWeek.set(w, set);
     }
     const weekKeys = [...byWeek.keys()].sort().slice(-8);
     if (!weekKeys.length) continue;
@@ -368,7 +374,7 @@ ${days
       await upsertThemeWeek({
         themeId: theme.id,
         week: w,
-        mentions: byWeek.get(w) ?? 0,
+        mentions: byWeek.get(w)?.size ?? 0,
         actionTaken: rawAction === 1 ? 1 : rawAction === 0 ? 0 : null,
         moodAvg,
       });
@@ -489,27 +495,4 @@ ${batch.map((d) => `${d.day}|${d.summary}|energy=${d.energy}|mood=${d.mood}|did=
   }
 }
 
-export async function recomputeStats(): Promise<void> {
-  const factors = await listFactors(true);
-  const dayFactors = await listDayFactors();
-  const themeWeeks = await listThemeWeeks();
-  const now = wallClock();
-  const days = [...new Set(dayFactors.map((d) => d.day))].sort();
-  const episodes = factors
-    .filter((f) => f.isOutcome)
-    .flatMap((f) => buildEpisodes(f.id, seriesFromDayFactors(dayFactors, f.id), days, now));
-  await replaceEpisodes(episodes);
-  const findings = computeAllFindings({
-    factors,
-    dayFactors,
-    themeWeeks: themeWeeks.map((w) => ({ themeId: w.themeId, week: w.week, mentions: w.mentions })),
-    now,
-  });
-  const existing = await listFindings();
-  const rejected = new Set(existing.filter((f) => f.userFeedback === "rejected").map((f) => f.id));
-  for (const f of findings) {
-    if (rejected.has(f.id)) continue;
-    const prev = existing.find((e) => e.id === f.id);
-    await upsertFinding({ ...f, userFeedback: prev?.userFeedback ?? null });
-  }
-}
+export { recomputeStats } from "./recompute.ts";

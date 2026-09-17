@@ -40,6 +40,7 @@ export type Mind = {
   threads: string[];
   recent_intents: string[];
   memory_ids: string[];
+  updated_at?: number;
 };
 
 export const EMPTY_MIND: Mind = {
@@ -231,6 +232,17 @@ export type BrainLogRow = {
   raw: string | null;
   note: string | null;
   at: number;
+  route?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  turnSeq?: number | null;
+  tokensIn?: number | null;
+  tokensCached?: number | null;
+  tokensOut?: number | null;
+  tokensReasoning?: number | null;
+  costUsd?: number | null;
+  error?: string | null;
+  trimmed?: boolean;
 };
 
 export type StoredMessage = {

@@ -70,6 +70,13 @@ export function validateOps(
 
     const happenedAt = sources[0]?.createdAt || now;
     const day = sources[0]?.localDay || localDay(happenedAt, "UTC");
+    let mergedSources = sourceIds;
+    let mergedLinks = links;
+    if (op === "SUPERSEDE" && target) {
+      const old = candMap.get(target);
+      mergedSources = [...new Set([...(old?.sourceIds ?? []), ...sourceIds])].slice(0, 12);
+      mergedLinks = [...new Set([...links, target])].slice(0, 6);
+    }
     const id = `n:${newId()}`;
     out.push({
       note: {
@@ -82,17 +89,17 @@ export function validateOps(
         weight,
         status: "active",
         supersededBy: null,
-        links,
+        links: mergedLinks,
         happenedAt,
         localDay: day,
-        sourceIds,
+        sourceIds: mergedSources,
         recallCount: 0,
         lastRecalledAt: null,
         createdAt: now,
         updatedAt: now,
       },
       supersede: op === "SUPERSEDE" ? target : undefined,
-      links,
+      links: mergedLinks,
     });
   }
   return out;

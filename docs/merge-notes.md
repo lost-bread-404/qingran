@@ -22,7 +22,7 @@
 
 - `vercel.json`：`regions: ["iad1"]`（和 Neon US East 同区）；三条 cron 打到 `/api/cron/brain?slot=1|2|3`，调度 `0 10/11/12 * * *`（UTC，对应纽约夏令时早上 6–8 点，都在 04:00 日界之后）。Hobby 每个表达式每天最多一次，所以拆成三个小时把积压的 synth / report 分段跑完。slot 参数路由忽略。
 - **maxDuration**：Nitro 3 + TanStack Start 把 SSR 和 `createServerFn` 打进同一条 Vercel Function，`waitUntil` 的 270s drain 无法只加在 cron 上。因此 `vite.config.ts` 里 `nitro({ vercel: { functions: { maxDuration: 300 } } })` 全局设成 300s。**不要**再用 `functionRules` 给 `/api/cron/brain` 单独复制一份——Nitro 会把整个 server bundle 再拷一份（[nitro#4233](https://github.com/nitrojs/nitro/issues/4233)），而 Diary 触发的 waitUntil 也跑在同一条 function 上。Hobby Fluid 上限就是 300s。
-- 环境变量：新增 **`CRON_SECRET`**、**`APP_PASSWORD`**。Vercel Cron 会带 `Authorization: Bearer $CRON_SECRET`。本地没设 `CRON_SECRET` 时允许从 localhost 调 `/api/cron/brain`。
+- 环境变量：新增 **`CRON_SECRET`**、**`APP_PASSWORD`**。Vercel Cron 会带 `Authorization: Bearer $CRON_SECRET`。生产 / Nitro 未设 `CRON_SECRET` 时 `/api/cron/brain` 返回 **503**；只有本地 `vite dev` 才允许 localhost 免密。
 
 ## 密码门
 
@@ -36,3 +36,11 @@
 4. 第 6 步「搬记忆」改为使用设置里的「导出完整备份 / 导入备份」（v2，含日记）。旧 v1 JSON 仍可导入。
 5. iPhone 上第一次打开清然 App 会看到登录页，输入一次密码即可，之后长期保持登录（WKWebView 默认数据存储会记住 cookie）。
 6. 忘记密码或怀疑泄露：在 Vercel 修改 `APP_PASSWORD` 并重新部署，所有设备需要重新登录。
+
+## 本 branch 新增（可观测性）
+
+- migration `0007_observability.sql`：`brain_log` 用量字段、`brain_turns`、`qr_mind_history`、`brain_daily_digest`、`diary_intention_ops`。
+- Diary「系统档案」tab：`src/components/lover/brain-system-archive.tsx`。
+- `package.json`：`test:app`（只跑 `src/`）、`demo:offline`、`analyze`、`engines.node >= 22.18.0`。`test` 分别跑 scripts 和 `test:app`，前者失败不会跳过后者。
+- eval / demo 用 `node --import ./scripts/eval/register-alias.mjs --experimental-strip-types ...`。
+- 备份 v2 加入 `brain_turns` / `qr_mind_history` / `brain_daily_digest`（`brain_log` 仍不进备份，走导出）。

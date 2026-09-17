@@ -1,5 +1,6 @@
-import { HISTORY_WINDOW, PORTRAIT_MAX_CHARS } from "../config.ts";
+import { HISTORY_WINDOW, PORTRAIT_MAX_CHARS, SESSION_GAP_MS } from "../config.ts";
 import { formatClock } from "../time.ts";
+import { formatMindAge } from "../usage.ts";
 import type { Mind, Note, PortraitRow, StoredMessage, VoiceChatMessage } from "../types.ts";
 import { QINGRAN_STANCE_ONE_LINE } from "./prompts.ts";
 
@@ -47,6 +48,7 @@ export function buildTail(opts: {
   notes: Note[];
   timeZone: string;
   careHint: boolean;
+  nowMs?: number;
 }): string {
   let reading = readingLine(opts.mind);
   let threads = opts.mind.threads.join("；");
@@ -54,10 +56,26 @@ export function buildTail(opts: {
     lead: opts.mind.lead_plan.join(" → "),
     intent: opts.mind.intent,
   };
+  const mindAge = (opts.nowMs ?? 0) - (opts.mind.updated_at ?? 0);
+  const stale =
+    !mindIsEmpty(opts.mind) &&
+    Boolean(opts.nowMs) &&
+    Boolean(opts.mind.updated_at) &&
+    mindAge >= SESSION_GAP_MS;
 
   const inner = mindIsEmpty(opts.mind)
     ? ""
-    : `【你此刻的内心】（这是你上一刻的想法；如果她这句话改变了情况，以这句话为准。说不说出来、怎么说，由你判断。）
+    : stale
+      ? `【你上次的内心】（这是 ${formatMindAge(mindAge)}前的想法，她现在的状态可能已经变了）
+底下的东西：${opts.mind.undercurrent}
+你的推断：${reading}
+你的看法：${opts.mind.my_view}
+你要带她走的路：${core.lead}
+要跟进：${threads}
+先重新感受她现在的状态，再决定怎么带她。
+
+`
+      : `【你此刻的内心】（这是你上一刻的想法；如果她这句话改变了情况，以这句话为准。说不说出来、怎么说，由你判断。）
 她现在：${opts.mind.rosie_now}
 底下的东西：${opts.mind.undercurrent}
 你的推断：${reading}
@@ -82,7 +100,7 @@ ${QINGRAN_STANCE_ONE_LINE}
     tail += "\n如果时机自然，可以像平常关心一样问问她今天过得怎么样、睡得如何。";
   }
 
-  if (tail.length > 2400 && !mindIsEmpty(opts.mind)) {
+  if (tail.length > 2400 && !mindIsEmpty(opts.mind) && !stale) {
     reading = "";
     threads = "";
     tail = `现在是${opts.clock}。

@@ -129,6 +129,16 @@ export const FUNCTION_MAX_MS = 300_000; // Vercel Hobby 上限
 export const LONG_DRAIN_MS = 270_000; // 留 30s 余量给收尾
 export const LOCK_SLACK_MS = 30_000;
 
+export const MODEL_PRICES: Record<string, { input: number; cached: number; output: number }> = {
+  "grok-4.6": { input: 2, cached: 0.5, output: 6 },
+  "grok-4.5": { input: 2, cached: 0.3, output: 6 },
+  "grok-4.3": { input: 1.25, cached: 0.2, output: 2.5 },
+  "grok-4.20-0309-non-reasoning": { input: 1.25, cached: 0.2, output: 2.5 },
+  "grok-4.20-0309-reasoning": { input: 1.25, cached: 0.2, output: 2.5 },
+};
+
+export const LOG_FULL_DAYS = 90;
+
 export const QR_VOICE_READS_DIARY = process.env.QR_VOICE_READS_DIARY !== "false";
 export const QR_CARE_CHECKIN = process.env.QR_CARE_CHECKIN === "true";
 

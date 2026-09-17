@@ -1,5 +1,5 @@
 import type { Profile } from "../../types.ts";
-import { HISTORY_WINDOW, QR_CARE_CHECKIN } from "../config.ts";
+import { HISTORY_WINDOW, QR_CARE_CHECKIN, SESSION_GAP_MS } from "../config.ts";
 import {
   getDay,
   getMessage,
@@ -23,6 +23,13 @@ export type HotContext = {
   dbFirstMs: number;
   sessionId: string | null;
   user: StoredMessage;
+  tail: string;
+  mindTurnSeq: number;
+  mindAgeMs: number;
+  mindStale: boolean;
+  pickedIds: string[];
+  fallbackIds: string[];
+  careHint: boolean;
 };
 
 export async function loadHotContext(input: {
@@ -58,6 +65,8 @@ export async function loadHotContext(input: {
   ]);
 
   const notes = await pickHotNotes(mind.memory_ids ?? [], input.text);
+  const pickedIds = notes.filter((n) => (mind.memory_ids ?? []).includes(n.id)).map((n) => n.id);
+  const fallbackIds = notes.filter((n) => !(mind.memory_ids ?? []).includes(n.id)).map((n) => n.id);
   let careHint = false;
   if (QR_CARE_CHECKIN) {
     const day = localDay(input.nowMs, input.timeZone);
@@ -68,12 +77,16 @@ export async function loadHotContext(input: {
     careHint = Boolean(log && log.coverage !== "ok" && !asked);
   }
 
+  const liveMind = mind.turn_seq ? mind : EMPTY_MIND;
+  const mindAgeMs = liveMind.updated_at ? input.nowMs - liveMind.updated_at : 0;
+  const mindStale = Boolean(liveMind.updated_at) && mindAgeMs >= SESSION_GAP_MS;
   const tail = buildTail({
     clock: formatClock(input.nowMs, input.timeZone),
-    mind: mind.turn_seq ? mind : EMPTY_MIND,
+    mind: liveMind,
     notes,
     timeZone: input.timeZone,
     careHint,
+    nowMs: input.nowMs,
   });
 
   const messages = buildVoiceMessages({
@@ -92,5 +105,12 @@ export async function loadHotContext(input: {
     dbFirstMs,
     sessionId: user.sessionId,
     user,
+    tail,
+    mindTurnSeq: liveMind.turn_seq,
+    mindAgeMs,
+    mindStale,
+    pickedIds,
+    fallbackIds,
+    careHint,
   };
 }

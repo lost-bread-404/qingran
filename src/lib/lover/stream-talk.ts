@@ -24,17 +24,31 @@ export type TalkStreamInput = {
 
 type Emit = (event: TalkStreamEvent) => void;
 
-export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<void> {
+export type TalkStreamResult = {
+  usage: {
+    input_tokens?: number;
+    output_tokens?: number;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    cached_tokens?: number;
+  } | null;
+  ttftMs: number | null;
+  firstAudioMs: number | null;
+  model: string;
+};
+
+export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<TalkStreamResult> {
+  const empty: TalkStreamResult = { usage: null, ttftMs: null, firstAudioMs: null, model: "" };
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) {
     emit({ t: "err", m: "这会儿连不上。" });
-    return;
+    return empty;
   }
 
   const say = data.text.trim().slice(0, MAX_INPUT);
   if (!say) {
     emit({ t: "err", m: "先说一句。" });
-    return;
+    return empty;
   }
 
   const speed = ttsSpeed(Boolean(data.softVoice));
@@ -43,10 +57,14 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   const t0 = Date.now();
   let ttftSent = false;
   let firstAudioSent = false;
+  let ttftMs: number | null = null;
+  let firstAudioMs: number | null = null;
+  let usage: TalkStreamResult["usage"] = null;
   // 从一开始就包一层，流式阶段的第一段音频也能计时
   const timedEmit: Emit = (event) => {
     if (event.t === "audio" && !firstAudioSent) {
-      emit({ t: "timing", k: "first_audio_ms", ms: Date.now() - t0 });
+      firstAudioMs = Date.now() - t0;
+      emit({ t: "timing", k: "first_audio_ms", ms: firstAudioMs });
       firstAudioSent = true;
     }
     emit(event);
@@ -64,6 +82,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       temperature: 0.85,
       max_tokens: route.maxOutput,
       stream: true,
+      stream_options: { include_usage: true },
       messages: data.messages,
     }),
     signal: AbortSignal.timeout(route.timeoutMs),
@@ -72,7 +91,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   if (!res.ok || !res.body) {
     tts.abort();
     emit({ t: "err", m: `想你的时候卡住了（${res.status}）。` });
-    return;
+    return { ...empty, model: route.model };
   }
 
   let full = "";
@@ -97,14 +116,17 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       try {
         const json = JSON.parse(payload) as {
           choices?: { delta?: { content?: string } }[];
+          usage?: TalkStreamResult["usage"];
         };
+        if (json.usage) usage = json.usage;
         token = json.choices?.[0]?.delta?.content ?? "";
       } catch {
         continue;
       }
       if (!token) continue;
       if (!ttftSent) {
-        emit({ t: "timing", k: "ttft_ms", ms: Date.now() - t0 });
+        ttftMs = Date.now() - t0;
+        emit({ t: "timing", k: "ttft_ms", ms: ttftMs });
         ttftSent = true;
       }
       full += token;
@@ -125,7 +147,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   if (!speech) {
     tts.abort();
     emit({ t: "err", m: "她好像走神了，再说一次。" });
-    return;
+    return { usage, ttftMs, firstAudioMs, model: route.model };
   }
 
   await tts.finish();
@@ -136,6 +158,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   }
 
   emit({ t: "done", speech, replyId: data.replyId });
+  return { usage, ttftMs, firstAudioMs, model: route.model };
 }
 
 class LiveTts {
