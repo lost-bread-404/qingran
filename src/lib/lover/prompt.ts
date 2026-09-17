@@ -1,6 +1,9 @@
 import { sortMemoriesByTime } from "./memory.ts";
 import type { ChatMessage, Memory, Profile } from "./types";
 
+const HEARING_TAG_GUIDE = `Rosie 的话有时会带语气标记，不是她打出来的字。格式：字〔长短·走向·声线｜情绪〕，例如「嗯〔long·rising·breathy｜coy〕今天好累〔｜sleepy〕」。
+〔〕里是听力给出的语气，不要念出来，不要写进回复的字面。用它判断她是在撒娇、气声、呢喃、困、委屈还是随口应一声，再按那个语气接。没有标记就按普通口语听。`;
+
 export function buildSystemPrompt(
   profile: Profile,
   memories: Memory[],
@@ -14,7 +17,14 @@ export function buildSystemPrompt(
       : sortMemoriesByTime(memories)
           .map((item) => `- ${formatClock(item.createdAt || Date.now(), timeZone)}：${item.text}`)
           .join("\n");
-  return `${base}\n\n现在是${clock}。记忆里的时间是事情发生时的时间，用来判断那是多久以前。\n\n你还记得：\n${memoryBlock}`;
+  return `${base}
+
+${HEARING_TAG_GUIDE}
+
+现在是${clock}。记忆里的时间是事情发生时的时间，用来判断那是多久以前。
+
+你还记得：
+${memoryBlock}`;
 }
 
 export function formatClock(nowMs: number, timeZone: string): string {

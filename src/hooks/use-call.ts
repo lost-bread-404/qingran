@@ -20,6 +20,8 @@ import {
   pageIsHidden,
 } from "@/lib/lover/audio-session";
 import { hearUtterance } from "@/lib/lover/hear";
+import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
 import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
 import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { keepPlaybackAlive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
@@ -76,6 +78,8 @@ export function useCall({ onUtterance, prompt }: Options) {
   const interimRef = useRef("");
   const framesRef = useRef<ProsodyFrame[]>([]);
   const nativeHangupRef = useRef(false);
+  const speechStartWallRef = useRef(0);
+  const heartbeatRef = useRef(0);
 
   useEffect(() => {
     onUtteranceRef.current = onUtterance;
@@ -146,7 +150,27 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     wakeLockRef.current = null;
     if (!nativeHangupRef.current) nativeEndCall();
+    if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
+    heartbeatRef.current = 0;
   }, [teardownMedia]);
+
+  const keepSelfhostWarm = () => {
+    if (getHearingSession().provider !== "selfhost") return;
+    const ping = () => {
+      void warmupHearing({ data: { provider: "selfhost" } }).then((result) => {
+        if (result.cold) setHearingSession({ coldStartMs: result.latency_ms });
+        const turnId = getHearingSession().turnId;
+        if (result.cold && turnId) {
+          void patchHearingTurn({
+            data: { id: turnId, cold_start_ms: result.latency_ms },
+          });
+        }
+      });
+    };
+    ping();
+    if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
+    heartbeatRef.current = window.setInterval(ping, 25_000);
+  };
 
   const beginUtterance = useCallback(() => {
     const stream = streamRef.current;
@@ -168,6 +192,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     const now = performance.now();
     speechStartRef.current = now;
+    speechStartWallRef.current = Date.now();
     lastVoiceRef.current = now;
     voiceBurstAtRef.current = now;
     if (!lastTextAtRef.current || now - lastTextAtRef.current > 400) {
@@ -229,6 +254,7 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   const flushUtterance = useCallback(async () => {
     if (phaseRef.current !== "speaking-you") return;
+    const endpoint_fired = Date.now();
     setPhaseBoth("transcribing");
     deafRef.current = true;
     await new Promise((resolve) => window.setTimeout(resolve, 180));
@@ -260,6 +286,8 @@ export function useCall({ onUtterance, prompt }: Options) {
         liveText,
         frames,
         prompt: promptRef.current,
+        speech_start: speechStartWallRef.current,
+        endpoint_fired,
       })) ?? "";
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
@@ -466,6 +494,7 @@ export function useCall({ onUtterance, prompt }: Options) {
       if (liveRef.current && !rafRef.current) rafRef.current = requestAnimationFrame(tick);
     }, 80);
     startCallHold();
+    keepSelfhostWarm();
     try {
       wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? null;
     } catch {

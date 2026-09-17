@@ -1,9 +1,11 @@
 import { Check, Pencil, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { backupFilename, makeBackup, parseBackup, type QingranBackup } from "@/lib/lover/backup";
+import { HEARING_PROVIDERS, type HearingProviderId } from "@/lib/lover/hearing/config";
 import {
   resolveManualMemory,
   sortMemoriesByTime,
@@ -12,6 +14,8 @@ import {
 } from "@/lib/lover/memory";
 import { DEFAULT_SYSTEM_PROMPT, type ChatMessage, type Memory, type Profile } from "@/lib/lover/types";
 import { cn } from "@/lib/utils";
+
+type Tab = "prompt" | "memory" | "backup" | "hearing";
 
 type Props = {
   open: boolean;
@@ -26,6 +30,13 @@ type Props = {
   onConsolidateMemories: () => Promise<void>;
   onClearChat: () => void;
   onRestoreBackup: (backup: QingranBackup) => Promise<void>;
+};
+
+const PROVIDER_LABEL: Record<HearingProviderId, string> = {
+  xai: "xAI（现有）",
+  qwen: "Qwen",
+  gemini: "Gemini",
+  selfhost: "自部署",
 };
 
 export function SettingsDrawer({
@@ -43,13 +54,16 @@ export function SettingsDrawer({
   onRestoreBackup,
 }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
+  const [hearingProvider, setHearingProvider] = useState<HearingProviderId>(profile.hearingProvider);
+  const [captureAudio, setCaptureAudio] = useState(profile.captureAudio);
+  const [scriptedCapture, setScriptedCapture] = useState(profile.scriptedCapture);
   const [newFact, setNewFact] = useState("");
   const [newAt, setNewAt] = useState(() => toDatetimeLocal(Date.now()));
   const [newTimeTouched, setNewTimeTouched] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [editAt, setEditAt] = useState("");
-  const [tab, setTab] = useState<"prompt" | "memory" | "backup">("prompt");
+  const [tab, setTab] = useState<Tab>("prompt");
   const [consolidating, setConsolidating] = useState(false);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -57,17 +71,23 @@ export function SettingsDrawer({
   useEffect(() => {
     if (open) {
       setDraft(profile.systemPrompt);
+      setHearingProvider(profile.hearingProvider);
+      setCaptureAudio(profile.captureAudio);
+      setScriptedCapture(profile.scriptedCapture);
       setTab("prompt");
       setNewAt(toDatetimeLocal(Date.now()));
       setNewTimeTouched(false);
       setEditingId(null);
     }
-  }, [open, profile.systemPrompt]);
+  }, [open, profile]);
 
   function save() {
     onSave({
       ...profile,
       systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
+      hearingProvider,
+      captureAudio,
+      scriptedCapture,
     });
     onOpenChange(false);
   }
@@ -109,6 +129,7 @@ export function SettingsDrawer({
             ["prompt", "Prompt"],
             ["memory", "记忆"],
             ["backup", "备份"],
+            ["hearing", "听力"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -116,7 +137,7 @@ export function SettingsDrawer({
             type="button"
             onClick={() => setTab(id)}
             className={cn(
-              "flex-1 rounded-md py-2 text-sm",
+              "flex-1 min-h-11 rounded-md py-2 text-sm",
               tab === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
             )}
           >
@@ -198,6 +219,62 @@ export function SettingsDrawer({
               导入备份
             </Button>
             {backupStatus ? <p className="text-sm text-subtle">{backupStatus}</p> : null}
+          </div>
+        </div>
+      ) : tab === "hearing" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <div className="mx-auto flex w-full max-w-md flex-col gap-5">
+            <div>
+              <p className="mb-2 text-sm">听力引擎</p>
+              <p className="mb-3 text-xs text-subtle">默认 xAI 现有流程。Qwen / Gemini / 自部署会输出「字 + 语气 tag」，失败自动退回 xAI。</p>
+              <div className="grid grid-cols-2 gap-2">
+                {HEARING_PROVIDERS.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setHearingProvider(id)}
+                    className={cn(
+                      "min-h-11 rounded-md px-3 py-3 text-sm",
+                      hearingProvider === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                    )}
+                  >
+                    {PROVIDER_LABEL[id]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={captureAudio}
+                onChange={(e) => setCaptureAudio(e.target.checked)}
+              />
+              <span>
+                <span className="block text-sm">录音采集</span>
+                <span className="block text-xs text-subtle">默认关。打开后把每段 16kHz WAV 存到私有库，不含公开链接。</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={scriptedCapture}
+                onChange={(e) => setScriptedCapture(e.target.checked)}
+              />
+              <span>
+                <span className="block text-sm">定向录制</span>
+                <span className="block text-xs text-subtle">屏幕显示当前类别和剩余配额，录完自动打标签。</span>
+              </span>
+            </label>
+            <Link
+              to="/lab"
+              className="flex h-11 items-center justify-center rounded-md bg-surface-2 text-sm"
+              onClick={() => onOpenChange(false)}
+            >
+              打开标注页
+            </Link>
+            <p className="text-xs text-subtle">标注页有密码保护。密码是环境变量 HEARING_LAB_PASSWORD。</p>
           </div>
         </div>
       ) : (

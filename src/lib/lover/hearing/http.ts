@@ -1,0 +1,358 @@
+import {
+  estimateCostUsd,
+  HEARING,
+  hearingTimeoutMs,
+  selfhostApiKey,
+  selfhostBaseUrl,
+  selfhostModel,
+  type HearingProviderId,
+} from "./config.ts";
+import { HEARING_INSTRUCTION } from "./instruction.ts";
+import { looksLikeRefusal, parseHearingJson, type HearingResult } from "./schema.ts";
+import type { HearingAdapterOutcome, HearingFailReason } from "./select.ts";
+
+export type AdapterFail = Extract<HearingAdapterOutcome, { ok: false }>;
+export type AdapterOk = Extract<HearingAdapterOutcome, { ok: true }>;
+export type AdapterOutcome = HearingAdapterOutcome;
+
+const USER_PROMPT = "转写这段中文口语。按系统说明输出严格 JSON。";
+
+export async function hearWithQwen(audioBase64: string): Promise<AdapterOutcome> {
+  const apiKey = process.env.DASHSCOPE_API_KEY;
+  const model = HEARING.qwen.model;
+  if (!apiKey) return missing("qwen", model);
+  return openaiAudioChat({
+    provider: "qwen",
+    model,
+    url: `${HEARING.qwen.baseUrl}/chat/completions`,
+    apiKey,
+    audioBase64,
+    audioStyle: "input_audio",
+    extra: { modalities: ["text"] },
+    preferStream: true,
+  });
+}
+
+export async function hearWithGemini(audioBase64: string): Promise<AdapterOutcome> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const model = HEARING.gemini.model;
+  if (!apiKey) return missing("gemini", model);
+  const started = Date.now();
+  const timeout = hearingTimeoutMs();
+  try {
+    const res = await fetch(`${HEARING.gemini.generateUrl}?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: HEARING_INSTRUCTION }] },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inline_data: { mime_type: "audio/wav", data: audioBase64 } },
+              { text: USER_PROMPT },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: "application/json",
+          maxOutputTokens: 800,
+          thinkingConfig: { thinkingLevel: "low" },
+        },
+      }),
+      signal: AbortSignal.timeout(timeout),
+    });
+    const latency_ms = Date.now() - started;
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: { message?: string };
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+    };
+    if (!res.ok) {
+      return {
+        ok: false,
+        reason: res.status === 408 ? "timeout" : "http",
+        raw: body.error?.message || `gemini ${res.status}`,
+        latency_ms,
+        provider: "gemini",
+        model,
+      };
+    }
+    const raw = body.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    return finishParse("gemini", model, raw, latency_ms, {
+      in: body.usageMetadata?.promptTokenCount,
+      out: body.usageMetadata?.candidatesTokenCount,
+    });
+  } catch (err) {
+    return failFromError("gemini", model, started, err);
+  }
+}
+
+export async function hearWithSelfhost(audioBase64: string): Promise<AdapterOutcome> {
+  const base = selfhostBaseUrl();
+  const model = selfhostModel();
+  if (!base) return missing("selfhost", model);
+  const first = await openaiAudioChat({
+    provider: "selfhost",
+    model,
+    url: `${base}/chat/completions`,
+    apiKey: selfhostApiKey(),
+    audioBase64,
+    audioStyle: "audio_url",
+    extra: { response_format: { type: "json_object" } },
+    preferStream: false,
+  });
+  if (first.ok || first.reason === "timeout" || first.reason === "refusal") return first;
+  return openaiAudioChat({
+    provider: "selfhost",
+    model,
+    url: `${base}/chat/completions`,
+    apiKey: selfhostApiKey(),
+    audioBase64,
+    audioStyle: "input_audio",
+    extra: { response_format: { type: "json_object" } },
+    preferStream: false,
+  });
+}
+
+export async function warmupSelfhost(): Promise<{
+  ok: boolean;
+  latency_ms: number;
+  cold: boolean;
+  error?: string;
+}> {
+  const base = selfhostBaseUrl();
+  const model = selfhostModel();
+  if (!base) return { ok: false, latency_ms: 0, cold: false, error: "missing_url" };
+  const started = Date.now();
+  try {
+    const res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${selfhostApiKey()}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        max_tokens: 8,
+        messages: [{ role: "user", content: "ping" }],
+      }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    const latency_ms = Date.now() - started;
+    if (!res.ok) {
+      return { ok: false, latency_ms, cold: latency_ms > 8_000, error: `http ${res.status}` };
+    }
+    return { ok: true, latency_ms, cold: latency_ms > 8_000 };
+  } catch (err) {
+    const latency_ms = Date.now() - started;
+    return {
+      ok: false,
+      latency_ms,
+      cold: latency_ms > 8_000,
+      error: err instanceof Error ? err.message : "warmup_failed",
+    };
+  }
+}
+
+async function openaiAudioChat(input: {
+  provider: HearingProviderId;
+  model: string;
+  url: string;
+  apiKey: string;
+  audioBase64: string;
+  audioStyle: "input_audio" | "audio_url";
+  extra?: Record<string, unknown>;
+  preferStream: boolean;
+}): Promise<AdapterOutcome> {
+  const started = Date.now();
+  const timeout = hearingTimeoutMs();
+  const payload = {
+    model: input.model,
+    temperature: 0,
+    max_tokens: 800,
+    messages: [
+      { role: "system", content: HEARING_INSTRUCTION },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: USER_PROMPT },
+          audioPart(input.audioBase64, input.audioStyle),
+        ],
+      },
+    ],
+    ...input.extra,
+  };
+
+  const tryOnce = async (stream: boolean) => {
+    const res = await fetch(input.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify({ ...payload, stream }),
+      signal: AbortSignal.timeout(timeout),
+    });
+    return res;
+  };
+
+  try {
+    let res = await tryOnce(input.preferStream);
+    if (!res.ok && input.preferStream && (res.status === 400 || res.status === 422)) {
+      res = await tryOnce(false);
+    } else if (!res.ok && !input.preferStream && (res.status === 400 || res.status === 422)) {
+      res = await tryOnce(true);
+    }
+    const latency_ms = Date.now() - started;
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      return {
+        ok: false,
+        reason: res.status === 408 ? "timeout" : "http",
+        raw: errText.slice(0, 500),
+        latency_ms,
+        provider: input.provider,
+        model: input.model,
+      };
+    }
+    if (res.headers.get("content-type")?.includes("text/event-stream") || input.preferStream) {
+      const streamed = await readOpenAiStream(res);
+      return finishParse(input.provider, input.model, streamed.text, latency_ms, streamed.usage);
+    }
+    const body = (await res.json()) as {
+      choices?: { message?: { content?: string | { text?: string }[] } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    const raw = messageContent(body.choices?.[0]?.message?.content);
+    return finishParse(input.provider, input.model, raw, latency_ms, {
+      in: body.usage?.prompt_tokens,
+      out: body.usage?.completion_tokens,
+    });
+  } catch (err) {
+    return failFromError(input.provider, input.model, started, err);
+  }
+}
+
+function audioPart(audioBase64: string, style: "input_audio" | "audio_url") {
+  if (style === "audio_url") {
+    return {
+      type: "audio_url",
+      audio_url: { url: `data:audio/wav;base64,${audioBase64}` },
+    };
+  }
+  return {
+    type: "input_audio",
+    input_audio: { data: audioBase64, format: "wav" },
+  };
+}
+
+async function readOpenAiStream(res: Response): Promise<{
+  text: string;
+  usage?: { in?: number; out?: number };
+}> {
+  if (!res.body) return { text: "" };
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let text = "";
+  let usage: { in?: number; out?: number } | undefined;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try {
+        const json = JSON.parse(payload) as {
+          choices?: { delta?: { content?: string }; message?: { content?: string } }[];
+          usage?: { prompt_tokens?: number; completion_tokens?: number };
+        };
+        text += json.choices?.[0]?.delta?.content ?? json.choices?.[0]?.message?.content ?? "";
+        if (json.usage) {
+          usage = { in: json.usage.prompt_tokens, out: json.usage.completion_tokens };
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return { text, usage };
+}
+
+function messageContent(content: string | { text?: string }[] | undefined): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.map((p) => p.text ?? "").join("");
+  return "";
+}
+
+function finishParse(
+  provider: HearingProviderId,
+  model: string,
+  raw: string,
+  latency_ms: number,
+  tokens?: { in?: number; out?: number },
+): AdapterOutcome {
+  if (looksLikeRefusal(raw)) {
+    return { ok: false, reason: "refusal", raw, latency_ms, provider, model };
+  }
+  try {
+    const parsed = parseHearingJson(raw);
+    const tokens_in = tokens?.in;
+    const tokens_out = tokens?.out;
+    return {
+      ok: true,
+      result: {
+        ...parsed,
+        raw,
+        latency_ms,
+        provider,
+        model,
+        refusal: false,
+        tokens_in,
+        tokens_out,
+        cost_usd:
+          tokens_in != null && tokens_out != null
+            ? estimateCostUsd(provider, tokens_in, tokens_out)
+            : undefined,
+      },
+    };
+  } catch {
+    return { ok: false, reason: "schema", raw, latency_ms, provider, model };
+  }
+}
+
+function missing(provider: HearingProviderId, model: string): AdapterFail {
+  return { ok: false, reason: "missing_key", latency_ms: 0, provider, model };
+}
+
+function failFromError(
+  provider: HearingProviderId,
+  model: string,
+  started: number,
+  err: unknown,
+): AdapterFail {
+  const latency_ms = Date.now() - started;
+  const name = err instanceof Error ? err.name : "";
+  const message = err instanceof Error ? err.message : "";
+  const timeout = name === "TimeoutError" || name === "AbortError" || /timeout|aborted/i.test(message);
+  const reason: HearingFailReason = timeout ? "timeout" : "http";
+  return {
+    ok: false,
+    reason,
+    raw: message.slice(0, 300),
+    latency_ms,
+    provider,
+    model,
+  };
+}

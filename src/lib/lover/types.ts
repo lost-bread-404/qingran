@@ -1,3 +1,5 @@
+import { DEFAULT_HEARING_PROVIDER, isHearingProvider, type HearingProviderId } from "./hearing/config.ts";
+
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "steer" | "setting";
@@ -10,6 +12,9 @@ export type Profile = {
   voiceSpeed: number;
   autoRemember: boolean;
   memoryCursor: string;
+  hearingProvider: HearingProviderId;
+  captureAudio: boolean;
+  scriptedCapture: boolean;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -47,6 +52,9 @@ export const DEFAULT_PROFILE: Profile = {
   voiceSpeed: 1,
   autoRemember: true,
   memoryCursor: "",
+  hearingProvider: DEFAULT_HEARING_PROVIDER,
+  captureAudio: false,
+  scriptedCapture: false,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -63,6 +71,9 @@ type LooseProfile = Partial<Profile> & {
   softVoice?: boolean;
   autoRemember?: boolean;
   memoryCursor?: string;
+  hearingProvider?: string;
+  captureAudio?: boolean;
+  scriptedCapture?: boolean;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -73,6 +84,11 @@ export function lockedProfile(input?: unknown): Profile {
     voiceSpeed: pickVoiceSpeed(raw),
     autoRemember: raw.autoRemember !== false,
     memoryCursor: typeof raw.memoryCursor === "string" ? raw.memoryCursor : "",
+    hearingProvider: isHearingProvider(raw.hearingProvider)
+      ? raw.hearingProvider
+      : DEFAULT_HEARING_PROVIDER,
+    captureAudio: Boolean(raw.captureAudio),
+    scriptedCapture: Boolean(raw.scriptedCapture),
   };
 }
 

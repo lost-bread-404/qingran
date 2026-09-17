@@ -240,6 +240,8 @@ export function useVoiceInput({ lang, prompt }: Options) {
         liveText,
         frames,
         prompt: promptRef.current,
+        speech_start: Date.now() - 1500,
+        endpoint_fired: Date.now(),
       })) ?? "";
     } catch (err) {
       const message = err instanceof Error ? err.message : "";

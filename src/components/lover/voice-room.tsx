@@ -36,10 +36,13 @@ import {
 } from "@/lib/lover/room";
 import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
+import { stripCueTags } from "@/lib/lover/hearing/schema";
 import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
 import { newId } from "@/lib/lover/storage";
 import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
+import { getHearingSession, nextScriptedCategory, setHearingSession } from "@/lib/lover/hearing/session";
+import { patchHearingTurn, scriptedQuota } from "@/lib/lover/hearing/store";
 import {
   CONTEXT_WINDOW,
   DEFAULT_PROFILE,
@@ -91,9 +94,15 @@ export function VoiceRoom() {
   const spokenCacheRef = useRef(new Map<string, { bytes: Uint8Array<ArrayBuffer>; mimeType: string }>());
   const viewport = useVisualViewportHeight();
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
+  const [scriptedHave, setScriptedHave] = useState<Record<string, number>>({});
 
   useEffect(() => {
     profileRef.current = profile;
+    setHearingSession({
+      provider: profile.hearingProvider,
+      capture: profile.captureAudio,
+      scripted: profile.scriptedCapture,
+    });
   }, [profile]);
   useEffect(() => {
     memoriesRef.current = memories;
@@ -104,6 +113,24 @@ export function VoiceRoom() {
   useEffect(() => {
     settingsOpenRef.current = settingsOpen;
   }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!profile.scriptedCapture) {
+      setHearingSession({ category: null, scripted: false, source: "real" });
+      return;
+    }
+    void scriptedQuota().then((result) => {
+      const counts: Record<string, number> = {};
+      for (const row of result.categories) counts[row.id] = row.have;
+      setScriptedHave(counts);
+      const next = nextScriptedCategory(counts);
+      setHearingSession({
+        category: next?.id ?? null,
+        scripted: true,
+        source: "scripted",
+      });
+    });
+  }, [profile.scriptedCapture, messages.length]);
 
   useEffect(() => {
     const lock = () => {
@@ -311,8 +338,9 @@ export function VoiceRoom() {
       sayRaw: string,
       opts?: { history?: ChatMessage[]; existingUser?: ChatMessage },
     ) => {
-      const say = sayRaw.trim();
-      if (!say) return;
+      const tagged = sayRaw.trim();
+      if (!tagged) return;
+      const say = stripCueTags(tagged).trim() || tagged;
       if (!opts?.existingUser && busyRef.current) return;
       const turn = ++turnRef.current;
       busyRef.current = true;
@@ -355,6 +383,9 @@ export function VoiceRoom() {
       let persistAt = 0;
       let paintHandle = 0;
       let latestDisplay = "";
+      let grokDone = 0;
+      let ttsFirst = 0;
+      const hearingTurnId = getHearingSession().lastTurnId;
       const persistReply = (text: string) => {
         const display = stripSpeechTags(text);
         inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
@@ -389,7 +420,7 @@ export function VoiceRoom() {
       try {
         await streamTalk(
           {
-            text: say,
+            text: tagged,
             profile: lockedProfile(profileRef.current),
             history,
             memories: memoriesRef.current,
@@ -404,6 +435,7 @@ export function VoiceRoom() {
             }
             if (event.t === "text_end") {
               full = event.speech || full;
+              grokDone = Date.now();
               paintText(full, true);
               void kickAudio();
               return;
@@ -442,6 +474,7 @@ export function VoiceRoom() {
                 void resumeAudio();
               }
               gotAudio = true;
+              if (!ttsFirst) ttsFirst = Date.now();
               setStatus("speaking");
               const bytes = base64ToBytes(event.b);
               clips.push(bytes);
@@ -464,6 +497,16 @@ export function VoiceRoom() {
         setBanner("线路有点不稳，稍后再说。");
         setStatus("error");
       } finally {
+        if (hearingTurnId) {
+          void patchHearingTurn({
+            data: {
+              id: hearingTurnId,
+              grok_done: grokDone || undefined,
+              tts_first_audio: ttsFirst || undefined,
+              cold_start_ms: getHearingSession().coldStartMs ?? undefined,
+            },
+          });
+        }
         pendingIdsRef.current.delete(reply.id);
         if (turn === turnRef.current) {
           busyRef.current = false;
@@ -601,6 +644,7 @@ export function VoiceRoom() {
   const transcribing = voice.status === "transcribing";
   const editable = lastUserSay(messages);
   const composing = composerOpen && !recording && !call.active;
+  const scriptedNow = profile.scriptedCapture ? nextScriptedCategory(scriptedHave) : null;
   const statusLine = call.active
     ? call.phase === "speaking-you"
       ? "在听你"
@@ -666,6 +710,21 @@ export function VoiceRoom() {
             </Button>
           </div>
         </header>
+
+        {scriptedNow ? (
+          <div className="mx-5 mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
+            <p>
+              定向录制 · {scriptedNow.label}
+              <span className="ml-2 text-xs text-subtle">
+                还差 {Math.max(0, scriptedNow.quota - (scriptedHave[scriptedNow.id] ?? 0))} / {scriptedNow.quota}
+              </span>
+            </p>
+          </div>
+        ) : profile.scriptedCapture ? (
+          <div className="mx-5 mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-muted">
+            定向录制配额已满。
+          </div>
+        ) : null}
 
         {composing ? (
           <div className="flex min-h-0 flex-1 flex-col px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
