@@ -52,7 +52,7 @@ export async function hearUtterance(input: {
   const audioBase64 = await blobToBase64(clip);
   const mimeType = clip.type || "audio/wav";
   const provider: HearingProviderId = session.provider;
-  const persist = debugHearing || session.capture || session.scripted;
+  const persist = debugHearing || session.capture;
 
   try {
     const result = await runHearing({
@@ -63,8 +63,7 @@ export async function hearUtterance(input: {
         prompt: input.prompt,
         provider,
         capture: persist,
-        source: session.source,
-        category: session.category ?? undefined,
+        source: "real",
         turnId,
         speech_start: input.speech_start,
         endpoint_fired: input.endpoint_fired,

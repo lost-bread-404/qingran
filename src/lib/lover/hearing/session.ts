@@ -1,15 +1,10 @@
-import type { HearingProviderId, ScriptedCategoryId } from "./config.ts";
+import type { HearingProviderId } from "./config.ts";
 import { DEFAULT_HEARING_PROVIDER } from "./config.ts";
 import type { AudioRoute, HearingMode } from "./route.ts";
-
-export type HearingSource = "real" | "scripted";
 
 export type HearingSession = {
   provider: HearingProviderId;
   capture: boolean;
-  scripted: boolean;
-  source: HearingSource;
-  category: ScriptedCategoryId | null;
   turnId: string | null;
   lastTurnId: string | null;
   coldStartMs: number | null;
@@ -24,9 +19,6 @@ export type HearingSession = {
 const session: HearingSession = {
   provider: DEFAULT_HEARING_PROVIDER,
   capture: false,
-  scripted: false,
-  source: "real",
-  category: null,
   turnId: null,
   lastTurnId: null,
   coldStartMs: null,
@@ -44,6 +36,4 @@ export function getHearingSession(): HearingSession {
 
 export function setHearingSession(patch: Partial<HearingSession>) {
   Object.assign(session, patch);
-  if (session.scripted) session.source = "scripted";
-  else session.source = "real";
 }

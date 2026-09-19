@@ -126,7 +126,6 @@ export function VoiceRoom() {
     setHearingSession({
       provider: profile.hearingProvider,
       capture: profile.debugHearing,
-      scripted: false,
       debugHearing: profile.debugHearing,
       nbest: profile.hearingNbest,
       mode: callActiveRef.current ? "call" : "text",

@@ -1,5 +1,3 @@
-import { SCRIPTED_CATEGORIES } from "./config.ts";
-
 export type SplitLabel = "dev" | "test";
 
 export function assignSplits<T extends { id: string; category?: string | null }>(
@@ -26,11 +24,6 @@ export function assignSplits<T extends { id: string; category?: string | null }>
     });
   }
   return out;
-}
-
-export function knownCategory(id: string | null | undefined): boolean {
-  if (!id) return false;
-  return SCRIPTED_CATEGORIES.some((c) => c.id === id);
 }
 
 function shuffle<T>(list: T[], seed: number) {

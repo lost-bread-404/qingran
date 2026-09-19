@@ -10,7 +10,7 @@ import {
 import { assignSplits } from "./split.ts";
 import { cer, cueTokenF1, fieldAccuracy, selfConsistency } from "./metrics.ts";
 import { chooseHearing } from "./select.ts";
-import { HEARING, SCRIPTED_CATEGORIES } from "./config.ts";
+import { HEARING } from "./config.ts";
 import { classifyGeminiResponse, clipFallbackRaw, hearingSystemPrompt, isModerationHttpError } from "./http.ts";
 
 describe("hearing schema", () => {
@@ -162,7 +162,7 @@ describe("hearing schema", () => {
     assert.equal(clipFallbackRaw("x".repeat(2500))?.length, 2000);
   });
 
-  it("applies n-best alt tags and keeps codeswitch categories", () => {
+  it("applies n-best alt tags", () => {
     const parsed = parseHearingJson(
       JSON.stringify({
         text: "今天好累",
@@ -173,8 +173,6 @@ describe("hearing schema", () => {
       }),
     );
     assert.equal(formatTaggedText(parsed), "今{天|填}好累");
-    assert.ok(SCRIPTED_CATEGORIES.some((c) => c.id === "codeswitch" && c.quota === 12));
-    assert.ok(SCRIPTED_CATEGORIES.some((c) => c.id === "homophone" && c.quota === 10));
   });
 
   it("appends n-best and context to the hearing system prompt", () => {

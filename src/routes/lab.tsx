@@ -19,7 +19,6 @@ import {
   type LabClipFilter,
 } from "@/lib/lover/hearing/store";
 import { EMOTIONS, type CueEmotion, type HearingCue, type HearingResult } from "@/lib/lover/hearing/schema";
-import { SCRIPTED_CATEGORIES } from "@/lib/lover/hearing/config";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/lab")({ component: HearingLabPage });
@@ -451,7 +450,7 @@ function HearingLabPage() {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
             {!clip ? (
-              <p className="text-sm text-subtle">还没有录音。打开设置里的调试模式后再通话。</p>
+              <p className="text-sm text-subtle">还没有录音。打开设置里的标注模式后再通话。</p>
             ) : (
               <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
                 <div className="rounded-md bg-surface-2 px-3 py-2 text-sm">
@@ -631,14 +630,13 @@ function CoveragePanel({
     return <p className="px-4 text-sm text-subtle">正在统计…</p>;
   }
   const { coverage: stats, totalTurns } = coverage;
-  const categories = SCRIPTED_CATEGORIES.map((c) => ({
-    id: c.id,
-    label: c.label,
-    row: stats.byCategory[c.id] ?? { confirmed: 0, edited: 0, n: 0 },
-  }));
-  const extra = Object.keys(stats.byCategory).filter(
-    (k) => !SCRIPTED_CATEGORIES.some((c) => c.id === k),
-  );
+  const categories = Object.keys(stats.byCategory)
+    .sort()
+    .map((id) => ({
+      id,
+      label: id,
+      row: stats.byCategory[id] ?? { confirmed: 0, edited: 0, n: 0 },
+    }));
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
@@ -667,27 +665,6 @@ function CoveragePanel({
                   </span>
                   <span className="text-xs text-subtle">
                     确认 {c.row.confirmed} · 编辑 {c.row.edited}
-                  </span>
-                </li>
-              );
-            })}
-            {extra.map((id) => {
-              const row = stats.byCategory[id]!;
-              const thin = row.n < 5;
-              return (
-                <li
-                  key={id}
-                  className={cn(
-                    "flex items-center justify-between rounded-md px-3 py-2 text-sm",
-                    thin ? "bg-live/15 text-live" : "bg-surface-2",
-                  )}
-                >
-                  <span>
-                    {id}
-                    {thin ? " · 少于 5" : ""}
-                  </span>
-                  <span className="text-xs text-subtle">
-                    确认 {row.confirmed} · 编辑 {row.edited}
                   </span>
                 </li>
               );

@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { dbSource, getSql } from "@/lib/db";
 import { newId } from "../storage";
-import { HEARING, isHearingProvider, SCRIPTED_CATEGORIES, type HearingProviderId } from "./config.ts";
+import { HEARING, isHearingProvider, type HearingProviderId } from "./config.ts";
 import {
   hearWithGemini,
   hearWithQwen,
@@ -253,19 +253,6 @@ export const getHearingTurnAudio = createServerFn({ method: "POST" })
     return { ok: true as const, audioBase64: fromBlob, mimeType: "audio/wav" };
   });
 
-export const undoHearingClip = createServerFn({ method: "POST" })
-  .validator((input: { id: string }) => input)
-  .handler(async ({ data }) => {
-    const sql = await getSql();
-    const rows = await sql<{ blob_pathname: string | null }>`
-      select blob_pathname from qingran_hearing_clips where id = ${data.id}
-    `;
-    if (!rows[0]) return { ok: false as const, error: "没有这段录音。" };
-    await deleteHearingWav(rows[0].blob_pathname);
-    await sql`delete from qingran_hearing_clips where id = ${data.id}`;
-    return { ok: true as const };
-  });
-
 export const runHearing = createServerFn({ method: "POST" })
   .validator((input: RunHearingInput) => input)
   .handler(async ({ data }): Promise<RunHearingOutput> => {
@@ -395,45 +382,6 @@ export const warmupHearing = createServerFn({ method: "POST" })
     }
     const result = await warmupSelfhost();
     return { ok: result.ok, latency_ms: result.latency_ms, cold: result.cold, error: result.error };
-  });
-
-export const saveHearingClip = createServerFn({ method: "POST" })
-  .validator(
-    (input: {
-      audioBase64: string;
-      liveText?: string;
-      xaiText?: string;
-      tagged?: string;
-      source?: "real" | "scripted";
-      category?: string;
-      hearing?: HearingResult | null;
-      turnId?: string;
-      mode?: HearingMode;
-      audioRoute?: AudioRoute;
-    }) => input,
-  )
-  .handler(async ({ data }) => {
-    try {
-      const clipId = await insertClip({
-        audioBase64: data.audioBase64,
-        durationMs: wavDurationMs(data.audioBase64),
-        source: data.source === "scripted" ? "scripted" : "real",
-        category: data.category,
-        xaiText: data.xaiText ?? "",
-        hearing: data.hearing ?? null,
-        tagged: data.tagged ?? "",
-        liveText: data.liveText ?? "",
-        turnId: data.turnId,
-        mode: data.mode ?? "scripted",
-        audioRoute: data.audioRoute,
-        disagreement: false,
-      });
-      return { ok: true as const, clipId };
-    } catch (err) {
-      const message = errorText(err);
-      console.error("[hearing] saveHearingClip failed:", message);
-      return { ok: false as const, error: message };
-    }
   });
 
 export const confirmHearingClip = createServerFn({ method: "POST" })
@@ -707,24 +655,6 @@ export const exportHearingClips = createServerFn({ method: "POST" })
       ),
     };
   });
-
-export const scriptedQuota = createServerFn({ method: "GET" }).handler(async () => {
-  const sql = await getSql();
-  const rows = await sql<{ category: string; n: number }>`
-    select category, count(*)::int as n
-    from qingran_hearing_clips
-    where source = 'scripted' and category is not null and skip = false
-    group by category
-  `;
-  const counts: Record<string, number> = {};
-  for (const row of rows) counts[row.category] = Number(row.n) || 0;
-  return {
-    categories: SCRIPTED_CATEGORIES.map((c) => ({
-      ...c,
-      have: counts[c.id] ?? 0,
-    })),
-  };
-});
 
 async function dispatchProvider(provider: HearingProviderId, audioBase64: string, opts?: HearingCallOpts) {
   if (provider === "qwen") return hearWithQwen(audioBase64, opts);

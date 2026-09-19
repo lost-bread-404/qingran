@@ -1,6 +1,4 @@
 import { DEFAULT_HEARING_PROVIDER, isHearingProvider, type HearingProviderId } from "./hearing/config.ts";
-import { sanitizeSkipped } from "./hearing/scripted.ts";
-import type { ScriptedCategoryId } from "./hearing/config.ts";
 
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
@@ -16,8 +14,6 @@ export type Profile = {
   memoryCursor: string;
   hearingProvider: HearingProviderId;
   captureAudio: boolean;
-  scriptedCapture: boolean;
-  skippedScripted: ScriptedCategoryId[];
   debugHearing: boolean;
   hearingNbest: boolean;
 };
@@ -61,8 +57,6 @@ export const DEFAULT_PROFILE: Profile = {
   memoryCursor: "",
   hearingProvider: DEFAULT_HEARING_PROVIDER,
   captureAudio: true,
-  scriptedCapture: false,
-  skippedScripted: [],
   debugHearing: true,
   hearingNbest: false,
 };
@@ -83,8 +77,6 @@ type LooseProfile = Partial<Profile> & {
   memoryCursor?: string;
   hearingProvider?: string;
   captureAudio?: boolean;
-  scriptedCapture?: boolean;
-  skippedScripted?: unknown;
   debugHearing?: boolean;
   hearingNbest?: boolean;
 };
@@ -102,8 +94,6 @@ export function lockedProfile(input?: unknown): Profile {
       : DEFAULT_HEARING_PROVIDER,
     debugHearing: raw.debugHearing !== false,
     captureAudio: raw.debugHearing !== false,
-    scriptedCapture: Boolean(raw.scriptedCapture),
-    skippedScripted: sanitizeSkipped(raw.skippedScripted),
     hearingNbest: Boolean(raw.hearingNbest),
   };
 }

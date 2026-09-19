@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LabRouteImport } from './routes/lab'
-import { Route as RecordRouteImport } from './routes/record'
 import { Route as ApiTalkRouteImport } from './routes/api/talk'
 
 const IndexRoute = IndexRouteImport.update({
@@ -24,11 +23,6 @@ const LabRoute = LabRouteImport.update({
   path: '/lab',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RecordRoute = RecordRouteImport.update({
-  id: '/record',
-  path: '/record',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiTalkRoute = ApiTalkRouteImport.update({
   id: '/api/talk',
   path: '/api/talk',
@@ -38,34 +32,30 @@ const ApiTalkRoute = ApiTalkRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/lab': typeof LabRoute
-  '/record': typeof RecordRoute
   '/api/talk': typeof ApiTalkRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/lab': typeof LabRoute
-  '/record': typeof RecordRoute
   '/api/talk': typeof ApiTalkRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/lab': typeof LabRoute
-  '/record': typeof RecordRoute
   '/api/talk': typeof ApiTalkRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/lab' | '/record' | '/api/talk'
+  fullPaths: '/' | '/lab' | '/api/talk'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/lab' | '/record' | '/api/talk'
-  id: '__root__' | '/' | '/lab' | '/record' | '/api/talk'
+  to: '/' | '/lab' | '/api/talk'
+  id: '__root__' | '/' | '/lab' | '/api/talk'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LabRoute: typeof LabRoute
-  RecordRoute: typeof RecordRoute
   ApiTalkRoute: typeof ApiTalkRoute
 }
 
@@ -85,13 +75,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LabRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/record': {
-      id: '/record'
-      path: '/record'
-      fullPath: '/record'
-      preLoaderRoute: typeof RecordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/talk': {
       id: '/api/talk'
       path: '/api/talk'
@@ -105,7 +88,6 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LabRoute: LabRoute,
-  RecordRoute: RecordRoute,
   ApiTalkRoute: ApiTalkRoute,
 }
 export const routeTree = rootRouteImport

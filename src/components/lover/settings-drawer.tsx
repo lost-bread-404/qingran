@@ -1,6 +1,5 @@
 import { Check, Pencil, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -59,7 +58,6 @@ export function SettingsDrawer({
   const [draft, setDraft] = useState(profile.systemPrompt);
   const [hearingProvider, setHearingProvider] = useState<HearingProviderId>(profile.hearingProvider);
   const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
-  const [hearingNbest, setHearingNbest] = useState(profile.hearingNbest);
   const [providerReady, setProviderReady] = useState<Record<HearingProviderId, boolean> | null>(null);
   const [newFact, setNewFact] = useState("");
   const [newAt, setNewAt] = useState(() => toDatetimeLocal(Date.now()));
@@ -77,7 +75,6 @@ export function SettingsDrawer({
       setDraft(profile.systemPrompt);
       setHearingProvider(profile.hearingProvider);
       setDebugHearing(profile.debugHearing);
-      setHearingNbest(profile.hearingNbest);
       setTab("prompt");
       setNewAt(toDatetimeLocal(Date.now()));
       setNewTimeTouched(false);
@@ -96,10 +93,7 @@ export function SettingsDrawer({
       systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
       hearingProvider: nextProvider,
       captureAudio: debugHearing,
-      scriptedCapture: profile.scriptedCapture,
-      skippedScripted: profile.skippedScripted,
       debugHearing,
-      hearingNbest,
     });
     onOpenChange(false);
   }
@@ -271,41 +265,12 @@ export function SettingsDrawer({
                 onChange={(e) => setDebugHearing(e.target.checked)}
               />
               <span>
-                <span className="block text-sm">调试</span>
+                <span className="block text-sm">标注模式</span>
                 <span className="block text-xs text-subtle">
                   打开后每一句都存成 clip，并启用确认面板。关掉就不存录音，铅笔只是改字。
                 </span>
               </span>
             </label>
-            <Link
-              to="/record"
-              className="flex h-11 items-center justify-center rounded-md bg-surface-2 text-sm"
-              onClick={() => onOpenChange(false)}
-            >
-              定向录制
-            </Link>
-            <Link
-              to="/lab"
-              className="flex h-11 items-center justify-center rounded-md bg-surface-2 text-sm"
-              onClick={() => onOpenChange(false)}
-            >
-              标注页
-            </Link>
-            <details className="rounded-md bg-surface-2 px-3 py-3">
-              <summary className="cursor-pointer text-sm">高级</summary>
-              <label className="mt-3 flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={hearingNbest}
-                  onChange={(e) => setHearingNbest(e.target.checked)}
-                />
-                <span>
-                  <span className="block text-sm">n-best 候选</span>
-                  <span className="block text-xs text-subtle">打开后不确定的词会写成 {"{A|B}"}。</span>
-                </span>
-              </label>
-            </details>
           </div>
         </div>
       ) : (

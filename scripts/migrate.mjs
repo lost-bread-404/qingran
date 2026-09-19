@@ -10,9 +10,7 @@
  * is not applied to an app that never asked for sign-in.
  *
  * No DATABASE_URL (local / preview builds) -> skip; the PGLite fallback applies
- * the same files at startup instead (see src/lib/db.ts). On Vercel, Neon also
- * applies pending files on first `getSql()` so a build that lacked DATABASE_URL
- * still catches up at runtime.
+ * the same files at startup instead (see src/lib/db.ts).
  */
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -22,16 +20,9 @@ import { pendingMigrations } from "./migration-plan.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
-  if (process.env.VERCEL) {
-    console.warn(
-      "[migrate] DATABASE_URL is not set during this Vercel build. " +
-        "Skipping here; src/lib/db.ts will apply pending migrations on the first Neon query.",
-    );
-  } else {
-    console.log(
-      "[migrate] DATABASE_URL not set — skipping (the PGLite fallback migrates itself).",
-    );
-  }
+  console.log(
+    "[migrate] DATABASE_URL not set — skipping (the PGLite fallback migrates itself).",
+  );
   process.exit(0);
 }
 
