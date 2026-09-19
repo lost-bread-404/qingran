@@ -56,7 +56,7 @@
 - [ ] 硬规则兜底：mind 过期 / 新会话开始 / 情绪强度突然升高 → 直接走推理模型。
 - [ ] 想完写回 mind，下次遇到类似情况直接走快路径。
 - [ ] 每轮记录走了哪条路径和触发原因；分别统计两条路径的延迟；看升级率（太高 = 快模型没自信，太低 = 在硬撑）。
-- [ ] 标注「快模型回答了但没脑子」的轮次，用来校准路由。
+- [ ] 标注「快模型回答了但没脳子」的轮次，用来校准路由。
 
 ## 5. 记忆检索
 
@@ -79,7 +79,7 @@
 
 ## 8. Prompt eval（Rosie 自己写 prompt，这里只放测试）
 
-- [ ] 从真实对话里挑 10–20 轮「霸总」/「没脑子」的回复，存成固定测试集；每次改 prompt 只改一处，重放一遍，比较前后。
+- [ ] 从真实对话里挑 10–20 轮「霸总」/「没脳子」的回复，存成固定测试集；每次改 prompt 只改一处，重放一遍，比较前后。
 - [ ] 必收测试用例：
   - **牛津面试**：Rosie 倾诉被比较 + 「下周面试失败就完了」。合格：先理解处境（必要时只问缺的信息）→ 共情 → 能兑现的付出。不合格：第一轮就安慰或承诺内推、资源。
   - **不信任 → 我会努力**这一类：Rosie 表达一个关于自己的深层信念。合格：回应这个信念本身。不合格：用付出、保证来回应。
@@ -89,6 +89,26 @@ Prompt 原则备忘（供 Rosie 自己写时参考）：写「她是谁、在乎
 ## 9. 语音（本轮 `feat/simple-hearing-eval` 之后）
 
 - [ ] 攒约 200 条标注后，看 /lab 三行 CER（最终文字 / 仅 xAI / 仅 Apple），再用 `scripts/eval-hearing.mjs` 在同一 test set 上比较 xAI / Qwen / Gemini / 自部署。
+- [ ] **Refusal 测试（还没做）**：攒到几十条标注后导出，用 eval 脚本测 Qwen / Gemini 的拒答率（hard + soft）。决策规则：任意一家 < 5% 就先用它；都 > 5% 就部署自部署版本（Modal，`deploy/modal_hearing.py`）。
+- [ ] **xAI STT streaming（WebSocket）**：从「说完 → 等 2 秒静音 → 上传整段 → 识别」改成边说边传、边说边识别，并可用 xAI 服务端 endpointing（Smart Turn）替代固定 2 秒静音。这是降低延迟收益最大的一项。
+  - 前提：eval baseline 已经出来，改完直接对比 streaming 和 batch 的 CER 与延迟。
+  - 问题：Vercel serverless 不适合长时间中转 WebSocket，大概率要让手机直连 xAI，需要临时 token 一类的机制避免暴露 API key（先查 xAI 文档确认是否支持）；中文识别问题依然存在（同一个模型）；录音照样要在本地保存一份用于 eval。
+
+听力引擎选项总览：
+
+| 选项 | 状态 |
+|---|---|
+| xAI STT（batch） | 在用 |
+| Qwen3.5-Omni（DashScope） | 已接入 |
+| Gemini | 已接入 |
+| Apple 识别（Web Speech） | 一直和 xAI 并行运行（liveText） |
+| 自部署 Qwen2.5-Omni-7B（Modal） | 代码已写好，未部署 |
+| 自部署 Qwen3-Omni-30B / Step-Audio 2 mini | 备选，自部署跑通后改配置即可换 |
+| xAI Voice Agent | 未做，需实测能否输出带语气的转写 |
+| SenseVoice（手机本地） | 未做，只有粗粒度情绪和事件标签 |
+| xAI STT streaming（WebSocket） | 未做，见上 |
+
+- [ ] 标注方式（已决定）：不再用固定情绪分类（撒娇 / 玩 / 困…）。语气用标点表达（～ … ！ ？），另加「字面≠意思」开关和可选备注；「噪音」开关保留。成绩卡加「语气符号准确率」评估 `recoverCues`。
 - [ ] 个人词表（从历史消息统计高频词和短句）和 confusions 自动纠错表：等 eval 显示错误主要是同音字问题时再做。
 - [ ] ~~iOS 壳接原生 SFSpeechRecognizer~~：不需要。数据显示 Apple 识别在主屏幕 PWA 模式下正常工作。
 - [ ] iOS 原生 app：等 Apple Developer 身份验证通过后在真机上测试（`DEVELOPMENT_TEAM` 还是空的）。
