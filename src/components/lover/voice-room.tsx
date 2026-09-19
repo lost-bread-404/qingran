@@ -2,6 +2,7 @@ import { Settings, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CallButton } from "@/components/lover/call-button";
 import { ConfirmTurn } from "@/components/lover/confirm-turn";
+import { FlagReply } from "@/components/lover/flag-reply";
 import { MicButton } from "@/components/lover/mic-button";
 import { SettingsDrawer } from "@/components/lover/settings-drawer";
 import { Transcript, type TranscriptHandle } from "@/components/lover/transcript";
@@ -37,7 +38,7 @@ import {
 } from "@/lib/lover/room";
 import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
-import { buildHearingContext, extractContextKeyterms, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
+import { buildHearingContext, extractContextKeyterms, lastDialogueTurns, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
 import { extractTfIdfTerms } from "@/lib/lover/hearing/keyterms";
 import { detectAudioRoute } from "@/lib/lover/hearing/route";
 import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
@@ -48,14 +49,18 @@ import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/sessio
 import { formatCallAudioLog, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
   confirmHearingClip,
+  flagQingranReply,
+  getHearingClipLabel,
   getHearingTurnAudio,
   hearingLabeledCount,
   patchHearingFinalText,
+  patchHearingReplyId,
   patchHearingTurn,
   unlabelHearingByTurn,
 } from "@/lib/lover/hearing/store";
 import { clipSaveBanner, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { micActionForConfirmPanel } from "@/lib/lover/hearing/confirm-call";
+import type { AcousticTags, TagKey } from "@/lib/lover/hearing/tags";
 import {
   CONTEXT_WINDOW,
   DEFAULT_PROFILE,
@@ -117,14 +122,22 @@ export function VoiceRoom() {
   const [undoConfirmId, setUndoConfirmId] = useState<string | null>(null);
   const undoTimerRef = useRef(0);
   const [audioLog, setAudioLog] = useState("");
+  const [confirmPredicted, setConfirmPredicted] = useState<AcousticTags | null>(null);
+  const [confirmGoldTags, setConfirmGoldTags] = useState<Partial<AcousticTags> | null>(null);
+  const [confirmNoise, setConfirmNoise] = useState(false);
+  const [confirmMismatch, setConfirmMismatch] = useState(false);
+  const [confirmNote, setConfirmNote] = useState("");
+  const [confirmDraft, setConfirmDraft] = useState("");
+  const [flagTarget, setFlagTarget] = useState<{ messageId: string; replyTo?: string; trigger: string; reply: string } | null>(null);
+  const [flagBusy, setFlagBusy] = useState(false);
+  const [flagError, setFlagError] = useState<string | null>(null);
 
   useEffect(() => {
     profileRef.current = profile;
-    const context = buildHearingContext(
-      chatRef.current
-        .filter((m) => m.kind !== "steer" && m.kind !== "setting" && !skipsQingran(m))
-        .map((m) => ({ role: m.role, text: m.text })),
-    );
+    const contextTurns = chatRef.current
+      .filter((m) => m.kind !== "steer" && m.kind !== "setting" && !skipsQingran(m))
+      .map((m) => ({ role: m.role, text: m.text }));
+    const context = buildHearingContext(contextTurns);
     const extraKeyterms = mergeKeyterms(
       extractTfIdfTerms(
         [{ text: profile.systemPrompt }, ...memoriesRef.current.map((m) => ({ text: m.text }))],
@@ -140,6 +153,8 @@ export function VoiceRoom() {
       mode: callActiveRef.current ? "call" : "text",
       context,
       extraKeyterms,
+      contextBefore: lastDialogueTurns(contextTurns, 4),
+      systemPrompt: profile.systemPrompt,
     });
   }, [profile, messages.length, memories]);
   useEffect(() => {
@@ -384,6 +399,7 @@ export function VoiceRoom() {
         skipQingran?: boolean;
         endpointFired?: number;
         sttDoneAt?: number;
+        predictedTags?: AcousticTags;
       },
     ) => {
       const tagged = sayRaw.trim();
@@ -400,6 +416,7 @@ export function VoiceRoom() {
         createdAt: at,
         kind: opts?.skipQingran ? "unheard" : "say",
         voiceTurnId: opts?.voiceTurnId,
+        predictedTags: opts?.predictedTags,
         hearingGold: opts?.voiceTurnId ? "unconfirmed" : undefined,
         hearingTiming: hearMs != null ? { hearMs } : undefined,
       };
@@ -444,7 +461,8 @@ export function VoiceRoom() {
       setStatus("thinking");
       void kickAudio();
       if (opts?.voiceTurnId) {
-        void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: say } });
+        void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: tagged } });
+        void patchHearingReplyId({ data: { turnId: opts.voiceTurnId, replyMessageId: reply.id } });
       }
       const stampTiming = (partial: { grokMs?: number; ttsMs?: number }) => {
         if (!profileRef.current.debugHearing) return;
@@ -619,6 +637,7 @@ export function VoiceRoom() {
         skipQingran: heard.skipQingran,
         endpointFired: heard.endpointFired,
         sttDoneAt: heard.sttDoneAt,
+        predictedTags: heard.predictedTags,
       });
     },
   });
@@ -658,11 +677,26 @@ export function VoiceRoom() {
     if (!msg?.voiceTurnId) return;
     let revoked = false;
     let url: string | null = null;
+    setConfirmPredicted(msg.predictedTags ?? null);
+    setConfirmGoldTags(null);
+    setConfirmNoise(false);
+    setConfirmMismatch(false);
+    setConfirmNote("");
+    setConfirmDraft(msg.text);
     void getHearingTurnAudio({ data: { turnId: msg.voiceTurnId } }).then((result) => {
       if (!result.ok || revoked) return;
       const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
       url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
       setConfirmAudioUrl(url);
+    });
+    void getHearingClipLabel({ data: { turnId: msg.voiceTurnId } }).then((result) => {
+      if (!result.ok || revoked) return;
+      if (result.predictedTags) setConfirmPredicted(result.predictedTags);
+      setConfirmGoldTags(result.goldTags);
+      setConfirmNoise(Boolean(result.noiseOnly));
+      setConfirmMismatch(Boolean(result.literalMismatch));
+      setConfirmNote(result.toneNote ?? "");
+      if (result.goldText) setConfirmDraft(result.goldText);
     });
     return () => {
       revoked = true;
@@ -687,6 +721,7 @@ export function VoiceRoom() {
           skipQingran: heard.skipQingran,
           endpointFired: heard.endpointFired,
           sttDoneAt: heard.sttDoneAt,
+          predictedTags: heard.predictedTags,
         });
       }
     } finally {
@@ -785,6 +820,8 @@ export function VoiceRoom() {
     noiseOnly: boolean;
     literalMismatch: boolean;
     toneNote: string;
+    goldTags: Partial<AcousticTags>;
+    tagsTouched: TagKey[];
   }) {
     const msg = chatRef.current.find((m) => m.id === confirmId);
     if (!msg?.voiceTurnId) {
@@ -802,6 +839,8 @@ export function VoiceRoom() {
           noiseOnly: input.noiseOnly,
           literalMismatch: input.literalMismatch,
           toneNote: input.toneNote,
+          goldTags: input.goldTags,
+          tagsTouched: input.tagsTouched,
         },
       });
       if (!result.ok) {
@@ -1070,6 +1109,17 @@ export function VoiceRoom() {
               onConfirmQuick={(id) => void saveConfirmQuick(id)}
               onUndoConfirm={(id) => void undoConfirm(id)}
               undoConfirmId={undoConfirmId}
+              onFlagReply={(assistantId, replyToId) => {
+                const reply = chatRef.current.find((m) => m.id === assistantId);
+                const trigger = replyToId ? chatRef.current.find((m) => m.id === replyToId) : undefined;
+                setFlagError(null);
+                setFlagTarget({
+                  messageId: assistantId,
+                  replyTo: replyToId,
+                  trigger: trigger?.text ?? "",
+                  reply: reply?.text ?? "",
+                });
+              }}
             />
 
             {editingId ? null : (
@@ -1136,14 +1186,55 @@ export function VoiceRoom() {
         <ConfirmTurn
           open={Boolean(confirmId)}
           sttText={messages.find((m) => m.id === confirmId)?.text ?? ""}
+          initialDraft={confirmDraft}
           audioUrl={confirmAudioUrl}
           busy={confirmBusy}
           error={confirmError}
+          initialPredicted={confirmPredicted}
+          initialGoldTags={confirmGoldTags}
+          initialNoise={confirmNoise}
+          initialLiteralMismatch={confirmMismatch}
+          initialToneNote={confirmNote}
           onClose={() => {
             setConfirmId(null);
             setConfirmError(null);
           }}
           onConfirm={(input) => void saveConfirm(input)}
+        />
+
+        <FlagReply
+          open={Boolean(flagTarget)}
+          triggerText={flagTarget?.trigger}
+          replyText={flagTarget?.reply}
+          busy={flagBusy}
+          error={flagError}
+          onClose={() => {
+            setFlagTarget(null);
+            setFlagError(null);
+          }}
+          onSave={async (note) => {
+            if (!flagTarget) return;
+            setFlagBusy(true);
+            setFlagError(null);
+            try {
+              const result = await flagQingranReply({
+                data: {
+                  messageId: flagTarget.messageId,
+                  replyToMessageId: flagTarget.replyTo,
+                  note,
+                },
+              });
+              if (!result.ok) {
+                setFlagError(result.error);
+                return;
+              }
+              setFlagTarget(null);
+            } catch (err) {
+              setFlagError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setFlagBusy(false);
+            }
+          }}
         />
 
         <SettingsDrawer

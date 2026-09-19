@@ -1,4 +1,5 @@
 import { shouldDropAsNoise } from "./noise.ts";
+import type { AcousticTags } from "./tags.ts";
 
 export const UNRECOGNIZED_TEXT = "〔未识别〕";
 
@@ -11,6 +12,7 @@ export type HeardUtterance = {
   persistPending?: boolean;
   endpointFired?: number;
   sttDoneAt?: number;
+  predictedTags?: AcousticTags;
 };
 
 export function clipSaveBanner(error: string): string {
@@ -39,6 +41,7 @@ export function heardFromHearing(input: {
   saveError?: string;
   endpointFired?: number;
   sttDoneAt?: number;
+  predictedTags?: AcousticTags;
 }): HeardUtterance {
   const recognized = input.tagged.trim() || input.xaiText.trim();
   const empty = !recognized || shouldDropAsNoise(input.noiseOnly, input.xaiText);
@@ -54,6 +57,7 @@ export function heardFromHearing(input: {
       saveError: input.saveError,
       skipQingran: empty,
       persistPending: true,
+      predictedTags: input.predictedTags,
       ...timing,
     };
   }
@@ -63,6 +67,7 @@ export function heardFromHearing(input: {
     clipId: input.clipId,
     saveError: input.saveError,
     skipQingran: false,
+    predictedTags: input.predictedTags,
     ...timing,
   };
 }

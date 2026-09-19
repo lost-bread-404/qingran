@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Pencil, Volume2 } from "lucide-react";
+import { Check, ChevronDown, Pencil, ThumbsDown, Volume2 } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +31,7 @@ type Props = {
   onConfirmQuick?: (id: string) => void;
   onUndoConfirm?: (id: string) => void;
   undoConfirmId?: string | null;
+  onFlagReply?: (assistantId: string, replyToId?: string) => void;
 };
 
 function nearBottom(el: HTMLElement): boolean {
@@ -61,6 +62,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     onConfirmQuick,
     onUndoConfirm,
     undoConfirmId,
+    onFlagReply,
   },
   ref,
 ) {
@@ -195,16 +197,28 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                 <p className="whitespace-pre-wrap break-words font-display text-lg font-medium leading-relaxed tracking-tight text-fg">
                   {pair.assistant.text}
                 </p>
-                {onPlay ? (
-                  <button
-                    type="button"
-                    aria-label="播放这句话"
-                    onClick={() => onPlay(pair.assistant!.id, pair.assistant!.text)}
-                    className="mt-1 shrink-0 text-subtle transition-colors duration-150 hover:text-fg"
-                  >
-                    <Volume2 className="size-4" />
-                  </button>
-                ) : null}
+                <div className="mt-1 flex shrink-0 flex-col gap-1">
+                  {onPlay ? (
+                    <button
+                      type="button"
+                      aria-label="播放这句话"
+                      onClick={() => onPlay(pair.assistant!.id, pair.assistant!.text)}
+                      className="text-subtle transition-colors duration-150 hover:text-fg"
+                    >
+                      <Volume2 className="size-4" />
+                    </button>
+                  ) : null}
+                  {onFlagReply ? (
+                    <button
+                      type="button"
+                      aria-label="这条回复不好"
+                      onClick={() => onFlagReply(pair.assistant!.id, pair.user?.id ?? pair.assistant!.replyTo)}
+                      className="text-subtle transition-colors duration-150 hover:text-fg"
+                    >
+                      <ThumbsDown className="size-4" />
+                    </button>
+                  ) : null}
+                </div>
               </div>
             ) : null}
           </div>

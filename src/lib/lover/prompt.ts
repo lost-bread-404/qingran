@@ -1,9 +1,13 @@
 import { sortMemoriesByTime } from "./memory.ts";
 import type { ChatMessage, Memory, Profile } from "./types";
 
-const HEARING_TAG_GUIDE = `Rosie 的话有时会带语气标记，不是她打出来的字。格式：字〔长短·走向·声线｜情绪〕，例如「嗯〔long·rising·breathy｜coy〕今天好累〔｜sleepy〕」。
-〔〕里是听力给出的语气，不要念出来，不要写进回复的字面。用它判断她是在撒娇、气声、呢喃、困、委屈还是随口应一声，再按那个语气接。没有标记就按普通口语听。
+const HEARING_TAG_GUIDE = `Rosie 的话有时会带语气标记，不是她打出来的字。格式：字〔长短·走向·声线｜〕，例如「嗯〔long·rising·breathy｜〕今天好累」。
+〔〕里是听力给出的声音：长短、音高走向、是不是气声。竖线右侧如果有字，是笑、哭或叹气，不是情绪类别。不要念出来，不要写进回复的字面。用它听声音听起来怎样，意思由你根据上下文判断。没有标记就按普通口语听。
 有时会出现 {A|B}，表示听力在两个词之间不确定，A 更可能。按更通顺的那个理解，不要把花括号念出来，也不要两个都念。`;
+
+export function promptFingerprint(systemPrompt: string): string {
+  return `${systemPrompt.trim()}\n${HEARING_TAG_GUIDE}`;
+}
 
 export function buildSystemPrompt(
   profile: Profile,

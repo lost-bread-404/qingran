@@ -60,7 +60,12 @@ test("stacked unheard then A/replyA/B/replyB stay in time order", () => {
     msg("b", "user", "B", 5),
     msg("rb", "assistant", "replyB", 6, { replyTo: "b" }),
   ]);
-  assert.deepEqual(pairs.map((p) => p.user?.id ?? p.assistant?.id), ["m1", "m2", "a", "b"]);
+  assert.deepEqual(
+    pairs.flatMap((p) => [p.user?.text, p.assistant?.text].filter(Boolean)),
+    [UNRECOGNIZED_TEXT, UNRECOGNIZED_TEXT, "A", "replyA", "B", "replyB"],
+  );
+  assert.equal(pairs[0]?.assistant, undefined);
+  assert.equal(pairs[1]?.assistant, undefined);
   assert.equal(pairs[2]?.assistant?.id, "ra");
   assert.equal(pairs[3]?.assistant?.id, "rb");
 });

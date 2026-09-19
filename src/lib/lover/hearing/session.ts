@@ -1,5 +1,6 @@
 import type { HearingProviderId } from "./config.ts";
 import { DEFAULT_HEARING_PROVIDER } from "./config.ts";
+import type { ContextTurn } from "./context.ts";
 import type { AudioRoute, HearingMode } from "./route.ts";
 
 export type HearingSession = {
@@ -14,6 +15,8 @@ export type HearingSession = {
   audioRoute: AudioRoute;
   context: string;
   extraKeyterms: string[];
+  contextBefore: ContextTurn[];
+  systemPrompt: string;
 };
 
 const session: HearingSession = {
@@ -28,6 +31,8 @@ const session: HearingSession = {
   audioRoute: "unknown",
   context: "",
   extraKeyterms: [],
+  contextBefore: [],
+  systemPrompt: "",
 };
 
 export function getHearingSession(): HearingSession {

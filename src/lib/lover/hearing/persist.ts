@@ -1,5 +1,11 @@
 import { goldTierFor, isGoldSource, type GoldSource } from "./gold.ts";
 import { hearingCueSchema, EMOTIONS, type CueEmotion, type HearingCue } from "./schema.ts";
+import {
+  parseAcousticTags,
+  parseTagKeys,
+  type AcousticTags,
+  type TagKey,
+} from "./tags.ts";
 
 export type Sql = {
   <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
@@ -29,6 +35,10 @@ export type InsertClipRowInput = {
   finalText?: string | null;
   peakRms?: number | null;
   vadFloor?: number | null;
+  predictedTags?: AcousticTags | null;
+  commitSha?: string | null;
+  promptHash?: string | null;
+  contextBefore?: unknown;
 };
 
 export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promise<void> {
@@ -37,7 +47,7 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       id, duration_ms, sample_rate, source, category, blob_pathname, audio_wav,
       xai_text, hearing_text, hearing_json, live_text,
       blob_error, storage_backend, stt_text, mode, audio_route, turn_id, disagreement,
-      final_text, peak_rms, vad_floor
+      final_text, peak_rms, vad_floor, predicted_tags, commit_sha, prompt_hash, context_before
     )
     values (
       ${input.id},
@@ -60,7 +70,11 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       ${Boolean(input.disagreement)},
       ${input.finalText ?? null},
       ${input.peakRms ?? null},
-      ${input.vadFloor ?? null}
+      ${input.vadFloor ?? null},
+      ${input.predictedTags ? JSON.stringify(input.predictedTags) : null}::jsonb,
+      ${input.commitSha ?? null},
+      ${input.promptHash ?? null},
+      ${input.contextBefore ? JSON.stringify(input.contextBefore) : null}::jsonb
     )
   `;
 }
@@ -75,6 +89,8 @@ export async function confirmClipByTurn(
     noiseOnly?: boolean;
     literalMismatch?: boolean;
     toneNote?: string | null;
+    goldTags?: Partial<AcousticTags> | null;
+    tagsTouched?: TagKey[] | null;
   },
 ): Promise<{ ok: true; clipId: string; goldTier: number } | { ok: false; error: string }> {
   if (!isGoldSource(input.goldSource)) return { ok: false, error: "bad-gold-source" };
@@ -99,19 +115,41 @@ export async function confirmClipByTurn(
   });
   const nextTier = hasCues ? 3 : tier;
   const note = input.toneNote?.trim() || null;
-  await sql`
-    update qingran_hearing_clips
-    set gold_text = ${input.goldText},
-        gold_source = ${input.goldSource},
-        gold_tier = ${nextTier},
-        utterance_emotion = coalesce(${emotion}, utterance_emotion),
-        noise_only = ${Boolean(input.noiseOnly)},
-        literal_mismatch = ${Boolean(input.literalMismatch)},
-        tone_note = ${note},
-        gold_at = now(),
-        stt_text = coalesce(stt_text, hearing_text, xai_text)
-    where id = ${clip.id}
-  `;
+  const touchTags = input.tagsTouched !== undefined;
+  const goldTags =
+    touchTags && input.goldTags && Object.keys(input.goldTags).length ? JSON.stringify(input.goldTags) : null;
+  const touched = touchTags && input.tagsTouched?.length ? input.tagsTouched : null;
+  if (touchTags) {
+    await sql`
+      update qingran_hearing_clips
+      set gold_text = ${input.goldText},
+          gold_source = ${input.goldSource},
+          gold_tier = ${nextTier},
+          utterance_emotion = coalesce(${emotion}, utterance_emotion),
+          noise_only = ${Boolean(input.noiseOnly)},
+          literal_mismatch = ${Boolean(input.literalMismatch)},
+          tone_note = ${note},
+          gold_at = now(),
+          gold_tags = ${goldTags}::jsonb,
+          tags_touched = ${touched},
+          stt_text = coalesce(stt_text, hearing_text, xai_text)
+      where id = ${clip.id}
+    `;
+  } else {
+    await sql`
+      update qingran_hearing_clips
+      set gold_text = ${input.goldText},
+          gold_source = ${input.goldSource},
+          gold_tier = ${nextTier},
+          utterance_emotion = coalesce(${emotion}, utterance_emotion),
+          noise_only = ${Boolean(input.noiseOnly)},
+          literal_mismatch = ${Boolean(input.literalMismatch)},
+          tone_note = ${note},
+          gold_at = now(),
+          stt_text = coalesce(stt_text, hearing_text, xai_text)
+      where id = ${clip.id}
+    `;
+  }
   return { ok: true, clipId: clip.id, goldTier: nextTier };
 }
 
@@ -140,7 +178,9 @@ export async function unlabelClip(
         noise_only = false,
         literal_mismatch = false,
         tone_note = null,
-        gold_at = null
+        gold_at = null,
+        gold_tags = null,
+        tags_touched = null
     where id = ${clip.id}
   `;
   return { ok: true, clipId: clip.id };
@@ -158,6 +198,9 @@ export type LabeledClipRow = {
   literalMismatch: boolean;
   toneNote: string | null;
   goldAt: string | null;
+  predictedTags: AcousticTags | null;
+  goldTags: Partial<AcousticTags> | null;
+  tagsTouched: TagKey[];
 };
 
 export async function listLabeledClipRows(sql: Sql, page = 1) {
@@ -173,9 +216,13 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
     literal_mismatch: boolean | null;
     tone_note: string | null;
     gold_at: string | null;
+    predicted_tags: unknown;
+    gold_tags: unknown;
+    tags_touched: string[] | null;
   }>(
     `select id, turn_id, final_text, gold_text, gold_source,
-            noise_only, literal_mismatch, tone_note, gold_at::text as gold_at
+            noise_only, literal_mismatch, tone_note, gold_at::text as gold_at,
+            predicted_tags, gold_tags, tags_touched
      from qingran_hearing_clips
      where gold_source is not null
      order by coalesce(gold_at, created_at) desc, id desc
@@ -197,6 +244,9 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
         literalMismatch: Boolean(row.literal_mismatch),
         toneNote: row.tone_note,
         goldAt: row.gold_at,
+        predictedTags: parseAcousticTags(row.predicted_tags),
+        goldTags: (row.gold_tags && typeof row.gold_tags === "object" ? row.gold_tags : null) as Partial<AcousticTags> | null,
+        tagsTouched: parseTagKeys(row.tags_touched),
       }),
     ),
     total: Number(count[0]?.n) || 0,
@@ -303,10 +353,14 @@ export async function listScoreClipRows(sql: Sql) {
     literal_mismatch: boolean | null;
     tone_note: string | null;
     turn_id: string | null;
+    predicted_tags: unknown;
+    gold_tags: unknown;
+    tags_touched: string[] | null;
   }>(
     `select id, created_at::text as created_at,
             final_text, xai_text, live_text, gold_text, stt_text, hearing_text,
-            noise_only, utterance_emotion, literal_mismatch, tone_note, turn_id
+            noise_only, utterance_emotion, literal_mismatch, tone_note, turn_id,
+            predicted_tags, gold_tags, tags_touched
      from qingran_hearing_clips
      order by created_at desc`,
   );
@@ -364,4 +418,165 @@ export function parseCues(value: unknown): HearingCue[] {
 
 function isEmotion(value: unknown): value is CueEmotion {
   return typeof value === "string" && (EMOTIONS as readonly string[]).includes(value);
+}
+
+export async function patchReplyMessageId(sql: Sql, turnId: string, replyMessageId: string) {
+  await sql`
+    update qingran_hearing_clips
+    set reply_message_id = ${replyMessageId}
+    where turn_id = ${turnId} and reply_message_id is null
+  `;
+  await sql`
+    update qingran_hearing_turns
+    set reply_message_id = ${replyMessageId}
+    where id = ${turnId} and reply_message_id is null
+  `;
+}
+
+export type ReplyFlagRow = {
+  id: string;
+  messageId: string;
+  replyToMessageId: string | null;
+  note: string;
+  createdAt: string;
+  commitSha: string | null;
+  promptHash: string | null;
+  triggerText: string;
+  replyText: string;
+};
+
+export async function insertReplyFlag(
+  sql: Sql,
+  input: {
+    id: string;
+    messageId: string;
+    replyToMessageId?: string | null;
+    note: string;
+    commitSha?: string | null;
+    promptHash?: string | null;
+  },
+) {
+  await sql`
+    insert into qingran_reply_flags (
+      id, message_id, reply_to_message_id, note, commit_sha, prompt_hash
+    )
+    values (
+      ${input.id},
+      ${input.messageId},
+      ${input.replyToMessageId ?? null},
+      ${input.note},
+      ${input.commitSha ?? null},
+      ${input.promptHash ?? null}
+    )
+  `;
+}
+
+export async function listReplyFlagRows(sql: Sql): Promise<ReplyFlagRow[]> {
+  const rows = await sql.query<{
+    id: string;
+    message_id: string;
+    reply_to_message_id: string | null;
+    note: string | null;
+    created_at: string;
+    commit_sha: string | null;
+    prompt_hash: string | null;
+    trigger_text: string | null;
+    reply_text: string | null;
+  }>(
+    `select f.id, f.message_id, f.reply_to_message_id, f.note,
+            f.created_at::text as created_at, f.commit_sha, f.prompt_hash,
+            t.body as trigger_text, r.body as reply_text
+     from qingran_reply_flags f
+     left join qingran_messages t on t.id = f.reply_to_message_id
+     left join qingran_messages r on r.id = f.message_id
+     order by f.created_at desc
+     limit 200`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    messageId: row.message_id,
+    replyToMessageId: row.reply_to_message_id,
+    note: row.note ?? "",
+    createdAt: row.created_at,
+    commitSha: row.commit_sha,
+    promptHash: row.prompt_hash,
+    triggerText: visibleMessageBody(row.trigger_text),
+    replyText: visibleMessageBody(row.reply_text),
+  }));
+}
+
+export function exportReplyFlagDataset(rows: ReplyFlagRow[]) {
+  return {
+    kind: "qingran-prompt-eval" as const,
+    version: 1,
+    exportedAt: Date.now(),
+    flags: rows.map((row) => ({
+      messageId: row.messageId,
+      replyToMessageId: row.replyToMessageId,
+      triggerText: row.triggerText,
+      replyText: row.replyText,
+      note: row.note,
+      createdAt: row.createdAt,
+      commitSha: row.commitSha,
+      promptHash: row.promptHash,
+    })),
+  };
+}
+
+export type ClipLabelRow = {
+  predictedTags: AcousticTags | null;
+  goldTags: Partial<AcousticTags> | null;
+  tagsTouched: TagKey[];
+  noiseOnly: boolean;
+  literalMismatch: boolean;
+  toneNote: string | null;
+  goldText: string;
+};
+
+export async function clipLabelByTurn(sql: Sql, turnId: string): Promise<ClipLabelRow | null> {
+  const rows = await sql<{
+    predicted_tags: unknown;
+    gold_tags: unknown;
+    tags_touched: string[] | null;
+    noise_only: boolean | null;
+    literal_mismatch: boolean | null;
+    tone_note: string | null;
+    gold_text: string | null;
+  }>`
+    select predicted_tags, gold_tags, tags_touched, noise_only, literal_mismatch, tone_note, gold_text
+    from qingran_hearing_clips
+    where turn_id = ${turnId}
+    order by created_at desc
+    limit 1
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    predictedTags: parseAcousticTags(row.predicted_tags),
+    goldTags:
+      row.gold_tags && typeof row.gold_tags === "object"
+        ? (row.gold_tags as Partial<AcousticTags>)
+        : null,
+    tagsTouched: parseTagKeys(row.tags_touched),
+    noiseOnly: Boolean(row.noise_only),
+    literalMismatch: Boolean(row.literal_mismatch),
+    toneNote: row.tone_note,
+    goldText: row.gold_text ?? "",
+  };
+}
+
+function visibleMessageBody(body: string | null): string {
+  if (!body) return "";
+  let text = body;
+  if (text.startsWith("⟦已扫⟧")) text = text.slice(4);
+  const hear = text.match(/^⟦听:[^⟧]+⟧/);
+  if (hear) text = text.slice(hear[0].length);
+  const gas = text.match(/^⟦气:[^⟧]+⟧/);
+  if (gas) text = text.slice(gas[0].length);
+  const reply = text.match(/^⟦回:[^⟧]+⟧/);
+  if (reply) text = text.slice(reply[0].length);
+  if (text.startsWith("⟦走向⟧") || text.startsWith("⟦设定⟧") || text.startsWith("⟦未听⟧")) {
+    text = text.slice(4);
+  }
+  return text;
 }

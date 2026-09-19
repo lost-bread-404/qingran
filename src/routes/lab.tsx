@@ -7,15 +7,19 @@ import {
   confirmHearingClip,
   deleteHearingClip,
   exportHearingClips,
+  exportReplyFlags,
   getHearingClipAudio,
   hearingLabScore,
   listLabeledHearingClips,
+  listReplyFlags,
   unlabelHearingClip,
   unlockHearingLab,
   type LabeledClipRow,
+  type ReplyFlagRow,
 } from "@/lib/lover/hearing/store";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
 import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/score";
+import { TAG_KEYS, TAG_LABELS, type AcousticTags } from "@/lib/lover/hearing/tags";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/lab")({ component: HearingLabPage });
@@ -47,6 +51,8 @@ type LabEdit = {
   noiseOnly: boolean;
   literalMismatch: boolean;
   toneNote: string | null;
+  predictedTags: AcousticTags | null;
+  goldTags: Partial<AcousticTags> | null;
 };
 
 function fromWorst(row: WorstClip): LabEdit {
@@ -58,6 +64,8 @@ function fromWorst(row: WorstClip): LabEdit {
     noiseOnly: row.noiseOnly,
     literalMismatch: row.literalMismatch,
     toneNote: row.toneNote,
+    predictedTags: row.predictedTags ?? null,
+    goldTags: row.goldTags ?? null,
   };
 }
 
@@ -70,6 +78,8 @@ function fromLabeled(row: LabeledClipRow): LabEdit {
     noiseOnly: row.noiseOnly,
     literalMismatch: row.literalMismatch,
     toneNote: row.toneNote,
+    predictedTags: row.predictedTags,
+    goldTags: row.goldTags,
   };
 }
 
@@ -89,6 +99,20 @@ function HearingLabPage() {
   const [labeledTotal, setLabeledTotal] = useState(0);
   const [labeledPage, setLabeledPage] = useState(1);
   const labeledPageSize = 30;
+  const [flags, setFlags] = useState<ReplyFlagRow[]>([]);
+
+  async function loadFlags(secret = password) {
+    try {
+      const next = await listReplyFlags({ data: { password: secret } });
+      if (!next.ok) {
+        setStatus(next.error);
+        return;
+      }
+      setFlags(next.flags);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   async function loadLabeled(secret = password, page = labeledPage) {
     try {
@@ -116,6 +140,7 @@ function HearingLabPage() {
       setError(null);
       setScore(next);
       await loadLabeled(secret, page);
+      await loadFlags(secret);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -397,6 +422,49 @@ function HearingLabPage() {
           </section>
 
           <section>
+            <p className="mb-2 font-display text-lg">👎 列表</p>
+            <p className="mb-3 text-xs text-subtle">
+              {flags.length ? `${flags.length} 条不好的回复，用作 prompt eval。` : "还没有标记不好的回复。"}
+            </p>
+            {flags.length ? (
+              <ul className="flex flex-col gap-3">
+                {flags.map((row) => (
+                  <li key={row.id} className="rounded-md bg-surface-2 px-3 py-3">
+                    <p className="text-xs text-subtle">{row.createdAt}</p>
+                    <p className="mt-1 text-sm">你 {row.triggerText || "（空）"}</p>
+                    <p className="text-sm text-muted">清然 {row.replyText || "（空）"}</p>
+                    {row.note ? <p className="mt-1 text-sm">备注 {row.note}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const exported = await exportReplyFlags({ data: { password } });
+                    const blob = new Blob([`${JSON.stringify(exported)}\n`], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `qingran-prompt-eval-${new Date().toISOString().slice(0, 10)}.json`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                    setStatus("已导出 👎 JSON。");
+                  } catch (err) {
+                    setStatus(err instanceof Error ? err.message : String(err));
+                  }
+                }}
+              >
+                导出 👎 JSON
+              </Button>
+            </div>
+          </section>
+
+          <section>
             <Button
               type="button"
               variant="outline"
@@ -433,11 +501,13 @@ function HearingLabPage() {
         initialNoise={Boolean(editClip?.noiseOnly)}
         initialLiteralMismatch={Boolean(editClip?.literalMismatch)}
         initialToneNote={editClip?.toneNote ?? ""}
+        initialPredicted={editClip?.predictedTags}
+        initialGoldTags={editClip?.goldTags}
         onClose={() => {
           setEditClip(null);
           setEditError(null);
         }}
-        onConfirm={async ({ goldText, source, noiseOnly, literalMismatch, toneNote }) => {
+        onConfirm={async ({ goldText, source, noiseOnly, literalMismatch, toneNote, goldTags, tagsTouched }) => {
           if (!editClip?.turnId) {
             setEditError("这条没有 turn_id，没法写入。");
             return;
@@ -453,6 +523,8 @@ function HearingLabPage() {
                 noiseOnly,
                 literalMismatch,
                 toneNote,
+                goldTags,
+                tagsTouched,
               },
             });
             if (!result.ok) {
@@ -488,7 +560,9 @@ function ScoreCard({ score }: { score: ScorePayload | null }) {
         }
       />
       <Row label="完全正确率" value={fmtPct(score.exactMatch)} />
-      <Row label="语气符号准确率" value={fmtPct(score.toneAccuracy)} />
+      {TAG_KEYS.map((key) => (
+        <Row key={key} label={`声学标签 · ${TAG_LABELS[key]}`} value={fmtPct(score.tagAccuracy[key])} />
+      ))}
       <Row
         label="噪音里有字"
         value={

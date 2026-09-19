@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   buildHearingContext,
   extractContextKeyterms,
+  lastDialogueTurns,
   mergeKeyterms,
   stripAltTags,
   stripHearingMarkup,
@@ -36,4 +37,24 @@ test("keyterms come from names in context and stay within api limits", () => {
 test("alt tags pick the first candidate for display", () => {
   assert.equal(stripAltTags("今{天|填}好累"), "今天好累");
   assert.equal(stripHearingMarkup("嗯〔long·rising·breathy｜coy〕今{天|填}"), "嗯今天");
+});
+
+test("lastDialogueTurns keeps four rounds and drops blanks", () => {
+  const turns = lastDialogueTurns([
+    { role: "user", text: " " },
+    { role: "user", text: "一" },
+    { role: "assistant", text: "二" },
+    { role: "user", text: "三" },
+    { role: "assistant", text: "四" },
+    { role: "user", text: "五" },
+    { role: "assistant", text: "六" },
+    { role: "user", text: "七" },
+    { role: "assistant", text: "八" },
+    { role: "user", text: "九" },
+    { role: "assistant", text: "十" },
+  ]);
+  assert.deepEqual(
+    turns.map((t) => t.text),
+    ["三", "四", "五", "六", "七", "八", "九", "十"],
+  );
 });

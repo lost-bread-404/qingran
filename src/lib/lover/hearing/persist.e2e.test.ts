@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { pendingMigrations } from "../../../../scripts/migration-plan.mjs";
-import { confirmClipByTurn, goldCount, hallucinationCount, insertClipRow, listClipRows, listLabeledClipRows, listScoreClipRows, patchFinalTextByTurn, unlabelClip } from "./persist.ts";
+import { confirmClipByTurn, exportReplyFlagDataset, goldCount, hallucinationCount, insertClipRow, insertReplyFlag, listClipRows, listLabeledClipRows, listReplyFlagRows, listScoreClipRows, patchFinalTextByTurn, unlabelClip } from "./persist.ts";
 import { scoreHearing } from "./score.ts";
 import { silenceWavBase64 } from "./wav.ts";
 
@@ -178,4 +178,111 @@ test("PGLite e2e: voice round → clip → confirm → confirmed filter", async 
   assert.equal(afterEdit.cerFinal, 0);
   const relisted = await listLabeledClipRows(sql, 1);
   assert.equal(relisted.clips[0]?.goldSource, "edited");
+});
+
+test("PGLite e2e: predicted tags, tags_touched gold, ✓ keeps tags, reply flags export", async () => {
+  const pg = new PGlite();
+  await pg.waitReady;
+  await pg.exec(
+    "create table if not exists _migrations (name text primary key, applied_at timestamptz not null default now())",
+  );
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations");
+  const entries = await readdir(dir);
+  const files = Object.fromEntries(
+    await Promise.all(
+      entries
+        .filter((name) => name.endsWith(".sql"))
+        .map(async (name) => [name, await readFile(join(dir, name), "utf8")] as const),
+    ),
+  );
+  for (const { name } of pendingMigrations(Object.keys(files), [])) {
+    await pg.exec(files[name] ?? "");
+    await pg.query("insert into _migrations (name) values ($1)", [name]);
+  }
+
+  const sql = toSql(async <T>(text: string, params: unknown[]) => {
+    const result = await pg.query<T>(text, params);
+    return result.rows;
+  });
+
+  const predicted = { length: "short", contour: "flat", voice: "normal", event: "none" } as const;
+  await insertClipRow(sql, {
+    id: "clip-tags",
+    durationMs: 400,
+    source: "real",
+    audioWav: silenceWavBase64(0.4),
+    xaiText: "嗯",
+    hearingText: "嗯〔short·flat·normal｜〕",
+    hearingJson: null,
+    liveText: "",
+    storageBackend: "db",
+    sttText: "嗯",
+    turnId: "turn-tags",
+    disagreement: false,
+    finalText: "嗯〔short·flat·normal｜〕",
+    predictedTags: { ...predicted },
+    commitSha: "abc123",
+    promptHash: "deadbeefcafe",
+    contextBefore: [
+      { role: "user", text: "在吗" },
+      { role: "assistant", text: "在" },
+    ],
+  });
+
+  const edited = await confirmClipByTurn(sql, {
+    turnId: "turn-tags",
+    goldText: "嗯",
+    goldSource: "edited",
+    goldTags: { contour: "rising" },
+    tagsTouched: ["contour"],
+  });
+  assert.equal(edited.ok, true);
+  const labeled = await listLabeledClipRows(sql, 1);
+  assert.deepEqual(labeled.clips[0]?.tagsTouched, ["contour"]);
+  assert.equal(labeled.clips[0]?.goldTags?.contour, "rising");
+  assert.equal(labeled.clips[0]?.predictedTags?.length, "short");
+
+  const quick = await confirmClipByTurn(sql, {
+    turnId: "turn-tags",
+    goldText: "嗯呐",
+    goldSource: "confirmed",
+  });
+  assert.equal(quick.ok, true);
+  const afterQuick = await listLabeledClipRows(sql, 1);
+  assert.equal(afterQuick.clips[0]?.goldText, "嗯呐");
+  assert.deepEqual(afterQuick.clips[0]?.tagsTouched, ["contour"]);
+  assert.equal(afterQuick.clips[0]?.goldTags?.contour, "rising");
+
+  await sql`insert into qingran_messages (id, role, body, created_at) values ('u1', 'user', '在吗', 1)`;
+  await sql`insert into qingran_messages (id, role, body, created_at) values ('a1', 'assistant', '嗯，在。', 2)`;
+  await insertReplyFlag(sql, {
+    id: "flag-1",
+    messageId: "a1",
+    replyToMessageId: "u1",
+    note: "答非所问",
+    commitSha: "abc123",
+    promptHash: "deadbeefcafe",
+  });
+  const flags = await listReplyFlagRows(sql);
+  assert.equal(flags.length, 1);
+  assert.equal(flags[0]?.triggerText, "在吗");
+  assert.equal(flags[0]?.replyText, "嗯，在。");
+  assert.equal(flags[0]?.note, "答非所问");
+  const exported = exportReplyFlagDataset(flags);
+  assert.equal(exported.kind, "qingran-prompt-eval");
+  assert.equal(exported.flags[0]?.triggerText, "在吗");
+  assert.equal(exported.flags[0]?.promptHash, "deadbeefcafe");
+});
+
+test("0010 eval-tag migration only adds columns and tables", async () => {
+  const sql = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations/0010_hearing_eval_tags.sql"),
+    "utf8",
+  );
+  assert.match(sql, /add column if not exists predicted_tags/);
+  assert.match(sql, /create table if not exists qingran_reply_flags/);
+  assert.doesNotMatch(sql, /drop column/i);
+  assert.doesNotMatch(sql, /alter column/i);
+  assert.doesNotMatch(sql, /\bupdate\b/i);
+  assert.doesNotMatch(sql, /\bdelete\b/i);
 });

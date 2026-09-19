@@ -9,6 +9,7 @@ import {
   type Profile,
 } from "./types";
 import { sortConversation } from "./pair-messages";
+import { parseAcousticTags, type AcousticTags } from "./hearing/tags.ts";
 
 type Room = {
   profile: Profile;
@@ -212,6 +213,9 @@ function encodeStoredMessage(msg: ChatMessage): string {
   else if (msg.kind === "setting") text = `⟦设定⟧${text}`;
   else if (msg.kind === "unheard") text = `⟦未听⟧${text}`;
   if (msg.replyTo) text = `⟦回:${msg.replyTo}⟧${text}`;
+  if (msg.predictedTags) {
+    text = `⟦气:${msg.predictedTags.length}.${msg.predictedTags.contour}.${msg.predictedTags.voice}.${msg.predictedTags.event}⟧${text}`;
+  }
   if (msg.voiceTurnId) {
     text =
       msg.hearingGold === "confirmed"
@@ -234,6 +238,7 @@ function decodeStoredMessage(row: {
   let voiceTurnId: string | undefined;
   let hearingGold: ChatMessage["hearingGold"];
   let replyTo: string | undefined;
+  let predictedTags: AcousticTags | undefined;
   if (text.startsWith("⟦已扫⟧")) {
     scanned = true;
     text = text.slice(4);
@@ -249,6 +254,12 @@ function decodeStoredMessage(row: {
       hearingGold = "unconfirmed";
     }
     text = text.slice(hear[0].length);
+  }
+  const gas = text.match(/^⟦气:([^⟧]+)⟧/);
+  if (gas) {
+    const [length, contour, voice, event] = gas[1].split(".");
+    predictedTags = parseAcousticTags({ length, contour, voice, event }) ?? undefined;
+    text = text.slice(gas[0].length);
   }
   const reply = text.match(/^⟦回:([^⟧]+)⟧/);
   if (reply) {
@@ -275,6 +286,7 @@ function decodeStoredMessage(row: {
     voiceTurnId,
     hearingGold,
     replyTo,
+    predictedTags,
   };
 }
 

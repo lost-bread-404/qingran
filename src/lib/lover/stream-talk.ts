@@ -4,6 +4,7 @@ import { spokenForTts } from "./speech-tags";
 import { ttsRequestBody, ttsSpeed } from "./tts";
 import type { ChatMessage, Memory, Profile } from "./types";
 import { readXaiFail } from "./xai-error";
+import { applyUtteranceTag } from "./hearing/tags.ts";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
 const MAX_HISTORY = 60;
@@ -46,7 +47,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   const system = buildSystemPrompt(data.profile, data.memories, clock, timeZone);
   const history = data.history.slice(-MAX_HISTORY).map((m) => ({
     role: m.role,
-    content: m.text,
+    content: m.predictedTags ? applyUtteranceTag(m.text, m.predictedTags) : m.text,
   }));
   const speed = ttsSpeed(data.profile.voiceSpeed);
   const tts = new LiveTts(apiKey, emit, speed);

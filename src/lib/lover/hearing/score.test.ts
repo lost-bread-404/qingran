@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cer, textsExact, toneMarksMatch } from "./metrics.ts";
+import { cer, textsExact } from "./metrics.ts";
 import { scoreHearing, type ScoreClip } from "./score.ts";
 import { hashSplit } from "./split.ts";
 
@@ -71,16 +71,28 @@ test("exactMatch ignores punctuation the same way CER does", () => {
   assert.equal(scored.cerFinal, 0);
 });
 
-test("tone mark accuracy compares ～ … ！ ？ and skips gold without them", () => {
-  assert.equal(toneMarksMatch("姐姐～", "姐姐。"), false);
-  assert.equal(toneMarksMatch("姐姐～", "姐姐～"), true);
+test("acoustic tag accuracy only uses tags_touched dimensions", () => {
   const scored = scoreHearing([
-    clip({ id: "wave", goldText: "姐姐～", finalText: "姐姐。" }),
-    clip({ id: "ok", goldText: "嗯…", finalText: "嗯…" }),
-    clip({ id: "plain", goldText: "姐姐。", finalText: "姐姐" }),
+    clip({
+      id: "a",
+      goldText: "嗯",
+      finalText: "嗯",
+      predictedTags: { length: "short", contour: "flat", voice: "normal", event: "none" },
+      goldTags: { contour: "rising" },
+      tagsTouched: ["contour"],
+    }),
+    clip({
+      id: "b",
+      goldText: "啊",
+      finalText: "啊",
+      predictedTags: { length: "short", contour: "flat", voice: "normal", event: "none" },
+      goldTags: { length: "short" },
+      tagsTouched: ["length"],
+    }),
   ]);
-  assert.equal(scored.toneAccuracy, 0.5);
-  assert.equal(scored.exactMatch, 1);
+  assert.equal(scored.tagAccuracy.contour, 0);
+  assert.equal(scored.tagAccuracy.length, 1);
+  assert.equal(scored.tagAccuracy.voice, null);
 });
 
 test("unlabeled clips drop out of the score card; re-edit updates exactMatch", () => {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { applyAltTags, clipAlternatives } from "./nbest.ts";
+import { applyUtteranceTag, tagsFromCues } from "./tags.ts";
 
 export const CONTOURS = ["rising", "falling", "flat", "wavering"] as const;
 export const LENGTHS = ["short", "long"] as const;
@@ -123,39 +124,16 @@ export function formatTaggedText(result: HearingModelOutput): string {
   const text = result.text.trim();
   if (result.noise_only) return "";
   if (!text && result.cues.length === 0) return "";
-  if (!result.cues.length) {
-    const base =
-      result.utterance_emotion === "neutral" ? text : `${text}〔｜${result.utterance_emotion}〕`;
-    return result.alternatives?.length ? applyAltTags(base, result.alternatives) : base;
-  }
-
-  let used = text;
-  const leftover: HearingCue[] = [];
-  for (const cue of result.cues) {
-    const tag = formatCueTag(cue);
-    const idx = used.indexOf(cue.token);
-    if (idx < 0) {
-      leftover.push(cue);
-      continue;
-    }
-    const insertAt = idx + cue.token.length;
-    used = `${used.slice(0, insertAt)}${tag}${used.slice(insertAt)}`;
-  }
-  for (const cue of leftover) {
-    used += `${cue.token}${formatCueTag(cue)}`;
-  }
-  const last = result.cues[result.cues.length - 1];
-  if (result.utterance_emotion !== "neutral" && last?.emotion !== result.utterance_emotion) {
-    used += `〔｜${result.utterance_emotion}〕`;
-  }
+  let used = text || result.cues.map((cue) => cue.token).join("");
   if (result.alternatives?.length) used = applyAltTags(used, result.alternatives);
+  if (result.cues.length) used = applyUtteranceTag(used, tagsFromCues(result.cues));
   return used.trim();
 }
 
 export function formatCueTag(cue: HearingCue): string {
-  const left = [cue.length, cue.contour, cue.voice].join("·");
-  const right = cue.event ? `${cue.emotion}·${cue.event}` : cue.emotion;
-  return `〔${left}｜${right}〕`;
+  const voice = cue.voice === "whisper" ? "breathy" : cue.voice;
+  const event = cue.event === "laugh" || cue.event === "cry" || cue.event === "sigh" ? cue.event : "";
+  return `〔${cue.length}·${cue.contour}·${voice}｜${event}〕`;
 }
 
 export function emptyHearing(provider: string, model: string, latency_ms: number): HearingResult {

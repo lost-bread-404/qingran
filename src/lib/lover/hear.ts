@@ -14,6 +14,7 @@ import {
   UNRECOGNIZED_TEXT,
   voiceTurnIdForMessage,
 } from "./hearing/heard";
+import { applyUtteranceTag, predictUtteranceTags, stripAcousticTags } from "./hearing/tags.ts";
 
 export { UNRECOGNIZED_TEXT, clipSaveBanner, voiceTurnIdForMessage };
 export type { HeardUtterance };
@@ -56,6 +57,7 @@ export async function hearUtterance(input: {
   const provider: HearingProviderId = session.provider;
   const persist = debugHearing || session.capture;
   let ranHearing = false;
+  const predictedFromFrames = predictUtteranceTags({ frames: input.frames });
 
   try {
     const result = await runHearing({
@@ -80,14 +82,19 @@ export async function hearUtterance(input: {
         peakRms: input.peakRms,
         vadFloor: input.vadFloor,
         liveTextSource: input.liveText.trim() ? "webspeech" : "none",
+        predictedTags: predictedFromFrames,
+        contextBefore: session.contextBefore,
+        systemPrompt: session.systemPrompt || input.prompt,
       },
     });
     ranHearing = true;
     if (result.quota) throw new Error(QUOTA_HINT);
-    const tagged =
+    const predicted = result.predictedTags ?? predictedFromFrames;
+    const core =
       result.provider !== "xai" && result.tagged
-        ? result.tagged
+        ? stripAcousticTags(result.tagged).trim() || finishHeard(result.xaiText, input.liveText, result.words, input.frames, audioStats(input.frames))
         : finishHeard(result.xaiText, input.liveText, result.words, input.frames, audioStats(input.frames));
+    const tagged = core ? applyUtteranceTag(core, predicted) : "";
     return heardFromHearing({
       debugHearing,
       turnId,
@@ -98,6 +105,7 @@ export async function hearUtterance(input: {
       saveError: result.saveError,
       endpointFired: input.endpoint_fired,
       sttDoneAt: Date.now(),
+      predictedTags: predicted,
     });
   } catch (err) {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
@@ -112,6 +120,7 @@ export async function hearUtterance(input: {
       noiseOnly: true,
       endpointFired: input.endpoint_fired,
       sttDoneAt: Date.now(),
+      predictedTags: predictedFromFrames,
     });
   }
 
@@ -131,14 +140,16 @@ export async function hearUtterance(input: {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
   const finished = finishHeard(text, input.liveText, words, input.frames, audioStats(input.frames));
+  const tagged = finished ? applyUtteranceTag(finished, predictedFromFrames) : "";
   return heardFromHearing({
     debugHearing,
     turnId,
-    tagged: finished,
+    tagged,
     xaiText: text,
     noiseOnly: !finished,
     endpointFired: input.endpoint_fired,
     sttDoneAt: Date.now(),
+    predictedTags: predictedFromFrames,
   });
 }
 

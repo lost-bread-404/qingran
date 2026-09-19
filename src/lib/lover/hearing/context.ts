@@ -10,6 +10,10 @@ const QUOTED_RE = /[“「『"]([^“」』"]{2,12})[”」』"]/g;
 const CALLED_RE = /(?:叫|名叫|是)\s*([\u4e00-\u9fffA-Za-z]{2,8})/g;
 const CJK_NAME_RE = /[\u4e00-\u9fff]{2,4}/g;
 
+export function lastDialogueTurns(messages: ContextTurn[], rounds = 4): ContextTurn[] {
+  return messages.filter((m) => m.text.trim()).slice(-rounds * 2);
+}
+
 export function stripHearingMarkup(text: string): string {
   return stripAltTags(stripCueTags(text));
 }

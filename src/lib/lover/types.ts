@@ -1,4 +1,5 @@
 import { DEFAULT_HEARING_PROVIDER, isHearingProvider, type HearingProviderId } from "./hearing/config.ts";
+import type { AcousticTags } from "./hearing/tags.ts";
 
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
@@ -29,6 +30,7 @@ export type ChatMessage = {
   scanned?: boolean;
   voiceTurnId?: string;
   replyTo?: string;
+  predictedTags?: AcousticTags;
   hearingGold?: "unconfirmed" | "confirmed";
   hearingTiming?: {
     hearMs?: number;

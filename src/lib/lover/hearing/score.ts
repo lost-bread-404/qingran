@@ -1,4 +1,5 @@
-import { cer, hasCueToneMarks, textsExact, toneMarksMatch } from "./metrics.ts";
+import { cer, textsExact } from "./metrics.ts";
+import { scoreTagAccuracy, type AcousticTags, type TagAccuracy, type TagKey } from "./tags.ts";
 
 export type ScoreWindow = "7d" | "all";
 
@@ -14,6 +15,9 @@ export type ScoreClip = {
   literalMismatch?: boolean;
   toneNote?: string | null;
   turnId: string | null;
+  predictedTags?: AcousticTags | null;
+  goldTags?: Partial<AcousticTags> | null;
+  tagsTouched?: TagKey[] | null;
 };
 
 export type WorstClip = {
@@ -26,6 +30,9 @@ export type WorstClip = {
   toneNote: string | null;
   cer: number;
   noiseOnly: boolean;
+  predictedTags?: AcousticTags | null;
+  goldTags?: Partial<AcousticTags> | null;
+  tagsTouched?: TagKey[] | null;
 };
 
 export type HearingScore = {
@@ -37,7 +44,7 @@ export type HearingScore = {
   liveEmptyRate: number;
   liveHasData: boolean;
   exactMatch: number | null;
-  toneAccuracy: number | null;
+  tagAccuracy: TagAccuracy;
   noiseN: number;
   noiseRecognizedRate: number | null;
   hallucinationN: number;
@@ -70,7 +77,6 @@ export function scoreHearing(
   const noise = rows.filter((clip) => clip.noiseOnly);
   const recognized = (clip: ScoreClip) =>
     Boolean((clip.finalText || clip.xaiText || clip.liveText).trim());
-  const withTone = golded.filter((clip) => hasCueToneMarks(clip.goldText));
   const worst = golded
     .map((clip) => ({
       id: clip.id,
@@ -82,6 +88,9 @@ export function scoreHearing(
       toneNote: clip.toneNote ?? null,
       cer: cer(clip.goldText, clip.finalText),
       noiseOnly: clip.noiseOnly,
+      predictedTags: clip.predictedTags,
+      goldTags: clip.goldTags,
+      tagsTouched: clip.tagsTouched,
     }))
     .sort((a, b) => b.cer - a.cer || a.id.localeCompare(b.id))
     .slice(0, 20);
@@ -97,9 +106,7 @@ export function scoreHearing(
     exactMatch: golded.length
       ? golded.filter((clip) => textsExact(clip.goldText, clip.finalText)).length / golded.length
       : null,
-    toneAccuracy: withTone.length
-      ? withTone.filter((clip) => toneMarksMatch(clip.goldText, clip.finalText)).length / withTone.length
-      : null,
+    tagAccuracy: scoreTagAccuracy(golded),
     noiseN: noise.length,
     noiseRecognizedRate: noise.length ? noise.filter(recognized).length / noise.length : null,
     hallucinationN: input.hallucinationN ?? 0,

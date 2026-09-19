@@ -32,16 +32,27 @@ test("transcript pencil opens confirm in debug; bubble text is not a hidden conf
   assert.doesNotMatch(src, /if \(canConfirm\) onConfirmStart/);
 });
 
-test("confirm panel keeps 噪音 and 字面≠意思, not emotion chips", () => {
+test("confirm panel keeps 噪音 and 字面≠意思, plus acoustic chips", () => {
   const src = readFileSync(new URL("../../../components/lover/confirm-turn.tsx", import.meta.url), "utf8");
   assert.match(src, />\s*噪音\s*</);
   assert.match(src, /字面≠意思/);
   assert.match(src, /aria-label="语气备注"/);
+  assert.match(src, /TAG_KEYS/);
+  assert.match(src, /tagsTouched/);
   assert.doesNotMatch(src, /EMOTION_LABEL/);
   assert.doesNotMatch(src, /CueEmotion/);
   assert.doesNotMatch(src, /这是纯噪音/);
   assert.match(src, /<audio className="mb-3 w-full" controls src=\{audioUrl\} \/>/);
   assert.doesNotMatch(src, /<audio[^>]*muted/);
+});
+
+test("transcript has 👎 on Qingran replies and confirm buttons", () => {
+  const src = readFileSync(new URL("../../../components/lover/transcript.tsx", import.meta.url), "utf8");
+  assert.match(src, /onConfirmQuick/);
+  assert.match(src, /aria-label="确认正确"/);
+  assert.match(src, /aria-label="打开标注"/);
+  assert.match(src, /aria-label="这条回复不好"/);
+  assert.match(src, /ThumbsDown/);
 });
 
 test("voice room shows labeled count, volume meter, and writes final_text back", () => {
@@ -56,6 +67,12 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /historyForQingran/);
   assert.match(src, /kind: opts\?\.skipQingran \? "unheard" : "say"/);
   assert.match(src, /replyTo: userMsg.id/);
+  assert.match(src, /patchHearingReplyId/);
+  assert.match(src, /flagQingranReply/);
+  assert.match(src, /result.noiseOnly/);
+  assert.match(src, /result.literalMismatch/);
+  assert.match(src, /result.toneNote/);
+  assert.match(src, /initialNoise=\{confirmNoise\}/);
   assert.match(src, /micActionForConfirmPanel/);
   assert.match(src, /qingranSpeaking: status === "speaking" \|\| status === "thinking"/);
 });
@@ -78,6 +95,16 @@ test("call deafen ignores speech rec without aborting it", () => {
   assert.doesNotMatch(onend, /deafRef\.current/);
 });
 
+test("lab scorecard uses acoustic tag accuracy and has 👎 list", () => {
+  const src = readFileSync(new URL("../../../routes/lab.tsx", import.meta.url), "utf8");
+  assert.match(src, /声学标签/);
+  assert.match(src, /tagAccuracy/);
+  assert.match(src, /👎 列表/);
+  assert.match(src, /exportReplyFlags/);
+  assert.doesNotMatch(src, /语气符号准确率/);
+  assert.doesNotMatch(src, /toneAccuracy/);
+});
+
 test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance", () => {
   const call = readFileSync(new URL("../../../hooks/use-call.ts", import.meta.url), "utf8");
   const hold = readFileSync(new URL("../../../hooks/use-voice-input.ts", import.meta.url), "utf8");
@@ -92,7 +119,7 @@ test("lab page is score card, worst 20, and hash export only", () => {
   const src = readFileSync(new URL("../../../routes/lab.tsx", import.meta.url), "utf8");
   assert.match(src, /最近 7 天/);
   assert.match(src, /CER 最终文字/);
-  assert.match(src, /语气符号准确率/);
+  assert.match(src, /声学标签/);
   assert.match(src, /最差 20 条/);
   assert.match(src, /最近标注/);
   assert.match(src, /撤销标注/);

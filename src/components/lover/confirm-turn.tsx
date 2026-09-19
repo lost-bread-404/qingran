@@ -4,6 +4,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import {
+  TAG_CONTOURS,
+  TAG_EVENTS,
+  TAG_KEYS,
+  TAG_LABELS,
+  TAG_LENGTHS,
+  TAG_VALUE_LABELS,
+  TAG_VOICES,
+  defaultTags,
+  goldTagsFromTouched,
+  tagsTouched,
+  type AcousticTags,
+  type TagKey,
+} from "@/lib/lover/hearing/tags";
 
 type Props = {
   open: boolean;
@@ -16,6 +30,8 @@ type Props = {
     noiseOnly: boolean;
     literalMismatch: boolean;
     toneNote: string;
+    goldTags: Partial<AcousticTags>;
+    tagsTouched: TagKey[];
   }) => Promise<void> | void;
   busy?: boolean;
   error?: string | null;
@@ -23,6 +39,15 @@ type Props = {
   initialLiteralMismatch?: boolean;
   initialToneNote?: string | null;
   initialDraft?: string;
+  initialPredicted?: AcousticTags | null;
+  initialGoldTags?: Partial<AcousticTags> | null;
+};
+
+const OPTIONS: Record<TagKey, readonly string[]> = {
+  length: TAG_LENGTHS,
+  contour: TAG_CONTOURS,
+  voice: TAG_VOICES,
+  event: TAG_EVENTS,
 };
 
 export function ConfirmTurn({
@@ -37,19 +62,25 @@ export function ConfirmTurn({
   initialLiteralMismatch = false,
   initialToneNote = "",
   initialDraft,
+  initialPredicted,
+  initialGoldTags,
 }: Props) {
+  const predicted = initialPredicted ?? defaultTags();
   const [draft, setDraft] = useState(initialDraft ?? sttText);
   const [noiseOnly, setNoiseOnly] = useState(initialNoise);
   const [literalMismatch, setLiteralMismatch] = useState(initialLiteralMismatch);
   const [toneNote, setToneNote] = useState(initialToneNote ?? "");
+  const [chosen, setChosen] = useState<AcousticTags>({ ...predicted, ...initialGoldTags });
 
   useEffect(() => {
     if (!open) return;
+    const nextPredicted = initialPredicted ?? defaultTags();
     setDraft(initialDraft ?? sttText);
     setNoiseOnly(initialNoise);
     setLiteralMismatch(initialLiteralMismatch);
     setToneNote(initialToneNote ?? "");
-  }, [open, sttText, initialDraft, initialNoise, initialLiteralMismatch, initialToneNote]);
+    setChosen({ ...nextPredicted, ...initialGoldTags });
+  }, [open, sttText, initialDraft, initialNoise, initialLiteralMismatch, initialToneNote, initialPredicted, initialGoldTags]);
 
   if (!open) return null;
 
@@ -58,7 +89,7 @@ export function ConfirmTurn({
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end bg-bg/80">
       <button type="button" className="min-h-0 flex-1" aria-label="关掉" onClick={onClose} />
-      <div className="rounded-t-2xl bg-bg px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-lamp">
+      <div className="max-h-[90dvh] overflow-y-auto rounded-t-2xl bg-bg px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-lamp">
         <div className="mb-3 flex items-center justify-between">
           <p className="font-display text-lg">确认这句话</p>
           <button
@@ -81,6 +112,33 @@ export function ConfirmTurn({
           className="min-h-28"
           aria-label="识别文字"
         />
+        <div className="mt-3 flex flex-col gap-3">
+          {TAG_KEYS.map((key) => (
+            <div key={key}>
+              <p className="mb-1 text-xs text-subtle">{TAG_LABELS[key]}</p>
+              <div className="flex flex-wrap gap-2">
+                {OPTIONS[key].map((value) => {
+                  const selected = chosen[key] === value;
+                  const label = TAG_VALUE_LABELS[key][value as never] as string;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setChosen((cur) => ({ ...cur, [key]: value }))}
+                      className={cn(
+                        "min-h-11 rounded-md px-3 text-sm",
+                        selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
@@ -120,15 +178,19 @@ export function ConfirmTurn({
             type="button"
             className="w-full"
             disabled={busy}
-            onClick={() =>
+            onClick={() => {
+              const nextPredicted = initialPredicted ?? defaultTags();
+              const touched = tagsTouched(nextPredicted, chosen);
               void onConfirm({
                 goldText: draft.trim(),
                 source: edited ? "edited" : "confirmed",
                 noiseOnly,
                 literalMismatch,
                 toneNote: toneNote.trim(),
-              })
-            }
+                goldTags: goldTagsFromTouched(chosen, touched),
+                tagsTouched: touched,
+              });
+            }}
           >
             {busy ? "正在写入…" : "确认"}
           </Button>

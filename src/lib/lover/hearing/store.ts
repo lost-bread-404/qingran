@@ -24,25 +24,40 @@ import { envPresence } from "./env.ts";
 import { scoreHearing, type ScoreWindow } from "./score.ts";
 import {
   clipCount,
+  clipLabelByTurn,
   confirmClipByTurn,
+  exportReplyFlagDataset,
   goldCount,
   goldStatusByTurnIds,
   hallucinationCount,
   insertClipRow,
+  insertReplyFlag,
   listClipRows,
   listLabeledClipRows,
   listMigrationNames,
+  listReplyFlagRows,
   listScoreClipRows,
   parseCues,
   patchFinalTextByTurn,
+  patchReplyMessageId,
   unlabelClip,
   type LabClipFilter,
 } from "./persist.ts";
 import { silenceWavBase64, wavDurationMs, wavPeakRms } from "./wav.ts";
 import { scrubHallucination } from "../stt-text.ts";
 import { waitUntil } from "@vercel/functions";
+import { gitCommitSha, hashQingranPrompt } from "./eval-meta.ts";
+import {
+  applyUtteranceTag,
+  defaultTags,
+  parseAcousticTags,
+  parseTagKeys,
+  tagsFromCues,
+  type AcousticTags,
+  type TagKey,
+} from "./tags.ts";
 
-export type { LabClipFilter, LabeledClipRow } from "./persist.ts";
+export type { LabClipFilter, LabeledClipRow, ReplyFlagRow } from "./persist.ts";
 
 export type HearingTurnPatch = {
   id: string;
@@ -67,6 +82,10 @@ export type HearingTurnPatch = {
   live_text_source?: string;
   hallucination_suspect?: boolean;
   save_error?: string;
+  commit_sha?: string | null;
+  prompt_hash?: string | null;
+  context_before?: unknown;
+  reply_message_id?: string | null;
 };
 
 export type RunHearingInput = {
@@ -91,6 +110,9 @@ export type RunHearingInput = {
   peakRms?: number;
   vadFloor?: number;
   liveTextSource?: "webspeech" | "none";
+  predictedTags?: AcousticTags;
+  contextBefore?: { role: string; text: string }[];
+  systemPrompt?: string;
 };
 
 export type RunHearingOutput = {
@@ -114,6 +136,7 @@ export type RunHearingOutput = {
   quota?: boolean;
   saveError?: string;
   hallucinationSuspect?: boolean;
+  predictedTags?: AcousticTags;
 };
 
 function labSecret(): string {
@@ -328,7 +351,11 @@ export const runHearing = createServerFn({ method: "POST" })
     const providerNoise = Boolean(hearing?.noise_only && used !== "xai");
     const disagreement = isNoiseDisagreement(providerNoise, xaiText);
     const drop = shouldDropAsNoise(providerNoise, xaiText);
-    const tagged = drop
+    const predicted =
+      used !== "xai" && hearing?.cues?.length
+        ? tagsFromCues(hearing.cues)
+        : parseAcousticTags(data.predictedTags) ?? defaultTags();
+    const taggedCore = drop
       ? ""
       : scrubbed.reason === "prefer_apple_quiet"
         ? liveText
@@ -337,9 +364,12 @@ export const runHearing = createServerFn({ method: "POST" })
           : used === "xai"
             ? xaiText
             : picked.tagged;
+    const tagged = taggedCore ? applyUtteranceTag(taggedCore, predicted) : "";
     const stt_done = Date.now();
     const latency_ms = hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0);
     const model = hearing?.model || HEARING[used].model;
+    const commitSha = gitCommitSha() || null;
+    const promptHash = data.systemPrompt ? hashQingranPrompt(data.systemPrompt) : null;
 
     waitUntil(
       persistHearingTurn({
@@ -353,7 +383,10 @@ export const runHearing = createServerFn({ method: "POST" })
         hearing,
         xaiText,
         pickedXaiText: picked.xaiText,
-        tagged: scrubbed.reason === "prefer_apple_quiet" ? liveText : used === "xai" ? xaiText : tagged,
+        tagged,
+        predictedTags: predicted,
+        commitSha,
+        promptHash,
         fallback,
         fallbackReason,
         outcome,
@@ -384,6 +417,7 @@ export const runHearing = createServerFn({ method: "POST" })
       words,
       hearing,
       hallucinationSuspect: scrubbed.suspect,
+      predictedTags: predicted,
     };
   });
 
@@ -427,6 +461,75 @@ export const patchHearingFinalText = createServerFn({ method: "POST" })
     }
   });
 
+export const patchHearingReplyId = createServerFn({ method: "POST" })
+  .validator((input: { turnId: string; replyMessageId: string }) => input)
+  .handler(async ({ data }) => {
+    try {
+      const sql = await getSql();
+      await patchReplyMessageId(sql, data.turnId, data.replyMessageId);
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: errorText(err) };
+    }
+  });
+
+export const getHearingClipLabel = createServerFn({ method: "POST" })
+  .validator((input: { turnId: string }) => input)
+  .handler(async ({ data }) => {
+    try {
+      const sql = await getSql();
+      const row = await clipLabelByTurn(sql, data.turnId);
+      if (!row) return { ok: false as const, error: "没有这段录音。" };
+      return { ok: true as const, ...row };
+    } catch (err) {
+      return { ok: false as const, error: errorText(err) };
+    }
+  });
+
+export const flagQingranReply = createServerFn({ method: "POST" })
+  .validator((input: { messageId: string; replyToMessageId?: string | null; note: string }) => input)
+  .handler(async ({ data }) => {
+    try {
+      const sql = await getSql();
+      const [profileRow] = await sql<{ data: { systemPrompt?: string } | string }>`
+        select data from qingran_profile where id = 1
+      `;
+      const raw = profileRow?.data;
+      const stored = typeof raw === "string" ? (safeJson(raw) as { systemPrompt?: string } | null) : raw;
+      await insertReplyFlag(sql, {
+        id: newId(),
+        messageId: data.messageId,
+        replyToMessageId: data.replyToMessageId ?? null,
+        note: data.note.trim().slice(0, 200),
+        commitSha: gitCommitSha() || null,
+        promptHash: hashQingranPrompt(stored?.systemPrompt || ""),
+      });
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: errorText(err) };
+    }
+  });
+
+export const listReplyFlags = createServerFn({ method: "POST" })
+  .validator((input: { password: string }) => input)
+  .handler(async ({ data }) => {
+    try {
+      assertLab(data.password);
+      const sql = await getSql();
+      return { ok: true as const, flags: await listReplyFlagRows(sql) };
+    } catch (err) {
+      return { ok: false as const, error: errorText(err), flags: [] as Awaited<ReturnType<typeof listReplyFlagRows>> };
+    }
+  });
+
+export const exportReplyFlags = createServerFn({ method: "POST" })
+  .validator((input: { password: string }) => input)
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    const sql = await getSql();
+    return exportReplyFlagDataset(await listReplyFlagRows(sql));
+  });
+
 export const confirmHearingClip = createServerFn({ method: "POST" })
   .validator(
     (input: {
@@ -437,6 +540,8 @@ export const confirmHearingClip = createServerFn({ method: "POST" })
       noiseOnly?: boolean;
       literalMismatch?: boolean;
       toneNote?: string | null;
+      goldTags?: Partial<AcousticTags> | null;
+      tagsTouched?: TagKey[] | null;
     }) => input,
   )
   .handler(async ({ data }) => {
@@ -450,6 +555,8 @@ export const confirmHearingClip = createServerFn({ method: "POST" })
         noiseOnly: data.noiseOnly,
         literalMismatch: data.literalMismatch,
         toneNote: data.toneNote,
+        goldTags: data.goldTags,
+        tagsTouched: data.tagsTouched,
       });
     } catch (err) {
       return { ok: false as const, error: errorText(err) };
@@ -538,6 +645,12 @@ export const hearingLabScore = createServerFn({ method: "POST" })
           literalMismatch: Boolean(row.literal_mismatch),
           toneNote: row.tone_note,
           turnId: row.turn_id,
+          predictedTags: parseAcousticTags(row.predicted_tags),
+          goldTags:
+            row.gold_tags && typeof row.gold_tags === "object"
+              ? (row.gold_tags as Partial<AcousticTags>)
+              : null,
+          tagsTouched: parseTagKeys(row.tags_touched),
         })),
         { window, hallucinationN },
       );
@@ -713,6 +826,13 @@ export const exportHearingClips = createServerFn({ method: "POST" })
       final_text: string | null;
       peak_rms: number | null;
       vad_floor: number | null;
+      predicted_tags: unknown;
+      gold_tags: unknown;
+      tags_touched: string[] | null;
+      commit_sha: string | null;
+      prompt_hash: string | null;
+      context_before: unknown;
+      reply_message_id: string | null;
     }>`
       select id, created_at::text as created_at, duration_ms, source, category, split,
              xai_text, hearing_text, hearing_json, live_text,
@@ -720,7 +840,8 @@ export const exportHearingClips = createServerFn({ method: "POST" })
              relabel_gold_text, relabel_gold_cues, relabel_noise_only, audio_wav, blob_pathname,
              gold_source, stt_text, gold_tier, utterance_emotion, literal_mismatch, tone_note,
              mode, audio_route,
-             turn_id, disagreement, storage_backend, final_text, peak_rms, vad_floor
+             turn_id, disagreement, storage_backend, final_text, peak_rms, vad_floor,
+             predicted_tags, gold_tags, tags_touched, commit_sha, prompt_hash, context_before, reply_message_id
       from qingran_hearing_clips
       order by created_at asc
     `;
@@ -762,6 +883,18 @@ export const exportHearingClips = createServerFn({ method: "POST" })
           finalText: row.final_text ?? "",
           peakRms: row.peak_rms,
           vadFloor: row.vad_floor,
+          predictedTags: parseAcousticTags(row.predicted_tags),
+          goldTags:
+            row.gold_tags && typeof row.gold_tags === "object"
+              ? (row.gold_tags as Partial<AcousticTags>)
+              : null,
+          tagsTouched: parseTagKeys(row.tags_touched),
+          commitSha: row.commit_sha,
+          promptHash: row.prompt_hash,
+          contextBefore: Array.isArray(row.context_before)
+            ? (row.context_before as { role: string; text: string }[])
+            : null,
+          replyMessageId: row.reply_message_id,
         })),
       ),
     };
@@ -786,6 +919,9 @@ async function persistHearingTurn(input: {
   xaiText: string;
   pickedXaiText: string;
   tagged: string;
+  predictedTags?: AcousticTags | null;
+  commitSha?: string | null;
+  promptHash?: string | null;
   fallback: boolean;
   fallbackReason?: string;
   outcome: AdapterOutcome | null;
@@ -817,6 +953,9 @@ async function persistHearingTurn(input: {
     disagreement: input.disagreement,
     live_text_source: input.data.liveTextSource ?? (input.data.liveText?.trim() ? "webspeech" : "none"),
     hallucination_suspect: input.scrubbedSuspect,
+    commit_sha: input.commitSha,
+    prompt_hash: input.promptHash,
+    context_before: input.data.contextBefore,
   });
   if (!input.capture) return;
   try {
@@ -835,6 +974,10 @@ async function persistHearingTurn(input: {
       disagreement: input.disagreement,
       peakRms: input.peakRms,
       vadFloor: input.data.vadFloor,
+      predictedTags: input.predictedTags,
+      commitSha: input.commitSha,
+      promptHash: input.promptHash,
+      contextBefore: input.data.contextBefore,
     });
   } catch (err) {
     const saveError = errorText(err);
@@ -851,7 +994,8 @@ async function upsertTurn(patch: HearingTurnPatch) {
         id, provider, model, speech_start, endpoint_fired, upload_start, stt_done,
         grok_done, tts_first_audio, latency_ms, tokens_in, tokens_out, cost_usd,
         refusal, fallback, fallback_reason, fallback_raw, cold_start_ms, disagreement,
-        live_text_source, hallucination_suspect, save_error
+        live_text_source, hallucination_suspect, save_error,
+        commit_sha, prompt_hash, context_before, reply_message_id
       )
       values (
         ${patch.id},
@@ -875,7 +1019,11 @@ async function upsertTurn(patch: HearingTurnPatch) {
         ${Boolean(patch.disagreement)},
         ${patch.live_text_source ?? null},
         ${Boolean(patch.hallucination_suspect)},
-        ${patch.save_error ?? null}
+        ${patch.save_error ?? null},
+        ${patch.commit_sha ?? null},
+        ${patch.prompt_hash ?? null},
+        ${patch.context_before ? JSON.stringify(patch.context_before) : null}::jsonb,
+        ${patch.reply_message_id ?? null}
       )
       on conflict (id) do update set
         provider = coalesce(excluded.provider, qingran_hearing_turns.provider),
@@ -898,7 +1046,11 @@ async function upsertTurn(patch: HearingTurnPatch) {
         disagreement = excluded.disagreement or qingran_hearing_turns.disagreement,
         live_text_source = coalesce(excluded.live_text_source, qingran_hearing_turns.live_text_source),
         hallucination_suspect = excluded.hallucination_suspect or qingran_hearing_turns.hallucination_suspect,
-        save_error = coalesce(excluded.save_error, qingran_hearing_turns.save_error)
+        save_error = coalesce(excluded.save_error, qingran_hearing_turns.save_error),
+        commit_sha = coalesce(excluded.commit_sha, qingran_hearing_turns.commit_sha),
+        prompt_hash = coalesce(excluded.prompt_hash, qingran_hearing_turns.prompt_hash),
+        context_before = coalesce(excluded.context_before, qingran_hearing_turns.context_before),
+        reply_message_id = coalesce(excluded.reply_message_id, qingran_hearing_turns.reply_message_id)
     `;
   } catch (err) {
     console.error("[hearing] upsertTurn failed:", errorText(err));
@@ -920,6 +1072,10 @@ async function insertClip(input: {
   disagreement: boolean;
   peakRms?: number | null;
   vadFloor?: number | null;
+  predictedTags?: AcousticTags | null;
+  commitSha?: string | null;
+  promptHash?: string | null;
+  contextBefore?: unknown;
 }): Promise<string> {
   const id = newId();
   const sql = await getSql();
@@ -951,6 +1107,10 @@ async function insertClip(input: {
     finalText: input.tagged || input.xaiText || "",
     peakRms: input.peakRms,
     vadFloor: input.vadFloor,
+    predictedTags: input.predictedTags,
+    commitSha: input.commitSha,
+    promptHash: input.promptHash,
+    contextBefore: input.contextBefore,
   });
   return id;
 }
@@ -962,6 +1122,14 @@ function asHearing(value: unknown): HearingResult | null {
 
 function isEmotion(value: unknown): value is CueEmotion {
   return typeof value === "string" && (EMOTIONS as readonly string[]).includes(value);
+}
+
+function safeJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 function mapClipRow(
