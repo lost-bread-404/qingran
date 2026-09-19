@@ -31,6 +31,8 @@ export async function hearUtterance(input: {
   endpoint_fired?: number;
   peakRms?: number;
   vadFloor?: number;
+  hearToTriggerMs?: number;
+  prerollPeakRms?: number;
   holdToTalk?: boolean;
 }): Promise<HeardUtterance> {
   const session = getHearingSession();
@@ -82,6 +84,8 @@ export async function hearUtterance(input: {
         audioRoute: session.audioRoute,
         peakRms: input.peakRms,
         vadFloor: input.vadFloor,
+        hearToTriggerMs: input.hearToTriggerMs,
+        prerollPeakRms: input.prerollPeakRms,
         liveTextSource: input.liveText.trim() ? "webspeech" : "none",
         predictedTags: predictedFromFrames,
         contextBefore: session.contextBefore,

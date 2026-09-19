@@ -355,6 +355,8 @@ function HearingLabPage() {
                       {row.noiseOnly ? " · 噪音" : ""}
                       {row.literalMismatch ? " · 字面≠意思" : ""}
                       {row.toneNote ? ` · ${row.toneNote}` : ""}
+                      {row.hearToTriggerMs != null ? ` · 接话 ${row.hearToTriggerMs}ms` : ""}
+                      {row.prerollPeakRms != null ? ` · 前1.5秒峰值 ${row.prerollPeakRms.toFixed(3)}` : ""}
                     </p>
                     <p className="mt-1 text-sm">识别 {row.finalText || "（空）"}</p>
                     <p className="text-sm text-muted">标注 {row.goldText || "（空）"}</p>

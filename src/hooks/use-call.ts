@@ -27,7 +27,7 @@ import { logCallAudio } from "@/lib/lover/call-audio-log";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
 import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
-import { attachPcmTap, peakRms, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
+import { attachPcmTap, peakRms, peakTimedRms, PRE_ROLL_SEC, pushTimedRms, wavFromTap, type PcmTap, type TimedRms } from "@/lib/lover/pcm-tap";
 import { keepPlaybackAlive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
@@ -36,6 +36,7 @@ import {
   LISTEN_WARMUP_MS,
   CALL_START_WARMUP_MS,
   MIN_SPEECH_MS,
+  POST_QINGRAN_MS,
   canBeginUtterance,
   holdThreshold,
   isHoldVoiced,
@@ -85,6 +86,10 @@ export function useCall({ onUtterance, prompt }: Options) {
   const promptRef = useRef(prompt ?? "");
   const noiseFloorRef = useRef(0.008);
   const triggerFloorRef = useRef(0.008);
+  const hearAtRef = useRef(0);
+  const hearToTriggerRef = useRef<number | null>(null);
+  const prerollPeakRef = useRef<number | null>(null);
+  const prerollLevelsRef = useRef<TimedRms[]>([]);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const recLiveRef = useRef(false);
   const warmupTimerRef = useRef(0);
@@ -210,6 +215,8 @@ export function useCall({ onUtterance, prompt }: Options) {
     speechStartRef.current = now;
     speechStartWallRef.current = Date.now();
     triggerFloorRef.current = noiseFloorRef.current;
+    hearToTriggerRef.current = hearAtRef.current ? Math.round(now - hearAtRef.current) : null;
+    prerollPeakRef.current = peakTimedRms(prerollLevelsRef.current);
     lastVoiceRef.current = now;
     voiceBurstAtRef.current = now;
     if (!lastTextAtRef.current || now - lastTextAtRef.current > 400) {
@@ -291,7 +298,6 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     recorderRef.current = null;
     chunksRef.current = [];
-    setMicEnabled(streamRef.current, false);
     if (!liveRef.current) return;
     finalTextRef.current = "";
     interimRef.current = "";
@@ -309,6 +315,8 @@ export function useCall({ onUtterance, prompt }: Options) {
         endpoint_fired,
         peakRms: peakRms(samples, sampleRate) || frames.reduce((max, frame) => Math.max(max, frame.rms), 0),
         vadFloor: triggerFloorRef.current,
+        hearToTriggerMs: hearToTriggerRef.current ?? undefined,
+        prerollPeakRms: prerollPeakRef.current ?? undefined,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
@@ -362,6 +370,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         framesRef.current.push(frame);
       }
       const rms = frame.rms;
+      pushTimedRms(prerollLevelsRef.current, { t: now, rms }, PRE_ROLL_SEC * 1000);
       noiseFloorRef.current = nextFloor(noiseFloorRef.current, rms, speaking);
       const floor = noiseFloorRef.current;
       const rising = isSpeechStart(rms, floor, frame.clarity, frame.bright, debugVad);
@@ -536,7 +545,8 @@ export function useCall({ onUtterance, prompt }: Options) {
     liveRef.current = true;
     deafRef.current = false;
     noiseFloorRef.current = 0.008;
-    listenReadyAtRef.current = performance.now() + CALL_START_WARMUP_MS;
+    hearAtRef.current = performance.now();
+    listenReadyAtRef.current = hearAtRef.current + CALL_START_WARMUP_MS;
     setActive(true);
     setPhaseBoth("listening");
     setMicEnabled(streamRef.current, true);
@@ -565,7 +575,6 @@ export function useCall({ onUtterance, prompt }: Options) {
   const deafen = useCallback(() => {
     if (!liveRef.current) return;
     deafRef.current = true;
-    setMicEnabled(streamRef.current, false);
     logCallAudio("deafen");
     speechRiseAtRef.current = 0;
     if (phaseRef.current === "transcribing") return;
@@ -594,7 +603,8 @@ export function useCall({ onUtterance, prompt }: Options) {
     finalTextRef.current = "";
     interimRef.current = "";
     lastTextAtRef.current = 0;
-    listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
+    hearAtRef.current = performance.now();
+    listenReadyAtRef.current = hearAtRef.current + POST_QINGRAN_MS;
     logCallAudio("hear");
     if (!pageIsHidden()) startSpeechRec();
   }, []);

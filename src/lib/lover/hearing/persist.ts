@@ -36,6 +36,8 @@ export type InsertClipRowInput = {
   finalText?: string | null;
   peakRms?: number | null;
   vadFloor?: number | null;
+  hearToTriggerMs?: number | null;
+  prerollPeakRms?: number | null;
   predictedTags?: AcousticTags | null;
   commitSha?: string | null;
   promptHash?: string | null;
@@ -48,7 +50,8 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       id, duration_ms, sample_rate, source, category, blob_pathname, audio_wav,
       xai_text, hearing_text, hearing_json, live_text,
       blob_error, storage_backend, stt_text, mode, audio_route, turn_id, disagreement,
-      final_text, peak_rms, vad_floor, predicted_tags, commit_sha, prompt_hash, context_before
+      final_text, peak_rms, vad_floor, hear_to_trigger_ms, preroll_peak_rms,
+      predicted_tags, commit_sha, prompt_hash, context_before
     )
     values (
       ${input.id},
@@ -72,6 +75,8 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       ${input.finalText ?? null},
       ${input.peakRms ?? null},
       ${input.vadFloor ?? null},
+      ${input.hearToTriggerMs ?? null},
+      ${input.prerollPeakRms ?? null},
       ${input.predictedTags ? JSON.stringify(input.predictedTags) : null}::jsonb,
       ${input.commitSha ?? null},
       ${input.promptHash ?? null},
@@ -202,6 +207,8 @@ export type LabeledClipRow = {
   predictedTags: AcousticTags | null;
   goldTags: Partial<AcousticTags> | null;
   tagsTouched: TagKey[];
+  hearToTriggerMs: number | null;
+  prerollPeakRms: number | null;
 };
 
 export async function listLabeledClipRows(sql: Sql, page = 1) {
@@ -220,10 +227,13 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
     predicted_tags: unknown;
     gold_tags: unknown;
     tags_touched: string[] | null;
+    hear_to_trigger_ms: number | null;
+    preroll_peak_rms: number | null;
   }>(
     `select id, turn_id, final_text, gold_text, gold_source,
             noise_only, literal_mismatch, tone_note, gold_at::text as gold_at,
-            predicted_tags, gold_tags, tags_touched
+            predicted_tags, gold_tags, tags_touched,
+            hear_to_trigger_ms, preroll_peak_rms
      from qingran_hearing_clips
      where gold_source is not null
      order by coalesce(gold_at, created_at) desc, id desc
@@ -248,6 +258,8 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
         predictedTags: parseAcousticTags(row.predicted_tags),
         goldTags: parsePartialAcousticTags(row.gold_tags),
         tagsTouched: parseTagKeys(row.tags_touched),
+        hearToTriggerMs: row.hear_to_trigger_ms == null ? null : Number(row.hear_to_trigger_ms),
+        prerollPeakRms: row.preroll_peak_rms == null ? null : Number(row.preroll_peak_rms),
       }),
     ),
     total: Number(count[0]?.n) || 0,

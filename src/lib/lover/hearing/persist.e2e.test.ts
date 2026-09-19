@@ -287,3 +287,16 @@ test("0010 eval-tag migration only adds columns and tables", async () => {
   assert.doesNotMatch(sql, /\bupdate\b/i);
   assert.doesNotMatch(sql, /\bdelete\b/i);
 });
+
+test("0011 preroll migration only adds clip columns", async () => {
+  const sql = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations/0011_hearing_preroll.sql"),
+    "utf8",
+  );
+  assert.match(sql, /add column if not exists hear_to_trigger_ms/);
+  assert.match(sql, /add column if not exists preroll_peak_rms/);
+  assert.doesNotMatch(sql, /drop column/i);
+  assert.doesNotMatch(sql, /alter column/i);
+  assert.doesNotMatch(sql, /\bupdate\b/i);
+  assert.doesNotMatch(sql, /\bdelete\b/i);
+});

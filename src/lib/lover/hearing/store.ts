@@ -111,6 +111,8 @@ export type RunHearingInput = {
   audioRoute?: AudioRoute;
   peakRms?: number;
   vadFloor?: number;
+  hearToTriggerMs?: number;
+  prerollPeakRms?: number;
   liveTextSource?: "webspeech" | "none";
   predictedTags?: AcousticTags;
   contextBefore?: { role: string; text: string }[];
@@ -979,6 +981,8 @@ async function persistHearingTurn(input: {
       disagreement: input.disagreement,
       peakRms: input.peakRms,
       vadFloor: input.data.vadFloor,
+      hearToTriggerMs: input.data.hearToTriggerMs,
+      prerollPeakRms: input.data.prerollPeakRms,
       predictedTags: input.predictedTags,
       commitSha: input.commitSha,
       promptHash: input.promptHash,
@@ -1078,6 +1082,8 @@ async function insertClip(input: {
   disagreement: boolean;
   peakRms?: number | null;
   vadFloor?: number | null;
+  hearToTriggerMs?: number | null;
+  prerollPeakRms?: number | null;
   predictedTags?: AcousticTags | null;
   commitSha?: string | null;
   promptHash?: string | null;
@@ -1114,6 +1120,8 @@ async function insertClip(input: {
     finalText: input.hallucinationSuspect ? "" : input.tagged || input.xaiText || "",
     peakRms: input.peakRms,
     vadFloor: input.vadFloor,
+    hearToTriggerMs: input.hearToTriggerMs,
+    prerollPeakRms: input.prerollPeakRms,
     predictedTags: input.predictedTags,
     commitSha: input.commitSha,
     promptHash: input.promptHash,

@@ -112,15 +112,19 @@ test("call deafen ignores speech rec without aborting it", () => {
   const deafen = src.slice(src.indexOf("const deafen = useCallback"), src.indexOf("const hear = useCallback"));
   assert.doesNotMatch(deafen, /recRef\.current\?\.abort/);
   assert.match(deafen, /pcmTapRef\.current\?\.stop/);
-  assert.match(deafen, /setMicEnabled\(streamRef\.current, false\)/);
+  assert.doesNotMatch(deafen, /setMicEnabled\(streamRef\.current, false\)/);
   assert.doesNotMatch(deafen, /stopCallHold/);
   assert.doesNotMatch(deafen, /ctxRef\.current\?\.close/);
   assert.doesNotMatch(deafen, /pauseMic\(/);
   const hear = src.slice(src.indexOf("const hear = useCallback"), src.indexOf("const revive = useCallback"));
   assert.match(hear, /startSpeechRec/);
+  assert.doesNotMatch(hear, /pcmTapRef\.current\?\.clear/);
+  assert.match(hear, /POST_QINGRAN_MS/);
   assert.match(src, /CALL_START_WARMUP_MS/);
   assert.match(src, /recLiveRef/);
   assert.match(src, /warmup-clear-ring/);
+  assert.match(src, /hearToTriggerMs/);
+  assert.match(src, /prerollPeakRms/);
   const onend = src.slice(src.indexOf("rec.onend"), src.indexOf("recRef.current = rec"));
   assert.doesNotMatch(onend, /deafRef\.current/);
 });
@@ -160,6 +164,8 @@ test("lab page is score card, worst 20, and hash export only", () => {
   assert.match(src, /最近标注/);
   assert.match(src, /撤销标注/);
   assert.match(src, /listLabeledHearingClips/);
+  assert.match(src, /接话/);
+  assert.match(src, /前1\.5秒峰值/);
   assert.match(src, /导出 JSON/);
   assert.match(src, /hash 80\/20/);
   assert.match(src, /apple_empty/);
@@ -238,7 +244,7 @@ test("hold-to-talk teardown releases the mic; call hangup does too; deafen does 
   const deafen = call.slice(call.indexOf("const deafen = useCallback"), call.indexOf("const hear = useCallback"));
   assert.doesNotMatch(deafen, /releaseMic/);
   assert.doesNotMatch(deafen, /pauseMic/);
-  assert.match(deafen, /setMicEnabled\(streamRef\.current, false\)/);
+  assert.doesNotMatch(deafen, /setMicEnabled\(streamRef\.current, false\)/);
 });
 
 test("idle hide/show does not write the audio session or grab the mic", () => {

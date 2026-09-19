@@ -1,5 +1,5 @@
 const STT_RATE = 16_000;
-export const PRE_ROLL_SEC = 0.6;
+export const PRE_ROLL_SEC = 1.5;
 
 const WORKLET = /* javascript */ `
 class QingranPcmTap extends AudioWorkletProcessor {
@@ -10,7 +10,7 @@ class QingranPcmTap extends AudioWorkletProcessor {
     this.filled = 0;
     this.ring = [];
     this.ringFilled = 0;
-    this.preSamples = Math.max(1, Math.round(sampleRate * 0.6));
+    this.preSamples = Math.max(1, Math.round(sampleRate * ${PRE_ROLL_SEC}));
     this.port.onmessage = (event) => {
       if (event.data === "start") {
         this.capturing = true;
@@ -109,6 +109,28 @@ export function clearSampleRing(ring: SampleRing) {
 
 export function snapshotSampleRing(ring: SampleRing): Float32Array {
   return concatFloats(ring.chunks);
+}
+
+/** Next capture starts with the current pre-roll. hear() must not clear the ring first. */
+export function beginCaptureSamples(ring: SampleRing, live: Float32Array[] = []): Float32Array {
+  return concatFloats([snapshotSampleRing(ring), ...live]);
+}
+
+export type TimedRms = { t: number; rms: number };
+
+export function pushTimedRms(rows: TimedRms[], sample: TimedRms, windowMs: number): TimedRms[] {
+  rows.push(sample);
+  const cutoff = sample.t - windowMs;
+  let start = 0;
+  while (start < rows.length && rows[start]!.t < cutoff) start += 1;
+  if (start) rows.splice(0, start);
+  return rows;
+}
+
+export function peakTimedRms(rows: readonly TimedRms[]): number {
+  let peak = 0;
+  for (const row of rows) if (row.rms > peak) peak = row.rms;
+  return peak;
 }
 
 export function downsample(input: Float32Array, fromRate: number, toRate: number) {
