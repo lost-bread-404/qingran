@@ -36,6 +36,8 @@ test("confirm panel uses exclusive emotion chips including 噪音", () => {
   assert.match(src, /撒娇/);
   assert.doesNotMatch(src, /这是纯噪音/);
   assert.doesNotMatch(src, /type="checkbox"/);
+  assert.match(src, /<audio className="mb-3 w-full" controls src=\{audioUrl\} \/>/);
+  assert.doesNotMatch(src, /<audio[^>]*muted/);
 });
 
 test("voice room shows labeled count, volume meter, and writes final_text back", () => {
@@ -45,6 +47,21 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /patchHearingFinalText/);
   assert.match(src, /saveConfirmQuick/);
   assert.match(src, /aria-label="阈值"/);
+  assert.match(src, /micActionForConfirmPanel/);
+  assert.match(src, /qingranSpeaking: status === "speaking" \|\| status === "thinking"/);
+});
+
+test("call deafen stops speech rec and pcm-tap without hanging playback", () => {
+  const src = readFileSync(new URL("../../../hooks/use-call.ts", import.meta.url), "utf8");
+  const deafen = src.slice(src.indexOf("const deafen = useCallback"), src.indexOf("const hear = useCallback"));
+  assert.match(deafen, /recRef\.current\?\.abort/);
+  assert.match(deafen, /pcmTapRef\.current\?\.stop/);
+  assert.match(deafen, /setMicEnabled\(streamRef\.current, false\)/);
+  assert.doesNotMatch(deafen, /stopCallHold/);
+  assert.doesNotMatch(deafen, /ctxRef\.current\?\.close/);
+  assert.doesNotMatch(deafen, /pauseMic\(/);
+  const hear = src.slice(src.indexOf("const hear = useCallback"), src.indexOf("const revive = useCallback"));
+  assert.match(hear, /startSpeechRec/);
 });
 
 test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance", () => {

@@ -520,14 +520,26 @@ export function useCall({ onUtterance, prompt }: Options) {
     if (!liveRef.current) return;
     deafRef.current = true;
     setMicEnabled(streamRef.current, false);
+    try {
+      recRef.current?.abort();
+    } catch {
+      /* ignore */
+    }
+    recRef.current = null;
+    if (phaseRef.current === "transcribing") return;
+    void pcmTapRef.current?.stop();
     if (phaseRef.current === "speaking-you") {
       try {
-        recorderRef.current?.stop();
+        recorderRef.current?.state === "recording" && recorderRef.current.stop();
       } catch {
         /* ignore */
       }
       recorderRef.current = null;
       chunksRef.current = [];
+      framesRef.current = [];
+      finalTextRef.current = "";
+      interimRef.current = "";
+      lastTextAtRef.current = 0;
     }
     setPhaseBoth("listening");
   }, []);

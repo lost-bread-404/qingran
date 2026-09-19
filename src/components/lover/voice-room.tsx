@@ -54,6 +54,7 @@ import {
   patchHearingTurn,
 } from "@/lib/lover/hearing/store";
 import { clipSaveBanner, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
+import { micActionForConfirmPanel } from "@/lib/lover/hearing/confirm-call";
 import {
   CONTEXT_WINDOW,
   DEFAULT_PROFILE,
@@ -111,6 +112,7 @@ export function VoiceRoom() {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmAudioUrl, setConfirmAudioUrl] = useState<string | null>(null);
   const [labeledCount, setLabeledCount] = useState(0);
+  const confirmWasOpenRef = useRef(false);
 
   useEffect(() => {
     profileRef.current = profile;
@@ -614,6 +616,19 @@ export function VoiceRoom() {
       void detectAudioRoute().then((route) => setHearingSession({ audioRoute: route }));
     }
   }, [call.active, call.hear, call.deafen]);
+
+  useEffect(() => {
+    const open = Boolean(confirmId);
+    const action = micActionForConfirmPanel({
+      panelOpen: open,
+      wasOpen: confirmWasOpenRef.current,
+      callActive: call.active,
+      qingranSpeaking: status === "speaking" || status === "thinking",
+    });
+    confirmWasOpenRef.current = open;
+    if (action === "deafen") call.deafen();
+    else if (action === "hear") call.hear();
+  }, [confirmId, call.active, call.deafen, call.hear, status]);
 
   useEffect(() => {
     if (!confirmId) {
