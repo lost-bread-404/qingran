@@ -1,4 +1,4 @@
-import { pageIsHidden, resumeAudioContext, setAudioSessionKind } from "@/lib/lover/audio-session";
+import { closeAudioContext, pageIsHidden, resumeAudioContext, setAudioSessionKind, watchAudioContext } from "@/lib/lover/audio-session";
 
 const SILENCE =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
@@ -41,7 +41,11 @@ function getCtx(): AudioContext | null {
   const Ctor = audioCtor();
   if (!Ctor) return null;
   if (ctx && (ctx.state as string) === "closed") ctx = null;
-  if (!ctx) ctx = new Ctor();
+  if (!ctx) {
+    if (pageIsHidden() && !holdPlaying && !isSpeaking()) return null;
+    ctx = new Ctor();
+    watchAudioContext(ctx, "playback");
+  }
   return ctx;
 }
 
@@ -111,13 +115,7 @@ function releaseElement(el: HTMLAudioElement | null) {
 
 function replaceCtx() {
   stopGraphKeepalive();
-  if (ctx) {
-    try {
-      void ctx.close();
-    } catch {
-      /* ignore */
-    }
-  }
+  closeAudioContext(ctx, "playback");
   ctx = null;
   masterIn = null;
   masterGain = null;
@@ -126,6 +124,7 @@ function replaceCtx() {
   const Ctor = typeof window === "undefined" ? null : audioCtor();
   if (!Ctor) return null;
   ctx = new Ctor();
+  watchAudioContext(ctx, "playback");
   return ctx;
 }
 
@@ -227,6 +226,7 @@ function prepSpeak() {
 }
 
 export async function unlockPlayback() {
+  if (pageIsHidden() && !holdPlaying && !isSpeaking()) return;
   const audioCtx = getCtx();
   try {
     if (audioCtx) await audioCtx.resume();
@@ -460,6 +460,7 @@ function isSpeaking() {
 
 
 export async function resumeAudio() {
+  if (pageIsHidden() && !holdPlaying && !isSpeaking()) return;
   let audioCtx = getCtx();
   if (!audioCtx) return;
   let ok = false;

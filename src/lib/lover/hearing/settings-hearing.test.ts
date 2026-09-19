@@ -209,3 +209,60 @@ test("flag sheet can cancel without recording", () => {
   assert.match(cancelBtn, /onClick=\{onClose\}/);
   assert.doesNotMatch(cancelBtn, /onSave/);
 });
+
+test("hold-to-talk teardown releases the mic; call hangup does too; deafen does not", () => {
+  const hold = readFileSync(new URL("../../../hooks/use-voice-input.ts", import.meta.url), "utf8");
+  const call = readFileSync(new URL("../../../hooks/use-call.ts", import.meta.url), "utf8");
+  assert.match(hold, /releaseMic\(\)/);
+  assert.doesNotMatch(hold, /pauseMic/);
+  const teardown = call.slice(call.indexOf("const teardownMedia = useCallback"), call.indexOf("const hangup = useCallback"));
+  assert.match(teardown, /releaseMic\(\)/);
+  assert.doesNotMatch(teardown, /pauseMic/);
+  const deafen = call.slice(call.indexOf("const deafen = useCallback"), call.indexOf("const hear = useCallback"));
+  assert.doesNotMatch(deafen, /releaseMic/);
+  assert.doesNotMatch(deafen, /pauseMic/);
+  assert.match(deafen, /setMicEnabled\(streamRef\.current, false\)/);
+});
+
+test("idle hide/show does not write the audio session or grab the mic", () => {
+  const src = readFileSync(new URL("../../../components/lover/voice-room.tsx", import.meta.url), "utf8");
+  const bg = src.slice(src.indexOf("onBackground:"), src.indexOf("window.addEventListener(\"beforeunload\""));
+  assert.match(bg, /callActiveRef\.current/);
+  assert.match(bg, /stopPlayback/);
+  assert.doesNotMatch(bg, /acquireMic/);
+  assert.doesNotMatch(bg, /claimListenSession/);
+  assert.doesNotMatch(bg, /setAudioSessionKind/);
+  assert.doesNotMatch(bg, /unlockPlayback/);
+  assert.doesNotMatch(bg, /resumeAudio/);
+  assert.doesNotMatch(bg, /kickAudio/);
+  assert.match(src, /installAudioTrace/);
+});
+
+test("debug settings show the timestamped audio trace", () => {
+  const src = readFileSync(new URL("../../../components/lover/settings-drawer.tsx", import.meta.url), "utf8");
+  assert.match(src, /音频日志/);
+  assert.match(src, /formatCallAudioLogLines/);
+  assert.match(src, /AudioTracePanel/);
+});
+
+test("audio trace records session, mic, rec, context, and page lifecycle", () => {
+  const audio = readFileSync(new URL("../audio.ts", import.meta.url), "utf8");
+  const session = readFileSync(new URL("../audio-session.ts", import.meta.url), "utf8");
+  const log = readFileSync(new URL("../call-audio-log.ts", import.meta.url), "utf8");
+  const hold = readFileSync(new URL("../../../hooks/use-voice-input.ts", import.meta.url), "utf8");
+  assert.match(audio, /logCallAudio\("acquireMic"\)/);
+  assert.match(audio, /logCallAudio\("pauseMic"\)/);
+  assert.match(audio, /logCallAudio\(`releaseMic/);
+  assert.match(audio, /logCallAudio\(`track \$\{event\}`\)/);
+  assert.match(audio, /logCallAudio\("rec.stop"\)/);
+  assert.match(hold, /logCallAudio\("rec.start"\)/);
+  assert.match(hold, /logCallAudio\("rec.abort"\)/);
+  assert.match(hold, /logCallAudio\("rec.onend"\)/);
+  assert.match(session, /watchAudioContext/);
+  assert.match(session, /AudioContext.resume/);
+  assert.match(log, /visibilitychange/);
+  assert.match(log, /pagehide/);
+  assert.match(log, /pageshow/);
+  assert.match(log, /freeze/);
+  assert.match(log, /AUDIO_LOG_MAX = 80/);
+});

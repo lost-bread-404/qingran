@@ -3,13 +3,15 @@ import {
   acquireMicFromGesture,
   getSpeechRecognitionCtor,
   isAppleTouch,
-  pauseMic,
+  releaseMic,
   pickRecorderMime,
   startRecorder,
   stopRecognition,
   usesBrowserStt,
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
+import { closeAudioContext, watchAudioContext } from "@/lib/lover/audio-session";
+import { logCallAudio } from "@/lib/lover/call-audio-log";
 import { hearUtterance } from "@/lib/lover/hear";
 import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
@@ -76,8 +78,10 @@ export function useVoiceInput({ lang, prompt }: Options) {
       /* ignore */
     }
     recorderRef.current = null;
-    pauseMic();
+    releaseMic();
+    mediaRef.current = null;
     try {
+      if (recRef.current) logCallAudio("rec.abort");
       recRef.current?.abort();
     } catch {
       /* ignore */
@@ -89,9 +93,9 @@ export function useVoiceInput({ lang, prompt }: Options) {
       /* ignore */
     }
     pcmTapRef.current = null;
+    closeAudioContext(analyseRef.current?.ctx ?? null, "hold");
     try {
       analyseRef.current?.source.disconnect();
-      void analyseRef.current?.ctx.close();
     } catch {
       /* ignore */
     }
@@ -109,6 +113,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
       (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctor) return;
     const ctx = new Ctor();
+    watchAudioContext(ctx, "hold");
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
@@ -209,9 +214,11 @@ export function useVoiceInput({ lang, prompt }: Options) {
         }
       };
       rec.onend = () => {
+        logCallAudio("rec.onend");
         if (recordingRef.current && session === sessionRef.current && !isAppleTouch()) {
           try {
             rec.start();
+            logCallAudio("rec.start (onend)");
           } catch {
             /* Chrome restarts noisily */
           }
@@ -220,6 +227,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
       recRef.current = rec;
       try {
         rec.start();
+        logCallAudio("rec.start");
       } catch {
         /* already started */
       }

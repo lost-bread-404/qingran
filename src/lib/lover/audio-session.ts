@@ -49,7 +49,11 @@ export function sessionTypeIfChanged(
   kind: AudioSessionKind,
 ): string | null {
   const next = sessionTypeFor(kind);
-  if (kind !== "yield" && current === next) return null;
+  if (kind === "yield") {
+    if (!current || current === "ambient" || current === "auto") return null;
+    return next;
+  }
+  if (current === next) return null;
   return next;
 }
 
@@ -134,6 +138,7 @@ export function primeAudioSession() {
 export async function resumeAudioContext(ctx: AudioContext): Promise<boolean> {
   if ((ctx.state as string) === "closed") return false;
   if (audioContextNeedsResume(ctx.state)) {
+    logCallAudio(`AudioContext.resume ${ctx.state}`);
     try {
       await ctx.resume();
     } catch {
@@ -141,6 +146,25 @@ export async function resumeAudioContext(ctx: AudioContext): Promise<boolean> {
     }
   }
   return ctx.state === "running";
+}
+
+export function watchAudioContext(ctx: AudioContext, label = "AudioContext") {
+  logCallAudio(`${label}.create ${ctx.state}`);
+  ctx.addEventListener("statechange", () => {
+    logCallAudio(`${label}.state ${ctx.state}`);
+  });
+}
+
+export function closeAudioContext(ctx: AudioContext | null, label = "AudioContext") {
+  if (!ctx) return;
+  const state = ctx.state as string;
+  if (state === "closed") return;
+  logCallAudio(`${label}.close ${state}`);
+  try {
+    void ctx.close();
+  } catch {
+    /* ignore */
+  }
 }
 
 export function listenAudioSession(handlers: {

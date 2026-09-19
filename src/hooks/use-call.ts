@@ -7,7 +7,7 @@ import {
   isAppleTouch,
   micFailHint,
   micUsable,
-  pauseMic,
+  releaseMic,
   pickRecorderMime,
   setMicEnabled,
   startRecorder,
@@ -15,9 +15,11 @@ import {
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
 import {
+  closeAudioContext,
   listenAppLifecycle,
   listenAudioSession,
   pageIsHidden,
+  watchAudioContext,
 } from "@/lib/lover/audio-session";
 import { hearUtterance } from "@/lib/lover/hear";
 import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
@@ -130,12 +132,9 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     recorderRef.current = null;
     chunksRef.current = [];
-    pauseMic();
-    try {
-      ctxRef.current?.close();
-    } catch {
-      /* ignore */
-    }
+    releaseMic();
+    streamRef.current = null;
+    closeAudioContext(ctxRef.current, "call");
     ctxRef.current = null;
     try {
       if (recRef.current) logCallAudio("rec.abort");
@@ -511,6 +510,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         window.AudioContext ||
         (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       const ctx = AudioCtx ? new AudioCtx() : null;
+      if (ctx) watchAudioContext(ctx, "call");
       if (ctx?.state === "suspended") await ctx.resume();
       if (ctx) {
         ctxRef.current = ctx;
@@ -627,7 +627,10 @@ export function useCall({ onUtterance, prompt }: Options) {
     const AudioCtx =
       window.AudioContext ||
       (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!ctxRef.current && AudioCtx) ctxRef.current = new AudioCtx();
+    if (!ctxRef.current && AudioCtx) {
+      ctxRef.current = new AudioCtx();
+      watchAudioContext(ctxRef.current, "call");
+    }
     try {
       if (ctxRef.current?.state === "suspended") await ctxRef.current.resume();
     } catch {

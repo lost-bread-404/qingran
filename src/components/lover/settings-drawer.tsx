@@ -16,6 +16,7 @@ import {
   splitLeadingTimestamp,
   toDatetimeLocal,
 } from "@/lib/lover/memory";
+import { formatCallAudioLogLines, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import { DEFAULT_SYSTEM_PROMPT, type ChatMessage, type Memory, type Profile } from "@/lib/lover/types";
 import { cn } from "@/lib/utils";
 
@@ -303,6 +304,7 @@ export function SettingsDrawer({
             >
               打开标注页
             </Link>
+            {debugHearing ? <AudioTracePanel /> : null}
           </div>
         </div>
       ) : (
@@ -468,4 +470,20 @@ function formatMemoryTime(ms: number) {
   } catch {
     return "";
   }
+}
+
+function AudioTracePanel() {
+  const [lines, setLines] = useState(() => formatCallAudioLogLines());
+  useEffect(() => {
+    setLines(formatCallAudioLogLines());
+    return subscribeCallAudioLog(() => setLines(formatCallAudioLogLines()));
+  }, []);
+  return (
+    <div>
+      <p className="mb-2 text-sm">音频日志</p>
+      <pre className="max-h-52 overflow-y-auto whitespace-pre-wrap rounded-md bg-surface-2 px-3 py-2 text-[11px] leading-relaxed text-muted">
+        {lines || "还没有。切一次后台再回来，看这里。"}
+      </pre>
+    </div>
+  );
 }

@@ -50,7 +50,9 @@ test("rewriting play-and-record is skipped so iOS does not click or duck", () =>
   assert.equal(sessionTypeIfChanged("auto", "listen"), "play-and-record");
   assert.equal(sessionTypeIfChanged(undefined, "listen"), "play-and-record");
   assert.equal(sessionTypeIfChanged("play-and-record", "yield"), "ambient");
-  assert.equal(sessionTypeIfChanged("ambient", "yield"), "ambient");
+  assert.equal(sessionTypeIfChanged("ambient", "yield"), null);
+  assert.equal(sessionTypeIfChanged("auto", "yield"), null);
+  assert.equal(sessionTypeIfChanged(undefined, "yield"), null);
 });
 
 

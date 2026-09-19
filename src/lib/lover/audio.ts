@@ -5,7 +5,10 @@ import {
   claimListenSession,
   yieldAudioSession,
   resumeAudioContext,
+  watchAudioContext,
+  closeAudioContext,
 } from "@/lib/lover/audio-session";
+import { logCallAudio } from "@/lib/lover/call-audio-log";
 
 export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -95,6 +98,7 @@ export function onMicEvent(listener: (event: "mute" | "unmute" | "ended") => voi
 }
 
 function emitMicEvent(event: "mute" | "unmute" | "ended") {
+  logCallAudio(`track ${event}`);
   for (const listener of micListeners) listener(event);
 }
 
@@ -111,6 +115,7 @@ export function usesBrowserStt(): boolean {
 
 export function stopRecognition(rec: SpeechRecognitionLike | null): Promise<void> {
   if (!rec) return Promise.resolve();
+  logCallAudio("rec.stop");
   return new Promise((resolve) => {
     let settled = false;
     const done = () => {
@@ -193,6 +198,7 @@ let acquireChain: Promise<unknown> = Promise.resolve();
 
 function beginMicRequest(): Promise<MediaStream> {
   const gen = ++micGen;
+  logCallAudio("acquireMic");
   if (sharedMic) {
     dropMic(sharedMic);
     sharedMic = null;
@@ -241,14 +247,18 @@ export function acquireMicFromGesture(): Promise<MediaStream> {
 }
 
 export function pauseMic() {
+  logCallAudio("pauseMic");
   setMicEnabled(sharedMic, false);
 }
 
 export function releaseMic() {
+  const had = Boolean(sharedMic);
+  const sessionType = getAudioSession()?.type;
+  logCallAudio(`releaseMic had=${had ? "1" : "0"} session=${sessionType || "∅"}`);
   micGen += 1;
   dropMic(sharedMic);
   sharedMic = null;
-  yieldAudioSession();
+  if (had || sessionType === "play-and-record") yieldAudioSession();
 }
 
 export async function getMicStream(): Promise<MediaStream> {
@@ -267,6 +277,7 @@ export function createAudioContext(): AudioContext | null {
     (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!Ctor) return null;
   const next = new Ctor();
+  watchAudioContext(next);
   try {
     void next.resume();
   } catch {
@@ -279,16 +290,12 @@ export async function resumeOrReplaceContext(ctx: AudioContext | null): Promise<
   if (ctx && (ctx.state as string) !== "closed") {
     const ok = await resumeAudioContext(ctx);
     if (ok) return ctx;
-    try {
-      await ctx.close();
-    } catch {
-      /* ignore */
-    }
+    closeAudioContext(ctx);
   }
   return createAudioContext();
 }
 
-export { getAudioSession, claimListenSession, yieldAudioSession, resumeAudioContext };
+export { getAudioSession, claimListenSession, yieldAudioSession, resumeAudioContext, watchAudioContext, closeAudioContext };
 
 export function tapHaptic(kind: "start" | "end") {
   try {

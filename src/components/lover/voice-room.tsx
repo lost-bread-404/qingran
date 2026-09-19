@@ -47,7 +47,7 @@ import { newId } from "@/lib/lover/storage";
 import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
-import { formatCallAudioLog, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
+import { formatCallAudioLog, installAudioTrace, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
   confirmHearingClip,
   flagQingranReply,
@@ -222,8 +222,11 @@ export function VoiceRoom() {
     return subscribeCallAudioLog(() => setAudioLog(formatCallAudioLog()));
   }, [profile.debugHearing]);
 
-  useEffect(() => () => {
-    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+  useEffect(() => {
+    installAudioTrace();
+    return () => {
+      if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
