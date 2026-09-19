@@ -4,7 +4,7 @@ import { voicedIslands, type ProsodyFrame } from "../prosody.ts";
 export const TAG_LENGTHS = ["short", "long"] as const;
 export const TAG_CONTOURS = ["rising", "falling", "flat", "wavering"] as const;
 export const TAG_VOICES = ["normal", "breathy"] as const;
-export const TAG_EVENT_VALUES = ["laugh", "cry", "sigh", "moan"] as const;
+export const TAG_EVENT_VALUES = ["laugh", "cry", "sigh", "moan", "meow"] as const;
 export const EVENT_CHIP_VALUES = ["none", ...TAG_EVENT_VALUES] as const;
 export const TAG_KEYS = ["length", "contour", "voice", "events"] as const;
 
@@ -38,7 +38,7 @@ export const TAG_VALUE_LABELS: {
   length: { short: "短", long: "长" },
   contour: { rising: "升", falling: "降", flat: "平", wavering: "晃" },
   voice: { normal: "正常", breathy: "气声" },
-  events: { laugh: "笑", cry: "哭", sigh: "叹", moan: "喘" },
+  events: { laugh: "笑", cry: "哭", sigh: "叹", moan: "喘", meow: "猫叫" },
 };
 
 export const EVENT_CHIP_LABELS: Record<EventChip, string> = {
@@ -47,6 +47,7 @@ export const EVENT_CHIP_LABELS: Record<EventChip, string> = {
   cry: "哭",
   sigh: "叹",
   moan: "喘",
+  meow: "猫叫",
 };
 
 const TAG_RE = /〔[^〕]*〕/g;
@@ -65,7 +66,7 @@ export function isTagVoice(value: unknown): value is TagVoice {
   return value === "normal" || value === "breathy";
 }
 export function isTagEvent(value: unknown): value is TagEvent {
-  return value === "laugh" || value === "cry" || value === "sigh" || value === "moan";
+  return value === "laugh" || value === "cry" || value === "sigh" || value === "moan" || value === "meow";
 }
 
 export function uniqueEvents(values: readonly unknown[]): TagEvent[] {
@@ -89,7 +90,7 @@ export function normalizeEvents(value: unknown): TagEvent[] {
 }
 
 export function cueEventToTag(event: string | null | undefined): TagEvent | null {
-  if (event === "laugh" || event === "cry" || event === "sigh" || event === "moan") return event;
+  if (event === "laugh" || event === "cry" || event === "sigh" || event === "moan" || event === "meow") return event;
   if (event === "breath" || event === "pant") return "moan";
   return null;
 }
@@ -204,6 +205,11 @@ export function tagsFromCues(
   return tags;
 }
 
+export function withMeowFromText(tags: AcousticTags, text: string): AcousticTags {
+  if (!/喵|嗷呜/.test(text)) return tags;
+  return { ...tags, events: uniqueEvents([...tags.events, "meow"]) };
+}
+
 export function predictUtteranceTags(input: {
   cues?: Array<{ length?: string; contour?: string; voice?: string; event?: string | null }>;
   frames?: ProsodyFrame[];
@@ -272,6 +278,7 @@ export function emptyEventScores(): Record<TagEvent, EventPr> {
     cry: { precision: null, recall: null },
     sigh: { precision: null, recall: null },
     moan: { precision: null, recall: null },
+    meow: { precision: null, recall: null },
   };
 }
 

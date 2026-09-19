@@ -14,6 +14,7 @@ import {
   tagsFromProsody,
   tagsTouched,
   toggleEventChip,
+  withMeowFromText,
   type AcousticTags,
 } from "./tags.ts";
 
@@ -38,6 +39,15 @@ test("utterance tag format joins events with + and leaves the slot empty", () =>
     formatAcousticTag({ ...base, contour: "wavering", events: ["cry", "moan"] }),
     "〔long·wavering·breathy｜cry+moan〕",
   );
+  assert.equal(formatAcousticTag({ ...base, events: ["meow"] }), "〔long·rising·breathy｜meow〕");
+});
+
+test("xAI text with 喵 or 嗷呜 predicts meow", () => {
+  const tags = { length: "short" as const, contour: "flat" as const, voice: "normal" as const, events: [] };
+  assert.deepEqual(withMeowFromText(tags, "嗷呜～").events, ["meow"]);
+  assert.deepEqual(withMeowFromText(tags, "喵一声").events, ["meow"]);
+  assert.deepEqual(withMeowFromText({ ...tags, events: ["laugh"] }, "喵呜").events, ["laugh", "meow"]);
+  assert.deepEqual(withMeowFromText(tags, "谢谢观看").events, []);
 });
 
 test("old event field converts to events array on read, without rewriting none", () => {
@@ -67,6 +77,7 @@ test("无 clears other events; picking an event cancels 无", () => {
   assert.deepEqual(toggleEventChip([], "laugh"), ["laugh"]);
   assert.deepEqual(toggleEventChip(["laugh"], "cry"), ["laugh", "cry"]);
   assert.deepEqual(toggleEventChip(["laugh", "cry"], "laugh"), ["cry"]);
+  assert.deepEqual(toggleEventChip([], "meow"), ["meow"]);
 });
 
 test("whisper and breath cues collapse into breathy / moan; cues merge events", () => {

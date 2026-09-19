@@ -24,6 +24,30 @@ export const STT_KEYTERMS: readonly string[] = [
   "呢",
   "吧",
   "喵",
+  "嗷",
+  "嗷呜",
+  "喵呜",
+  "呜喵",
+];
+
+/** Fillers and onomatopoeia that are real speech, including repeats (嗯嗯, 嗷呜嗷呜). */
+export const VOCAL_CUES: readonly string[] = [
+  "嗯",
+  "啊",
+  "呜",
+  "哈",
+  "哼",
+  "哦",
+  "唉",
+  "嘛",
+  "呀",
+  "啦",
+  "呢",
+  "吧",
+  "喵",
+  "嗷",
+  "嗷呜",
+  "喵呜",
 ];
 
 export const HEARING = {

@@ -2,7 +2,7 @@ import { sortMemoriesByTime } from "./memory.ts";
 import type { ChatMessage, Memory, Profile } from "./types";
 
 const HEARING_TAG_GUIDE = `Rosie 的话有时会带语气标记，不是她打出来的字。格式：字〔长短·走向·声线｜事件〕，例如「嗯〔long·rising·breathy｜〕今天好累」。
-〔〕里是听力给出的声音：长短、音高走向、是不是气声。竖线右侧如果有字，是笑、哭、叹气或喘息（laugh、cry、sigh、moan），多个事件用 + 连接，例如 〔long·wavering·breathy｜cry+moan〕。没有事件时竖线右侧留空。不是情绪类别。不要念出来，不要写进回复的字面。用它听声音听起来怎样，意思由你根据上下文判断。没有标记就按普通口语听。
+〔〕里是听力给出的声音：长短、音高走向、是不是气声。竖线右侧如果有字，是笑、哭、叹气、喘息或猫叫（laugh、cry、sigh、moan、meow），多个事件用 + 连接，例如 〔long·wavering·breathy｜cry+moan〕。没有事件时竖线右侧留空。不是情绪类别。不要念出来，不要写进回复的字面。用它听声音听起来怎样，意思由你根据上下文判断。没有标记就按普通口语听。
 有时会出现 {A|B}，表示听力在两个词之间不确定，A 更可能。按更通顺的那个理解，不要把花括号念出来，也不要两个都念。`;
 
 export function promptFingerprint(systemPrompt: string): string {

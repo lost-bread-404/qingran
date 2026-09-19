@@ -43,12 +43,16 @@ test("STT_KEYTERMS is the slim configurable list in hearing/config.ts", () => {
     "呢",
     "吧",
     "喵",
+    "嗷",
+    "嗷呜",
+    "喵呜",
+    "呜喵",
   ]);
   assert.equal(STT_KEYTERMS.includes("林泽"), false);
   assert.equal(STT_KEYTERMS.includes("嗯嗯"), false);
   assert.equal(STT_KEYTERMS.includes("嗯嗯嗯"), false);
   assert.equal(STT_KEYTERMS.includes("啊啊"), false);
-  assert.equal(STT_KEYTERMS.includes("嗷"), false);
+  assert.equal(STT_KEYTERMS.includes("嗷"), true);
   assert.equal(STT_KEYTERMS.includes("信息素"), false);
   const stt = readFileSync(new URL("../stt-text.ts", import.meta.url), "utf8");
   assert.doesNotMatch(stt, /ABO_TERMS/);

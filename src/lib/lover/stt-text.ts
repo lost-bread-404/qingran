@@ -1,8 +1,8 @@
 import { classifyCue, cuesFromProsody, glueCueParts, markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
 import { islandVoiced, listenVocal } from "./vocal-event.ts";
-import { STT_KEYTERMS } from "./hearing/config.ts";
+import { STT_KEYTERMS, VOCAL_CUES } from "./hearing/config.ts";
 
-export { STT_KEYTERMS };
+export { STT_KEYTERMS, VOCAL_CUES };
 
 const CUE_CHARS = "嗯唔呜啊哦噢喔额呃唉哎诶欸哼哈嘿哇呀哟呦切啧嘶嘛呢吧啦咯嘞嘤喵嗷呼嘻嗨嘘咿欧咕唧呐欸喔哇";
 const FILLER = new RegExp(`[${CUE_CHARS}]`);
@@ -340,6 +340,19 @@ function liveTextIsEmptyOrFiller(liveText?: string): boolean {
   return !t || isMostlyFiller(t);
 }
 
+export function isVocalCueText(text: string): boolean {
+  const core = stripMarks(text);
+  if (!core) return false;
+  const terms = [...VOCAL_CUES].sort((a, b) => b.length - a.length);
+  let i = 0;
+  while (i < core.length) {
+    const hit = terms.find((term) => core.startsWith(term, i));
+    if (!hit) return false;
+    i += hit.length;
+  }
+  return true;
+}
+
 export function hallucinationReason(input: {
   durationSec: number;
   peakRms: number;
@@ -349,6 +362,7 @@ export function hallucinationReason(input: {
 }): HallucinationReason | null {
   if (input.holdToTalk) return null;
   if (!liveTextIsEmptyOrFiller(input.liveText)) return null;
+  if (isVocalCueText(input.xaiText)) return null;
   if (!xaiHasSubstance(input.xaiText)) return null;
   if (xaiLooksLikeSentence(input.xaiText) && isQuietClip(input)) return "short_quiet";
   return "apple_empty";

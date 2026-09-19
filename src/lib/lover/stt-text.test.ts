@@ -17,6 +17,7 @@ import {
   sttKeyterms,
   STT_KEYTERMS,
   stripMarks,
+  isVocalCueText,
 } from "./stt-text.ts";
 import { classifyCue, cuesFromProsody, voicedIslands, type ProsodyFrame } from "./prosody.ts";
 
@@ -127,6 +128,18 @@ test("short quiet clip with a long xAI sentence is short_quiet", () => {
     finishHeard("林泽是一个中国的演员", "", undefined, undefined, { durationSec: 0.4, peakRms: 0.001 }),
     "",
   );
+});
+
+test("Apple-empty vocal cues are not hallucination; 谢谢观看 still is", () => {
+  const audio = { durationSec: 2.0, peakRms: 0.08 };
+  assert.equal(isVocalCueText("嗷呜～"), true);
+  assert.equal(isVocalCueText("喵呜喵呜"), true);
+  assert.equal(isVocalCueText("嗯嗯啊"), true);
+  assert.equal(isVocalCueText("谢谢观看"), false);
+  assert.equal(hallucinationReason({ ...audio, xaiText: "嗷呜～", liveText: "" }), null);
+  assert.equal(scrubHallucination("嗷呜～", audio, "").suspect, false);
+  assert.match(finishHeard("嗷呜～", "", undefined, undefined, audio), /嗷呜/);
+  assert.equal(hallucinationReason({ ...audio, xaiText: "谢谢观看", liveText: "" }), "apple_empty");
 });
 
 test("quiet real sentence with matching Apple text is kept", () => {

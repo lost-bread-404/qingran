@@ -54,6 +54,7 @@ import {
   parsePartialAcousticTags,
   parseTagKeys,
   tagsFromCues,
+  withMeowFromText,
   type AcousticTags,
   type TagKey,
 } from "./tags.ts";
@@ -356,7 +357,7 @@ export const runHearing = createServerFn({ method: "POST" })
     const providerNoise = Boolean(hearing?.noise_only && used !== "xai");
     const disagreement = isNoiseDisagreement(providerNoise, xaiText);
     const drop = shouldDropAsNoise(providerNoise, xaiText) || scrubbed.suspect;
-    const predicted =
+    const predictedBase =
       used !== "xai" && hearing?.cues?.length
         ? tagsFromCues(hearing.cues)
         : parseAcousticTags(data.predictedTags) ?? defaultTags();
@@ -369,6 +370,7 @@ export const runHearing = createServerFn({ method: "POST" })
           : used === "xai"
             ? xaiText
             : picked.tagged;
+    const predicted = used === "xai" ? withMeowFromText(predictedBase, originalXai || taggedCore) : predictedBase;
     const tagged = taggedCore ? applyUtteranceTag(taggedCore, predicted) : "";
     const stt_done = Date.now();
     const latency_ms = hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0);

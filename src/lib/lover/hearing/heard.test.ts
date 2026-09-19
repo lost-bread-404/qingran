@@ -110,6 +110,13 @@ test("errorText keeps postgres code and message", () => {
   );
 });
 
+test("Apple empty + xAI 嗷呜～ is sent as a vocal cue", () => {
+  const heard = decideHeard({ liveText: "", xaiText: "嗷呜～" });
+  assert.equal(heard.skipQingran, false);
+  assert.equal(heard.hallucinationSuspect, false);
+  assert.match(heard.text, /嗷呜/);
+});
+
 test("Apple empty + xAI 谢谢观看 becomes 未识别 and is not sent", () => {
   const heard = decideHeard({ liveText: "", xaiText: "谢谢观看" });
   assert.equal(heard.text, UNRECOGNIZED_TEXT);
