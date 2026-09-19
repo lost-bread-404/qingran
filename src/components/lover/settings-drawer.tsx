@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { backupFilename, makeBackup, parseBackup, type QingranBackup } from "@/lib/lover/backup";
 import { LogoutButton } from "@/components/lover/logout-button";
-import { HEARING_PROVIDERS, type HearingProviderId } from "@/lib/lover/hearing/config";
+import { HEARING_PROVIDERS, SCRIPTED_CATEGORIES, type HearingProviderId } from "@/lib/lover/hearing/config";
 import {
   resolveManualMemory,
   sortMemoriesByTime,
@@ -58,6 +58,7 @@ export function SettingsDrawer({
   const [hearingProvider, setHearingProvider] = useState<HearingProviderId>(profile.hearingProvider);
   const [captureAudio, setCaptureAudio] = useState(profile.captureAudio);
   const [scriptedCapture, setScriptedCapture] = useState(profile.scriptedCapture);
+  const [skippedScripted, setSkippedScripted] = useState(profile.skippedScripted);
   const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
   const [hearingNbest, setHearingNbest] = useState(profile.hearingNbest);
   const [newFact, setNewFact] = useState("");
@@ -77,6 +78,7 @@ export function SettingsDrawer({
       setHearingProvider(profile.hearingProvider);
       setCaptureAudio(profile.captureAudio);
       setScriptedCapture(profile.scriptedCapture);
+      setSkippedScripted(profile.skippedScripted);
       setDebugHearing(profile.debugHearing);
       setHearingNbest(profile.hearingNbest);
       setTab("prompt");
@@ -93,6 +95,7 @@ export function SettingsDrawer({
       hearingProvider,
       captureAudio,
       scriptedCapture,
+      skippedScripted,
       debugHearing,
       hearingNbest,
     });
@@ -296,9 +299,33 @@ export function SettingsDrawer({
               />
               <span>
                 <span className="block text-sm">定向录制</span>
-                <span className="block text-xs text-subtle">屏幕显示当前类别和剩余配额，录完自动打标签。</span>
+                <span className="block text-xs text-subtle">屏幕切成录音面板，按住录、松开存，不发给清然。</span>
               </span>
             </label>
+            {skippedScripted.length > 0 ? (
+              <div className="rounded-md bg-surface-2 px-3 py-3">
+                <p className="text-sm">跳过的类别</p>
+                <p className="mt-1 text-xs text-subtle">恢复后会重新出现在定向录制里。</p>
+                <ul className="mt-2 flex flex-col gap-2">
+                  {skippedScripted.map((id) => {
+                    const cat = SCRIPTED_CATEGORIES.find((c) => c.id === id);
+                    return (
+                      <li key={id} className="flex items-center justify-between gap-2">
+                        <span className="text-sm">{cat?.label ?? id}</span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSkippedScripted((list) => list.filter((item) => item !== id))}
+                        >
+                          恢复
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
             <Link
               to="/lab"
               className="flex h-11 items-center justify-center rounded-md bg-surface-2 text-sm"

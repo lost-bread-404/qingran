@@ -175,6 +175,7 @@ describe("hearing schema", () => {
     assert.equal(formatTaggedText(parsed), "今{天|填}好累");
     assert.ok(SCRIPTED_CATEGORIES.some((c) => c.id === "codeswitch" && c.quota === 12));
     assert.ok(SCRIPTED_CATEGORIES.some((c) => c.id === "homophone" && c.quota === 10));
+    assert.ok(SCRIPTED_CATEGORIES.every((c) => c.hint && c.example));
   });
 
   it("appends n-best and context to the hearing system prompt", () => {

@@ -21,6 +21,7 @@ import {
 } from "@/lib/lover/audio-session";
 import { hearUtterance } from "@/lib/lover/hear";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { clipSaveBanner } from "@/lib/lover/hearing/scripted";
 import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
 import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
 import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
@@ -279,8 +280,9 @@ export function useCall({ onUtterance, prompt }: Options) {
     lastTextAtRef.current = 0;
 
     let heard = "";
+    let saveError: string | undefined;
     try {
-      heard = (await hearUtterance({
+      const result = await hearUtterance({
         wav,
         fallback,
         liveText,
@@ -288,7 +290,9 @@ export function useCall({ onUtterance, prompt }: Options) {
         prompt: promptRef.current,
         speech_start: speechStartWallRef.current,
         endpoint_fired,
-      })) ?? "";
+      });
+      heard = result.text ?? "";
+      saveError = result.saveError;
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       if (isQuotaHint(message)) {
@@ -301,15 +305,21 @@ export function useCall({ onUtterance, prompt }: Options) {
       }
     }
     if (!liveRef.current) return;
+    const session = getHearingSession();
+    if (saveError && (session.capture || session.scripted)) {
+      setError(clipSaveBanner(saveError));
+    }
     if (!heard) {
-      setError("我没听清，再说一遍。");
+      if (!(saveError && (session.capture || session.scripted))) {
+        setError("我没听清，再说一遍。");
+      }
       deafRef.current = false;
       setMicEnabled(streamRef.current, true);
       listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
       setPhaseBoth("listening");
       return;
     }
-    setError(null);
+    if (!saveError) setError(null);
     setPhaseBoth("listening");
     try {
       await onUtteranceRef.current(heard);

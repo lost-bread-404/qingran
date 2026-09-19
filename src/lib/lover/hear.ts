@@ -1,7 +1,8 @@
 import { blobToBase64 } from "./audio";
-import { runHearing } from "./hearing/store";
+import { runHearing, type RunHearingOutput } from "./hearing/store";
 import { getHearingSession, setHearingSession } from "./hearing/session";
 import { shouldDropAsNoise } from "./hearing/noise";
+import { persistHearingClip } from "./hearing/scripted";
 import { transcribeVoice } from "./server";
 import { finishHeard } from "./stt-text";
 import type { ProsodyFrame } from "./prosody";
@@ -11,6 +12,13 @@ import type { HearingProviderId } from "./hearing/config";
 
 type SttWord = { text?: string; start?: number; end?: number };
 
+export type HearUtteranceResult = {
+  text: string;
+  clipId?: string;
+  saveError?: string;
+  xaiText: string;
+};
+
 export async function hearUtterance(input: {
   wav: Blob | null;
   fallback?: Blob | null;
@@ -19,23 +27,76 @@ export async function hearUtterance(input: {
   prompt?: string;
   speech_start?: number;
   endpoint_fired?: number;
-}) {
+}): Promise<HearUtteranceResult> {
   const clip =
     input.wav && input.wav.size >= 80
       ? input.wav
       : input.fallback && input.fallback.size >= 40
         ? input.fallback
         : null;
-  if (!clip) return finishHeard("", input.liveText, undefined, input.frames);
+  if (!clip) {
+    return {
+      text: finishHeard("", input.liveText, undefined, input.frames),
+      xaiText: "",
+    };
+  }
 
   const session = getHearingSession();
+  const persist = persistHearingClip(session);
+  const result = await runHearingOnClip({
+    clip,
+    liveText: input.liveText,
+    prompt: input.prompt,
+    speech_start: input.speech_start,
+    endpoint_fired: input.endpoint_fired,
+    capture: persist,
+    source: session.source,
+    category: session.category ?? undefined,
+  });
+  setHearingSession({
+    lastClipId: result.clipId ?? null,
+    lastSaveError: result.saveError ?? null,
+    lastXaiText: result.xaiText || null,
+  });
+  if (session.scripted) {
+    return {
+      text: result.tagged || result.xaiText || "",
+      clipId: result.clipId,
+      saveError: result.saveError,
+      xaiText: result.xaiText,
+    };
+  }
+  if (shouldDropAsNoise(result.noise_only, result.xaiText)) {
+    return { text: "", clipId: result.clipId, saveError: result.saveError, xaiText: result.xaiText };
+  }
+  if (result.provider !== "xai" && result.tagged) {
+    return { text: result.tagged, clipId: result.clipId, saveError: result.saveError, xaiText: result.xaiText };
+  }
+  return {
+    text: finishHeard(result.xaiText, input.liveText, result.words, input.frames),
+    clipId: result.clipId,
+    saveError: result.saveError,
+    xaiText: result.xaiText,
+  };
+}
+
+export async function runHearingOnClip(input: {
+  clip: Blob;
+  liveText: string;
+  prompt?: string;
+  speech_start?: number;
+  endpoint_fired?: number;
+  capture: boolean;
+  source: "real" | "scripted";
+  category?: string;
+}): Promise<RunHearingOutput> {
+  const session = getHearingSession();
   const turnId = newId();
-  setHearingSession({ turnId, lastTurnId: turnId });
+  setHearingSession({ turnId, lastTurnId: turnId, lastSaveError: null, lastClipId: null });
   const upload_start = Date.now();
-  const audioBase64 = await blobToBase64(clip);
-  const mimeType = clip.type || "audio/wav";
+  const audioBase64 = await blobToBase64(input.clip);
+  const mimeType = input.clip.type || "audio/wav";
   const provider: HearingProviderId = session.provider;
-  const persist = session.debugHearing || session.capture || session.scripted;
 
   try {
     const result = await runHearing({
@@ -45,9 +106,9 @@ export async function hearUtterance(input: {
         liveText: input.liveText,
         prompt: input.prompt,
         provider,
-        capture: persist,
-        source: session.source,
-        category: session.category ?? undefined,
+        capture: input.capture,
+        source: input.source,
+        category: input.category,
         turnId,
         speech_start: input.speech_start,
         endpoint_fired: input.endpoint_fired,
@@ -61,9 +122,12 @@ export async function hearUtterance(input: {
       },
     });
     if (result.quota) throw new Error(QUOTA_HINT);
-    if (shouldDropAsNoise(result.noise_only, result.xaiText)) return "";
-    if (result.provider !== "xai" && result.tagged) return result.tagged;
-    return finishHeard(result.xaiText, input.liveText, result.words, input.frames);
+    setHearingSession({
+      lastClipId: result.clipId ?? null,
+      lastSaveError: result.saveError ?? null,
+      lastXaiText: result.xaiText || null,
+    });
+    return result;
   } catch (err) {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
@@ -83,5 +147,22 @@ export async function hearUtterance(input: {
   } catch (err) {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
-  return finishHeard(text, input.liveText, words, input.frames);
+  return {
+    ok: true,
+    turnId,
+    provider,
+    model: "",
+    tagged: finishHeard(text, input.liveText, words, []),
+    text,
+    xaiText: text,
+    liveText: input.liveText,
+    noise_only: false,
+    disagreement: false,
+    fallback: true,
+    fallback_reason: "xai-direct",
+    refusal: false,
+    latency_ms: 0,
+    words,
+    hearing: null,
+  };
 }

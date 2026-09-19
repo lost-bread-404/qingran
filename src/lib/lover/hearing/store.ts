@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSql } from "@/lib/db";
+import { getSql, dbSource } from "@/lib/db";
 import { newId } from "../storage";
-import { HEARING, isHearingProvider, SCRIPTED_CATEGORIES, type HearingProviderId } from "./config.ts";
+import { HEARING, isHearingProvider, SCRIPTED_CATEGORIES, EXPECTED_HEARING_MIGRATIONS, EXPECTED_CLIP_COLUMNS, type HearingProviderId } from "./config.ts";
+import { formatUnknownError, hearingSaveError } from "./scripted.ts";
 import {
   hearWithGemini,
   hearWithQwen,
@@ -85,6 +86,7 @@ export type RunHearingOutput = {
   words: { text?: string; start?: number; end?: number }[];
   hearing: HearingResult | null;
   clipId?: string;
+  saveError?: string;
   quota?: boolean;
 };
 
@@ -177,6 +179,7 @@ export const runHearing = createServerFn({ method: "POST" })
     });
 
     let clipId: string | undefined;
+    let saveError: string | undefined;
     if (data.capture) {
       try {
         clipId = await insertClip({
@@ -193,8 +196,9 @@ export const runHearing = createServerFn({ method: "POST" })
           audioRoute: data.audioRoute,
           disagreement,
         });
-      } catch {
+      } catch (err) {
         clipId = undefined;
+        saveError = hearingSaveError(err);
       }
     }
 
@@ -216,6 +220,7 @@ export const runHearing = createServerFn({ method: "POST" })
       words,
       hearing,
       clipId,
+      saveError,
     };
   });
 
@@ -472,14 +477,74 @@ export const deleteHearingClip = createServerFn({ method: "POST" })
   .validator((input: { password: string; id: string }) => input)
   .handler(async ({ data }) => {
     assertLab(data.password);
-    const sql = await getSql();
-    const rows = await sql<{ blob_pathname: string | null }>`
-      select blob_pathname from qingran_hearing_clips where id = ${data.id}
-    `;
-    await deleteHearingWav(rows[0]?.blob_pathname);
-    await sql`delete from qingran_hearing_clips where id = ${data.id}`;
+    await removeClip(data.id);
     return { ok: true as const };
   });
+
+export const undoHearingClip = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    await removeClip(data.id);
+    return { ok: true as const };
+  });
+
+export const hearingLabDiagnostics = createServerFn({ method: "POST" })
+  .validator((input: { password: string }) => input)
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    const sql = await getSql();
+    let migrations: string[] = [];
+    let migrationsError: string | null = null;
+    try {
+      const rows = await sql<{ name: string }>`select name from _migrations order by name`;
+      migrations = rows.map((r) => r.name);
+    } catch (err) {
+      migrationsError = formatUnknownError(err);
+    }
+    let clipCount = 0;
+    let clipCountError: string | null = null;
+    try {
+      const rows = await sql<{ n: number }>`select count(*)::int as n from qingran_hearing_clips`;
+      clipCount = Number(rows[0]?.n) || 0;
+    } catch (err) {
+      clipCountError = formatUnknownError(err);
+    }
+    let columns: string[] = [];
+    try {
+      const rows = await sql<{ column_name: string }>`
+        select column_name
+        from information_schema.columns
+        where table_schema = 'public' and table_name = 'qingran_hearing_clips'
+        order by ordinal_position
+      `;
+      columns = rows.map((r) => r.column_name);
+    } catch {
+      columns = [];
+    }
+    const missingMigrations = EXPECTED_HEARING_MIGRATIONS.filter((name) => !migrations.includes(name));
+    const missingColumns = EXPECTED_CLIP_COLUMNS.filter((name) => !columns.includes(name));
+    return {
+      ok: true as const,
+      dbSource,
+      migrations,
+      migrationsError,
+      clipCount,
+      clipCountError,
+      columns,
+      missingMigrations,
+      missingColumns,
+      blobTokenSet: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
+    };
+  });
+
+async function removeClip(id: string) {
+  const sql = await getSql();
+  const rows = await sql<{ blob_pathname: string | null }>`
+    select blob_pathname from qingran_hearing_clips where id = ${id}
+  `;
+  await deleteHearingWav(rows[0]?.blob_pathname);
+  await sql`delete from qingran_hearing_clips where id = ${id}`;
+}
 
 export const assignHearingSplits = createServerFn({ method: "POST" })
   .validator((input: { password: string }) => input)
@@ -654,8 +719,8 @@ async function upsertTurn(patch: HearingTurnPatch) {
         cold_start_ms = coalesce(excluded.cold_start_ms, qingran_hearing_turns.cold_start_ms),
         disagreement = excluded.disagreement or qingran_hearing_turns.disagreement
     `;
-  } catch {
-    /* preview without migration still runs */
+  } catch (err) {
+    console.error("[hearing] upsertTurn failed:", err);
   }
 }
 

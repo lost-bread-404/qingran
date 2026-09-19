@@ -12,6 +12,7 @@ import {
 } from "@/lib/lover/audio";
 import { hearUtterance } from "@/lib/lover/hear";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { clipSaveBanner } from "@/lib/lover/hearing/scripted";
 import { warmupHearing } from "@/lib/lover/hearing/store";
 import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
@@ -222,9 +223,9 @@ export function useVoiceInput({ lang, prompt }: Options) {
     }
   }, [lang, recorderSupported, speechSupported, startPulse]);
 
-  const stop = useCallback(async (): Promise<string> => {
-    if (stopLockRef.current) return "";
-    if (!recordingRef.current && status !== "recording") return "";
+  const collectClip = useCallback(async () => {
+    if (stopLockRef.current) return null;
+    if (!recordingRef.current && status !== "recording") return null;
     stopLockRef.current = true;
     recordingRef.current = false;
     setStatus("transcribing");
@@ -238,18 +239,30 @@ export function useVoiceInput({ lang, prompt }: Options) {
     const wav = wavFromTap(samples, analyseRef.current?.ctx.sampleRate ?? 48000);
     const fallback = wav ? null : await collectRecording(session);
     teardownMedia();
+    setInterim("");
+    interimRef.current = "";
+    finalTextRef.current = "";
+    return { wav, fallback, liveText, frames };
+  }, [status, teardownMedia]);
+
+  const stop = useCallback(async (): Promise<string> => {
+    const collected = await collectClip();
+    if (!collected) return "";
 
     let heard = "";
+    let saveError: string | undefined;
     try {
-      heard = (await hearUtterance({
-        wav,
-        fallback,
-        liveText,
-        frames,
+      const result = await hearUtterance({
+        wav: collected.wav,
+        fallback: collected.fallback,
+        liveText: collected.liveText,
+        frames: collected.frames,
         prompt: promptRef.current,
         speech_start: Date.now() - 1500,
         endpoint_fired: Date.now(),
-      })) ?? "";
+      });
+      heard = result.text ?? "";
+      saveError = result.saveError;
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       setStatus("idle");
@@ -258,10 +271,14 @@ export function useVoiceInput({ lang, prompt }: Options) {
       return "";
     }
 
-    setInterim("");
-    interimRef.current = "";
-    finalTextRef.current = "";
     stopLockRef.current = false;
+
+    const session = getHearingSession();
+    if (saveError && (session.capture || session.scripted)) {
+      setStatus("idle");
+      setError(clipSaveBanner(saveError));
+      return heard;
+    }
 
     if (!heard) {
       setStatus("idle");
@@ -271,7 +288,14 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
     setStatus("idle");
     return heard;
-  }, [lang, status, teardownMedia]);
+  }, [collectClip]);
+
+  const stopRaw = useCallback(async () => {
+    const collected = await collectClip();
+    stopLockRef.current = false;
+    setStatus("idle");
+    return collected;
+  }, [collectClip]);
 
   const cancel = useCallback(() => {
     stopLockRef.current = false;
@@ -317,6 +341,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
     recorderSupported,
     start,
     stop,
+    stopRaw,
     cancel,
   };
 }

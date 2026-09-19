@@ -10,12 +10,14 @@ import {
   deleteHearingClip,
   exportHearingClips,
   getHearingClipAudio,
+  hearingLabDiagnostics,
   hearingLabStats,
   listHearingClips,
   saveHearingGold,
   unlockHearingLab,
   type LabClipFilter,
 } from "@/lib/lover/hearing/store";
+import { formatUnknownError } from "@/lib/lover/hearing/scripted";
 import { EMOTIONS, type CueEmotion, type HearingCue, type HearingResult } from "@/lib/lover/hearing/schema";
 import { SCRIPTED_CATEGORIES } from "@/lib/lover/hearing/config";
 import { cn } from "@/lib/utils";
@@ -77,6 +79,16 @@ function HearingLabPage() {
   const [skip, setSkip] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [confirmTurnId, setConfirmTurnId] = useState<string | null>(null);
+  const [diag, setDiag] = useState<{
+    dbSource: string;
+    migrations: string[];
+    migrationsError: string | null;
+    clipCount: number;
+    clipCountError: string | null;
+    missingMigrations: string[];
+    missingColumns: string[];
+    blobTokenSet: boolean;
+  } | null>(null);
   const [coverage, setCoverage] = useState<{
     totalTurns: number;
     coverage: {
@@ -95,36 +107,52 @@ function HearingLabPage() {
   const dbBacked = clips.filter((c) => c.storageBackend === "db").length;
 
   async function load(nextRelabel = relabel, secret = password, nextFilter = filter) {
-    const listed = await listHearingClips({
-      data: { password: secret, relabel: nextRelabel, filter: nextFilter },
-    });
-    setClips(listed.clips as ClipRow[]);
-    setIndex(0);
-    const stats = await hearingLabStats({ data: { password: secret } });
-    setCoverage({ totalTurns: stats.totalTurns, coverage: stats.coverage });
+    try {
+      const listed = await listHearingClips({
+        data: { password: secret, relabel: nextRelabel, filter: nextFilter },
+      });
+      setClips(listed.clips as ClipRow[]);
+      setIndex(0);
+      const stats = await hearingLabStats({ data: { password: secret } });
+      setCoverage({ totalTurns: stats.totalTurns, coverage: stats.coverage });
+      const nextDiag = await hearingLabDiagnostics({ data: { password: secret } });
+      setDiag(nextDiag);
+      setError(null);
+    } catch (err) {
+      setError(formatUnknownError(err));
+    }
   }
 
   async function unlock() {
     setError(null);
-    const result = await unlockHearingLab({ data: { password } });
-    if (!result.ok) {
-      setError(result.error);
-      return;
+    try {
+      const result = await unlockHearingLab({ data: { password } });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      sessionStorage.setItem(LAB_KEY, password);
+      setUnlocked(true);
+      await load(relabel, password);
+    } catch (err) {
+      setError(formatUnknownError(err));
     }
-    sessionStorage.setItem(LAB_KEY, password);
-    setUnlocked(true);
-    await load(relabel, password);
   }
 
   useEffect(() => {
     const saved = sessionStorage.getItem(LAB_KEY);
     if (!saved) return;
     setPassword(saved);
-    void unlockHearingLab({ data: { password: saved } }).then((result) => {
-      if (!result.ok) return;
-      setUnlocked(true);
-      void load(false, saved);
-    });
+    void unlockHearingLab({ data: { password: saved } })
+      .then((result) => {
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setUnlocked(true);
+        void load(false, saved);
+      })
+      .catch((err) => setError(formatUnknownError(err)));
   }, []);
 
   useEffect(() => {
@@ -215,6 +243,28 @@ function HearingLabPage() {
           重标
         </Button>
       </header>
+
+      {error ? (
+        <div className="mx-4 mb-2 rounded-md bg-live/15 px-3 py-2 text-sm text-live">{error}</div>
+      ) : null}
+
+      {diag ? (
+        <div className="mx-4 mb-2 rounded-md bg-surface-2 px-3 py-2 text-xs text-subtle">
+          <p>
+            db={diag.dbSource} · clips={diag.clipCount}
+            {diag.clipCountError ? ` · count错误 ${diag.clipCountError}` : ""} · blob=
+            {diag.blobTokenSet ? "on" : "off"}
+          </p>
+          <p className="mt-1">_migrations: {diag.migrations.join(", ") || "（无）"}</p>
+          {diag.migrationsError ? <p className="mt-1 text-live">{diag.migrationsError}</p> : null}
+          {diag.missingMigrations.length ? (
+            <p className="mt-1 text-live">缺 migration：{diag.missingMigrations.join(", ")}</p>
+          ) : null}
+          {diag.missingColumns.length ? (
+            <p className="mt-1 text-live">缺列：{diag.missingColumns.join(", ")}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {dbBacked > 0 || coverage?.coverage.dbBacked ? (
         <div className="mx-4 mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-live">

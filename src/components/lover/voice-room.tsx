@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CallButton } from "@/components/lover/call-button";
 import { ConfirmTurn } from "@/components/lover/confirm-turn";
 import { MicButton } from "@/components/lover/mic-button";
+import { ScriptedCapturePanel } from "@/components/lover/scripted-capture";
 import { SettingsDrawer } from "@/components/lover/settings-drawer";
 import { Transcript, type TranscriptHandle } from "@/components/lover/transcript";
 import { Button } from "@/components/ui/button";
@@ -45,8 +46,8 @@ import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
 import { newId } from "@/lib/lover/storage";
 import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
-import { getHearingSession, nextScriptedCategory, setHearingSession } from "@/lib/lover/hearing/session";
-import { confirmHearingClip, patchHearingTurn, scriptedQuota } from "@/lib/lover/hearing/store";
+import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { confirmHearingClip, patchHearingTurn } from "@/lib/lover/hearing/store";
 import {
   CONTEXT_WINDOW,
   DEFAULT_PROFILE,
@@ -101,7 +102,6 @@ export function VoiceRoom() {
   const transcriptRef = useRef<TranscriptHandle>(null);
   const viewport = useVisualViewportHeight();
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
-  const [scriptedHave, setScriptedHave] = useState<Record<string, number>>({});
 
   useEffect(() => {
     profileRef.current = profile;
@@ -123,7 +123,7 @@ export function VoiceRoom() {
       scripted: profile.scriptedCapture,
       debugHearing: profile.debugHearing,
       nbest: profile.hearingNbest,
-      mode: callActiveRef.current ? "call" : "text",
+      mode: profile.scriptedCapture ? "scripted" : callActiveRef.current ? "call" : "text",
       context,
       extraKeyterms,
     });
@@ -137,24 +137,6 @@ export function VoiceRoom() {
   useEffect(() => {
     settingsOpenRef.current = settingsOpen;
   }, [settingsOpen]);
-
-  useEffect(() => {
-    if (!profile.scriptedCapture) {
-      setHearingSession({ category: null, scripted: false, source: "real" });
-      return;
-    }
-    void scriptedQuota().then((result) => {
-      const counts: Record<string, number> = {};
-      for (const row of result.categories) counts[row.id] = row.have;
-      setScriptedHave(counts);
-      const next = nextScriptedCategory(counts);
-      setHearingSession({
-        category: next?.id ?? null,
-        scripted: true,
-        source: "scripted",
-      });
-    });
-  }, [profile.scriptedCapture, messages.length]);
 
   useEffect(() => {
     const lock = () => {
@@ -561,6 +543,7 @@ export function VoiceRoom() {
   const call = useCall({
     prompt: profile.systemPrompt,
     onUtterance: async (text) => {
+      if (profileRef.current.scriptedCapture) return;
       await sendTurn(text, { voiceTurnId: getHearingSession().lastTurnId ?? undefined });
     },
   });
@@ -569,11 +552,20 @@ export function VoiceRoom() {
     callActiveRef.current = call.active;
     hearRef.current = call.hear;
     deafenRef.current = call.deafen;
-    setHearingSession({ mode: call.active ? "call" : "text" });
+    if (!profileRef.current.scriptedCapture) {
+      setHearingSession({ mode: call.active ? "call" : "text" });
+    }
     if (call.active) {
       void detectAudioRoute().then((route) => setHearingSession({ audioRoute: route }));
     }
   }, [call.active, call.hear, call.deafen]);
+
+  useEffect(() => {
+    if (!profile.scriptedCapture || !call.active) return;
+    call.hangup();
+    stopPlayback();
+    setStatus("idle");
+  }, [profile.scriptedCapture, call.active, call.hangup]);
 
   const finishHold = useCallback(async () => {
     if (finishingHoldRef.current) return;
@@ -592,6 +584,7 @@ export function VoiceRoom() {
   }, [sendTurn, voice]);
 
   const holdStart = useCallback(async () => {
+    if (profileRef.current.scriptedCapture) return;
     if (callActiveRef.current || holdingRef.current || finishingHoldRef.current) return;
     if (voice.status === "transcribing") return;
     if (status === "thinking" || status === "speaking") return;
@@ -721,8 +714,7 @@ export function VoiceRoom() {
   const recording = voice.status === "recording";
   const transcribing = voice.status === "transcribing";
   const editable = lastUserSay(messages);
-  const composing = composerOpen && !recording && !call.active;
-  const scriptedNow = profile.scriptedCapture ? nextScriptedCategory(scriptedHave) : null;
+  const composing = composerOpen && !recording && !call.active && !profile.scriptedCapture;
   const statusLine = call.active
     ? call.phase === "speaking-you"
       ? "在听你"
@@ -760,7 +752,13 @@ export function VoiceRoom() {
             <div>
               <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
               <p className="text-xs text-subtle">
-                {call.active ? "通话中" : memories.length > 0 ? `记得 ${memories.length} 件事` : "在"}
+                {profile.scriptedCapture
+                  ? "定向录制"
+                  : call.active
+                    ? "通话中"
+                    : memories.length > 0
+                      ? `记得 ${memories.length} 件事`
+                      : "在"}
               </p>
             </div>
           </button>
@@ -800,22 +798,20 @@ export function VoiceRoom() {
           </div>
         </header>
 
-        {scriptedNow ? (
-          <div className="mx-5 mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
-            <p>
-              定向录制 · {scriptedNow.label}
-              <span className="ml-2 text-xs text-subtle">
-                还差 {Math.max(0, scriptedNow.quota - (scriptedHave[scriptedNow.id] ?? 0))} / {scriptedNow.quota}
-              </span>
-            </p>
-          </div>
-        ) : profile.scriptedCapture ? (
-          <div className="mx-5 mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-muted">
-            定向录制配额已满。
-          </div>
-        ) : null}
-
-        {composing ? (
+        {profile.scriptedCapture ? (
+          <ScriptedCapturePanel
+            skipped={profile.skippedScripted}
+            onSkip={(id) =>
+              setProfile((p) =>
+                lockedProfile({
+                  ...p,
+                  skippedScripted: p.skippedScripted.includes(id) ? p.skippedScripted : [...p.skippedScripted, id],
+                }),
+              )
+            }
+            prompt={profile.systemPrompt}
+          />
+        ) : composing ? (
           <div className="flex min-h-0 flex-1 flex-col px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
             {(banner || voice.error) && (
               <p className="mb-2 text-center text-sm text-live">{banner || voice.error}</p>

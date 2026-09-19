@@ -1,5 +1,5 @@
 export type AudioRoute = "headphones" | "speaker" | "unknown";
-export type HearingMode = "call" | "text";
+export type HearingMode = "call" | "text" | "scripted";
 
 export function classifyAudioRoute(label: string | null | undefined): AudioRoute {
   const text = (label ?? "").toLowerCase();
