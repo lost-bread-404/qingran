@@ -14,6 +14,7 @@ import { useVoiceInput } from "@/hooks/use-voice-input";
 import { base64ToBytes, concatBytes } from "@/lib/lover/audio";
 import { addManualMemory, mergeFacts, replaceMemories, updateMemory } from "@/lib/lover/memory";
 import { dropIncompleteReplies, historyForQingran, skipsQingran } from "@/lib/lover/pair-messages";
+import { planInterruptQingran } from "@/lib/lover/interrupt";
 import {
   enqueuePlayback,
   getPlaybackElement,
@@ -108,6 +109,7 @@ export function VoiceRoom() {
   const abortRef = useRef<AbortController | null>(null);
   const pendingIdsRef = useRef(new Set<string>());
   const inflightRef = useRef<{ id: string; createdAt: number; text: string } | null>(null);
+  const speakingIdRef = useRef<string | null>(null);
   const callActiveRef = useRef(false);
   const hearRef = useRef<() => void>(() => undefined);
   const deafenRef = useRef<() => void>(() => undefined);
@@ -342,6 +344,7 @@ export function VoiceRoom() {
 
   const playFull = useCallback(async (id: string, speech: string, turn: number) => {
     if (profileRef.current.muted) return;
+    speakingIdRef.current = id;
     stopPlayback();
     setStatus("speaking");
     void unlockPlayback();
@@ -362,6 +365,7 @@ export function VoiceRoom() {
     }
     const ok = await playMp3Bytes(clip.bytes, clip.mimeType);
     if (turn !== turnRef.current) return;
+    if (speakingIdRef.current === id) speakingIdRef.current = null;
     if (!ok) setBanner("声音被浏览器拦住了，点喇叭再听。");
     setStatus((s) => (s === "speaking" ? "idle" : s));
     resumeCallListen(turn);
@@ -458,6 +462,7 @@ export function VoiceRoom() {
       }
       pendingIdsRef.current.add(reply.id);
       inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text: "" };
+      speakingIdRef.current = reply.id;
       setStatus("thinking");
       void kickAudio();
       if (opts?.voiceTurnId) {
@@ -525,6 +530,7 @@ export function VoiceRoom() {
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
           },
           (event) => {
+            if (turn !== turnRef.current) return;
             if (event.t === "text") {
               if (userMsg.hearingTiming?.grokMs == null) stampTiming({ grokMs: Date.now() - sttDoneAt });
               full += event.d;
@@ -592,7 +598,7 @@ export function VoiceRoom() {
           ac.signal,
         );
       } catch (err) {
-        persistReply(full);
+        if (turn === turnRef.current) persistReply(full);
         pendingIdsRef.current.delete(reply.id);
         if (turn !== turnRef.current) return;
         if ((err as { name?: string }).name === "AbortError") return;
@@ -938,6 +944,34 @@ export function VoiceRoom() {
     }
   }
 
+  function interruptQingran() {
+    const plan = planInterruptQingran({
+      speakingOrThinking: status === "speaking" || status === "thinking",
+      callActive: call.active,
+    });
+    if (!plan) return;
+    turnRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (plan.stopPlayback) stopPlayback();
+    busyRef.current = false;
+    setStatus("idle");
+    const id = speakingIdRef.current ?? inflightRef.current?.id;
+    const target =
+      (id ? chatRef.current.find((m) => m.id === id) : undefined) ??
+      [...chatRef.current].reverse().find((m) => m.role === "assistant");
+    if (plan.markInterrupted && target?.role === "assistant") {
+      pendingIdsRef.current.delete(target.id);
+      const updated: ChatMessage = { ...target, interrupted: true };
+      chatRef.current = chatRef.current.map((m) => (m.id === updated.id ? updated : m));
+      setMessages(chatRef.current);
+      void updateRoomMessage({ data: updated });
+    }
+    inflightRef.current = null;
+    speakingIdRef.current = null;
+    if (plan.hear) call.hear();
+  }
+
   const recording = voice.status === "recording";
   const transcribing = voice.status === "transcribing";
   const editable = lastUserSay(messages);
@@ -964,19 +998,29 @@ export function VoiceRoom() {
           className="relative z-10 flex shrink-0 items-center justify-between bg-bg/80 px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm"
           onClick={() => transcriptRef.current?.pageUp()}
         >
-          <button
-            type="button"
-            aria-label="往上看更早的对话"
-            className="flex min-w-0 flex-1 items-center gap-3 text-left"
-          >
-            <div
-              className={cn(
-                "lamp-orb size-10 rounded-full",
-                status === "idle" && !recording && !call.active && "lamp-breathe",
-              )}
-              aria-hidden
-            />
-            <div>
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <button
+              type="button"
+              aria-label={status === "speaking" || status === "thinking" ? "打断清然" : "清然"}
+              className="grid size-11 shrink-0 place-items-center"
+              onClick={(e) => {
+                e.stopPropagation();
+                interruptQingran();
+              }}
+            >
+              <div
+                className={cn(
+                  "lamp-orb size-10 rounded-full",
+                  status === "idle" && !recording && !call.active && "lamp-breathe",
+                )}
+                aria-hidden
+              />
+            </button>
+            <button
+              type="button"
+              aria-label="往上看更早的对话"
+              className="min-w-0 flex-1 text-left"
+            >
               <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
               <p className="text-xs text-subtle">
                 {profile.debugHearing
@@ -990,8 +1034,8 @@ export function VoiceRoom() {
               {profile.debugHearing && audioLog ? (
                 <p className="max-w-[14rem] truncate text-[10px] text-subtle/80">{audioLog}</p>
               ) : null}
-            </div>
-          </button>
+            </button>
+          </div>
           <div
             className="flex items-center gap-1"
             onClick={(e) => e.stopPropagation()}

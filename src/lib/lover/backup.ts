@@ -80,5 +80,6 @@ function cloneMessage(m: ChatMessage): ChatMessage {
     voiceTurnId: m.voiceTurnId ? String(m.voiceTurnId) : undefined,
     replyTo: m.replyTo ? String(m.replyTo) : undefined,
     hearingGold: m.hearingGold === "confirmed" ? "confirmed" : m.hearingGold === "unconfirmed" ? "unconfirmed" : undefined,
+    interrupted: m.interrupted ? true : undefined,
   };
 }

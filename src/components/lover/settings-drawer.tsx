@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { backupFilename, makeBackup, parseBackup, type QingranBackup } from "@/lib/lover/backup";
 import { LogoutButton } from "@/components/lover/logout-button";
 import { HEARING_PROVIDERS, type HearingProviderId } from "@/lib/lover/hearing/config";
@@ -69,6 +70,7 @@ export function SettingsDrawer({
   const [consolidating, setConsolidating] = useState(false);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const viewport = useVisualViewportHeight(open);
 
   useEffect(() => {
     if (open) {
@@ -82,6 +84,14 @@ export function SettingsDrawer({
       void hearingEnvStatus().then((result) => setProviderReady(result.providers));
     }
   }, [open, profile]);
+
+  useEffect(() => {
+    if (!open) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) {
+      keepCaretVisible(active);
+    }
+  }, [open, viewport.height, viewport.offsetTop]);
 
   function save() {
     const ready = providerReady?.[hearingProvider];
@@ -110,7 +120,10 @@ export function SettingsDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-bg">
+    <div
+      className="fixed inset-x-0 z-50 flex flex-col bg-bg"
+      style={{ top: viewport.offsetTop, height: viewport.height }}
+    >
       <header className="flex shrink-0 items-center gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <button
           type="button"
@@ -156,7 +169,18 @@ export function SettingsDrawer({
         <div className="flex min-h-0 flex-1 flex-col px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <Textarea
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              keepCaretVisible(e.currentTarget);
+            }}
+            onSelect={(e) => keepCaretVisible(e.currentTarget)}
+            onFocus={(e) => {
+              const box = e.currentTarget;
+              window.setTimeout(() => {
+                window.scrollTo(0, 0);
+                keepCaretVisible(box);
+              }, 50);
+            }}
             maxLength={8000}
             className="min-h-0 flex-1 resize-none font-mono leading-relaxed"
             placeholder="写给模型的 system prompt"
@@ -288,9 +312,18 @@ export function SettingsDrawer({
                 onChange={(e) => {
                   const value = e.target.value;
                   setNewFact(value);
+                  keepCaretVisible(e.currentTarget);
                   if (newTimeTouched) return;
                   const parsed = splitLeadingTimestamp(value);
                   if (parsed.at) setNewAt(toDatetimeLocal(parsed.at));
+                }}
+                onSelect={(e) => keepCaretVisible(e.currentTarget)}
+                onFocus={(e) => {
+                  const box = e.currentTarget;
+                  window.setTimeout(() => {
+                    window.scrollTo(0, 0);
+                    keepCaretVisible(box);
+                  }, 50);
                 }}
                 placeholder="记下大事"
                 maxLength={200}
@@ -337,7 +370,18 @@ export function SettingsDrawer({
                           <Input
                             autoFocus
                             value={editDraft}
-                            onChange={(e) => setEditDraft(e.target.value)}
+                            onChange={(e) => {
+                              setEditDraft(e.target.value);
+                              keepCaretVisible(e.currentTarget);
+                            }}
+                            onSelect={(e) => keepCaretVisible(e.currentTarget)}
+                            onFocus={(e) => {
+                              const box = e.currentTarget;
+                              window.setTimeout(() => {
+                                window.scrollTo(0, 0);
+                                keepCaretVisible(box);
+                              }, 50);
+                            }}
                           />
                           <Input
                             type="datetime-local"

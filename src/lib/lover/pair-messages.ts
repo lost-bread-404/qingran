@@ -1,4 +1,5 @@
 import { UNRECOGNIZED_TEXT } from "./hearing/heard.ts";
+import { withInterruptedMark } from "./interrupt.ts";
 import { CONTEXT_WINDOW, type ChatMessage } from "./types.ts";
 
 export type ChatPair = {
@@ -26,7 +27,12 @@ export function skipsQingran(msg: ChatMessage): boolean {
 export function historyForQingran(messages: ChatMessage[], limit = CONTEXT_WINDOW): ChatMessage[] {
   return messages
     .filter((msg) => msg.kind !== "steer" && msg.kind !== "setting" && !skipsQingran(msg))
-    .slice(-limit);
+    .slice(-limit)
+    .map((msg) =>
+      msg.role === "assistant" && msg.interrupted
+        ? { ...msg, text: withInterruptedMark(msg.text) }
+        : msg,
+    );
 }
 
 /** Lay out turns in time order. Replies attach to `replyTo` when present; unheard users never take a reply. */
@@ -63,7 +69,7 @@ export function dropIncompleteReplies(
   const next = [...messages];
   while (next.length) {
     const last = next[next.length - 1];
-    if (last?.role === "assistant" && !last.text.trim() && !keep?.has(last.id)) {
+    if (last?.role === "assistant" && !last.text.trim() && !keep?.has(last.id) && !last.interrupted) {
       next.pop();
       continue;
     }

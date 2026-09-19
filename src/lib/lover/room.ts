@@ -223,6 +223,7 @@ function encodeStoredMessage(msg: ChatMessage): string {
         : `⟦听:${msg.voiceTurnId}⟧${text}`;
   }
   if (msg.scanned) text = `⟦已扫⟧${text}`;
+  if (msg.interrupted) text = `⟦断⟧${text}`;
   return text;
 }
 
@@ -239,6 +240,11 @@ function decodeStoredMessage(row: {
   let hearingGold: ChatMessage["hearingGold"];
   let replyTo: string | undefined;
   let predictedTags: AcousticTags | undefined;
+  let interrupted = false;
+  if (text.startsWith("⟦断⟧")) {
+    interrupted = true;
+    text = text.slice("⟦断⟧".length);
+  }
   if (text.startsWith("⟦已扫⟧")) {
     scanned = true;
     text = text.slice(4);
@@ -287,6 +293,7 @@ function decodeStoredMessage(row: {
     hearingGold,
     replyTo,
     predictedTags,
+    interrupted: interrupted || undefined,
   };
 }
 

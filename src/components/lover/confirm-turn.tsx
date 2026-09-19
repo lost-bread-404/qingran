@@ -1,8 +1,9 @@
 import { X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { cn } from "@/lib/utils";
 import {
   TAG_CONTOURS,
@@ -50,6 +51,10 @@ const OPTIONS: Record<TagKey, readonly string[]> = {
   event: TAG_EVENTS,
 };
 
+function caretOf(el: HTMLTextAreaElement | HTMLInputElement) {
+  keepCaretVisible(el);
+}
+
 export function ConfirmTurn({
   open,
   sttText,
@@ -71,6 +76,9 @@ export function ConfirmTurn({
   const [literalMismatch, setLiteralMismatch] = useState(initialLiteralMismatch);
   const [toneNote, setToneNote] = useState(initialToneNote ?? "");
   const [chosen, setChosen] = useState<AcousticTags>({ ...predicted, ...initialGoldTags });
+  const viewport = useVisualViewportHeight(open);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -82,15 +90,34 @@ export function ConfirmTurn({
     setChosen({ ...nextPredicted, ...initialGoldTags });
   }, [open, sttText, initialDraft, initialNoise, initialLiteralMismatch, initialToneNote, initialPredicted, initialGoldTags]);
 
+  useEffect(() => {
+    if (!open) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) {
+      keepCaretVisible(active);
+    }
+  }, [open, viewport.height, viewport.offsetTop]);
+
   if (!open) return null;
 
   const edited = draft.trim() !== sttText.trim();
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end bg-bg/80">
-      <button type="button" className="min-h-0 flex-1" aria-label="关掉" onClick={onClose} />
-      <div className="max-h-[90dvh] overflow-y-auto rounded-t-2xl bg-bg px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-lamp">
-        <div className="mb-3 flex items-center justify-between">
+    <div
+      className="fixed inset-x-0 z-50 flex flex-col bg-bg/80"
+      style={{ top: viewport.offsetTop, height: viewport.height }}
+    >
+      {viewport.keyboardUp ? null : (
+        <button type="button" className="min-h-0 flex-1" aria-label="关掉" onClick={onClose} />
+      )}
+      <div
+        className={cn(
+          "flex min-h-0 flex-col overflow-hidden rounded-t-2xl bg-bg px-4 pt-3 shadow-lamp",
+          viewport.keyboardUp ? "flex-1" : "max-h-full",
+        )}
+        style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
+      >
+        <div className="mb-3 flex shrink-0 items-center justify-between">
           <p className="font-display text-lg">确认这句话</p>
           <button
             type="button"
@@ -102,98 +129,125 @@ export function ConfirmTurn({
           </button>
         </div>
         {audioUrl ? (
-          <audio className="mb-3 w-full" controls src={audioUrl} />
+          <audio className="mb-3 w-full shrink-0" controls src={audioUrl} />
         ) : (
-          <p className="mb-3 text-xs text-subtle">没有这段录音，或者还在加载。</p>
+          <p className="mb-3 shrink-0 text-xs text-subtle">没有这段录音，或者还在加载。</p>
         )}
-        <Textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          className="min-h-28"
-          aria-label="识别文字"
-        />
-        <div className="mt-3 flex flex-col gap-3">
-          {TAG_KEYS.map((key) => (
-            <div key={key}>
-              <p className="mb-1 text-xs text-subtle">{TAG_LABELS[key]}</p>
-              <div className="flex flex-wrap gap-2">
-                {OPTIONS[key].map((value) => {
-                  const selected = chosen[key] === value;
-                  const label = TAG_VALUE_LABELS[key][value as never] as string;
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => setChosen((cur) => ({ ...cur, [key]: value }))}
-                      className={cn(
-                        "min-h-11 rounded-md px-3 text-sm",
-                        selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            aria-pressed={noiseOnly}
-            onClick={() => setNoiseOnly((cur) => !cur)}
-            className={cn(
-              "min-h-11 rounded-md px-3 text-sm",
-              noiseOnly ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-            )}
-          >
-            噪音
-          </button>
-          <button
-            type="button"
-            aria-pressed={literalMismatch}
-            onClick={() => setLiteralMismatch((cur) => !cur)}
-            className={cn(
-              "min-h-11 rounded-md px-3 text-sm",
-              literalMismatch ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-            )}
-          >
-            字面≠意思
-          </button>
-        </div>
-        <p className="mt-2 text-xs text-subtle">反话、玩笑、嘴上说讨厌其实在撒娇。</p>
-        <Input
-          value={toneNote}
-          onChange={(e) => setToneNote(e.target.value)}
-          className="mt-2"
-          placeholder="可选备注"
-          aria-label="语气备注"
-          maxLength={80}
-        />
-        {error ? <p className="mt-2 text-sm text-live">{error}</p> : null}
-        <div className="mt-4">
-          <Button
-            type="button"
-            className="w-full"
-            disabled={busy}
-            onClick={() => {
-              const nextPredicted = initialPredicted ?? defaultTags();
-              const touched = tagsTouched(nextPredicted, chosen);
-              void onConfirm({
-                goldText: draft.trim(),
-                source: edited ? "edited" : "confirmed",
-                noiseOnly,
-                literalMismatch,
-                toneNote: toneNote.trim(),
-                goldTags: goldTagsFromTouched(chosen, touched),
-                tagsTouched: touched,
-              });
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <Textarea
+            ref={draftRef}
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              caretOf(e.currentTarget);
             }}
-          >
-            {busy ? "正在写入…" : "确认"}
-          </Button>
+            onSelect={(e) => caretOf(e.currentTarget)}
+            onFocus={(e) => {
+              const box = e.currentTarget;
+              const scroller = scrollRef.current;
+              if (scroller) scroller.scrollTop = Math.max(0, box.offsetTop - 8);
+              window.setTimeout(() => {
+                window.scrollTo(0, 0);
+                caretOf(box);
+              }, 50);
+            }}
+            className="min-h-28"
+            aria-label="识别文字"
+          />
+          <div className="mt-3 flex flex-col gap-3">
+            {TAG_KEYS.map((key) => (
+              <div key={key}>
+                <p className="mb-1 text-xs text-subtle">{TAG_LABELS[key]}</p>
+                <div className="flex flex-wrap gap-2">
+                  {OPTIONS[key].map((value) => {
+                    const selected = chosen[key] === value;
+                    const label = TAG_VALUE_LABELS[key][value as never] as string;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setChosen((cur) => ({ ...cur, [key]: value }))}
+                        className={cn(
+                          "min-h-11 rounded-md px-3 text-sm",
+                          selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                        )}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              aria-pressed={noiseOnly}
+              onClick={() => setNoiseOnly((cur) => !cur)}
+              className={cn(
+                "min-h-11 rounded-md px-3 text-sm",
+                noiseOnly ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+              )}
+            >
+              噪音
+            </button>
+            <button
+              type="button"
+              aria-pressed={literalMismatch}
+              onClick={() => setLiteralMismatch((cur) => !cur)}
+              className={cn(
+                "min-h-11 rounded-md px-3 text-sm",
+                literalMismatch ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+              )}
+            >
+              字面≠意思
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-subtle">反话、玩笑、嘴上说讨厌其实在撒娇。</p>
+          <Input
+            value={toneNote}
+            onChange={(e) => {
+              setToneNote(e.target.value);
+              caretOf(e.currentTarget);
+            }}
+            onSelect={(e) => caretOf(e.currentTarget)}
+            onFocus={(e) => {
+              const box = e.currentTarget;
+              window.setTimeout(() => {
+                window.scrollTo(0, 0);
+                caretOf(box);
+              }, 50);
+            }}
+            className="mt-2"
+            placeholder="可选备注"
+            aria-label="语气备注"
+            maxLength={80}
+          />
+          {error ? <p className="mt-2 text-sm text-live">{error}</p> : null}
+          <div className="mt-4">
+            <Button
+              type="button"
+              className="w-full"
+              disabled={busy}
+              onClick={() => {
+                const nextPredicted = initialPredicted ?? defaultTags();
+                const touched = tagsTouched(nextPredicted, chosen);
+                void onConfirm({
+                  goldText: draft.trim(),
+                  source: edited ? "edited" : "confirmed",
+                  noiseOnly,
+                  literalMismatch,
+                  toneNote: toneNote.trim(),
+                  goldTags: goldTagsFromTouched(chosen, touched),
+                  tagsTouched: touched,
+                });
+              }}
+            >
+              {busy ? "正在写入…" : "确认"}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

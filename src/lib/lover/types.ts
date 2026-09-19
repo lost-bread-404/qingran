@@ -37,6 +37,7 @@ export type ChatMessage = {
     grokMs?: number;
     ttsMs?: number;
   };
+  interrupted?: boolean;
 };
 
 export type Memory = {

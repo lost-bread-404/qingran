@@ -91,6 +91,21 @@ test("round-trips unheard kind and replyTo", () => {
   assert.equal(parsed?.messages[2]?.replyTo, "u1");
 });
 
+test("round-trips interrupted assistant replies", () => {
+  const backup = makeBackup({
+    now: 1_700_000_000_000,
+    profile: lockedProfile(),
+    memories: [],
+    messages: [
+      { id: "u1", role: "user", text: "听我说", createdAt: 3 },
+      { id: "a1", role: "assistant", text: "我正要说完", createdAt: 4, interrupted: true },
+    ],
+  });
+  const parsed = parseBackup(JSON.parse(JSON.stringify(backup)));
+  assert.equal(parsed?.messages[1]?.interrupted, true);
+  assert.equal(parsed?.messages[1]?.text, "我正要说完");
+});
+
 test("backup filename is a dated json", () => {
   assert.match(backupFilename(Date.UTC(2026, 8, 16)), /^qingran-backup-\d{8}\.json$/);
 });

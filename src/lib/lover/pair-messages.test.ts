@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { UNRECOGNIZED_TEXT } from "./hearing/heard.ts";
+import { INTERRUPTED_MARK } from "./interrupt.ts";
 import {
   dropIncompleteReplies,
   historyForQingran,
@@ -121,4 +122,28 @@ test("dropIncompleteReplies keeps an in-flight empty assistant", () => {
   );
   assert.equal(next.length, 2);
   assert.equal(next[1]?.id, "a1");
+});
+
+test("dropIncompleteReplies keeps an interrupted empty assistant", () => {
+  const next = dropIncompleteReplies([
+    msg("u1", "user", "一"),
+    msg("a1", "assistant", "", 2, { interrupted: true }),
+  ]);
+  assert.equal(next.length, 2);
+  assert.equal(next[1]?.interrupted, true);
+});
+
+test("historyForQingran appends the interrupt mark to interrupted replies", () => {
+  const history = historyForQingran([
+    msg("u1", "user", "听我说", 1),
+    msg("a1", "assistant", "我正要说完", 2, { interrupted: true }),
+  ]);
+  assert.deepEqual(history.map((m) => m.text), ["听我说", `我正要说完${INTERRUPTED_MARK}`]);
+});
+
+test("historyForQingran does not double the interrupt mark", () => {
+  const history = historyForQingran([
+    msg("a1", "assistant", `已经有了${INTERRUPTED_MARK}`, 1, { interrupted: true }),
+  ]);
+  assert.equal(history[0]?.text, `已经有了${INTERRUPTED_MARK}`);
 });

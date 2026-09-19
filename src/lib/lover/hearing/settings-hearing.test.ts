@@ -42,7 +42,7 @@ test("confirm panel keeps 噪音 and 字面≠意思, plus acoustic chips", () =
   assert.doesNotMatch(src, /EMOTION_LABEL/);
   assert.doesNotMatch(src, /CueEmotion/);
   assert.doesNotMatch(src, /这是纯噪音/);
-  assert.match(src, /<audio className="mb-3 w-full" controls src=\{audioUrl\} \/>/);
+  assert.match(src, /<audio className="mb-3 w-full shrink-0" controls src=\{audioUrl\} \/>/);
   assert.doesNotMatch(src, /<audio[^>]*muted/);
 });
 
@@ -155,4 +155,20 @@ test("debug transcript shows segmented latency", () => {
   assert.match(src, /说完→识别完/);
   assert.match(src, /识别完→字/);
   assert.match(src, /→出声/);
+});
+
+test("confirm panel and settings drawer follow visualViewport and keep the caret visible", () => {
+  const confirm = readFileSync(new URL("../../../components/lover/confirm-turn.tsx", import.meta.url), "utf8");
+  const settings = readFileSync(new URL("../../../components/lover/settings-drawer.tsx", import.meta.url), "utf8");
+  assert.match(confirm, /useVisualViewportHeight\(open\)/);
+  assert.match(confirm, /keepCaretVisible/);
+  assert.match(confirm, /top: viewport\.offsetTop/);
+  assert.match(confirm, /height: viewport\.height/);
+  assert.match(confirm, /onSelect=\{\(e\) => caretOf\(e\.currentTarget\)\}/);
+  assert.match(settings, /useVisualViewportHeight\(open\)/);
+  assert.match(settings, /keepCaretVisible/);
+  assert.match(settings, /top: viewport\.offsetTop/);
+  assert.match(settings, /height: viewport\.height/);
+  assert.match(settings, /写给模型的 system prompt/);
+  assert.match(settings, /记下大事/);
 });
