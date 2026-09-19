@@ -38,8 +38,9 @@ test("confirm panel keeps 噪音 and 字面≠意思, plus acoustic chips", () =
   assert.match(src, />\s*噪音\s*</);
   assert.match(src, /字面≠意思/);
   assert.match(src, /aria-label="语气备注"/);
-  assert.match(src, /TAG_KEYS/);
-  assert.match(src, /tagsTouched/);
+  assert.match(src, /toggleEventChip/);
+  assert.match(src, /EVENT_CHIP_VALUES/);
+  assert.match(src, /EVENT_CHIP_LABELS/);
   assert.doesNotMatch(src, /EMOTION_LABEL/);
   assert.doesNotMatch(src, /CueEmotion/);
   assert.doesNotMatch(src, /这是纯噪音/);
@@ -122,6 +123,8 @@ test("lab scorecard uses acoustic tag accuracy and has 👎 list", () => {
   const src = readFileSync(new URL("../../../routes/lab.tsx", import.meta.url), "utf8");
   assert.match(src, /声学标签/);
   assert.match(src, /tagAccuracy/);
+  assert.match(src, /fmtEventPr/);
+  assert.match(src, /TAG_EVENT_VALUES/);
   assert.match(src, /👎 列表/);
   assert.match(src, /exportReplyFlags/);
   assert.doesNotMatch(src, /语气符号准确率/);

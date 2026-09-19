@@ -51,6 +51,7 @@ import {
   applyUtteranceTag,
   defaultTags,
   parseAcousticTags,
+  parsePartialAcousticTags,
   parseTagKeys,
   tagsFromCues,
   type AcousticTags,
@@ -654,10 +655,7 @@ export const hearingLabScore = createServerFn({ method: "POST" })
           toneNote: row.tone_note,
           turnId: row.turn_id,
           predictedTags: parseAcousticTags(row.predicted_tags),
-          goldTags:
-            row.gold_tags && typeof row.gold_tags === "object"
-              ? (row.gold_tags as Partial<AcousticTags>)
-              : null,
+          goldTags: parsePartialAcousticTags(row.gold_tags),
           tagsTouched: parseTagKeys(row.tags_touched),
         })),
         { window, hallucinationN, hallucinationByReason },
@@ -892,10 +890,7 @@ export const exportHearingClips = createServerFn({ method: "POST" })
           peakRms: row.peak_rms,
           vadFloor: row.vad_floor,
           predictedTags: parseAcousticTags(row.predicted_tags),
-          goldTags:
-            row.gold_tags && typeof row.gold_tags === "object"
-              ? (row.gold_tags as Partial<AcousticTags>)
-              : null,
+          goldTags: parsePartialAcousticTags(row.gold_tags),
           tagsTouched: parseTagKeys(row.tags_touched),
           commitSha: row.commit_sha,
           promptHash: row.prompt_hash,

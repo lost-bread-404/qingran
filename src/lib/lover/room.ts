@@ -214,7 +214,7 @@ function encodeStoredMessage(msg: ChatMessage): string {
   else if (msg.kind === "unheard") text = `⟦未听⟧${text}`;
   if (msg.replyTo) text = `⟦回:${msg.replyTo}⟧${text}`;
   if (msg.predictedTags) {
-    text = `⟦气:${msg.predictedTags.length}.${msg.predictedTags.contour}.${msg.predictedTags.voice}.${msg.predictedTags.event}⟧${text}`;
+    text = `⟦气:${msg.predictedTags.length}.${msg.predictedTags.contour}.${msg.predictedTags.voice}.${msg.predictedTags.events.join("+")}⟧${text}`;
   }
   if (msg.voiceTurnId) {
     text =

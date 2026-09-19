@@ -8,6 +8,7 @@ import { pendingMigrations } from "../../../../scripts/migration-plan.mjs";
 import { confirmClipByTurn, exportReplyFlagDataset, goldCount, hallucinationCount, insertClipRow, insertReplyFlag, listClipRows, listLabeledClipRows, listReplyFlagRows, listScoreClipRows, patchFinalTextByTurn, unlabelClip } from "./persist.ts";
 import { scoreHearing } from "./score.ts";
 import { silenceWavBase64 } from "./wav.ts";
+import type { AcousticTags } from "./tags.ts";
 
 type Sql = {
   <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
@@ -205,7 +206,7 @@ test("PGLite e2e: predicted tags, tags_touched gold, ✓ keeps tags, reply flags
     return result.rows;
   });
 
-  const predicted = { length: "short", contour: "flat", voice: "normal", event: "none" } as const;
+  const predicted: AcousticTags = { length: "short", contour: "flat", voice: "normal", events: [] };
   await insertClipRow(sql, {
     id: "clip-tags",
     durationMs: 400,

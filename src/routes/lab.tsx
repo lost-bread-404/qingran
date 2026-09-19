@@ -19,7 +19,7 @@ import {
 } from "@/lib/lover/hearing/store";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
 import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/score";
-import { TAG_KEYS, TAG_LABELS, type AcousticTags } from "@/lib/lover/hearing/tags";
+import { TAG_EVENT_VALUES, TAG_LABELS, TAG_VALUE_LABELS, type AcousticTags, type EventPr } from "@/lib/lover/hearing/tags";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/lab")({ component: HearingLabPage });
@@ -564,8 +564,15 @@ function ScoreCard({ score }: { score: ScorePayload | null }) {
         }
       />
       <Row label="完全正确率" value={fmtPct(score.exactMatch)} />
-      {TAG_KEYS.map((key) => (
-        <Row key={key} label={`声学标签 · ${TAG_LABELS[key]}`} value={fmtPct(score.tagAccuracy[key])} />
+      <Row label={`声学标签 · ${TAG_LABELS.length}`} value={fmtPct(score.tagAccuracy.length)} />
+      <Row label={`声学标签 · ${TAG_LABELS.contour}`} value={fmtPct(score.tagAccuracy.contour)} />
+      <Row label={`声学标签 · ${TAG_LABELS.voice}`} value={fmtPct(score.tagAccuracy.voice)} />
+      {TAG_EVENT_VALUES.map((event) => (
+        <Row
+          key={event}
+          label={`声学标签 · ${TAG_VALUE_LABELS.events[event]}`}
+          value={fmtEventPr(score.tagAccuracy.events[event])}
+        />
       ))}
       <Row
         label="噪音里有字"
@@ -602,6 +609,11 @@ function fmtCer(n: number | null) {
 function fmtPct(n: number | null) {
   if (n == null) return "无数据";
   return `${(n * 100).toFixed(1)}%`;
+}
+
+function fmtEventPr(row: EventPr | undefined) {
+  if (!row || (row.precision == null && row.recall == null)) return "无数据";
+  return `P ${fmtPct(row.precision)} · R ${fmtPct(row.recall)}`;
 }
 
 function isEmotion(value: string | null | undefined): value is CueEmotion {

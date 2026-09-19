@@ -2,6 +2,7 @@ import { goldTierFor, isGoldSource, type GoldSource } from "./gold.ts";
 import { hearingCueSchema, EMOTIONS, type CueEmotion, type HearingCue } from "./schema.ts";
 import {
   parseAcousticTags,
+  parsePartialAcousticTags,
   parseTagKeys,
   type AcousticTags,
   type TagKey,
@@ -245,7 +246,7 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
         toneNote: row.tone_note,
         goldAt: row.gold_at,
         predictedTags: parseAcousticTags(row.predicted_tags),
-        goldTags: (row.gold_tags && typeof row.gold_tags === "object" ? row.gold_tags : null) as Partial<AcousticTags> | null,
+        goldTags: parsePartialAcousticTags(row.gold_tags),
         tagsTouched: parseTagKeys(row.tags_touched),
       }),
     ),
@@ -580,10 +581,7 @@ export async function clipLabelByTurn(sql: Sql, turnId: string): Promise<ClipLab
   if (!row) return null;
   return {
     predictedTags: parseAcousticTags(row.predicted_tags),
-    goldTags:
-      row.gold_tags && typeof row.gold_tags === "object"
-        ? (row.gold_tags as Partial<AcousticTags>)
-        : null,
+    goldTags: parsePartialAcousticTags(row.gold_tags),
     tagsTouched: parseTagKeys(row.tags_touched),
     noiseOnly: Boolean(row.noise_only),
     literalMismatch: Boolean(row.literal_mismatch),

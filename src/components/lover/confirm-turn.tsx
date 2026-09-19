@@ -6,8 +6,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { cn } from "@/lib/utils";
 import {
+  EVENT_CHIP_LABELS,
+  EVENT_CHIP_VALUES,
   TAG_CONTOURS,
-  TAG_EVENTS,
   TAG_KEYS,
   TAG_LABELS,
   TAG_LENGTHS,
@@ -15,7 +16,9 @@ import {
   TAG_VOICES,
   defaultTags,
   goldTagsFromTouched,
+  parsePartialAcousticTags,
   tagsTouched,
+  toggleEventChip,
   type AcousticTags,
   type TagKey,
 } from "@/lib/lover/hearing/tags";
@@ -44,12 +47,21 @@ type Props = {
   initialGoldTags?: Partial<AcousticTags> | null;
 };
 
-const OPTIONS: Record<TagKey, readonly string[]> = {
+const OPTIONS: Record<"length" | "contour" | "voice", readonly string[]> = {
   length: TAG_LENGTHS,
   contour: TAG_CONTOURS,
   voice: TAG_VOICES,
-  event: TAG_EVENTS,
 };
+
+function mergeChosen(predicted: AcousticTags, gold?: Partial<AcousticTags> | null): AcousticTags {
+  const parsed = parsePartialAcousticTags(gold) ?? {};
+  return {
+    length: parsed.length ?? predicted.length,
+    contour: parsed.contour ?? predicted.contour,
+    voice: parsed.voice ?? predicted.voice,
+    events: parsed.events ?? predicted.events,
+  };
+}
 
 function caretOf(el: HTMLTextAreaElement | HTMLInputElement) {
   keepCaretVisible(el);
@@ -75,7 +87,7 @@ export function ConfirmTurn({
   const [noiseOnly, setNoiseOnly] = useState(initialNoise);
   const [literalMismatch, setLiteralMismatch] = useState(initialLiteralMismatch);
   const [toneNote, setToneNote] = useState(initialToneNote ?? "");
-  const [chosen, setChosen] = useState<AcousticTags>({ ...predicted, ...initialGoldTags });
+  const [chosen, setChosen] = useState<AcousticTags>(() => mergeChosen(predicted, initialGoldTags));
   const viewport = useVisualViewportHeight(open);
   const draftRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -87,7 +99,7 @@ export function ConfirmTurn({
     setNoiseOnly(initialNoise);
     setLiteralMismatch(initialLiteralMismatch);
     setToneNote(initialToneNote ?? "");
-    setChosen({ ...nextPredicted, ...initialGoldTags });
+    setChosen(mergeChosen(nextPredicted, initialGoldTags));
   }, [open, sttText, initialDraft, initialNoise, initialLiteralMismatch, initialToneNote, initialPredicted, initialGoldTags]);
 
   useEffect(() => {
@@ -159,24 +171,42 @@ export function ConfirmTurn({
               <div key={key}>
                 <p className="mb-1 text-xs text-subtle">{TAG_LABELS[key]}</p>
                 <div className="flex flex-wrap gap-2">
-                  {OPTIONS[key].map((value) => {
-                    const selected = chosen[key] === value;
-                    const label = TAG_VALUE_LABELS[key][value as never] as string;
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => setChosen((cur) => ({ ...cur, [key]: value }))}
-                        className={cn(
-                          "min-h-11 rounded-md px-3 text-sm",
-                          selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-                        )}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
+                  {key === "events"
+                    ? EVENT_CHIP_VALUES.map((value) => {
+                        const selected = value === "none" ? chosen.events.length === 0 : chosen.events.includes(value);
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => setChosen((cur) => ({ ...cur, events: toggleEventChip(cur.events, value) }))}
+                            className={cn(
+                              "min-h-11 rounded-md px-3 text-sm",
+                              selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                            )}
+                          >
+                            {EVENT_CHIP_LABELS[value]}
+                          </button>
+                        );
+                      })
+                    : OPTIONS[key].map((value) => {
+                        const selected = chosen[key] === value;
+                        const label = TAG_VALUE_LABELS[key][value as never] as string;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => setChosen((cur) => ({ ...cur, [key]: value }))}
+                            className={cn(
+                              "min-h-11 rounded-md px-3 text-sm",
+                              selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                            )}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
                 </div>
               </div>
             ))}

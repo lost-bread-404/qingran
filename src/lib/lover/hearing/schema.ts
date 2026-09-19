@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { applyAltTags, clipAlternatives } from "./nbest.ts";
-import { applyUtteranceTag, tagsFromCues } from "./tags.ts";
+import { applyUtteranceTag, cueEventToTag, tagsFromCues } from "./tags.ts";
 
 export const CONTOURS = ["rising", "falling", "flat", "wavering"] as const;
 export const LENGTHS = ["short", "long"] as const;
@@ -14,7 +14,7 @@ export const EMOTIONS = [
   "annoyed",
   "neutral",
 ] as const;
-export const EVENTS = ["laugh", "cry", "breath", "sigh"] as const;
+export const EVENTS = ["laugh", "cry", "breath", "sigh", "moan"] as const;
 
 export type CueContour = (typeof CONTOURS)[number];
 export type CueLength = (typeof LENGTHS)[number];
@@ -132,7 +132,7 @@ export function formatTaggedText(result: HearingModelOutput): string {
 
 export function formatCueTag(cue: HearingCue): string {
   const voice = cue.voice === "whisper" ? "breathy" : cue.voice;
-  const event = cue.event === "laugh" || cue.event === "cry" || cue.event === "sigh" ? cue.event : "";
+  const event = cueEventToTag(cue.event) ?? "";
   return `〔${cue.length}·${cue.contour}·${voice}｜${event}〕`;
 }
 
