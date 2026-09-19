@@ -61,7 +61,7 @@ import {
 } from "@/lib/lover/hearing/store";
 import { clipSaveBanner, UNRECOGNIZED_TEXT, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { micActionForConfirmPanel } from "@/lib/lover/hearing/confirm-call";
-import { shouldResendAfterConfirm, sliceAfterMessage } from "@/lib/lover/hearing/confirm-resend";
+import { planConfirmSave, sliceAfterMessage } from "@/lib/lover/hearing/confirm-resend";
 import type { AcousticTags, TagKey } from "@/lib/lover/hearing/tags";
 import { POST_QINGRAN_MS } from "@/lib/lover/vad";
 import {
@@ -461,7 +461,11 @@ export function VoiceRoom() {
         replyTo: userMsg.id,
       };
       if (opts?.existingUser) {
-        setMessages([...(opts.history ?? sourceHistory), userMsg, reply]);
+        setMessages((prev) => {
+          const idx = prev.findIndex((m) => m.id === userMsg.id);
+          if (idx < 0) return [...(opts.history ?? sourceHistory), userMsg, reply];
+          return [...prev.slice(0, idx), userMsg, reply];
+        });
       } else {
         setMessages((prev) => [...dropIncompleteReplies(prev, pendingIdsRef.current), userMsg, reply]);
         void appendRoomMessage({ data: userMsg });
@@ -872,25 +876,17 @@ export function VoiceRoom() {
         return;
       }
       if (msg.hearingGold !== "confirmed") setLabeledCount((n) => n + 1);
-      const goldText = input.goldText.trim();
-      const shouldResend = shouldResendAfterConfirm({
-        goldText,
-        previousText: msg.text,
+      const plan = planConfirmSave(chatRef.current, msg, {
+        goldText: input.goldText,
         noiseOnly: input.noiseOnly,
       });
-      const updated: ChatMessage = {
-        ...msg,
-        text: goldText || msg.text,
-        hearingGold: "confirmed",
-        kind: shouldResend ? "say" : msg.kind,
-      };
-      if (shouldResend) {
-        setConfirmId(null);
-        await replayFrom(updated);
+      const updated: ChatMessage = { ...plan.updated, hearingGold: "confirmed" };
+      setConfirmId(null);
+      if (plan.shouldResend) {
+        void replayFrom(updated);
       } else {
         void updateRoomMessage({ data: updated });
         setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
-        setConfirmId(null);
       }
     } catch (err) {
       setConfirmError(err instanceof Error ? err.message : String(err));
@@ -997,7 +993,9 @@ export function VoiceRoom() {
           : status === "speaking"
             ? "清然在说"
             : "你说，说完停两秒"
-    : "";
+    : status === "thinking"
+      ? "正在想"
+      : "";
 
   return (
     <div

@@ -86,10 +86,18 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /POST_QINGRAN_MS/);
   assert.match(src, /setConfirmStt\(result\.xaiText\)/);
   assert.match(src, /UNRECOGNIZED_TEXT/);
-  assert.match(src, /shouldResendAfterConfirm/);
+  assert.match(src, /planConfirmSave/);
   assert.match(src, /sliceAfterMessage/);
   assert.match(src, /async function replayFrom/);
   assert.doesNotMatch(src, /alreadySent/);
+  const save = src.slice(src.indexOf("async function saveConfirm"), src.indexOf("async function saveConfirmQuick"));
+  assert.match(save, /void replayFrom/);
+  assert.doesNotMatch(save, /await replayFrom/);
+  assert.match(src, /正在想/);
+  assert.match(src, /prev.slice\(0, idx\), userMsg, reply/);
+  const confirm = readFileSync(new URL("../../../components/lover/confirm-turn.tsx", import.meta.url), "utf8");
+  assert.match(confirm, /disabled=\{busy\}/);
+  assert.doesNotMatch(confirm, /status === "thinking"/);
 });
 
 test("call deafen ignores speech rec without aborting it", () => {
