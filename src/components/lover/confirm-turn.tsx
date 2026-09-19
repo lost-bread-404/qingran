@@ -15,6 +15,11 @@ const EMOTION_LABEL: Record<CueEmotion, string> = {
   neutral: "平",
 };
 
+const CHIPS: { id: CueEmotion | "noise"; label: string }[] = [
+  ...EMOTIONS.map((id) => ({ id, label: EMOTION_LABEL[id] })),
+  { id: "noise", label: "噪音" },
+];
+
 type Props = {
   open: boolean;
   sttText: string;
@@ -57,6 +62,7 @@ export function ConfirmTurn({
   if (!open) return null;
 
   const edited = draft.trim() !== sttText.trim();
+  const selected: CueEmotion | "noise" | null = noiseOnly ? "noise" : emotion;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end bg-bg/80">
@@ -85,24 +91,29 @@ export function ConfirmTurn({
           aria-label="识别文字"
         />
         <div className="mt-3 flex flex-wrap gap-2">
-          {EMOTIONS.map((id) => (
+          {CHIPS.map((chip) => (
             <button
-              key={id}
+              key={chip.id}
               type="button"
-              onClick={() => setEmotion((cur) => (cur === id ? null : id))}
+              onClick={() => {
+                const id = chip.id;
+                if (id === "noise") {
+                  setNoiseOnly((cur) => !cur);
+                  setEmotion(null);
+                  return;
+                }
+                setNoiseOnly(false);
+                setEmotion((cur) => (cur === id ? null : id));
+              }}
               className={cn(
                 "min-h-11 rounded-md px-3 text-sm",
-                emotion === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                selected === chip.id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
               )}
             >
-              {EMOTION_LABEL[id]}
+              {chip.label}
             </button>
           ))}
         </div>
-        <label className="mt-3 flex min-h-11 items-center gap-2 text-sm">
-          <input type="checkbox" checked={noiseOnly} onChange={(e) => setNoiseOnly(e.target.checked)} />
-          这是纯噪音
-        </label>
         {error ? <p className="mt-2 text-sm text-live">{error}</p> : null}
         <div className="mt-4">
           <Button

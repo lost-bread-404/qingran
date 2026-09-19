@@ -28,6 +28,8 @@ export async function hearUtterance(input: {
   prompt?: string;
   speech_start?: number;
   endpoint_fired?: number;
+  peakRms?: number;
+  vadFloor?: number;
 }): Promise<HeardUtterance> {
   const session = getHearingSession();
   const turnId = newId();
@@ -74,6 +76,9 @@ export async function hearUtterance(input: {
         debugHearing,
         mode: session.mode,
         audioRoute: session.audioRoute,
+        peakRms: input.peakRms,
+        vadFloor: input.vadFloor,
+        liveTextSource: input.liveText.trim() ? "webspeech" : "none",
       },
     });
     if (result.quota) throw new Error(QUOTA_HINT);

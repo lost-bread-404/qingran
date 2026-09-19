@@ -24,17 +24,19 @@ import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
 import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
-import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
+import { attachPcmTap, peakRms, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { keepPlaybackAlive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
 import {
   LISTEN_WARMUP_MS,
+  holdThreshold,
   isHoldVoiced,
   isSpeechStart,
   nextFloor,
   shouldEndUtterance,
+  startThreshold,
   VOICE_SPIKE_MS,
 } from "@/lib/lover/vad";
 
@@ -51,6 +53,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const [active, setActive] = useState(false);
   const [phase, setPhase] = useState<CallPhase>("idle");
   const [level, setLevel] = useState(0);
+  const [threshold, setThreshold] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const liveRef = useRef(false);
@@ -74,6 +77,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const onUtteranceRef = useRef(onUtterance);
   const promptRef = useRef(prompt ?? "");
   const noiseFloorRef = useRef(0.008);
+  const triggerFloorRef = useRef(0.008);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const finalTextRef = useRef("");
   const interimRef = useRef("");
@@ -135,6 +139,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     finalTextRef.current = "";
     interimRef.current = "";
     setLevel(0);
+    setThreshold(0);
   }, []);
 
   const hangup = useCallback(() => {
@@ -194,6 +199,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     const now = performance.now();
     speechStartRef.current = now;
     speechStartWallRef.current = Date.now();
+    triggerFloorRef.current = noiseFloorRef.current;
     lastVoiceRef.current = now;
     voiceBurstAtRef.current = now;
     if (!lastTextAtRef.current || now - lastTextAtRef.current > 400) {
@@ -262,7 +268,8 @@ export function useCall({ onUtterance, prompt }: Options) {
     const liveText = (finalTextRef.current || interimRef.current).trim();
     const frames = framesRef.current.slice();
     const samples = (await pcmTapRef.current?.stop()) ?? new Float32Array(0);
-    const wav = wavFromTap(samples, ctxRef.current?.sampleRate ?? 48000);
+    const sampleRate = ctxRef.current?.sampleRate ?? 48000;
+    const wav = wavFromTap(samples, sampleRate);
     const fallback = wav ? null : await collectRecording();
     if (wav) {
       try {
@@ -289,6 +296,8 @@ export function useCall({ onUtterance, prompt }: Options) {
         prompt: promptRef.current,
         speech_start: speechStartWallRef.current,
         endpoint_fired,
+        peakRms: peakRms(samples, sampleRate) || frames.reduce((max, frame) => Math.max(max, frame.rms), 0),
+        vadFloor: triggerFloorRef.current,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
@@ -345,7 +354,9 @@ export function useCall({ onUtterance, prompt }: Options) {
       noiseFloorRef.current = nextFloor(noiseFloorRef.current, rms, speaking);
       const floor = noiseFloorRef.current;
       const rising = isSpeechStart(rms, floor, frame.clarity, frame.bright, debugVad);
+      const cut = speaking ? holdThreshold(floor, debugVad) : startThreshold(floor, debugVad);
       setLevel(Math.min(1, rms * 8));
+      setThreshold(Math.min(1, cut * 8));
       if (
         !deafRef.current &&
         phaseRef.current === "listening" &&
@@ -657,6 +668,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     active,
     phase,
     level,
+    threshold,
     error,
     start,
     hangup,

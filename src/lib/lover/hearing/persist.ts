@@ -26,6 +26,9 @@ export type InsertClipRowInput = {
   audioRoute?: string | null;
   turnId?: string | null;
   disagreement: boolean;
+  finalText?: string | null;
+  peakRms?: number | null;
+  vadFloor?: number | null;
 };
 
 export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promise<void> {
@@ -33,7 +36,8 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
     insert into qingran_hearing_clips (
       id, duration_ms, sample_rate, source, category, blob_pathname, audio_wav,
       xai_text, hearing_text, hearing_json, live_text,
-      blob_error, storage_backend, stt_text, mode, audio_route, turn_id, disagreement
+      blob_error, storage_backend, stt_text, mode, audio_route, turn_id, disagreement,
+      final_text, peak_rms, vad_floor
     )
     values (
       ${input.id},
@@ -53,7 +57,10 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       ${input.mode ?? null},
       ${input.audioRoute ?? null},
       ${input.turnId ?? null},
-      ${Boolean(input.disagreement)}
+      ${Boolean(input.disagreement)},
+      ${input.finalText ?? null},
+      ${input.peakRms ?? null},
+      ${input.vadFloor ?? null}
     )
   `;
 }
@@ -97,6 +104,14 @@ export async function confirmClipByTurn(
   return { ok: true, clipId: clip.id, goldTier: nextTier };
 }
 
+export async function patchFinalTextByTurn(sql: Sql, turnId: string, finalText: string) {
+  await sql`
+    update qingran_hearing_clips
+    set final_text = ${finalText}
+    where turn_id = ${turnId}
+  `;
+}
+
 export async function listClipRows(sql: Sql, filter: LabClipFilter = "all") {
   const where =
     filter === "confirmed"
@@ -134,13 +149,17 @@ export async function listClipRows(sql: Sql, filter: LabClipFilter = "all") {
     disagreement: boolean | null;
     storage_backend: string | null;
     blob_error: string | null;
+    final_text: string | null;
+    peak_rms: number | null;
+    vad_floor: number | null;
   }>(
     `select id, created_at::text as created_at, duration_ms, source, category, split,
             xai_text, hearing_text, hearing_json, live_text,
             gold_text, gold_cues, noise_only, skip,
             relabel_gold_text, relabel_gold_cues, relabel_noise_only,
             gold_source, stt_text, gold_tier, utterance_emotion, mode, audio_route,
-            turn_id, disagreement, storage_backend, blob_error
+            turn_id, disagreement, storage_backend, blob_error,
+            final_text, peak_rms, vad_floor
      from qingran_hearing_clips
      where ${where}
      order by disagreement desc, created_at desc
@@ -150,6 +169,13 @@ export async function listClipRows(sql: Sql, filter: LabClipFilter = "all") {
 
 export async function clipCount(sql: Sql): Promise<number> {
   const rows = await sql<{ n: number }>`select count(*)::int as n from qingran_hearing_clips`;
+  return Number(rows[0]?.n) || 0;
+}
+
+export async function goldCount(sql: Sql): Promise<number> {
+  const rows = await sql<{ n: number }>`
+    select count(*)::int as n from qingran_hearing_clips where gold_source is not null
+  `;
   return Number(rows[0]?.n) || 0;
 }
 

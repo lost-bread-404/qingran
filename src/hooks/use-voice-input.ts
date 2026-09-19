@@ -14,9 +14,10 @@ import { hearUtterance } from "@/lib/lover/hear";
 import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { warmupHearing } from "@/lib/lover/hearing/store";
-import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
+import { attachPcmTap, peakRms, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
+import { holdThreshold, nextFloor } from "@/lib/lover/vad";
 import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
 
 export type VoiceInputStatus = "idle" | "recording" | "transcribing";
@@ -30,6 +31,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
   const [status, setStatus] = useState<VoiceInputStatus>("idle");
   const [interim, setInterim] = useState("");
   const [level, setLevel] = useState(0);
+  const [threshold, setThreshold] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [micReady, setMicReady] = useState<boolean | null>(null);
 
@@ -47,6 +49,9 @@ export function useVoiceInput({ lang, prompt }: Options) {
   const framesRef = useRef<ProsodyFrame[]>([]);
   const analyseRef = useRef<{ ctx: AudioContext; source: MediaStreamAudioSourceNode } | null>(null);
   const pcmTapRef = useRef<PcmTap | null>(null);
+  const noiseFloorRef = useRef(0.008);
+  const triggerFloorRef = useRef(0.008);
+  const speechStartWallRef = useRef(0);
 
   const speechSupported = usesBrowserStt();
   const recorderSupported =
@@ -64,6 +69,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
     setLevel(0);
+    setThreshold(0);
     try {
       recorderRef.current?.state === "recording" && recorderRef.current.stop();
     } catch {
@@ -96,6 +102,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
   const startPulse = useCallback(async (stream: MediaStream) => {
     framesRef.current = [];
+    noiseFloorRef.current = 0.008;
     const t0 = performance.now();
     const Ctor =
       window.AudioContext ||
@@ -118,7 +125,11 @@ export function useVoiceInput({ lang, prompt }: Options) {
     const tick = () => {
       const frame = sampleProsody(analyser, ctx.sampleRate, (performance.now() - t0) / 1000, true);
       framesRef.current.push(frame);
+      noiseFloorRef.current = nextFloor(noiseFloorRef.current, frame.rms, true);
+      const debugVad = getHearingSession().debugHearing;
+      const cut = holdThreshold(noiseFloorRef.current, debugVad);
       setLevel(Math.min(1, frame.rms * 8));
+      setThreshold(Math.min(1, cut * 8));
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
@@ -215,6 +226,8 @@ export function useVoiceInput({ lang, prompt }: Options) {
     }
 
     recordingRef.current = true;
+    speechStartWallRef.current = Date.now();
+    triggerFloorRef.current = noiseFloorRef.current;
     setStatus("recording");
     if (getHearingSession().provider === "selfhost") {
       void warmupHearing({ data: { provider: "selfhost" } }).then((result) => {
@@ -237,7 +250,8 @@ export function useVoiceInput({ lang, prompt }: Options) {
     const liveText = (finalTextRef.current || interimRef.current).trim();
     const frames = framesRef.current.slice();
     const samples = (await pcmTapRef.current?.stop()) ?? new Float32Array(0);
-    const wav = wavFromTap(samples, analyseRef.current?.ctx.sampleRate ?? 48000);
+    const sampleRate = analyseRef.current?.ctx.sampleRate ?? 48000;
+    const wav = wavFromTap(samples, sampleRate);
     const fallback = wav ? null : await collectRecording(session);
     teardownMedia();
 
@@ -249,8 +263,10 @@ export function useVoiceInput({ lang, prompt }: Options) {
         liveText,
         frames,
         prompt: promptRef.current,
-        speech_start: Date.now() - 1500,
+        speech_start: speechStartWallRef.current || Date.now() - 1500,
         endpoint_fired: Date.now(),
+        peakRms: peakRms(samples, sampleRate) || frames.reduce((max, frame) => Math.max(max, frame.rms), 0),
+        vadFloor: triggerFloorRef.current,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
@@ -336,6 +352,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
     status,
     interim,
     level,
+    threshold,
     error,
     setError,
     micReady,

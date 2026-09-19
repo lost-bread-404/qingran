@@ -49,6 +49,8 @@ import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/sessio
 import {
   confirmHearingClip,
   getHearingTurnAudio,
+  hearingLabeledCount,
+  patchHearingFinalText,
   patchHearingTurn,
 } from "@/lib/lover/hearing/store";
 import { clipSaveBanner, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
@@ -108,6 +110,7 @@ export function VoiceRoom() {
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmAudioUrl, setConfirmAudioUrl] = useState<string | null>(null);
+  const [labeledCount, setLabeledCount] = useState(0);
 
   useEffect(() => {
     profileRef.current = profile;
@@ -179,6 +182,13 @@ export function VoiceRoom() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!hydrated || !profile.debugHearing) return;
+    void hearingLabeledCount({ data: {} }).then((result) => {
+      if (result.ok) setLabeledCount(result.count);
+    });
+  }, [hydrated, profile.debugHearing]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -375,6 +385,9 @@ export function VoiceRoom() {
         setBanner(null);
         setMessages((prev) => [...prev, userMsg]);
         void appendRoomMessage({ data: userMsg });
+        if (opts.voiceTurnId) {
+          void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: "" } });
+        }
         return;
       }
       if (!opts?.existingUser && busyRef.current) return;
@@ -403,6 +416,9 @@ export function VoiceRoom() {
       inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text: "" };
       setStatus("thinking");
       void kickAudio();
+      if (opts?.voiceTurnId) {
+        void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: say } });
+      }
 
       let full = "";
       let gotAudio = false;
@@ -736,6 +752,7 @@ export function VoiceRoom() {
         setConfirmError(result.error);
         return;
       }
+      if (msg.hearingGold !== "confirmed") setLabeledCount((n) => n + 1);
       const updated: ChatMessage = {
         ...msg,
         text: goldText || msg.text,
@@ -767,6 +784,31 @@ export function VoiceRoom() {
       setConfirmError(err instanceof Error ? err.message : String(err));
     } finally {
       setConfirmBusy(false);
+    }
+  }
+
+  async function saveConfirmQuick(id: string) {
+    const msg = chatRef.current.find((m) => m.id === id);
+    if (!msg?.voiceTurnId) return;
+    setBanner(null);
+    try {
+      const result = await confirmHearingClip({
+        data: {
+          turnId: msg.voiceTurnId,
+          goldText: msg.text,
+          goldSource: "confirmed",
+        },
+      });
+      if (!result.ok) {
+        setBanner(result.error);
+        return;
+      }
+      if (msg.hearingGold !== "confirmed") setLabeledCount((n) => n + 1);
+      const updated: ChatMessage = { ...msg, hearingGold: "confirmed" };
+      void updateRoomMessage({ data: updated });
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
+    } catch (err) {
+      setBanner(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -811,7 +853,13 @@ export function VoiceRoom() {
             <div>
               <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
               <p className="text-xs text-subtle">
-                {call.active ? "通话中" : memories.length > 0 ? `记得 ${memories.length} 件事` : "在"}
+                {profile.debugHearing
+                  ? `已标 ${labeledCount} / 200`
+                  : call.active
+                    ? "通话中"
+                    : memories.length > 0
+                      ? `记得 ${memories.length} 件事`
+                      : "在"}
               </p>
             </div>
           </button>
@@ -929,6 +977,7 @@ export function VoiceRoom() {
                 setConfirmError(null);
                 setConfirmId(id);
               }}
+              onConfirmQuick={(id) => void saveConfirmQuick(id)}
             />
 
             {editingId ? null : (
@@ -938,6 +987,12 @@ export function VoiceRoom() {
                   {banner || voice.error || call.error}
                 </p>
               )}
+              {call.active || recording ? (
+                <VolumeMeter
+                  level={call.active ? call.level : voice.level}
+                  threshold={call.active ? call.threshold : voice.threshold}
+                />
+              ) : null}
               <div className="flex flex-col items-center gap-3">
                 {call.active ? (
                   <CallButton active onClick={() => void toggleCall()} />
@@ -1062,4 +1117,24 @@ function streamAudioCovers(chunks: Array<Uint8Array>, display: string) {
   if (chars < 4) return sec >= 0.35;
   return sec >= Math.max(1, chars / 6.5);
 }
+
+function VolumeMeter({ level, threshold }: { level: number; threshold: number }) {
+  return (
+    <div
+      className="relative mb-3 h-1.5 w-full max-w-[12rem] overflow-hidden rounded-full bg-surface-2"
+      aria-label="音量"
+    >
+      <div
+        className="h-full rounded-full bg-accent transition-[width] duration-75"
+        style={{ width: `${Math.min(100, Math.max(0, level * 100))}%` }}
+      />
+      <div
+        className="absolute top-0 h-full w-0.5 bg-live"
+        style={{ left: `${Math.min(100, Math.max(0, threshold * 100))}%` }}
+        aria-label="阈值"
+      />
+    </div>
+  );
+}
+
 

@@ -22,6 +22,37 @@ test("settings hearing tab is engine plus 标注模式 only", () => {
 
 test("transcript pencil opens confirm in debug; bubble text is not a hidden confirm entry", () => {
   const src = readFileSync(new URL("../../../components/lover/transcript.tsx", import.meta.url), "utf8");
-  assert.match(src, /canConfirm \? onConfirmStart/);
+  assert.match(src, /onConfirmQuick/);
+  assert.match(src, /aria-label="确认正确"/);
+  assert.match(src, /aria-label="打开标注"/);
+  assert.match(src, /aria-label="改这句话"/);
+  assert.match(src, /canConfirm \? \(/);
   assert.doesNotMatch(src, /if \(canConfirm\) onConfirmStart/);
+});
+
+test("confirm panel uses exclusive emotion chips including 噪音", () => {
+  const src = readFileSync(new URL("../../../components/lover/confirm-turn.tsx", import.meta.url), "utf8");
+  assert.match(src, /label: "噪音"/);
+  assert.match(src, /撒娇/);
+  assert.doesNotMatch(src, /这是纯噪音/);
+  assert.doesNotMatch(src, /type="checkbox"/);
+});
+
+test("voice room shows labeled count, volume meter, and writes final_text back", () => {
+  const src = readFileSync(new URL("../../../components/lover/voice-room.tsx", import.meta.url), "utf8");
+  assert.match(src, /已标 \$\{labeledCount\} \/ 200/);
+  assert.match(src, /VolumeMeter/);
+  assert.match(src, /patchHearingFinalText/);
+  assert.match(src, /saveConfirmQuick/);
+  assert.match(src, /aria-label="阈值"/);
+});
+
+test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance", () => {
+  const call = readFileSync(new URL("../../../hooks/use-call.ts", import.meta.url), "utf8");
+  const hold = readFileSync(new URL("../../../hooks/use-voice-input.ts", import.meta.url), "utf8");
+  assert.match(call, /peakRms:/);
+  assert.match(call, /vadFloor: triggerFloorRef/);
+  assert.match(call, /startThreshold/);
+  assert.match(hold, /vadFloor: triggerFloorRef/);
+  assert.match(hold, /holdThreshold/);
 });

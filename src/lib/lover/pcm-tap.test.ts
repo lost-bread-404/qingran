@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { downsample, encodeWavPcm16, wavFromTap } from "./pcm-tap.ts";
+import {
+  createSampleRing,
+  downsample,
+  encodeWavPcm16,
+  PRE_ROLL_SEC,
+  pushSampleRing,
+  snapshotSampleRing,
+  wavFromTap,
+} from "./pcm-tap.ts";
 
 test("downsample 48k to 16k keeps about a third of the samples", () => {
   const input = new Float32Array(4800);
@@ -30,4 +38,20 @@ test("wavFromTap ignores clips that are too short", () => {
   const samples = new Float32Array(100);
   assert.equal(wavFromTap(samples, 16000), null);
   assert.ok(wavFromTap(new Float32Array(4000), 16000));
+});
+
+test("pre-roll ring keeps about 600ms and prepends it at start", () => {
+  assert.equal(PRE_ROLL_SEC, 0.6);
+  const rate = 16_000;
+  const capacity = Math.round(rate * PRE_ROLL_SEC);
+  const ring = createSampleRing();
+  for (let i = 0; i < 20; i += 1) {
+    const chunk = new Float32Array(rate / 10);
+    chunk.fill(i === 19 ? 0.4 : 0.01 * i);
+    pushSampleRing(ring, chunk, capacity);
+  }
+  const snap = snapshotSampleRing(ring);
+  assert.ok(snap.length <= capacity);
+  assert.ok(snap.length >= capacity - rate / 10);
+  assert.ok(Math.abs((snap[snap.length - 1] ?? 0) - 0.4) < 1e-5);
 });

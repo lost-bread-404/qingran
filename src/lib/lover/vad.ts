@@ -15,8 +15,8 @@ export const DEBUG_START_FLOOR_MIN = 0.003;
 export const DEBUG_START_FLOOR_MULT = 1.25;
 export const DEBUG_START_CUE_MIN = 0.0025;
 export const DEBUG_START_CUE_MULT = 1.05;
-export const DEBUG_HOLD_FLOOR_MIN = 0.002;
-export const DEBUG_HOLD_FLOOR_MULT = 1.15;
+export const DEBUG_HOLD_FLOOR_MIN = 0.005;
+export const DEBUG_HOLD_FLOOR_MULT = 1.4;
 
 export function clampFloor(value: number) {
   return Math.min(0.045, Math.max(0.004, value));

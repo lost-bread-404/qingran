@@ -1,4 +1,4 @@
-import { ChevronDown, Pencil, Volume2 } from "lucide-react";
+import { Check, ChevronDown, Pencil, Volume2 } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,6 +28,7 @@ type Props = {
   onEditCancel?: () => void;
   onEditSave?: () => void;
   onConfirmStart?: (id: string) => void;
+  onConfirmQuick?: (id: string) => void;
 };
 
 function nearBottom(el: HTMLElement): boolean {
@@ -55,6 +56,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     onEditCancel,
     onEditSave,
     onConfirmStart,
+    onConfirmQuick,
   },
   ref,
 ) {
@@ -178,6 +180,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                   debugHearing={debugHearing}
                   onEditStart={onEditStart}
                   onConfirmStart={onConfirmStart}
+                  onConfirmQuick={onConfirmQuick}
                 />
               )
             ) : null}
@@ -230,34 +233,62 @@ function UserBubble({
   debugHearing,
   onEditStart,
   onConfirmStart,
+  onConfirmQuick,
 }: {
   user: ChatMessage;
   editable: boolean;
   debugHearing?: boolean;
   onEditStart?: (id: string) => void;
   onConfirmStart?: (id: string) => void;
+  onConfirmQuick?: (id: string) => void;
 }) {
   const canConfirm = Boolean(debugHearing && user.voiceTurnId && onConfirmStart);
-  const goldLabel =
-    user.hearingGold === "confirmed" ? "已确认" : user.voiceTurnId && debugHearing ? "未确认" : null;
+  const labeled = user.hearingGold === "confirmed";
   return (
-    <div className="flex items-end justify-end gap-2">
-      {editable && onEditStart ? (
-        <button
-          type="button"
-          aria-label={canConfirm ? "确认这句话" : "改这句话"}
-          onClick={() => (canConfirm ? onConfirmStart?.(user.id) : onEditStart(user.id))}
-          className="mb-1 shrink-0 text-subtle transition-colors duration-150 hover:text-fg"
-        >
-          <Pencil className="size-3.5" />
-        </button>
-      ) : null}
-      <div className="flex max-w-[min(20rem,85%)] flex-col items-end gap-1">
-        {goldLabel ? <p className="text-[10px] text-subtle">{goldLabel}</p> : null}
-        <p className="whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
-          {user.text}
-        </p>
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex items-end justify-end gap-2">
+        {!canConfirm && editable && onEditStart ? (
+          <button
+            type="button"
+            aria-label="改这句话"
+            onClick={() => onEditStart(user.id)}
+            className="mb-1 shrink-0 text-subtle transition-colors duration-150 hover:text-fg"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+        ) : null}
+        <div className="relative flex max-w-[min(20rem,85%)] flex-col items-end">
+          {labeled ? (
+            <span
+              className="absolute -right-1 -top-1 size-2 rounded-full bg-emerald-500"
+              aria-label="已标注"
+            />
+          ) : null}
+          <p className="whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
+            {user.text}
+          </p>
+        </div>
       </div>
+      {canConfirm ? (
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label="确认正确"
+            onClick={() => onConfirmQuick?.(user.id)}
+            className="grid size-8 place-items-center rounded-md text-subtle transition-colors duration-150 hover:text-fg"
+          >
+            <Check className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="打开标注"
+            onClick={() => onConfirmStart?.(user.id)}
+            className="grid size-8 place-items-center rounded-md text-subtle transition-colors duration-150 hover:text-fg"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
