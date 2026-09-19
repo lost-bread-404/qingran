@@ -125,6 +125,39 @@ test("short quiet clip with a long xAI sentence is hallucination_suspect", () =>
   );
 });
 
+test("quiet real sentence with matching Apple text is kept", () => {
+  const sentence = "今天有点累想早点睡";
+  const audio = { durationSec: 0.8, peakRms: 0.008 };
+  assert.equal(isHallucinationSuspect({ ...audio, xaiText: sentence, liveText: sentence }), false);
+  const scrubbed = scrubHallucination(sentence, audio, sentence);
+  assert.equal(scrubbed.suspect, false);
+  assert.equal(scrubbed.reason, "prefer_apple_quiet");
+  assert.equal(stripMarks(scrubbed.text), stripMarks(sentence));
+  assert.equal(stripMarks(finishHeard(sentence, sentence, undefined, undefined, audio)), stripMarks(sentence));
+});
+
+test("quiet clip with empty Apple and a long xAI sentence is hallucination", () => {
+  const xai = "我喜欢你我的宝贝";
+  const audio = { durationSec: 0.5, peakRms: 0.001 };
+  assert.equal(isHallucinationSuspect({ ...audio, xaiText: xai, liveText: "" }), true);
+  const scrubbed = scrubHallucination(xai, audio, "");
+  assert.equal(scrubbed.suspect, true);
+  assert.equal(scrubbed.reason, "hallucination_suspect");
+  assert.equal(finishHeard(xai, "", undefined, undefined, audio), "");
+});
+
+test("quiet clip prefers Apple's real sentence over xAI", () => {
+  const audio = { durationSec: 0.7, peakRms: 0.01 };
+  const xai = "林泽是一个中国的演员";
+  const apple = "今天有点累";
+  assert.equal(isHallucinationSuspect({ ...audio, xaiText: xai, liveText: apple }), false);
+  const scrubbed = scrubHallucination(xai, audio, apple);
+  assert.equal(scrubbed.suspect, false);
+  assert.equal(scrubbed.reason, "prefer_apple_quiet");
+  assert.equal(stripMarks(scrubbed.text), "今天有点累");
+  assert.equal(stripMarks(finishHeard(xai, apple, undefined, undefined, audio)), "今天有点累");
+});
+
 test("cue punctuation stays as heard", () => {
   assert.equal(punctuateSpeech("想你了嘛"), "想你了嘛。");
   assert.equal(punctuateSpeech("嗯啊～"), "嗯啊～");

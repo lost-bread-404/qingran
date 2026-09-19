@@ -317,30 +317,54 @@ export const HALLUCINATION_MIN_SEC = 1.2;
 export const HALLUCINATION_PEAK_RMS = 0.02;
 export const HALLUCINATION_SENTENCE_CHARS = 6;
 
+function xaiLooksLikeSentence(xaiText: string): boolean {
+  const core = stripMarks(xaiText);
+  if (!core || isMostlyFiller(xaiText)) return false;
+  return core.length > HALLUCINATION_SENTENCE_CHARS;
+}
+
+function isQuietClip(audio: { durationSec: number; peakRms: number }): boolean {
+  return audio.durationSec < HALLUCINATION_MIN_SEC || audio.peakRms < HALLUCINATION_PEAK_RMS;
+}
+
+function liveTextIsEmptyOrFiller(liveText?: string): boolean {
+  const t = (liveText ?? "").trim();
+  return !t || isMostlyFiller(t);
+}
+
 export function isHallucinationSuspect(input: {
   durationSec: number;
   peakRms: number;
   xaiText: string;
+  liveText?: string;
 }): boolean {
-  const core = stripMarks(input.xaiText);
-  if (!core || isMostlyFiller(input.xaiText)) return false;
-  if (core.length <= HALLUCINATION_SENTENCE_CHARS) return false;
-  return input.durationSec < HALLUCINATION_MIN_SEC || input.peakRms < HALLUCINATION_PEAK_RMS;
+  if (!xaiLooksLikeSentence(input.xaiText)) return false;
+  if (!isQuietClip(input)) return false;
+  return liveTextIsEmptyOrFiller(input.liveText);
 }
 
 export function hallucinationFallback(xaiText: string, browser = ""): string {
   return salvageCues(`${browser} ${xaiText}`) || "";
 }
 
+export type HallucinationScrub = {
+  text: string;
+  suspect: boolean;
+  reason?: "hallucination_suspect" | "prefer_apple_quiet";
+};
+
 export function scrubHallucination(
   xaiText: string,
   audio: { durationSec: number; peakRms: number },
   browser = "",
-): { text: string; suspect: boolean } {
-  if (!isHallucinationSuspect({ ...audio, xaiText })) {
+): HallucinationScrub {
+  if (!xaiLooksLikeSentence(xaiText) || !isQuietClip(audio)) {
     return { text: xaiText, suspect: false };
   }
-  return { text: hallucinationFallback(xaiText, browser), suspect: true };
+  if (!liveTextIsEmptyOrFiller(browser)) {
+    return { text: browser, suspect: false, reason: "prefer_apple_quiet" };
+  }
+  return { text: hallucinationFallback(xaiText, browser), suspect: true, reason: "hallucination_suspect" };
 }
 
 export function pickTranscript(server: string, browser: string): string {

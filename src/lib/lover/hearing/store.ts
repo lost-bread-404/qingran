@@ -313,16 +313,28 @@ export const runHearing = createServerFn({ method: "POST" })
     let xaiText = picked.xaiText;
     const durationSec = wavDurationMs(data.audioBase64) / 1000;
     const peakRms = wavPeakRms(data.audioBase64);
-    const scrubbed = scrubHallucination(xaiText, { durationSec, peakRms }, data.liveText ?? "");
+    const liveText = data.liveText ?? "";
+    const scrubbed = scrubHallucination(xaiText, { durationSec, peakRms }, liveText);
     if (scrubbed.suspect) {
       xaiText = scrubbed.text;
       fallback = true;
       fallbackReason = "hallucination_suspect";
+    } else if (scrubbed.reason === "prefer_apple_quiet") {
+      fallback = true;
+      fallbackReason = "prefer_apple_quiet";
     }
     const providerNoise = Boolean(hearing?.noise_only && used !== "xai");
     const disagreement = isNoiseDisagreement(providerNoise, xaiText);
     const drop = shouldDropAsNoise(providerNoise, xaiText);
-    const tagged = drop ? "" : disagreement ? xaiText : used === "xai" ? xaiText : picked.tagged;
+    const tagged = drop
+      ? ""
+      : scrubbed.reason === "prefer_apple_quiet"
+        ? liveText
+        : disagreement
+          ? xaiText
+          : used === "xai"
+            ? xaiText
+            : picked.tagged;
     const stt_done = Date.now();
     const latency_ms = hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0);
     const model = hearing?.model || HEARING[used].model;
@@ -339,7 +351,7 @@ export const runHearing = createServerFn({ method: "POST" })
         hearing,
         xaiText,
         pickedXaiText: picked.xaiText,
-        tagged: used === "xai" ? xaiText : tagged,
+        tagged: scrubbed.reason === "prefer_apple_quiet" ? liveText : used === "xai" ? xaiText : tagged,
         fallback,
         fallbackReason,
         outcome,
@@ -743,7 +755,7 @@ async function persistHearingTurn(input: {
     refusal: input.refusal,
     fallback: input.fallback,
     fallback_reason: input.fallbackReason,
-    fallback_raw: input.scrubbedSuspect
+    fallback_raw: input.scrubbedSuspect || input.fallbackReason === "prefer_apple_quiet"
       ? clipFallbackRaw(input.pickedXaiText)
       : clipFallbackRaw(input.outcome && !input.outcome.ok ? input.outcome.raw : undefined),
     disagreement: input.disagreement,

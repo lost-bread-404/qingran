@@ -76,6 +76,7 @@ test("runHearing persists with waitUntil; xai skips audio-LLM and a second STT",
   assert.match(store, /from "@vercel\/functions"/);
   assert.match(store, /waitUntil\(/);
   assert.match(store, /provider === "xai" \? Promise.resolve\(null\)/);
+  assert.match(store, /prefer_apple_quiet/);
   assert.match(hear, /ranHearing \|\| provider === "xai"/);
   assert.match(hear, /transcribeVoice/);
 });
