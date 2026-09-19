@@ -4,6 +4,7 @@ import {
   browserSttReady,
   extractKeyterms,
   finishHeard,
+  isHallucinationSuspect,
   needsPunctuationHelp,
   pickTranscript,
   punctuateSpeech,
@@ -11,6 +12,9 @@ import {
   refineCueWords,
   restoreSpeechText,
   shapeCueProsody,
+  scrubHallucination,
+  sttKeyterms,
+  STT_KEYTERMS,
   stripMarks,
 } from "./stt-text.ts";
 import { classifyCue, cuesFromProsody, voicedIslands, type ProsodyFrame } from "./prosody.ts";
@@ -89,6 +93,27 @@ test("extractKeyterms picks names and ABO words from the prompt", () => {
   assert.ok(terms.includes("Rosie"));
   assert.ok(terms.includes("信息素"));
   assert.ok(terms.includes("Omega") || terms.includes("omega"));
+});
+
+test("sttKeyterms ignores prompt extraction and only uses the fixed list", () => {
+  const prompt = `清然叫 Rosie 小猫。林泽是一个中国的演员。这是 ABO 世界观，omega 会释放信息素。`;
+  const terms = sttKeyterms(prompt);
+  assert.deepEqual(terms, [...STT_KEYTERMS]);
+  assert.equal(terms.includes("信息素"), false);
+});
+
+test("short quiet clip with a long xAI sentence is hallucination_suspect", () => {
+  const xai = "林泽是一个中国的演员";
+  assert.equal(isHallucinationSuspect({ durationSec: 0.6, peakRms: 0.002, xaiText: xai }), true);
+  assert.equal(isHallucinationSuspect({ durationSec: 2.0, peakRms: 0.08, xaiText: xai }), false);
+  assert.equal(isHallucinationSuspect({ durationSec: 0.4, peakRms: 0.002, xaiText: "嗯" }), false);
+  const scrubbed = scrubHallucination("我喜欢你林泽是一个中国的演员", { durationSec: 0.5, peakRms: 0.001 }, "嗯");
+  assert.equal(scrubbed.suspect, true);
+  assert.equal(scrubbed.text, "嗯");
+  assert.equal(
+    finishHeard("林泽是一个中国的演员", "", undefined, undefined, { durationSec: 0.4, peakRms: 0.001 }),
+    "",
+  );
 });
 
 test("cue punctuation stays as heard", () => {

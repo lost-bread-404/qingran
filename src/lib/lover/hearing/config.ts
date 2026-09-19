@@ -3,6 +3,7 @@ export type HearingProviderId = (typeof HEARING_PROVIDERS)[number];
 
 export const DEFAULT_HEARING_PROVIDER: HearingProviderId = "xai";
 export const DEFAULT_HEARING_TIMEOUT_MS = 4000;
+export const DEFAULT_XAI_VAD_THRESHOLD = 0.3;
 
 export const HEARING = {
   timeoutMs: DEFAULT_HEARING_TIMEOUT_MS,
@@ -41,6 +42,12 @@ export function hearingTimeoutMs(): number {
   const raw = Number(process.env.HEARING_TIMEOUT_MS);
   if (Number.isFinite(raw) && raw >= 500) return Math.min(20_000, Math.floor(raw));
   return DEFAULT_HEARING_TIMEOUT_MS;
+}
+
+export function xaiVadThreshold(): number {
+  const raw = Number(process.env.XAI_VAD_THRESHOLD);
+  if (Number.isFinite(raw) && raw >= 0 && raw <= 1) return raw;
+  return DEFAULT_XAI_VAD_THRESHOLD;
 }
 
 export function selfhostBaseUrl(): string {

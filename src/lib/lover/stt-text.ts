@@ -240,10 +240,8 @@ export function extractKeyterms(prompt: string): string[] {
   return [...found].filter((term) => term.length >= 2 && term.length <= 16).slice(0, 32);
 }
 
-export function sttKeyterms(prompt?: string): string[] {
-  const extra = prompt ? extractKeyterms(prompt) : [];
-  const all = [...extra, ...STT_KEYTERMS];
-  return [...new Set(all)].slice(0, 100);
+export function sttKeyterms(_prompt?: string): string[] {
+  return [...STT_KEYTERMS];
 }
 
 export function isMostlyFiller(text: string): boolean {
@@ -363,6 +361,36 @@ function shouldKeepOnlyCues(text: string): boolean {
   return [...leftover].every((ch) => FILLER.test(ch));
 }
 
+export const HALLUCINATION_MIN_SEC = 1.2;
+export const HALLUCINATION_PEAK_RMS = 0.02;
+export const HALLUCINATION_SENTENCE_CHARS = 6;
+
+export function isHallucinationSuspect(input: {
+  durationSec: number;
+  peakRms: number;
+  xaiText: string;
+}): boolean {
+  const core = stripMarks(input.xaiText);
+  if (!core || isMostlyFiller(input.xaiText)) return false;
+  if (core.length <= HALLUCINATION_SENTENCE_CHARS) return false;
+  return input.durationSec < HALLUCINATION_MIN_SEC || input.peakRms < HALLUCINATION_PEAK_RMS;
+}
+
+export function hallucinationFallback(xaiText: string, browser = ""): string {
+  return salvageCues(`${browser} ${xaiText}`) || "";
+}
+
+export function scrubHallucination(
+  xaiText: string,
+  audio: { durationSec: number; peakRms: number },
+  browser = "",
+): { text: string; suspect: boolean } {
+  if (!isHallucinationSuspect({ ...audio, xaiText })) {
+    return { text: xaiText, suspect: false };
+  }
+  return { text: hallucinationFallback(xaiText, browser), suspect: true };
+}
+
 export function pickTranscript(server: string, browser: string): string {
   const mixed = `${browser} ${server}`.trim();
   if (isMostlyFiller(mixed)) return punctuateSpeech(mixed);
@@ -459,8 +487,13 @@ export function finishHeard(
   browser: string,
   _words: CueWord[] | undefined,
   frames: ProsodyFrame[] | undefined,
+  audio?: { durationSec: number; peakRms: number },
 ): string {
-  const picked = pickTranscript(stripHehe(server), stripHehe(browser));
+  let xai = stripHehe(server);
+  if (audio) {
+    xai = scrubHallucination(xai, audio, browser).text;
+  }
+  const picked = pickTranscript(xai, stripHehe(browser));
   return recoverCues(picked, frames);
 }
 

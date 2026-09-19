@@ -9,10 +9,11 @@ import {
   parseRememberResult,
 } from "./prompt";
 import { spokenForTts } from "./speech-tags";
-import { restoreSpeechText, sttKeyterms } from "./stt-text";
+import { restoreSpeechText, STT_KEYTERMS } from "./stt-text";
 import { ttsRequestBody, ttsSpeed } from "./tts";
 import type { ChatMessage, Memory } from "./types";
 import { isQuotaHint, readXaiFail } from "./xai-error";
+import { HEARING, xaiVadThreshold } from "./hearing/config";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
 
@@ -208,14 +209,10 @@ export const transcribeVoice = createServerFn({ method: "POST" })
     if (bytes.length > 12_000_000) return { ok: false as const, error: "这段有点太长。" };
 
     const form = new FormData();
-    form.append("language", "zh");
+    form.append("model", HEARING.xai.model);
     form.append("filler_words", "true");
-    form.append("vad_threshold", "0");
-    form.append(
-      "prompt",
-      "中文口语原文。嗯、啊、呜、哈照实写，不要省略语气词，不要翻译。",
-    );
-    for (const term of sttKeyterms(data.prompt)) form.append("keyterm", term);
+    form.append("vad_threshold", String(xaiVadThreshold()));
+    for (const term of STT_KEYTERMS) form.append("keyterm", term);
     const blob = new Blob([new Uint8Array(bytes)], { type: mime });
     form.append("file", blob, filenameFor(mime));
 

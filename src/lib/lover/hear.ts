@@ -80,7 +80,7 @@ export async function hearUtterance(input: {
     const tagged =
       result.provider !== "xai" && result.tagged
         ? result.tagged
-        : finishHeard(result.xaiText, input.liveText, result.words, input.frames);
+        : finishHeard(result.xaiText, input.liveText, result.words, input.frames, audioStats(input.frames));
     return heardFromHearing({
       debugHearing,
       turnId,
@@ -109,7 +109,7 @@ export async function hearUtterance(input: {
   } catch (err) {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
-  const finished = finishHeard(text, input.liveText, words, input.frames);
+  const finished = finishHeard(text, input.liveText, words, input.frames, audioStats(input.frames));
   return heardFromHearing({
     debugHearing,
     turnId,
@@ -117,4 +117,10 @@ export async function hearUtterance(input: {
     xaiText: text,
     noiseOnly: !finished,
   });
+}
+
+function audioStats(frames: ProsodyFrame[]) {
+  const durationSec = frames.at(-1)?.t ?? 0;
+  const peakRms = frames.reduce((max, frame) => Math.max(max, frame.rms), 0);
+  return { durationSec, peakRms };
 }

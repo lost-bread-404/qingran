@@ -33,7 +33,8 @@ import {
   parseCues,
   type LabClipFilter,
 } from "./persist.ts";
-import { silenceWavBase64, wavDurationMs } from "./wav.ts";
+import { silenceWavBase64, wavDurationMs, wavPeakRms } from "./wav.ts";
+import { scrubHallucination } from "../stt-text.ts";
 
 export type { LabClipFilter } from "./persist.ts";
 
@@ -100,6 +101,7 @@ export type RunHearingOutput = {
   clipId?: string;
   quota?: boolean;
   saveError?: string;
+  hallucinationSuspect?: boolean;
 };
 
 function labSecret(): string {
@@ -295,11 +297,22 @@ export const runHearing = createServerFn({ method: "POST" })
       };
     }
 
-    const { used, hearing, fallback, fallback_reason, xaiText, words, refusal } = picked;
+    const { used, hearing, words, refusal } = picked;
+    let fallback = picked.fallback;
+    let fallbackReason: string | undefined = picked.fallback_reason;
+    let xaiText = picked.xaiText;
+    const durationSec = wavDurationMs(data.audioBase64) / 1000;
+    const peakRms = wavPeakRms(data.audioBase64);
+    const scrubbed = scrubHallucination(xaiText, { durationSec, peakRms }, data.liveText ?? "");
+    if (scrubbed.suspect) {
+      xaiText = scrubbed.text;
+      fallback = true;
+      fallbackReason = "hallucination_suspect";
+    }
     const providerNoise = Boolean(hearing?.noise_only && used !== "xai");
     const disagreement = isNoiseDisagreement(providerNoise, xaiText);
     const drop = shouldDropAsNoise(providerNoise, xaiText);
-    const tagged = drop ? "" : disagreement ? xaiText : picked.tagged;
+    const tagged = drop ? "" : disagreement ? xaiText : used === "xai" ? xaiText : picked.tagged;
     const stt_done = Date.now();
 
     await upsertTurn({
@@ -316,8 +329,10 @@ export const runHearing = createServerFn({ method: "POST" })
       cost_usd: hearing?.cost_usd,
       refusal,
       fallback,
-      fallback_reason,
-      fallback_raw: clipFallbackRaw(outcome && !outcome.ok ? outcome.raw : undefined),
+      fallback_reason: fallbackReason,
+      fallback_raw: scrubbed.suspect
+        ? clipFallbackRaw(picked.xaiText)
+        : clipFallbackRaw(outcome && !outcome.ok ? outcome.raw : undefined),
       disagreement,
     });
 
@@ -327,7 +342,7 @@ export const runHearing = createServerFn({ method: "POST" })
       try {
         clipId = await insertClip({
           audioBase64: data.audioBase64,
-          durationMs: wavDurationMs(data.audioBase64),
+          durationMs: Math.round(durationSec * 1000),
           source: data.source === "scripted" ? "scripted" : "real",
           category: data.category,
           xaiText,
@@ -357,13 +372,14 @@ export const runHearing = createServerFn({ method: "POST" })
       noise_only: drop,
       disagreement,
       fallback,
-      fallback_reason,
+      fallback_reason: fallbackReason,
       refusal,
       latency_ms: hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0),
       words,
       hearing,
       clipId,
       saveError,
+      hallucinationSuspect: scrubbed.suspect,
     };
   });
 

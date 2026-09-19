@@ -31,3 +31,29 @@ export function wavDurationMs(base64: string): number {
     return 0;
   }
 }
+
+export function wavPeakRms(base64: string, sampleRate = 16_000): number {
+  try {
+    const buf = Buffer.from(base64, "base64");
+    if (buf.length < 46) return 0;
+    const frame = Math.max(1, Math.round(sampleRate * 0.02));
+    let peak = 0;
+    let i = 44;
+    while (i + 1 < buf.length) {
+      let sumSq = 0;
+      let n = 0;
+      for (let k = 0; k < frame && i + 1 < buf.length; k += 1, i += 2) {
+        const sample = buf.readInt16LE(i) / 32768;
+        sumSq += sample * sample;
+        n += 1;
+      }
+      if (n) {
+        const rms = Math.sqrt(sumSq / n);
+        if (rms > peak) peak = rms;
+      }
+    }
+    return peak;
+  } catch {
+    return 0;
+  }
+}

@@ -1,7 +1,6 @@
-import { restoreSpeechText, sttKeyterms } from "../stt-text.ts";
+import { restoreSpeechText, STT_KEYTERMS } from "../stt-text.ts";
 import { isQuotaHint, readXaiFail } from "../xai-error.ts";
-import { mergeKeyterms } from "./context.ts";
-import { HEARING } from "./config.ts";
+import { HEARING, xaiVadThreshold } from "./config.ts";
 import type { AdapterOutcome } from "./http.ts";
 
 type SttWord = { text?: string; start?: number; end?: number };
@@ -42,8 +41,8 @@ export async function transcribeWithXai(input: {
   const form = new FormData();
   form.append("model", HEARING.xai.model);
   form.append("filler_words", "true");
-  form.append("vad_threshold", "0");
-  for (const term of mergeKeyterms(sttKeyterms(input.prompt), input.extraKeyterms)) {
+  form.append("vad_threshold", String(xaiVadThreshold()));
+  for (const term of STT_KEYTERMS) {
     form.append("keyterm", term);
   }
   const blob = new Blob([new Uint8Array(bytes)], { type: mime });
