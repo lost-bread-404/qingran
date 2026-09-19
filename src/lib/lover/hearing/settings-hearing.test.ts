@@ -30,12 +30,14 @@ test("transcript pencil opens confirm in debug; bubble text is not a hidden conf
   assert.doesNotMatch(src, /if \(canConfirm\) onConfirmStart/);
 });
 
-test("confirm panel uses exclusive emotion chips including 噪音", () => {
+test("confirm panel keeps 噪音 and 字面≠意思, not emotion chips", () => {
   const src = readFileSync(new URL("../../../components/lover/confirm-turn.tsx", import.meta.url), "utf8");
-  assert.match(src, /label: "噪音"/);
-  assert.match(src, /撒娇/);
+  assert.match(src, />\s*噪音\s*</);
+  assert.match(src, /字面≠意思/);
+  assert.match(src, /aria-label="语气备注"/);
+  assert.doesNotMatch(src, /EMOTION_LABEL/);
+  assert.doesNotMatch(src, /CueEmotion/);
   assert.doesNotMatch(src, /这是纯噪音/);
-  assert.doesNotMatch(src, /type="checkbox"/);
   assert.match(src, /<audio className="mb-3 w-full" controls src=\{audioUrl\} \/>/);
   assert.doesNotMatch(src, /<audio[^>]*muted/);
 });
@@ -78,6 +80,7 @@ test("lab page is score card, worst 20, and hash export only", () => {
   const src = readFileSync(new URL("../../../routes/lab.tsx", import.meta.url), "utf8");
   assert.match(src, /最近 7 天/);
   assert.match(src, /CER 最终文字/);
+  assert.match(src, /语气符号准确率/);
   assert.match(src, /最差 20 条/);
   assert.match(src, /导出 JSON/);
   assert.match(src, /hash 80\/20/);

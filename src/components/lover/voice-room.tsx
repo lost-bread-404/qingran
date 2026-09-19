@@ -37,7 +37,6 @@ import {
 } from "@/lib/lover/room";
 import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
-import { type CueEmotion } from "@/lib/lover/hearing/schema";
 import { buildHearingContext, extractContextKeyterms, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
 import { extractTfIdfTerms } from "@/lib/lover/hearing/keyterms";
 import { detectAudioRoute } from "@/lib/lover/hearing/route";
@@ -763,12 +762,13 @@ export function VoiceRoom() {
     await sendTurn(text, { history, existingUser: updated });
   }
 
-  async function saveConfirm(
-    goldText: string,
-    source: "confirmed" | "edited",
-    emotion: CueEmotion | null,
-    noiseOnly: boolean,
-  ) {
+  async function saveConfirm(input: {
+    goldText: string;
+    source: "confirmed" | "edited";
+    noiseOnly: boolean;
+    literalMismatch: boolean;
+    toneNote: string;
+  }) {
     const msg = chatRef.current.find((m) => m.id === confirmId);
     if (!msg?.voiceTurnId) {
       setConfirmId(null);
@@ -780,10 +780,11 @@ export function VoiceRoom() {
       const result = await confirmHearingClip({
         data: {
           turnId: msg.voiceTurnId,
-          goldText,
-          goldSource: source,
-          utteranceEmotion: emotion,
-          noiseOnly,
+          goldText: input.goldText,
+          goldSource: input.source,
+          noiseOnly: input.noiseOnly,
+          literalMismatch: input.literalMismatch,
+          toneNote: input.toneNote,
         },
       });
       if (!result.ok) {
@@ -793,11 +794,11 @@ export function VoiceRoom() {
       if (msg.hearingGold !== "confirmed") setLabeledCount((n) => n + 1);
       const updated: ChatMessage = {
         ...msg,
-        text: goldText || msg.text,
+        text: input.goldText || msg.text,
         hearingGold: "confirmed",
       };
       void updateRoomMessage({ data: updated });
-      if (source === "edited" && goldText.trim() && goldText.trim() !== msg.text.trim() && !noiseOnly) {
+      if (input.source === "edited" && input.goldText.trim() && input.goldText.trim() !== msg.text.trim() && !input.noiseOnly) {
         const idx = chatRef.current.findIndex((m) => m.id === msg.id);
         const next = idx >= 0 ? chatRef.current[idx + 1] : undefined;
         const alreadySent = next?.role === "assistant" && Boolean(next.text.trim());
@@ -812,7 +813,7 @@ export function VoiceRoom() {
           if (removed.length) {
             void deleteRoomMessages({ data: { ids: removed.map((m) => m.id) } });
           }
-          await sendTurn(goldText, { history, existingUser: updated, voiceTurnId: msg.voiceTurnId });
+          await sendTurn(input.goldText, { history, existingUser: updated, voiceTurnId: msg.voiceTurnId });
         }
       } else {
         setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
@@ -1089,9 +1090,7 @@ export function VoiceRoom() {
             setConfirmId(null);
             setConfirmError(null);
           }}
-          onConfirm={(goldText, source, emotion, noiseOnly) =>
-            void saveConfirm(goldText, source, emotion, noiseOnly)
-          }
+          onConfirm={(input) => void saveConfirm(input)}
         />
 
         <SettingsDrawer

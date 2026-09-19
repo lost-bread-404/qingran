@@ -1,4 +1,4 @@
-import { cer } from "./metrics.ts";
+import { cer, hasCueToneMarks, textsExact, toneMarksMatch } from "./metrics.ts";
 
 export type ScoreWindow = "7d" | "all";
 
@@ -11,6 +11,8 @@ export type ScoreClip = {
   goldText: string;
   noiseOnly: boolean;
   utteranceEmotion: string | null;
+  literalMismatch?: boolean;
+  toneNote?: string | null;
   turnId: string | null;
 };
 
@@ -20,6 +22,8 @@ export type WorstClip = {
   hyp: string;
   gold: string;
   emotion: string | null;
+  literalMismatch: boolean;
+  toneNote: string | null;
   cer: number;
   noiseOnly: boolean;
 };
@@ -33,6 +37,7 @@ export type HearingScore = {
   liveEmptyRate: number;
   liveHasData: boolean;
   exactMatch: number | null;
+  toneAccuracy: number | null;
   noiseN: number;
   noiseRecognizedRate: number | null;
   hallucinationN: number;
@@ -65,6 +70,7 @@ export function scoreHearing(
   const noise = rows.filter((clip) => clip.noiseOnly);
   const recognized = (clip: ScoreClip) =>
     Boolean((clip.finalText || clip.xaiText || clip.liveText).trim());
+  const withTone = golded.filter((clip) => hasCueToneMarks(clip.goldText));
   const worst = golded
     .map((clip) => ({
       id: clip.id,
@@ -72,6 +78,8 @@ export function scoreHearing(
       hyp: clip.finalText,
       gold: clip.goldText,
       emotion: clip.utteranceEmotion,
+      literalMismatch: Boolean(clip.literalMismatch),
+      toneNote: clip.toneNote ?? null,
       cer: cer(clip.goldText, clip.finalText),
       noiseOnly: clip.noiseOnly,
     }))
@@ -87,7 +95,10 @@ export function scoreHearing(
     liveEmptyRate,
     liveHasData: liveGolded.length > 0,
     exactMatch: golded.length
-      ? golded.filter((clip) => clip.finalText.trim() === clip.goldText.trim()).length / golded.length
+      ? golded.filter((clip) => textsExact(clip.goldText, clip.finalText)).length / golded.length
+      : null,
+    toneAccuracy: withTone.length
+      ? withTone.filter((clip) => toneMarksMatch(clip.goldText, clip.finalText)).length / withTone.length
       : null,
     noiseN: noise.length,
     noiseRecognizedRate: noise.length ? noise.filter(recognized).length / noise.length : null,

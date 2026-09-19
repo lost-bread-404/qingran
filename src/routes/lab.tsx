@@ -194,6 +194,8 @@ function HearingLabPage() {
                     <p className="text-xs text-subtle">
                       CER {(row.cer * 100).toFixed(0)}%
                       {row.emotion && isEmotion(row.emotion) ? ` · ${EMOTION_LABEL[row.emotion]}` : ""}
+                      {row.literalMismatch ? " · 字面≠意思" : ""}
+                      {row.toneNote ? ` · ${row.toneNote}` : ""}
                       {row.noiseOnly ? " · 噪音" : ""}
                     </p>
                     <p className="mt-1 text-sm">识别 {row.hyp || "（空）"}</p>
@@ -282,13 +284,14 @@ function HearingLabPage() {
         audioUrl={editAudio}
         busy={editBusy}
         error={editError}
-        initialEmotion={editClip && isEmotion(editClip.emotion) ? editClip.emotion : null}
         initialNoise={Boolean(editClip?.noiseOnly)}
+        initialLiteralMismatch={Boolean(editClip?.literalMismatch)}
+        initialToneNote={editClip?.toneNote ?? ""}
         onClose={() => {
           setEditClip(null);
           setEditError(null);
         }}
-        onConfirm={async (gold, source, emotion, noiseOnly) => {
+        onConfirm={async ({ goldText, source, noiseOnly, literalMismatch, toneNote }) => {
           if (!editClip?.turnId) {
             setEditError("这条没有 turn_id，没法写入。");
             return;
@@ -299,10 +302,11 @@ function HearingLabPage() {
             const result = await confirmHearingClip({
               data: {
                 turnId: editClip.turnId,
-                goldText: gold,
+                goldText,
                 goldSource: source,
-                utteranceEmotion: emotion,
                 noiseOnly,
+                literalMismatch,
+                toneNote,
               },
             });
             if (!result.ok) {
@@ -338,6 +342,7 @@ function ScoreCard({ score }: { score: ScorePayload | null }) {
         }
       />
       <Row label="完全正确率" value={fmtPct(score.exactMatch)} />
+      <Row label="语气符号准确率" value={fmtPct(score.toneAccuracy)} />
       <Row
         label="噪音里有字"
         value={

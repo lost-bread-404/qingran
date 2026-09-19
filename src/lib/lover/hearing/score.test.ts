@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { cer, textsExact, toneMarksMatch } from "./metrics.ts";
 import { scoreHearing, type ScoreClip } from "./score.ts";
 import { hashSplit } from "./split.ts";
 
@@ -60,6 +61,26 @@ test("Apple live_text all empty is 无数据 with empty rate 1", () => {
   assert.equal(scored.liveEmptyRate, 1);
   assert.equal(scored.exactMatch, 1);
   assert.equal(scored.cerFinal, 0);
+});
+
+test("exactMatch ignores punctuation the same way CER does", () => {
+  assert.equal(textsExact("姐姐。", "姐姐"), true);
+  assert.equal(cer("姐姐。", "姐姐"), 0);
+  const scored = scoreHearing([clip({ id: "p", goldText: "姐姐。", finalText: "姐姐" })]);
+  assert.equal(scored.exactMatch, 1);
+  assert.equal(scored.cerFinal, 0);
+});
+
+test("tone mark accuracy compares ～ … ！ ？ and skips gold without them", () => {
+  assert.equal(toneMarksMatch("姐姐～", "姐姐。"), false);
+  assert.equal(toneMarksMatch("姐姐～", "姐姐～"), true);
+  const scored = scoreHearing([
+    clip({ id: "wave", goldText: "姐姐～", finalText: "姐姐。" }),
+    clip({ id: "ok", goldText: "嗯…", finalText: "嗯…" }),
+    clip({ id: "plain", goldText: "姐姐。", finalText: "姐姐" }),
+  ]);
+  assert.equal(scored.toneAccuracy, 0.5);
+  assert.equal(scored.exactMatch, 1);
 });
 
 test("id hash split is stable and roughly 80/20", () => {

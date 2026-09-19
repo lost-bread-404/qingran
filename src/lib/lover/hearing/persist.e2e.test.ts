@@ -80,8 +80,9 @@ test("PGLite e2e: voice round → clip → confirm → confirmed filter", async 
     turnId: "turn-1",
     goldText: "在吗",
     goldSource: "confirmed",
-    utteranceEmotion: "neutral",
     noiseOnly: false,
+    literalMismatch: true,
+    toneNote: "反话",
   });
   assert.equal(confirmed.ok, true);
 
@@ -92,6 +93,8 @@ test("PGLite e2e: voice round → clip → confirm → confirmed filter", async 
   assert.equal(after[0]?.stt_text, "在吗");
   assert.equal(after[0]?.peak_rms, 0.04);
   assert.equal(after[0]?.vad_floor, 0.008);
+  assert.equal(after[0]?.literal_mismatch, true);
+  assert.equal(after[0]?.tone_note, "反话");
   assert.equal(await goldCount(sql), 1);
 
   await patchFinalTextByTurn(sql, "turn-1", "在吗呀");

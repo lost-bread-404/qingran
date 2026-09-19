@@ -73,6 +73,8 @@ export async function confirmClipByTurn(
     goldSource: GoldSource;
     utteranceEmotion?: string | null;
     noiseOnly?: boolean;
+    literalMismatch?: boolean;
+    toneNote?: string | null;
   },
 ): Promise<{ ok: true; clipId: string; goldTier: number } | { ok: false; error: string }> {
   if (!isGoldSource(input.goldSource)) return { ok: false, error: "bad-gold-source" };
@@ -96,13 +98,16 @@ export async function confirmClipByTurn(
     hasCues,
   });
   const nextTier = hasCues ? 3 : tier;
+  const note = input.toneNote?.trim() || null;
   await sql`
     update qingran_hearing_clips
     set gold_text = ${input.goldText},
         gold_source = ${input.goldSource},
         gold_tier = ${nextTier},
-        utterance_emotion = ${emotion},
+        utterance_emotion = coalesce(${emotion}, utterance_emotion),
         noise_only = ${Boolean(input.noiseOnly)},
+        literal_mismatch = ${Boolean(input.literalMismatch)},
+        tone_note = ${note},
         stt_text = coalesce(stt_text, hearing_text, xai_text)
     where id = ${clip.id}
   `;
@@ -153,6 +158,8 @@ export async function listClipRows(sql: Sql, filter: LabClipFilter = "all") {
     stt_text: string | null;
     gold_tier: number | null;
     utterance_emotion: string | null;
+    literal_mismatch: boolean | null;
+    tone_note: string | null;
     mode: string | null;
     audio_route: string | null;
     turn_id: string | null;
@@ -167,7 +174,8 @@ export async function listClipRows(sql: Sql, filter: LabClipFilter = "all") {
             xai_text, hearing_text, hearing_json, live_text,
             gold_text, gold_cues, noise_only, skip,
             relabel_gold_text, relabel_gold_cues, relabel_noise_only,
-            gold_source, stt_text, gold_tier, utterance_emotion, mode, audio_route,
+            gold_source, stt_text, gold_tier, utterance_emotion, literal_mismatch, tone_note,
+            mode, audio_route,
             turn_id, disagreement, storage_backend, blob_error,
             final_text, peak_rms, vad_floor
      from qingran_hearing_clips
@@ -201,11 +209,13 @@ export async function listScoreClipRows(sql: Sql) {
     hearing_text: string | null;
     noise_only: boolean | null;
     utterance_emotion: string | null;
+    literal_mismatch: boolean | null;
+    tone_note: string | null;
     turn_id: string | null;
   }>(
     `select id, created_at::text as created_at,
             final_text, xai_text, live_text, gold_text, stt_text, hearing_text,
-            noise_only, utterance_emotion, turn_id
+            noise_only, utterance_emotion, literal_mismatch, tone_note, turn_id
      from qingran_hearing_clips
      order by created_at desc`,
   );

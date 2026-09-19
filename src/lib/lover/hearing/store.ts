@@ -433,6 +433,8 @@ export const confirmHearingClip = createServerFn({ method: "POST" })
       goldSource: GoldSource;
       utteranceEmotion?: string | null;
       noiseOnly?: boolean;
+      literalMismatch?: boolean;
+      toneNote?: string | null;
     }) => input,
   )
   .handler(async ({ data }) => {
@@ -444,6 +446,8 @@ export const confirmHearingClip = createServerFn({ method: "POST" })
         goldSource: data.goldSource,
         utteranceEmotion: data.utteranceEmotion,
         noiseOnly: data.noiseOnly,
+        literalMismatch: data.literalMismatch,
+        toneNote: data.toneNote,
       });
     } catch (err) {
       return { ok: false as const, error: errorText(err) };
@@ -486,6 +490,8 @@ export const hearingLabScore = createServerFn({ method: "POST" })
           goldText: row.gold_text ?? "",
           noiseOnly: Boolean(row.noise_only),
           utteranceEmotion: row.utterance_emotion,
+          literalMismatch: Boolean(row.literal_mismatch),
+          toneNote: row.tone_note,
           turnId: row.turn_id,
         })),
         { window, hallucinationN },
@@ -652,6 +658,8 @@ export const exportHearingClips = createServerFn({ method: "POST" })
       stt_text: string | null;
       gold_tier: number | null;
       utterance_emotion: string | null;
+      literal_mismatch: boolean | null;
+      tone_note: string | null;
       mode: string | null;
       audio_route: string | null;
       turn_id: string | null;
@@ -665,7 +673,8 @@ export const exportHearingClips = createServerFn({ method: "POST" })
              xai_text, hearing_text, hearing_json, live_text,
              gold_text, gold_cues, noise_only, skip,
              relabel_gold_text, relabel_gold_cues, relabel_noise_only, audio_wav, blob_pathname,
-             gold_source, stt_text, gold_tier, utterance_emotion, mode, audio_route,
+             gold_source, stt_text, gold_tier, utterance_emotion, literal_mismatch, tone_note,
+             mode, audio_route,
              turn_id, disagreement, storage_backend, final_text, peak_rms, vad_floor
       from qingran_hearing_clips
       order by created_at asc
@@ -698,6 +707,8 @@ export const exportHearingClips = createServerFn({ method: "POST" })
           sttText: row.stt_text ?? "",
           goldTier: row.gold_tier,
           utteranceEmotion: row.utterance_emotion,
+          literalMismatch: Boolean(row.literal_mismatch),
+          toneNote: row.tone_note,
           mode: row.mode,
           audioRoute: row.audio_route,
           turnId: row.turn_id,
@@ -931,6 +942,8 @@ function mapClipRow(
     stt_text: string | null;
     gold_tier: number | null;
     utterance_emotion: string | null;
+    literal_mismatch?: boolean | null;
+    tone_note?: string | null;
     mode: string | null;
     audio_route: string | null;
     turn_id: string | null;
@@ -961,6 +974,8 @@ function mapClipRow(
     sttText: row.stt_text ?? row.hearing_text ?? row.xai_text ?? "",
     goldTier: relabel ? null : row.gold_tier,
     utteranceEmotion: relabel ? null : row.utterance_emotion,
+    literalMismatch: relabel ? false : Boolean(row.literal_mismatch),
+    toneNote: relabel ? null : row.tone_note ?? null,
     mode: row.mode,
     audioRoute: row.audio_route,
     turnId: row.turn_id,
