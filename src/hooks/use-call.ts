@@ -33,6 +33,8 @@ import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
 import {
   LISTEN_WARMUP_MS,
   CALL_START_WARMUP_MS,
+  MIN_SPEECH_MS,
+  canBeginUtterance,
   holdThreshold,
   isHoldVoiced,
   isSpeechStart,
@@ -69,6 +71,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const voiceBurstAtRef = useRef(0);
   const lastTextAtRef = useRef(0);
   const listenReadyAtRef = useRef(0);
+  const speechRiseAtRef = useRef(0);
   const rafRef = useRef(0);
   const intervalRef = useRef(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -263,6 +266,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     finalTextRef.current = "";
     interimRef.current = "";
     lastTextAtRef.current = 0;
+    speechRiseAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
     setPhaseBoth("listening");
   }, []);
@@ -365,14 +369,25 @@ export function useCall({ onUtterance, prompt }: Options) {
       const cut = speaking ? holdThreshold(floor, debugVad) : startThreshold(floor, debugVad);
       setLevel(Math.min(1, rms * 8));
       setThreshold(Math.min(1, cut * 8));
-      if (
-        !deafRef.current &&
-        phaseRef.current === "listening" &&
-        now >= listenReadyAtRef.current &&
-        rising
-      ) {
-        beginUtterance();
-      } else if (speaking) {
+      if (deafRef.current || phaseRef.current !== "listening" || now < listenReadyAtRef.current) {
+        speechRiseAtRef.current = 0;
+      } else if (rising) {
+        if (!speechRiseAtRef.current) speechRiseAtRef.current = now;
+        if (
+          canBeginUtterance({
+            rising: true,
+            heldMs: now - speechRiseAtRef.current,
+            requireHold: debugVad,
+            minMs: MIN_SPEECH_MS,
+          })
+        ) {
+          speechRiseAtRef.current = 0;
+          beginUtterance();
+        }
+      } else {
+        speechRiseAtRef.current = 0;
+      }
+      if (speaking) {
         const voiced = isHoldVoiced(rms, floor, debugVad);
         if (voiced) {
           if (!voiceBurstAtRef.current) voiceBurstAtRef.current = now;
@@ -552,6 +567,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     deafRef.current = true;
     setMicEnabled(streamRef.current, false);
     logCallAudio("deafen");
+    speechRiseAtRef.current = 0;
     if (phaseRef.current === "transcribing") return;
     void pcmTapRef.current?.stop();
     if (phaseRef.current === "speaking-you") {

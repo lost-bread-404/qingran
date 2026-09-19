@@ -29,7 +29,7 @@ import {
   exportReplyFlagDataset,
   goldCount,
   goldStatusByTurnIds,
-  hallucinationCount,
+  hallucinationCountByReason,
   insertClipRow,
   insertReplyFlag,
   listClipRows,
@@ -113,6 +113,7 @@ export type RunHearingInput = {
   predictedTags?: AcousticTags;
   contextBefore?: { role: string; text: string }[];
   systemPrompt?: string;
+  holdToTalk?: boolean;
 };
 
 export type RunHearingOutput = {
@@ -136,6 +137,7 @@ export type RunHearingOutput = {
   quota?: boolean;
   saveError?: string;
   hallucinationSuspect?: boolean;
+  hallucinationReason?: "apple_empty" | "short_quiet";
   predictedTags?: AcousticTags;
 };
 
@@ -335,22 +337,24 @@ export const runHearing = createServerFn({ method: "POST" })
     const { used, hearing, words, refusal } = picked;
     let fallback = picked.fallback;
     let fallbackReason: string | undefined = picked.fallback_reason;
-    let xaiText = picked.xaiText;
+    const originalXai = picked.xaiText;
+    let xaiText = originalXai;
     const durationSec = wavDurationMs(data.audioBase64) / 1000;
     const peakRms = wavPeakRms(data.audioBase64);
     const liveText = data.liveText ?? "";
-    const scrubbed = scrubHallucination(xaiText, { durationSec, peakRms }, liveText);
+    const holdToTalk = Boolean(data.holdToTalk) || data.mode === "text";
+    const scrubbed = scrubHallucination(originalXai, { durationSec, peakRms }, liveText, { holdToTalk });
     if (scrubbed.suspect) {
-      xaiText = scrubbed.text;
       fallback = true;
-      fallbackReason = "hallucination_suspect";
+      fallbackReason = scrubbed.reason;
     } else if (scrubbed.reason === "prefer_apple_quiet") {
       fallback = true;
       fallbackReason = "prefer_apple_quiet";
+      xaiText = originalXai;
     }
     const providerNoise = Boolean(hearing?.noise_only && used !== "xai");
     const disagreement = isNoiseDisagreement(providerNoise, xaiText);
-    const drop = shouldDropAsNoise(providerNoise, xaiText);
+    const drop = shouldDropAsNoise(providerNoise, xaiText) || scrubbed.suspect;
     const predicted =
       used !== "xai" && hearing?.cues?.length
         ? tagsFromCues(hearing.cues)
@@ -382,7 +386,7 @@ export const runHearing = createServerFn({ method: "POST" })
         latency_ms,
         hearing,
         xaiText,
-        pickedXaiText: picked.xaiText,
+        pickedXaiText: originalXai,
         tagged,
         predictedTags: predicted,
         commitSha,
@@ -406,7 +410,7 @@ export const runHearing = createServerFn({ method: "POST" })
       model,
       tagged,
       text: hearing?.text ?? xaiText,
-      xaiText,
+      xaiText: originalXai,
       liveText: data.liveText ?? "",
       noise_only: drop,
       disagreement,
@@ -417,6 +421,9 @@ export const runHearing = createServerFn({ method: "POST" })
       words,
       hearing,
       hallucinationSuspect: scrubbed.suspect,
+      hallucinationReason: scrubbed.suspect && (scrubbed.reason === "apple_empty" || scrubbed.reason === "short_quiet")
+        ? scrubbed.reason
+        : undefined,
       predictedTags: predicted,
     };
   });
@@ -631,7 +638,8 @@ export const hearingLabScore = createServerFn({ method: "POST" })
       assertLab(data.password);
       const sql = await getSql();
       const rows = await listScoreClipRows(sql);
-      const hallucinationN = await hallucinationCount(sql, window);
+      const hallucinationByReason = await hallucinationCountByReason(sql, window);
+      const hallucinationN = hallucinationByReason.apple_empty + hallucinationByReason.short_quiet;
       const score = scoreHearing(
         rows.map((row) => ({
           id: row.id,
@@ -652,7 +660,7 @@ export const hearingLabScore = createServerFn({ method: "POST" })
               : null,
           tagsTouched: parseTagKeys(row.tags_touched),
         })),
-        { window, hallucinationN },
+        { window, hallucinationN, hallucinationByReason },
       );
       return { ok: true as const, dbSource, window, ...score };
     } catch (err) {
@@ -978,6 +986,7 @@ async function persistHearingTurn(input: {
       commitSha: input.commitSha,
       promptHash: input.promptHash,
       contextBefore: input.data.contextBefore,
+      hallucinationSuspect: input.scrubbedSuspect,
     });
   } catch (err) {
     const saveError = errorText(err);
@@ -1076,6 +1085,7 @@ async function insertClip(input: {
   commitSha?: string | null;
   promptHash?: string | null;
   contextBefore?: unknown;
+  hallucinationSuspect?: boolean;
 }): Promise<string> {
   const id = newId();
   const sql = await getSql();
@@ -1085,7 +1095,7 @@ async function insertClip(input: {
   const blobError = stored.error;
   const storageBackend = storedPath ? "blob" : "db";
   const audioWav = storedPath ? null : input.audioBase64;
-  const sttText = input.tagged || input.xaiText;
+  const sttText = input.xaiText || input.tagged;
   await insertClipRow(sql, {
     id,
     durationMs: input.durationMs,
@@ -1104,7 +1114,7 @@ async function insertClip(input: {
     audioRoute: input.audioRoute,
     turnId: input.turnId,
     disagreement: input.disagreement,
-    finalText: input.tagged || input.xaiText || "",
+    finalText: input.hallucinationSuspect ? "" : input.tagged || input.xaiText || "",
     peakRms: input.peakRms,
     vadFloor: input.vadFloor,
     predictedTags: input.predictedTags,

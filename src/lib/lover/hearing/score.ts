@@ -48,6 +48,7 @@ export type HearingScore = {
   noiseN: number;
   noiseRecognizedRate: number | null;
   hallucinationN: number;
+  hallucinationByReason: { apple_empty: number; short_quiet: number };
   worst: WorstClip[];
 };
 
@@ -62,7 +63,12 @@ export function inScoreWindow(createdAt: string, window: ScoreWindow, now = Date
 
 export function scoreHearing(
   clips: ScoreClip[],
-  input: { window?: ScoreWindow; hallucinationN?: number; now?: number } = {},
+  input: {
+    window?: ScoreWindow;
+    hallucinationN?: number;
+    hallucinationByReason?: { apple_empty?: number; short_quiet?: number };
+    now?: number;
+  } = {},
 ): HearingScore {
   const window = input.window ?? "all";
   const now = input.now ?? Date.now();
@@ -110,6 +116,10 @@ export function scoreHearing(
     noiseN: noise.length,
     noiseRecognizedRate: noise.length ? noise.filter(recognized).length / noise.length : null,
     hallucinationN: input.hallucinationN ?? 0,
+    hallucinationByReason: {
+      apple_empty: input.hallucinationByReason?.apple_empty ?? 0,
+      short_quiet: input.hallucinationByReason?.short_quiet ?? 0,
+    },
     worst,
   };
 }

@@ -4,6 +4,7 @@ import {
   browserSttReady,
   extractKeyterms,
   finishHeard,
+  hallucinationReason,
   isHallucinationSuspect,
   needsPunctuationHelp,
   pickTranscript,
@@ -111,14 +112,17 @@ test("sttKeyterms ignores prompt extraction and only uses the fixed list", () =>
   assert.ok(terms.includes("嗯"));
 });
 
-test("short quiet clip with a long xAI sentence is hallucination_suspect", () => {
+test("short quiet clip with a long xAI sentence is short_quiet", () => {
   const xai = "林泽是一个中国的演员";
   assert.equal(isHallucinationSuspect({ durationSec: 0.6, peakRms: 0.002, xaiText: xai }), true);
-  assert.equal(isHallucinationSuspect({ durationSec: 2.0, peakRms: 0.08, xaiText: xai }), false);
+  assert.equal(hallucinationReason({ durationSec: 0.6, peakRms: 0.002, xaiText: xai }), "short_quiet");
+  assert.equal(isHallucinationSuspect({ durationSec: 2.0, peakRms: 0.08, xaiText: xai }), true);
+  assert.equal(hallucinationReason({ durationSec: 2.0, peakRms: 0.08, xaiText: xai }), "apple_empty");
   assert.equal(isHallucinationSuspect({ durationSec: 0.4, peakRms: 0.002, xaiText: "嗯" }), false);
   const scrubbed = scrubHallucination("我喜欢你林泽是一个中国的演员", { durationSec: 0.5, peakRms: 0.001 }, "嗯");
   assert.equal(scrubbed.suspect, true);
-  assert.equal(scrubbed.text, "嗯");
+  assert.equal(scrubbed.reason, "short_quiet");
+  assert.equal(scrubbed.text, "");
   assert.equal(
     finishHeard("林泽是一个中国的演员", "", undefined, undefined, { durationSec: 0.4, peakRms: 0.001 }),
     "",
@@ -136,13 +140,13 @@ test("quiet real sentence with matching Apple text is kept", () => {
   assert.equal(stripMarks(finishHeard(sentence, sentence, undefined, undefined, audio)), stripMarks(sentence));
 });
 
-test("quiet clip with empty Apple and a long xAI sentence is hallucination", () => {
+test("quiet clip with empty Apple and a long xAI sentence is short_quiet", () => {
   const xai = "我喜欢你我的宝贝";
   const audio = { durationSec: 0.5, peakRms: 0.001 };
   assert.equal(isHallucinationSuspect({ ...audio, xaiText: xai, liveText: "" }), true);
   const scrubbed = scrubHallucination(xai, audio, "");
   assert.equal(scrubbed.suspect, true);
-  assert.equal(scrubbed.reason, "hallucination_suspect");
+  assert.equal(scrubbed.reason, "short_quiet");
   assert.equal(finishHeard(xai, "", undefined, undefined, audio), "");
 });
 
@@ -496,6 +500,16 @@ test("browser STT with real words can skip the server", () => {
   assert.equal(browserSttReady("嗯"), false);
   assert.equal(browserSttReady("嗯嗯～"), false);
   assert.equal(browserSttReady(""), false);
+});
+
+test("hold-to-talk keeps xAI when Apple is empty", () => {
+  const xai = "谢谢观看";
+  const audio = { durationSec: 1.8, peakRms: 0.06 };
+  assert.equal(isHallucinationSuspect({ ...audio, xaiText: xai, liveText: "", holdToTalk: true }), false);
+  const scrubbed = scrubHallucination(xai, audio, "", { holdToTalk: true });
+  assert.equal(scrubbed.suspect, false);
+  assert.equal(stripMarks(scrubbed.text), "谢谢观看");
+  assert.equal(stripMarks(finishHeard(xai, "", undefined, undefined, audio, { holdToTalk: true })), "谢谢观看");
 });
 
 

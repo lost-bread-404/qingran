@@ -59,9 +59,10 @@ import {
   patchHearingTurn,
   unlabelHearingByTurn,
 } from "@/lib/lover/hearing/store";
-import { clipSaveBanner, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
+import { clipSaveBanner, UNRECOGNIZED_TEXT, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { micActionForConfirmPanel } from "@/lib/lover/hearing/confirm-call";
 import type { AcousticTags, TagKey } from "@/lib/lover/hearing/tags";
+import { POST_QINGRAN_MS } from "@/lib/lover/vad";
 import {
   CONTEXT_WINDOW,
   DEFAULT_PROFILE,
@@ -130,6 +131,7 @@ export function VoiceRoom() {
   const [confirmMismatch, setConfirmMismatch] = useState(false);
   const [confirmNote, setConfirmNote] = useState("");
   const [confirmDraft, setConfirmDraft] = useState("");
+  const [confirmStt, setConfirmStt] = useState("");
   const [flagTarget, setFlagTarget] = useState<{ messageId: string; replyTo?: string; trigger: string; reply: string } | null>(null);
   const [flagBusy, setFlagBusy] = useState(false);
   const [flagError, setFlagError] = useState<string | null>(null);
@@ -339,7 +341,7 @@ export function VoiceRoom() {
     if (!callActiveRef.current) return;
     window.setTimeout(() => {
       if (callActiveRef.current && turn === turnRef.current) hearRef.current();
-    }, 80);
+    }, POST_QINGRAN_MS);
   }
 
   const playFull = useCallback(async (id: string, speech: string, turn: number) => {
@@ -689,6 +691,7 @@ export function VoiceRoom() {
     setConfirmMismatch(false);
     setConfirmNote("");
     setConfirmDraft(msg.text);
+    setConfirmStt(msg.text);
     void getHearingTurnAudio({ data: { turnId: msg.voiceTurnId } }).then((result) => {
       if (!result.ok || revoked) return;
       const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
@@ -702,7 +705,9 @@ export function VoiceRoom() {
       setConfirmNoise(Boolean(result.noiseOnly));
       setConfirmMismatch(Boolean(result.literalMismatch));
       setConfirmNote(result.toneNote ?? "");
+      if (result.xaiText) setConfirmStt(result.xaiText);
       if (result.goldText) setConfirmDraft(result.goldText);
+      else if (result.xaiText && msg.text === UNRECOGNIZED_TEXT) setConfirmDraft(result.xaiText);
     });
     return () => {
       revoked = true;
@@ -1229,7 +1234,7 @@ export function VoiceRoom() {
 
         <ConfirmTurn
           open={Boolean(confirmId)}
-          sttText={messages.find((m) => m.id === confirmId)?.text ?? ""}
+          sttText={confirmStt}
           initialDraft={confirmDraft}
           audioUrl={confirmAudioUrl}
           busy={confirmBusy}

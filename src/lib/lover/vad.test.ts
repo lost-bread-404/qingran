@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  canBeginUtterance,
   DEBUG_START_FLOOR_MIN,
   DEBUG_START_FLOOR_MULT,
   holdThreshold,
   isHoldVoiced,
   isSpeechStart,
+  MIN_SPEECH_MS,
   nextFloor,
+  POST_QINGRAN_MS,
   shouldEndUtterance,
   START_FLOOR_MIN,
   START_FLOOR_MULT,
@@ -132,4 +135,16 @@ test("a long turn is not force-ended while you are still talking", () => {
     }),
     false,
   );
+});
+
+test("annotation mode waits MIN_SPEECH_MS of continuous speech before recording", () => {
+  assert.equal(MIN_SPEECH_MS, 220);
+  assert.equal(canBeginUtterance({ rising: true, heldMs: 100, requireHold: true }), false);
+  assert.equal(canBeginUtterance({ rising: true, heldMs: 220, requireHold: true }), true);
+  assert.equal(canBeginUtterance({ rising: true, heldMs: 0, requireHold: false }), true);
+  assert.equal(canBeginUtterance({ rising: false, heldMs: 500, requireHold: true }), false);
+});
+
+test("Qingran tail guard is 300ms", () => {
+  assert.equal(POST_QINGRAN_MS, 300);
 });

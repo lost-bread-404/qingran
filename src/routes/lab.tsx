@@ -213,24 +213,28 @@ function HearingLabPage() {
 
   if (!unlocked) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 px-6">
-        <p className="font-display text-2xl">听力标注</p>
-        <p className="max-w-sm text-center text-sm text-muted">设置里的标注页，需要密码。</p>
-        <Input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="密码"
-          className="max-w-xs"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void unlock();
-          }}
-        />
-        {error ? <p className="text-sm text-live">{error}</p> : null}
-        <Button onClick={() => void unlock()}>打开</Button>
-        <Link to="/" className="text-sm text-subtle">
-          回通话
-        </Link>
+      <div className="flex h-full flex-col bg-bg">
+        <header className="flex shrink-0 items-center gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+          <Link to="/" className="text-sm text-muted">
+            返回
+          </Link>
+        </header>
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6">
+          <p className="font-display text-2xl">听力标注</p>
+          <p className="max-w-sm text-center text-sm text-muted">设置里的标注页，需要密码。</p>
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="密码"
+            className="max-w-xs"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void unlock();
+            }}
+          />
+          {error ? <p className="text-sm text-live">{error}</p> : null}
+          <Button onClick={() => void unlock()}>打开</Button>
+        </div>
       </div>
     );
   }
@@ -569,7 +573,14 @@ function ScoreCard({ score }: { score: ScorePayload | null }) {
           score.noiseN === 0 ? "无数据" : `${fmtPct(score.noiseRecognizedRate)} · ${score.noiseN} 条`
         }
       />
-      <Row label="疑似幻觉" value={`${score.hallucinationN}`} />
+      <Row
+        label="疑似幻觉"
+        value={
+          score.hallucinationN === 0
+            ? "0"
+            : `${score.hallucinationN}（apple_empty ${score.hallucinationByReason?.apple_empty ?? 0} · short_quiet ${score.hallucinationByReason?.short_quiet ?? 0}）`
+        }
+      />
     </dl>
   );
 }

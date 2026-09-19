@@ -4,6 +4,8 @@ export const VOICE_SPIKE_MS = 80;
 export const LISTEN_WARMUP_MS = 380;
 /** First 500ms after getUserMedia: iOS mic is often still muted/silent. */
 export const CALL_START_WARMUP_MS = 500;
+/** After Qingran finishes speaking, ignore VAD starts for this long. */
+export const POST_QINGRAN_MS = 300;
 
 /** Production VAD start: max(0.01, floor * 1.95). Debug lowers both floor min and multiplier. */
 export const START_FLOOR_MIN = 0.01;
@@ -58,6 +60,18 @@ export function isSpeechStart(
 
 export function isHoldVoiced(rms: number, floor: number, debug = false) {
   return rms > holdThreshold(floor, debug);
+}
+
+/** Annotation mode keeps the lowered start threshold but needs a held burst before recording. */
+export function canBeginUtterance(input: {
+  rising: boolean;
+  heldMs: number;
+  requireHold: boolean;
+  minMs?: number;
+}): boolean {
+  if (!input.rising) return false;
+  if (!input.requireHold) return true;
+  return input.heldMs >= (input.minMs ?? MIN_SPEECH_MS);
 }
 
 export type EndpointInput = {

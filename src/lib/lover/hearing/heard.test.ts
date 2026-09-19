@@ -7,6 +7,34 @@ import {
   UNRECOGNIZED_TEXT,
   voiceTurnIdForMessage,
 } from "./heard.ts";
+import { scrubHallucination } from "../stt-text.ts";
+
+function decideHeard(input: {
+  liveText: string;
+  xaiText: string;
+  holdToTalk?: boolean;
+  durationSec?: number;
+  peakRms?: number;
+}) {
+  const audio = {
+    durationSec: input.durationSec ?? 2,
+    peakRms: input.peakRms ?? 0.08,
+  };
+  const scrubbed = scrubHallucination(input.xaiText, audio, input.liveText, {
+    holdToTalk: input.holdToTalk,
+  });
+  return heardFromHearing({
+    debugHearing: true,
+    turnId: "t-hall",
+    tagged: scrubbed.suspect ? "" : input.xaiText,
+    xaiText: input.xaiText,
+    noiseOnly: false,
+    clipId: "c-hall",
+    hallucinationSuspect: scrubbed.suspect,
+    hallucinationReason:
+      scrubbed.reason === "apple_empty" || scrubbed.reason === "short_quiet" ? scrubbed.reason : undefined,
+  });
+}
 
 test("debug empty recognition becomes 未识别 and is not sent", () => {
   const heard = heardFromHearing({
@@ -80,4 +108,28 @@ test("errorText keeps postgres code and message", () => {
     errorText({ message: "column stt_text does not exist", code: "42703" }),
     /42703/,
   );
+});
+
+test("Apple empty + xAI 谢谢观看 becomes 未识别 and is not sent", () => {
+  const heard = decideHeard({ liveText: "", xaiText: "谢谢观看" });
+  assert.equal(heard.text, UNRECOGNIZED_TEXT);
+  assert.equal(heard.skipQingran, true);
+  assert.equal(heard.hallucinationSuspect, true);
+  assert.equal(heard.hallucinationReason, "apple_empty");
+  assert.equal(heard.clipId, "c-hall");
+});
+
+test("Apple empty + xAI long sentence becomes 未识别 and is not sent", () => {
+  const heard = decideHeard({ liveText: "", xaiText: "林泽是一个中国的演员今天也来了" });
+  assert.equal(heard.text, UNRECOGNIZED_TEXT);
+  assert.equal(heard.skipQingran, true);
+  assert.equal(heard.hallucinationSuspect, true);
+  assert.equal(heard.hallucinationReason, "apple_empty");
+});
+
+test("hold-to-talk + Apple empty + xAI content is sent", () => {
+  const heard = decideHeard({ liveText: "", xaiText: "我想你了", holdToTalk: true });
+  assert.equal(heard.skipQingran, false);
+  assert.equal(heard.hallucinationSuspect, false);
+  assert.match(heard.text, /我想你了/);
 });

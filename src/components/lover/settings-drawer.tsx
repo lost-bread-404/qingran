@@ -1,5 +1,6 @@
 import { Check, Pencil, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -295,6 +296,13 @@ export function SettingsDrawer({
                 </span>
               </span>
             </label>
+            <Link
+              to="/lab"
+              className="flex min-h-11 items-center justify-center rounded-md bg-surface-2 px-3 text-sm"
+              onClick={() => onOpenChange(false)}
+            >
+              打开标注页
+            </Link>
           </div>
         </div>
       ) : (

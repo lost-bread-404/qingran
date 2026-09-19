@@ -13,6 +13,8 @@ export type HeardUtterance = {
   endpointFired?: number;
   sttDoneAt?: number;
   predictedTags?: AcousticTags;
+  hallucinationSuspect?: boolean;
+  hallucinationReason?: "apple_empty" | "short_quiet";
 };
 
 export function clipSaveBanner(error: string): string {
@@ -42,12 +44,19 @@ export function heardFromHearing(input: {
   endpointFired?: number;
   sttDoneAt?: number;
   predictedTags?: AcousticTags;
+  hallucinationSuspect?: boolean;
+  hallucinationReason?: "apple_empty" | "short_quiet";
 }): HeardUtterance {
   const recognized = input.tagged.trim() || input.xaiText.trim();
-  const empty = !recognized || shouldDropAsNoise(input.noiseOnly, input.xaiText);
+  const empty =
+    Boolean(input.hallucinationSuspect) || !recognized || shouldDropAsNoise(input.noiseOnly, input.xaiText);
   const timing = {
     endpointFired: input.endpointFired,
     sttDoneAt: input.sttDoneAt,
+  };
+  const extra = {
+    hallucinationSuspect: input.hallucinationSuspect,
+    hallucinationReason: input.hallucinationReason,
   };
   if (input.debugHearing) {
     return {
@@ -59,6 +68,7 @@ export function heardFromHearing(input: {
       persistPending: true,
       predictedTags: input.predictedTags,
       ...timing,
+      ...extra,
     };
   }
   return {
@@ -66,9 +76,10 @@ export function heardFromHearing(input: {
     turnId: input.turnId,
     clipId: input.clipId,
     saveError: input.saveError,
-    skipQingran: false,
+    skipQingran: Boolean(input.hallucinationSuspect),
     predictedTags: input.predictedTags,
     ...timing,
+    ...extra,
   };
 }
 

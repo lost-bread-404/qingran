@@ -14,10 +14,11 @@ test("settings hearing tab is engine plus 标注模式 only", () => {
   assert.doesNotMatch(src, /调试模式/);
   assert.doesNotMatch(src, /录音采集/);
   assert.doesNotMatch(src, /to="\/record"/);
+  assert.match(src, /打开标注页/);
+  assert.match(src, /to="\/lab"/);
   assert.doesNotMatch(src, /定向录制/);
   assert.doesNotMatch(src, />高级</);
   assert.doesNotMatch(src, /hearingNbest/);
-  assert.doesNotMatch(src, /to="\/lab"/);
 });
 
 test("transcript pencil opens confirm in debug; bubble text is not a hidden confirm entry", () => {
@@ -75,6 +76,9 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /initialNoise=\{confirmNoise\}/);
   assert.match(src, /micActionForConfirmPanel/);
   assert.match(src, /qingranSpeaking: status === "speaking" \|\| status === "thinking"/);
+  assert.match(src, /POST_QINGRAN_MS/);
+  assert.match(src, /setConfirmStt\(result\.xaiText\)/);
+  assert.match(src, /UNRECOGNIZED_TEXT/);
 });
 
 test("call deafen ignores speech rec without aborting it", () => {
@@ -111,8 +115,12 @@ test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance",
   assert.match(call, /peakRms:/);
   assert.match(call, /vadFloor: triggerFloorRef/);
   assert.match(call, /startThreshold/);
+  assert.match(call, /MIN_SPEECH_MS/);
+  assert.match(call, /canBeginUtterance/);
+  assert.match(call, /speechRiseAtRef/);
   assert.match(hold, /vadFloor: triggerFloorRef/);
   assert.match(hold, /holdThreshold/);
+  assert.match(hold, /holdToTalk: true/);
 });
 
 test("lab page is score card, worst 20, and hash export only", () => {
@@ -126,6 +134,11 @@ test("lab page is score card, worst 20, and hash export only", () => {
   assert.match(src, /listLabeledHearingClips/);
   assert.match(src, /导出 JSON/);
   assert.match(src, /hash 80\/20/);
+  assert.match(src, /apple_empty/);
+  assert.match(src, /short_quiet/);
+  assert.match(src, /hallucinationByReason/);
+  assert.match(src, /返回/);
+  assert.match(src, /to="\/"/);
   assert.doesNotMatch(src, /重标/);
   assert.doesNotMatch(src, /disagreement/);
   assert.doesNotMatch(src, /覆盖率/);
@@ -139,8 +152,12 @@ test("runHearing persists with waitUntil; xai skips audio-LLM and a second STT",
   assert.match(store, /waitUntil\(/);
   assert.match(store, /provider === "xai" \? Promise.resolve\(null\)/);
   assert.match(store, /prefer_apple_quiet/);
+  assert.match(store, /apple_empty/);
+  assert.match(store, /short_quiet/);
+  assert.match(store, /holdToTalk/);
   assert.match(hear, /ranHearing \|\| provider === "xai"/);
   assert.match(hear, /transcribeVoice/);
+  assert.match(hear, /hallucinationSuspect/);
 });
 
 test("playback START_SEC is restored to pre-low-latency 0.42", () => {

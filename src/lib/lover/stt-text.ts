@@ -317,10 +317,18 @@ export const HALLUCINATION_MIN_SEC = 1.2;
 export const HALLUCINATION_PEAK_RMS = 0.02;
 export const HALLUCINATION_SENTENCE_CHARS = 6;
 
+export type HallucinationReason = "apple_empty" | "short_quiet";
+
 function xaiLooksLikeSentence(xaiText: string): boolean {
   const core = stripMarks(xaiText);
   if (!core || isMostlyFiller(xaiText)) return false;
   return core.length > HALLUCINATION_SENTENCE_CHARS;
+}
+
+function xaiHasSubstance(xaiText: string): boolean {
+  const core = stripMarks(xaiText);
+  if (!core) return false;
+  return !isMostlyFiller(xaiText);
 }
 
 function isQuietClip(audio: { durationSec: number; peakRms: number }): boolean {
@@ -332,15 +340,28 @@ function liveTextIsEmptyOrFiller(liveText?: string): boolean {
   return !t || isMostlyFiller(t);
 }
 
+export function hallucinationReason(input: {
+  durationSec: number;
+  peakRms: number;
+  xaiText: string;
+  liveText?: string;
+  holdToTalk?: boolean;
+}): HallucinationReason | null {
+  if (input.holdToTalk) return null;
+  if (!liveTextIsEmptyOrFiller(input.liveText)) return null;
+  if (!xaiHasSubstance(input.xaiText)) return null;
+  if (xaiLooksLikeSentence(input.xaiText) && isQuietClip(input)) return "short_quiet";
+  return "apple_empty";
+}
+
 export function isHallucinationSuspect(input: {
   durationSec: number;
   peakRms: number;
   xaiText: string;
   liveText?: string;
+  holdToTalk?: boolean;
 }): boolean {
-  if (!xaiLooksLikeSentence(input.xaiText)) return false;
-  if (!isQuietClip(input)) return false;
-  return liveTextIsEmptyOrFiller(input.liveText);
+  return hallucinationReason(input) != null;
 }
 
 export function hallucinationFallback(xaiText: string, browser = ""): string {
@@ -350,21 +371,26 @@ export function hallucinationFallback(xaiText: string, browser = ""): string {
 export type HallucinationScrub = {
   text: string;
   suspect: boolean;
-  reason?: "hallucination_suspect" | "prefer_apple_quiet";
+  reason?: HallucinationReason | "prefer_apple_quiet";
 };
 
 export function scrubHallucination(
   xaiText: string,
   audio: { durationSec: number; peakRms: number },
   browser = "",
+  opts?: { holdToTalk?: boolean },
 ): HallucinationScrub {
-  if (!xaiLooksLikeSentence(xaiText) || !isQuietClip(audio)) {
-    return { text: xaiText, suspect: false };
-  }
-  if (!liveTextIsEmptyOrFiller(browser)) {
+  const reason = hallucinationReason({
+    ...audio,
+    xaiText,
+    liveText: browser,
+    holdToTalk: opts?.holdToTalk,
+  });
+  if (reason) return { text: "", suspect: true, reason };
+  if (xaiLooksLikeSentence(xaiText) && isQuietClip(audio) && !liveTextIsEmptyOrFiller(browser)) {
     return { text: browser, suspect: false, reason: "prefer_apple_quiet" };
   }
-  return { text: hallucinationFallback(xaiText, browser), suspect: true, reason: "hallucination_suspect" };
+  return { text: xaiText, suspect: false };
 }
 
 export function pickTranscript(server: string, browser: string): string {
@@ -464,10 +490,13 @@ export function finishHeard(
   _words: CueWord[] | undefined,
   frames: ProsodyFrame[] | undefined,
   audio?: { durationSec: number; peakRms: number },
+  opts?: { holdToTalk?: boolean },
 ): string {
   let xai = stripHehe(server);
   if (audio) {
-    xai = scrubHallucination(xai, audio, browser).text;
+    const scrubbed = scrubHallucination(xai, audio, browser, opts);
+    if (scrubbed.suspect) return "";
+    xai = scrubbed.text;
   }
   const picked = pickTranscript(xai, stripHehe(browser));
   return recoverCues(picked, frames);

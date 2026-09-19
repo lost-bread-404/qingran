@@ -33,7 +33,7 @@ test("score card CER, exact match, noise rate, and worst-20 order", () => {
         finalText: "错很多字啊",
       }),
     ],
-    { window: "7d", hallucinationN: 2, now },
+    { window: "7d", hallucinationN: 2, hallucinationByReason: { apple_empty: 1, short_quiet: 1 }, now },
   );
   assert.equal(scored.clipN, 4);
   assert.equal(scored.goldN, 3);
@@ -44,6 +44,8 @@ test("score card CER, exact match, noise rate, and worst-20 order", () => {
   assert.equal(scored.noiseN, 2);
   assert.equal(scored.noiseRecognizedRate, 0.5);
   assert.equal(scored.hallucinationN, 2);
+  assert.equal(scored.hallucinationByReason.apple_empty, 1);
+  assert.equal(scored.hallucinationByReason.short_quiet, 1);
   assert.equal(scored.worst[0]?.id, "b");
   assert.equal(scored.worst[0]?.hyp, "我喜欢你");
   assert.equal(scored.worst[0]?.gold, "嗯");

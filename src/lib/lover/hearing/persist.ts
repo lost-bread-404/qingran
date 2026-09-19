@@ -367,20 +367,45 @@ export async function listScoreClipRows(sql: Sql) {
 }
 
 export async function hallucinationCount(sql: Sql, window: "7d" | "all"): Promise<number> {
+  const by = await hallucinationCountByReason(sql, window);
+  return by.apple_empty + by.short_quiet;
+}
+
+export type HallucinationByReason = { apple_empty: number; short_quiet: number };
+
+export async function hallucinationCountByReason(
+  sql: Sql,
+  window: "7d" | "all",
+): Promise<HallucinationByReason> {
   const rows =
     window === "7d"
-      ? await sql<{ n: number }>`
-          select count(*)::int as n
+      ? await sql<{ reason: string; n: number }>`
+          select case
+                   when fallback_reason = 'apple_empty' then 'apple_empty'
+                   else 'short_quiet'
+                 end as reason,
+                 count(*)::int as n
           from qingran_hearing_turns
           where hallucination_suspect = true
             and created_at >= now() - interval '7 days'
+          group by 1
         `
-      : await sql<{ n: number }>`
-          select count(*)::int as n
+      : await sql<{ reason: string; n: number }>`
+          select case
+                   when fallback_reason = 'apple_empty' then 'apple_empty'
+                   else 'short_quiet'
+                 end as reason,
+                 count(*)::int as n
           from qingran_hearing_turns
           where hallucination_suspect = true
+          group by 1
         `;
-  return Number(rows[0]?.n) || 0;
+  const out: HallucinationByReason = { apple_empty: 0, short_quiet: 0 };
+  for (const row of rows) {
+    if (row.reason === "apple_empty") out.apple_empty = Number(row.n) || 0;
+    else out.short_quiet += Number(row.n) || 0;
+  }
+  return out;
 }
 
 export async function listMigrationNames(sql: Sql): Promise<string[]> {
@@ -531,6 +556,7 @@ export type ClipLabelRow = {
   literalMismatch: boolean;
   toneNote: string | null;
   goldText: string;
+  xaiText: string;
 };
 
 export async function clipLabelByTurn(sql: Sql, turnId: string): Promise<ClipLabelRow | null> {
@@ -542,8 +568,9 @@ export async function clipLabelByTurn(sql: Sql, turnId: string): Promise<ClipLab
     literal_mismatch: boolean | null;
     tone_note: string | null;
     gold_text: string | null;
+    xai_text: string | null;
   }>`
-    select predicted_tags, gold_tags, tags_touched, noise_only, literal_mismatch, tone_note, gold_text
+    select predicted_tags, gold_tags, tags_touched, noise_only, literal_mismatch, tone_note, gold_text, xai_text
     from qingran_hearing_clips
     where turn_id = ${turnId}
     order by created_at desc
@@ -562,6 +589,7 @@ export async function clipLabelByTurn(sql: Sql, turnId: string): Promise<ClipLab
     literalMismatch: Boolean(row.literal_mismatch),
     toneNote: row.tone_note,
     goldText: row.gold_text ?? "",
+    xaiText: row.xai_text ?? "",
   };
 }
 
