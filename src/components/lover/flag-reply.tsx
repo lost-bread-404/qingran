@@ -49,8 +49,11 @@ export function FlagReply({ open, triggerText, replyText, busy, error, onClose, 
           maxLength={200}
         />
         {error ? <p className="mt-2 text-sm text-live">{error}</p> : null}
-        <div className="mt-4">
-          <Button type="button" className="w-full" disabled={busy} onClick={() => void onSave(note.trim())}>
+        <div className="mt-4 flex gap-2">
+          <Button type="button" variant="outline" className="min-h-11 flex-1" disabled={busy} onClick={onClose}>
+            取消
+          </Button>
+          <Button type="button" className="min-h-11 flex-1" disabled={busy} onClick={() => void onSave(note.trim())}>
             {busy ? "正在写入…" : "记下"}
           </Button>
         </div>

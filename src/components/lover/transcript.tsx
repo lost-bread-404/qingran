@@ -193,32 +193,32 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
               )
             ) : null}
             {pair.assistant?.text.trim() ? (
-              <div className="flex max-w-[min(22rem,92%)] items-start gap-2 self-start">
-                <p className="whitespace-pre-wrap break-words font-display text-lg font-medium leading-relaxed tracking-tight text-fg">
-                  {pair.assistant.text}
-                </p>
-                <div className="mt-1 flex shrink-0 flex-col gap-1">
+              <div className="flex max-w-[min(22rem,92%)] flex-col gap-6 self-start">
+                <div className="flex items-start gap-2">
+                  <p className="whitespace-pre-wrap break-words font-display text-lg font-medium leading-relaxed tracking-tight text-fg">
+                    {pair.assistant.text}
+                  </p>
                   {onPlay ? (
                     <button
                       type="button"
                       aria-label="播放这句话"
                       onClick={() => onPlay(pair.assistant!.id, pair.assistant!.text)}
-                      className="text-subtle transition-colors duration-150 hover:text-fg"
+                      className="grid size-11 shrink-0 place-items-center text-subtle transition-colors duration-150 hover:text-fg"
                     >
                       <Volume2 className="size-4" />
                     </button>
                   ) : null}
-                  {onFlagReply ? (
-                    <button
-                      type="button"
-                      aria-label="这条回复不好"
-                      onClick={() => onFlagReply(pair.assistant!.id, pair.user?.id ?? pair.assistant!.replyTo)}
-                      className="text-subtle transition-colors duration-150 hover:text-fg"
-                    >
-                      <ThumbsDown className="size-4" />
-                    </button>
-                  ) : null}
                 </div>
+                {onFlagReply ? (
+                  <button
+                    type="button"
+                    aria-label="这条回复不好"
+                    onClick={() => onFlagReply(pair.assistant!.id, pair.user?.id ?? pair.assistant!.replyTo)}
+                    className="grid size-11 place-items-center self-start text-subtle transition-colors duration-150 hover:text-fg"
+                  >
+                    <ThumbsDown className="size-4" />
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>

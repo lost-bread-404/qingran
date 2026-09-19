@@ -47,13 +47,20 @@ test("confirm panel keeps 噪音 and 字面≠意思, plus acoustic chips", () =
   assert.doesNotMatch(src, /<audio[^>]*muted/);
 });
 
-test("transcript has 👎 on Qingran replies and confirm buttons", () => {
+test("transcript has 👎 below the reply, 24pt from play, both 44pt", () => {
   const src = readFileSync(new URL("../../../components/lover/transcript.tsx", import.meta.url), "utf8");
   assert.match(src, /onConfirmQuick/);
   assert.match(src, /aria-label="确认正确"/);
   assert.match(src, /aria-label="打开标注"/);
   assert.match(src, /aria-label="这条回复不好"/);
   assert.match(src, /ThumbsDown/);
+  assert.match(src, /aria-label="播放这句话"/);
+  const play = src.slice(src.indexOf('aria-label="播放这句话"'), src.indexOf('aria-label="这条回复不好"'));
+  const flag = src.slice(src.indexOf('aria-label="这条回复不好"'), src.indexOf("thinking ?"));
+  assert.match(play, /grid size-11/);
+  assert.match(flag, /grid size-11/);
+  assert.match(src, /flex-col gap-6 self-start/);
+  assert.doesNotMatch(src, /flex-col gap-1/);
 });
 
 test("voice room shows labeled count, volume meter, and writes final_text back", () => {
@@ -79,6 +86,10 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /POST_QINGRAN_MS/);
   assert.match(src, /setConfirmStt\(result\.xaiText\)/);
   assert.match(src, /UNRECOGNIZED_TEXT/);
+  assert.match(src, /shouldResendAfterConfirm/);
+  assert.match(src, /sliceAfterMessage/);
+  assert.match(src, /async function replayFrom/);
+  assert.doesNotMatch(src, /alreadySent/);
 });
 
 test("call deafen ignores speech rec without aborting it", () => {
@@ -188,4 +199,13 @@ test("confirm panel and settings drawer follow visualViewport and keep the caret
   assert.match(settings, /height: viewport\.height/);
   assert.match(settings, /写给模型的 system prompt/);
   assert.match(settings, /记下大事/);
+});
+
+test("flag sheet can cancel without recording", () => {
+  const src = readFileSync(new URL("../../../components/lover/flag-reply.tsx", import.meta.url), "utf8");
+  const start = src.indexOf('variant="outline"');
+  const cancelBtn = src.slice(start, src.indexOf("</Button>", start));
+  assert.match(cancelBtn, /取消/);
+  assert.match(cancelBtn, /onClick=\{onClose\}/);
+  assert.doesNotMatch(cancelBtn, /onSave/);
 });

@@ -61,6 +61,7 @@ import {
 } from "@/lib/lover/hearing/store";
 import { clipSaveBanner, UNRECOGNIZED_TEXT, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { micActionForConfirmPanel } from "@/lib/lover/hearing/confirm-call";
+import { shouldResendAfterConfirm, sliceAfterMessage } from "@/lib/lover/hearing/confirm-resend";
 import type { AcousticTags, TagKey } from "@/lib/lover/hearing/tags";
 import { POST_QINGRAN_MS } from "@/lib/lover/vad";
 import {
@@ -808,21 +809,30 @@ export function VoiceRoom() {
       if (call.active) call.hear();
       return;
     }
+    const updated: ChatMessage = { ...current, text };
+    setEditingId(null);
+    await replayFrom(updated);
+  }
+
+  async function replayFrom(updated: ChatMessage) {
     abortRef.current?.abort();
     stopPlayback();
     busyRef.current = true;
-    const idx = chatRef.current.findIndex((m) => m.id === current.id);
-    if (idx < 0) return;
-    const history = chatRef.current.slice(0, idx);
-    const updated: ChatMessage = { ...current, text };
-    const removed = chatRef.current.slice(idx + 1);
-    setMessages([...history, updated]);
-    setEditingId(null);
-    void updateRoomMessage({ data: updated });
-    if (removed.length) {
-      void deleteRoomMessages({ data: { ids: removed.map((m) => m.id) } });
+    const sliced = sliceAfterMessage(chatRef.current, updated.id);
+    if (!sliced) {
+      busyRef.current = false;
+      return;
     }
-    await sendTurn(text, { history, existingUser: updated });
+    setMessages([...sliced.history, updated]);
+    void updateRoomMessage({ data: updated });
+    if (sliced.removed.length) {
+      void deleteRoomMessages({ data: { ids: sliced.removed.map((m) => m.id) } });
+    }
+    await sendTurn(updated.text, {
+      history: sliced.history,
+      existingUser: updated,
+      voiceTurnId: updated.voiceTurnId,
+    });
   }
 
   async function saveConfirm(input: {
@@ -859,33 +869,26 @@ export function VoiceRoom() {
         return;
       }
       if (msg.hearingGold !== "confirmed") setLabeledCount((n) => n + 1);
+      const goldText = input.goldText.trim();
+      const shouldResend = shouldResendAfterConfirm({
+        goldText,
+        previousText: msg.text,
+        noiseOnly: input.noiseOnly,
+      });
       const updated: ChatMessage = {
         ...msg,
-        text: input.goldText || msg.text,
+        text: goldText || msg.text,
         hearingGold: "confirmed",
+        kind: shouldResend ? "say" : msg.kind,
       };
-      void updateRoomMessage({ data: updated });
-      if (input.source === "edited" && input.goldText.trim() && input.goldText.trim() !== msg.text.trim() && !input.noiseOnly) {
-        const idx = chatRef.current.findIndex((m) => m.id === msg.id);
-        const next = idx >= 0 ? chatRef.current[idx + 1] : undefined;
-        const alreadySent = next?.role === "assistant" && Boolean(next.text.trim());
-        if (alreadySent) {
-          setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
-        } else {
-          abortRef.current?.abort();
-          stopPlayback();
-          const history = idx >= 0 ? chatRef.current.slice(0, idx) : chatRef.current;
-          const removed = idx >= 0 ? chatRef.current.slice(idx + 1) : [];
-          setMessages([...history, updated]);
-          if (removed.length) {
-            void deleteRoomMessages({ data: { ids: removed.map((m) => m.id) } });
-          }
-          await sendTurn(input.goldText, { history, existingUser: updated, voiceTurnId: msg.voiceTurnId });
-        }
+      if (shouldResend) {
+        setConfirmId(null);
+        await replayFrom(updated);
       } else {
+        void updateRoomMessage({ data: updated });
         setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
+        setConfirmId(null);
       }
-      setConfirmId(null);
     } catch (err) {
       setConfirmError(err instanceof Error ? err.message : String(err));
     } finally {
