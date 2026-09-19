@@ -11,6 +11,7 @@ import {
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
 import { hearUtterance } from "@/lib/lover/hear";
+import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { warmupHearing } from "@/lib/lover/hearing/store";
 import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
@@ -222,9 +223,10 @@ export function useVoiceInput({ lang, prompt }: Options) {
     }
   }, [lang, recorderSupported, speechSupported, startPulse]);
 
-  const stop = useCallback(async (): Promise<string> => {
-    if (stopLockRef.current) return "";
-    if (!recordingRef.current && status !== "recording") return "";
+  const stop = useCallback(async (): Promise<HeardUtterance> => {
+    const empty: HeardUtterance = { text: "", turnId: "", skipQingran: false };
+    if (stopLockRef.current) return empty;
+    if (!recordingRef.current && status !== "recording") return empty;
     stopLockRef.current = true;
     recordingRef.current = false;
     setStatus("transcribing");
@@ -239,9 +241,9 @@ export function useVoiceInput({ lang, prompt }: Options) {
     const fallback = wav ? null : await collectRecording(session);
     teardownMedia();
 
-    let heard = "";
+    let heard: HeardUtterance = empty;
     try {
-      heard = (await hearUtterance({
+      heard = await hearUtterance({
         wav,
         fallback,
         liveText,
@@ -249,13 +251,15 @@ export function useVoiceInput({ lang, prompt }: Options) {
         prompt: promptRef.current,
         speech_start: Date.now() - 1500,
         endpoint_fired: Date.now(),
-      })) ?? "";
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       setStatus("idle");
       stopLockRef.current = false;
-      setError(isQuotaHint(message) ? QUOTA_HINT : "我没听清，再说一遍。");
-      return "";
+      if (isQuotaHint(message)) setError(QUOTA_HINT);
+      else if (getHearingSession().debugHearing) setError(message || "识别失败。");
+      else setError("我没听清，再说一遍。");
+      return empty;
     }
 
     setInterim("");
@@ -263,15 +267,37 @@ export function useVoiceInput({ lang, prompt }: Options) {
     finalTextRef.current = "";
     stopLockRef.current = false;
 
-    if (!heard) {
+    if (heard.saveError) setError(clipSaveBanner(heard.saveError));
+    if (!heard.text) {
       setStatus("idle");
-      setError("我没听清，再说一遍。");
-      return "";
+      if (!getHearingSession().debugHearing) setError("我没听清，再说一遍。");
+      return heard;
     }
 
+    if (!heard.saveError) setError(null);
     setStatus("idle");
     return heard;
-  }, [lang, status, teardownMedia]);
+  }, [status, teardownMedia]);
+
+  const stopRaw = useCallback(async () => {
+    if (stopLockRef.current) return null;
+    if (!recordingRef.current && status !== "recording") return null;
+    stopLockRef.current = true;
+    recordingRef.current = false;
+    setStatus("idle");
+    const session = sessionRef.current;
+    await stopRecognition(recRef.current);
+    const liveText = (finalTextRef.current || interimRef.current).trim();
+    const samples = (await pcmTapRef.current?.stop()) ?? new Float32Array(0);
+    const wav = wavFromTap(samples, analyseRef.current?.ctx.sampleRate ?? 48000, 0);
+    const fallback = wav ? null : await collectRecording(session);
+    teardownMedia();
+    setInterim("");
+    interimRef.current = "";
+    finalTextRef.current = "";
+    stopLockRef.current = false;
+    return { wav, fallback, liveText };
+  }, [status, teardownMedia]);
 
   const cancel = useCallback(() => {
     stopLockRef.current = false;
@@ -317,6 +343,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
     recorderSupported,
     start,
     stop,
+    stopRaw,
     cancel,
   };
 }

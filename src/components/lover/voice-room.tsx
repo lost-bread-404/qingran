@@ -45,8 +45,13 @@ import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
 import { newId } from "@/lib/lover/storage";
 import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
-import { getHearingSession, nextScriptedCategory, setHearingSession } from "@/lib/lover/hearing/session";
-import { confirmHearingClip, patchHearingTurn, scriptedQuota } from "@/lib/lover/hearing/store";
+import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import {
+  confirmHearingClip,
+  getHearingTurnAudio,
+  patchHearingTurn,
+} from "@/lib/lover/hearing/store";
+import { clipSaveBanner, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import {
   CONTEXT_WINDOW,
   DEFAULT_PROFILE,
@@ -101,7 +106,8 @@ export function VoiceRoom() {
   const transcriptRef = useRef<TranscriptHandle>(null);
   const viewport = useVisualViewportHeight();
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
-  const [scriptedHave, setScriptedHave] = useState<Record<string, number>>({});
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmAudioUrl, setConfirmAudioUrl] = useState<string | null>(null);
 
   useEffect(() => {
     profileRef.current = profile;
@@ -119,8 +125,8 @@ export function VoiceRoom() {
     );
     setHearingSession({
       provider: profile.hearingProvider,
-      capture: profile.captureAudio,
-      scripted: profile.scriptedCapture,
+      capture: profile.debugHearing,
+      scripted: false,
       debugHearing: profile.debugHearing,
       nbest: profile.hearingNbest,
       mode: callActiveRef.current ? "call" : "text",
@@ -137,24 +143,6 @@ export function VoiceRoom() {
   useEffect(() => {
     settingsOpenRef.current = settingsOpen;
   }, [settingsOpen]);
-
-  useEffect(() => {
-    if (!profile.scriptedCapture) {
-      setHearingSession({ category: null, scripted: false, source: "real" });
-      return;
-    }
-    void scriptedQuota().then((result) => {
-      const counts: Record<string, number> = {};
-      for (const row of result.categories) counts[row.id] = row.have;
-      setScriptedHave(counts);
-      const next = nextScriptedCategory(counts);
-      setHearingSession({
-        category: next?.id ?? null,
-        scripted: true,
-        source: "scripted",
-      });
-    });
-  }, [profile.scriptedCapture, messages.length]);
 
   useEffect(() => {
     const lock = () => {
@@ -364,11 +352,32 @@ export function VoiceRoom() {
   const sendTurn = useCallback(
     async (
       sayRaw: string,
-      opts?: { history?: ChatMessage[]; existingUser?: ChatMessage; voiceTurnId?: string },
+      opts?: {
+        history?: ChatMessage[];
+        existingUser?: ChatMessage;
+        voiceTurnId?: string;
+        skipQingran?: boolean;
+      },
     ) => {
       const tagged = sayRaw.trim();
       if (!tagged) return;
       const say = stripHearingMarkup(tagged).trim() || tagged;
+      const at = Date.now();
+      const userMsg: ChatMessage = opts?.existingUser ?? {
+        id: newId(),
+        role: "user",
+        text: say,
+        createdAt: at,
+        kind: "say",
+        voiceTurnId: opts?.voiceTurnId,
+        hearingGold: opts?.voiceTurnId ? "unconfirmed" : undefined,
+      };
+      if (opts?.skipQingran) {
+        setBanner(null);
+        setMessages((prev) => [...prev, userMsg]);
+        void appendRoomMessage({ data: userMsg });
+        return;
+      }
       if (!opts?.existingUser && busyRef.current) return;
       const turn = ++turnRef.current;
       busyRef.current = true;
@@ -379,15 +388,6 @@ export function VoiceRoom() {
       voice.setError(null);
 
       const history = (opts?.history ?? chatRef.current).slice(-CONTEXT_WINDOW);
-      const at = Date.now();
-      const userMsg: ChatMessage = opts?.existingUser ?? {
-        id: newId(),
-        role: "user",
-        text: say,
-        createdAt: at,
-        kind: "say",
-        voiceTurnId: opts?.voiceTurnId,
-      };
       const reply: ChatMessage = {
         id: newId(),
         role: "assistant",
@@ -560,8 +560,12 @@ export function VoiceRoom() {
 
   const call = useCall({
     prompt: profile.systemPrompt,
-    onUtterance: async (text) => {
-      await sendTurn(text, { voiceTurnId: getHearingSession().lastTurnId ?? undefined });
+    onUtterance: async (heard: HeardUtterance) => {
+      if (heard.saveError) setBanner(clipSaveBanner(heard.saveError));
+      await sendTurn(heard.text, {
+        voiceTurnId: voiceTurnIdForMessage(heard),
+        skipQingran: heard.skipQingran,
+      });
     },
   });
 
@@ -575,17 +579,47 @@ export function VoiceRoom() {
     }
   }, [call.active, call.hear, call.deafen]);
 
+  useEffect(() => {
+    if (!confirmId) {
+      setConfirmAudioUrl((url) => {
+        if (url) URL.revokeObjectURL(url);
+        return null;
+      });
+      return;
+    }
+    const msg = chatRef.current.find((m) => m.id === confirmId);
+    if (!msg?.voiceTurnId) return;
+    let revoked = false;
+    let url: string | null = null;
+    void getHearingTurnAudio({ data: { turnId: msg.voiceTurnId } }).then((result) => {
+      if (!result.ok || revoked) return;
+      const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
+      url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
+      setConfirmAudioUrl(url);
+    });
+    return () => {
+      revoked = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [confirmId]);
+
   const finishHold = useCallback(async () => {
     if (finishingHoldRef.current) return;
     finishingHoldRef.current = true;
     try {
       stopPlayback();
-      const text = await voice.stop();
+      const heard = await voice.stop();
       stopPlayback();
       const el = getPlaybackElement();
       el.muted = false;
       setStatus("idle");
-      if (text) void sendTurn(text, { voiceTurnId: getHearingSession().lastTurnId ?? undefined });
+      if (heard.saveError) setBanner(clipSaveBanner(heard.saveError));
+      if (heard.text) {
+        void sendTurn(heard.text, {
+          voiceTurnId: voiceTurnIdForMessage(heard),
+          skipQingran: heard.skipQingran,
+        });
+      }
     } finally {
       finishingHoldRef.current = false;
     }
@@ -676,28 +710,43 @@ export function VoiceRoom() {
     await sendTurn(text, { history, existingUser: updated });
   }
 
-  async function saveConfirm(goldText: string, source: "confirmed" | "edited", emotion: CueEmotion | null) {
+  async function saveConfirm(
+    goldText: string,
+    source: "confirmed" | "edited",
+    emotion: CueEmotion | null,
+    noiseOnly: boolean,
+  ) {
     const msg = chatRef.current.find((m) => m.id === confirmId);
     if (!msg?.voiceTurnId) {
       setConfirmId(null);
       return;
     }
     setConfirmBusy(true);
+    setConfirmError(null);
     try {
-      await confirmHearingClip({
+      const result = await confirmHearingClip({
         data: {
           turnId: msg.voiceTurnId,
           goldText,
           goldSource: source,
           utteranceEmotion: emotion,
+          noiseOnly,
         },
       });
-      if (source === "edited" && goldText.trim() && goldText.trim() !== msg.text.trim()) {
+      if (!result.ok) {
+        setConfirmError(result.error);
+        return;
+      }
+      const updated: ChatMessage = {
+        ...msg,
+        text: goldText || msg.text,
+        hearingGold: "confirmed",
+      };
+      void updateRoomMessage({ data: updated });
+      if (source === "edited" && goldText.trim() && goldText.trim() !== msg.text.trim() && !noiseOnly) {
         const idx = chatRef.current.findIndex((m) => m.id === msg.id);
         const next = idx >= 0 ? chatRef.current[idx + 1] : undefined;
         const alreadySent = next?.role === "assistant" && Boolean(next.text.trim());
-        const updated: ChatMessage = { ...msg, text: goldText };
-        void updateRoomMessage({ data: updated });
         if (alreadySent) {
           setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
         } else {
@@ -711,10 +760,14 @@ export function VoiceRoom() {
           }
           await sendTurn(goldText, { history, existingUser: updated, voiceTurnId: msg.voiceTurnId });
         }
+      } else {
+        setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
       }
+      setConfirmId(null);
+    } catch (err) {
+      setConfirmError(err instanceof Error ? err.message : String(err));
     } finally {
       setConfirmBusy(false);
-      setConfirmId(null);
     }
   }
 
@@ -722,7 +775,6 @@ export function VoiceRoom() {
   const transcribing = voice.status === "transcribing";
   const editable = lastUserSay(messages);
   const composing = composerOpen && !recording && !call.active;
-  const scriptedNow = profile.scriptedCapture ? nextScriptedCategory(scriptedHave) : null;
   const statusLine = call.active
     ? call.phase === "speaking-you"
       ? "在听你"
@@ -800,21 +852,6 @@ export function VoiceRoom() {
           </div>
         </header>
 
-        {scriptedNow ? (
-          <div className="mx-5 mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
-            <p>
-              定向录制 · {scriptedNow.label}
-              <span className="ml-2 text-xs text-subtle">
-                还差 {Math.max(0, scriptedNow.quota - (scriptedHave[scriptedNow.id] ?? 0))} / {scriptedNow.quota}
-              </span>
-            </p>
-          </div>
-        ) : profile.scriptedCapture ? (
-          <div className="mx-5 mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-muted">
-            定向录制配额已满。
-          </div>
-        ) : null}
-
         {composing ? (
           <div className="flex min-h-0 flex-1 flex-col px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
             {(banner || voice.error) && (
@@ -889,7 +926,10 @@ export function VoiceRoom() {
                 if (call.active) call.hear();
               }}
               onEditSave={() => void saveEdit()}
-              onConfirmStart={(id) => setConfirmId(id)}
+              onConfirmStart={(id) => {
+                setConfirmError(null);
+                setConfirmId(id);
+              }}
             />
 
             {editingId ? null : (
@@ -950,9 +990,16 @@ export function VoiceRoom() {
         <ConfirmTurn
           open={Boolean(confirmId)}
           sttText={messages.find((m) => m.id === confirmId)?.text ?? ""}
+          audioUrl={confirmAudioUrl}
           busy={confirmBusy}
-          onClose={() => setConfirmId(null)}
-          onConfirm={(goldText, source, emotion) => void saveConfirm(goldText, source, emotion)}
+          error={confirmError}
+          onClose={() => {
+            setConfirmId(null);
+            setConfirmError(null);
+          }}
+          onConfirm={(goldText, source, emotion, noiseOnly) =>
+            void saveConfirm(goldText, source, emotion, noiseOnly)
+          }
         />
 
         <SettingsDrawer

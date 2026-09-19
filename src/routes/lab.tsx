@@ -10,6 +10,8 @@ import {
   deleteHearingClip,
   exportHearingClips,
   getHearingClipAudio,
+  hearingConnectionTest,
+  hearingLabDiagnostics,
   hearingLabStats,
   listHearingClips,
   saveHearingGold,
@@ -77,6 +79,24 @@ function HearingLabPage() {
   const [skip, setSkip] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [confirmTurnId, setConfirmTurnId] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [diag, setDiag] = useState<{
+    dbSource: string;
+    migrations: string[];
+    clipCount: number;
+    env: Record<string, boolean>;
+    error?: string;
+  } | null>(null);
+  const [ping, setPing] = useState<{
+    engines: { id: string; ok: boolean; latency_ms: number; error?: string }[];
+    env: Record<string, boolean>;
+    dbSource: string;
+    migrations: string[];
+    clipCount: number;
+    dbError?: string;
+  } | null>(null);
+  const [pingBusy, setPingBusy] = useState(false);
   const [coverage, setCoverage] = useState<{
     totalTurns: number;
     coverage: {
@@ -95,25 +115,51 @@ function HearingLabPage() {
   const dbBacked = clips.filter((c) => c.storageBackend === "db").length;
 
   async function load(nextRelabel = relabel, secret = password, nextFilter = filter) {
-    const listed = await listHearingClips({
-      data: { password: secret, relabel: nextRelabel, filter: nextFilter },
-    });
-    setClips(listed.clips as ClipRow[]);
-    setIndex(0);
-    const stats = await hearingLabStats({ data: { password: secret } });
-    setCoverage({ totalTurns: stats.totalTurns, coverage: stats.coverage });
+    try {
+      const listed = await listHearingClips({
+        data: { password: secret, relabel: nextRelabel, filter: nextFilter },
+      });
+      if (!listed.ok) {
+        setError(listed.error);
+        setClips([]);
+        return;
+      }
+      setError(null);
+      setClips(listed.clips as ClipRow[]);
+      setIndex(0);
+      const stats = await hearingLabStats({ data: { password: secret } });
+      if (!stats.ok) {
+        setError(stats.error);
+      } else {
+        setCoverage({ totalTurns: stats.totalTurns, coverage: stats.coverage });
+      }
+      const nextDiag = await hearingLabDiagnostics({ data: { password: secret } });
+      setDiag({
+        dbSource: nextDiag.dbSource,
+        migrations: nextDiag.migrations,
+        clipCount: nextDiag.clipCount,
+        env: nextDiag.env,
+        error: "error" in nextDiag ? nextDiag.error : undefined,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function unlock() {
     setError(null);
-    const result = await unlockHearingLab({ data: { password } });
-    if (!result.ok) {
-      setError(result.error);
-      return;
+    try {
+      const result = await unlockHearingLab({ data: { password } });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      sessionStorage.setItem(LAB_KEY, password);
+      setUnlocked(true);
+      await load(relabel, password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
-    sessionStorage.setItem(LAB_KEY, password);
-    setUnlocked(true);
-    await load(relabel, password);
   }
 
   useEffect(() => {
@@ -215,6 +261,58 @@ function HearingLabPage() {
           重标
         </Button>
       </header>
+
+      {error ? <p className="mx-4 mb-2 text-sm text-live">{error}</p> : null}
+
+      <div className="mx-4 mb-3 rounded-md bg-surface-2 px-3 py-3 text-sm">
+        <div className="flex items-center justify-between gap-2">
+          <p>连接测试</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={pingBusy}
+            onClick={async () => {
+              setPingBusy(true);
+              try {
+                const result = await hearingConnectionTest({ data: { password } });
+                setPing(result);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setPingBusy(false);
+              }
+            }}
+          >
+            {pingBusy ? "测试中…" : "测一下"}
+          </Button>
+        </div>
+        {diag ? (
+          <p className="mt-2 text-xs text-subtle">
+            db {diag.dbSource} · clips {diag.clipCount} · migrations {diag.migrations.join(", ") || "无"}
+          </p>
+        ) : null}
+        {diag?.error ? <p className="mt-1 text-xs text-live">{diag.error}</p> : null}
+        {diag ? (
+          <p className="mt-1 text-xs text-subtle">
+            env{" "}
+            {Object.entries(diag.env)
+              .map(([k, v]) => `${k}=${v ? "有" : "无"}`)
+              .join(" · ")}
+          </p>
+        ) : null}
+        {ping ? (
+          <ul className="mt-2 flex flex-col gap-1 text-xs">
+            {ping.engines.map((engine) => (
+              <li key={engine.id}>
+                {engine.id}: {engine.ok ? "ok" : "失败"} · {engine.latency_ms}ms
+                {engine.error ? ` · ${engine.error}` : ""}
+              </li>
+            ))}
+            {ping.dbError ? <li className="text-live">db: {ping.dbError}</li> : null}
+          </ul>
+        ) : null}
+      </div>
 
       {dbBacked > 0 || coverage?.coverage.dbBacked ? (
         <div className="mx-4 mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-live">
@@ -417,20 +515,28 @@ function HearingLabPage() {
                         setStatus("cues 不是合法 JSON。");
                         return;
                       }
-                      await saveHearingGold({
-                        data: {
-                          password,
-                          id: clip.id,
-                          relabel,
-                          goldText,
-                          goldCues: cues,
-                          noiseOnly,
-                          skip,
-                          utteranceEmotion: clip.utteranceEmotion as CueEmotion | null,
-                        },
-                      });
-                      setStatus(relabel ? "重标已另存。" : "已保存标注。");
-                      await load();
+                      try {
+                        const saved = await saveHearingGold({
+                          data: {
+                            password,
+                            id: clip.id,
+                            relabel,
+                            goldText,
+                            goldCues: cues,
+                            noiseOnly,
+                            skip,
+                            utteranceEmotion: clip.utteranceEmotion as CueEmotion | null,
+                          },
+                        });
+                        if (!saved.ok) {
+                          setStatus(saved.error);
+                          return;
+                        }
+                        setStatus(relabel ? "重标已另存。" : "已保存标注。");
+                        await load();
+                      } catch (err) {
+                        setStatus(err instanceof Error ? err.message : String(err));
+                      }
                     }}
                   >
                     保存
@@ -463,21 +569,41 @@ function HearingLabPage() {
       <ConfirmTurn
         open={Boolean(confirmClip)}
         sttText={confirmClip?.sttText || confirmClip?.hearingText || confirmClip?.xaiText || ""}
+        audioUrl={audioUrl}
+        busy={confirmBusy}
+        error={confirmError}
         initialEmotion={(confirmClip?.utteranceEmotion as CueEmotion | null) ?? null}
-        onClose={() => setConfirmTurnId(null)}
-        onConfirm={async (gold, source, emotion) => {
-          if (!confirmClip?.turnId) return;
-          await confirmHearingClip({
-            data: {
-              turnId: confirmClip.turnId,
-              goldText: gold,
-              goldSource: source,
-              utteranceEmotion: emotion,
-            },
-          });
+        initialNoise={Boolean(confirmClip?.noiseOnly)}
+        onClose={() => {
           setConfirmTurnId(null);
-          setStatus("已写入 eval set。");
-          await load();
+          setConfirmError(null);
+        }}
+        onConfirm={async (gold, source, emotion, noiseOnly) => {
+          if (!confirmClip?.turnId) return;
+          setConfirmBusy(true);
+          setConfirmError(null);
+          try {
+            const result = await confirmHearingClip({
+              data: {
+                turnId: confirmClip.turnId,
+                goldText: gold,
+                goldSource: source,
+                utteranceEmotion: emotion,
+                noiseOnly,
+              },
+            });
+            if (!result.ok) {
+              setConfirmError(result.error);
+              return;
+            }
+            setConfirmTurnId(null);
+            setStatus("已写入 eval set。");
+            await load();
+          } catch (err) {
+            setConfirmError(err instanceof Error ? err.message : String(err));
+          } finally {
+            setConfirmBusy(false);
+          }
         }}
       />
     </div>

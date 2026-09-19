@@ -47,6 +47,34 @@ test("empty prompt in a backup still becomes the default after lock", () => {
   assert.equal(parsed.profile.systemPrompt, DEFAULT_SYSTEM_PROMPT);
 });
 
+test("debug switch owns captureAudio", () => {
+  assert.equal(lockedProfile({ debugHearing: false }).debugHearing, false);
+  assert.equal(lockedProfile({ debugHearing: false }).captureAudio, false);
+  assert.equal(lockedProfile({ debugHearing: true, captureAudio: false }).captureAudio, true);
+  assert.equal(lockedProfile({ debugHearing: false, captureAudio: true }).captureAudio, false);
+});
+
+test("round-trips confirmed gold flag on a voice turn", () => {
+  const backup = makeBackup({
+    now: 1_700_000_000_000,
+    profile: lockedProfile({ debugHearing: true }),
+    memories: [],
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        text: "嗯",
+        createdAt: 3,
+        voiceTurnId: "turn-9",
+        hearingGold: "confirmed",
+      },
+    ],
+  });
+  const parsed = parseBackup(JSON.parse(JSON.stringify(backup)));
+  assert.equal(parsed?.messages[0]?.hearingGold, "confirmed");
+  assert.equal(parsed?.messages[0]?.voiceTurnId, "turn-9");
+});
+
 test("backup filename is a dated json", () => {
   assert.match(backupFilename(Date.UTC(2026, 8, 16)), /^qingran-backup-\d{8}\.json$/);
 });

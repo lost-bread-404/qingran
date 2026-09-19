@@ -86,6 +86,14 @@ function toSql(run: Run): Sql {
   return sql;
 }
 
+function loadMigrationFiles(): Record<string, string> {
+  return import.meta.glob("/migrations/*.sql", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+}
+
 function createNeonSql(): Promise<Sql> {
   globalRef.__pgSqlPromise__ ??= (async () => {
     // Regular Postgres driver: node-postgres (`pg`) — works directly with Neon's
@@ -95,6 +103,7 @@ function createNeonSql(): Promise<Sql> {
     types.setTypeParser(OID_DATE, identity);
     types.setTypeParser(OID_INTERVAL, identity);
     const pool = new Pool({ connectionString: databaseUrl });
+    await applyNeonMigrations(pool);
     return toSql(async <T>(text: string, params: unknown[]) => {
       const res = await pool.query(text, params);
       return res.rows as T[];
@@ -104,6 +113,44 @@ function createNeonSql(): Promise<Sql> {
     throw err;
   });
   return globalRef.__pgSqlPromise__;
+}
+
+async function applyNeonMigrations(pool: import("pg").Pool) {
+  // Runtime apply covers Vercel deploys whose `npm run db:migrate` skipped
+  // because DATABASE_URL was not in the build environment. Pending files are
+  // tracked in `_migrations`. Use a transaction advisory lock — Neon pooled
+  // endpoints do not keep session locks.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("select pg_advisory_xact_lock(87429156)");
+    await client.query(
+      "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+    );
+    const applied = (await client.query("SELECT name FROM _migrations")).rows.map(
+      (r: { name: string }) => r.name,
+    );
+    const migrations = loadMigrationFiles();
+    let count = 0;
+    for (const { name, path } of pendingMigrations(Object.keys(migrations), applied)) {
+      await client.query(migrations[path]);
+      await client.query("INSERT INTO _migrations (name) VALUES ($1)", [name]);
+      console.log(`[db] applied ${name}`);
+      count += 1;
+    }
+    await client.query("COMMIT");
+    if (count) console.log(`[db] neon migrations done — ${count} applied.`);
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* connection died */
+    }
+    console.error("[db] neon migrate failed:", err);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function createPgliteSql(): Promise<Sql> {
@@ -138,11 +185,7 @@ async function createPgliteSql(): Promise<Sql> {
   // passes serialized on a global chain so concurrent callers never
   // double-apply.
   const migrate = async (): Promise<void> => {
-    const migrations = import.meta.glob("/migrations/*.sql", {
-      query: "?raw",
-      import: "default",
-      eager: true,
-    }) as Record<string, string>;
+    const migrations = loadMigrationFiles();
     const doneRows = await pg.query<{ name: string }>(
       "select name from _migrations",
     );
@@ -218,18 +261,20 @@ export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite
  *
  * - **PGLite** (preview / no `DATABASE_URL`): open the in-memory DB and apply
  *   `migrations/*.sql`. Idempotent — concurrent callers share one promise.
- * - **Neon**: no-op (pool is created lazily on first query).
+ * - **Neon**: open the pool and apply any pending `migrations/*.sql` (covers
+ *   Vercel deploys whose build-time `db:migrate` skipped for lack of
+ *   DATABASE_URL).
  *
  * Vite `configureServer` awaits this at dev startup; production imports of this
  * module kick it off immediately (see bottom of file).
  */
 export function ensureDbReady(): Promise<void> {
-  if (dbSource !== "pglite") return Promise.resolve();
   return getSql().then(() => undefined);
 }
 
 // Server-only eager start: kick PGLite bootstrap as soon as this module loads in
 // Node. Client bundles never hit this path (`getSql` throws in the browser).
+// Neon stays lazy — first getSql() applies pending migrations (see createNeonSql).
 const globalBoot = globalThis as typeof globalThis & {
   __pgBootstrapPromise__?: Promise<void>;
 };

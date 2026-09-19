@@ -210,7 +210,12 @@ function encodeStoredMessage(msg: ChatMessage): string {
   let text = msg.text;
   if (msg.kind === "steer") text = `⟦走向⟧${text}`;
   else if (msg.kind === "setting") text = `⟦设定⟧${text}`;
-  if (msg.voiceTurnId) text = `⟦听:${msg.voiceTurnId}⟧${text}`;
+  if (msg.voiceTurnId) {
+    text =
+      msg.hearingGold === "confirmed"
+        ? `⟦听:${msg.voiceTurnId}:金⟧${text}`
+        : `⟦听:${msg.voiceTurnId}⟧${text}`;
+  }
   if (msg.scanned) text = `⟦已扫⟧${text}`;
   return text;
 }
@@ -225,13 +230,21 @@ function decodeStoredMessage(row: {
   let scanned = false;
   let kind: MessageKind | undefined;
   let voiceTurnId: string | undefined;
+  let hearingGold: ChatMessage["hearingGold"];
   if (text.startsWith("⟦已扫⟧")) {
     scanned = true;
     text = text.slice(4);
   }
   const hear = text.match(/^⟦听:([^⟧]+)⟧/);
   if (hear) {
-    voiceTurnId = hear[1];
+    const raw = hear[1];
+    if (raw.endsWith(":金")) {
+      voiceTurnId = raw.slice(0, -2);
+      hearingGold = "confirmed";
+    } else {
+      voiceTurnId = raw;
+      hearingGold = "unconfirmed";
+    }
     text = text.slice(hear[0].length);
   }
   if (text.startsWith("⟦走向⟧")) {
@@ -249,6 +262,7 @@ function decodeStoredMessage(row: {
     kind,
     scanned: scanned || undefined,
     voiceTurnId,
+    hearingGold,
   };
 }
 

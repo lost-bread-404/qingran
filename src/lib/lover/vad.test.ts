@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DEBUG_START_FLOOR_MIN,
+  DEBUG_START_FLOOR_MULT,
   holdThreshold,
   isHoldVoiced,
   isSpeechStart,
   nextFloor,
   shouldEndUtterance,
+  START_FLOOR_MIN,
+  START_FLOOR_MULT,
   startThreshold,
 } from "./vad.ts";
 
@@ -28,6 +32,16 @@ test("quiet coquettish cues can still start a turn", () => {
   const floor = 0.006;
   assert.equal(isSpeechStart(0.009, floor, 0.55, 0.12), true);
   assert.equal(isSpeechStart(0.009, floor, 0.1, 0.28), true);
+});
+
+test("debug VAD numbers are documented vs production", () => {
+  assert.equal(START_FLOOR_MIN, 0.01);
+  assert.equal(START_FLOOR_MULT, 1.95);
+  assert.equal(DEBUG_START_FLOOR_MIN, 0.003);
+  assert.equal(DEBUG_START_FLOOR_MULT, 1.25);
+  const floor = 0.008;
+  assert.equal(startThreshold(floor, false), Math.max(0.01, floor * 1.95));
+  assert.equal(startThreshold(floor, true), Math.max(0.003, floor * 1.25));
 });
 
 test("hold uses the floor so room noise is not treated as speech", () => {

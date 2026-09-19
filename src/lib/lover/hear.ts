@@ -1,13 +1,22 @@
 import { blobToBase64 } from "./audio";
 import { runHearing } from "./hearing/store";
 import { getHearingSession, setHearingSession } from "./hearing/session";
-import { shouldDropAsNoise } from "./hearing/noise";
 import { transcribeVoice } from "./server";
 import { finishHeard } from "./stt-text";
 import type { ProsodyFrame } from "./prosody";
 import { QUOTA_HINT, isQuotaHint } from "./xai-error";
 import { newId } from "./storage";
 import type { HearingProviderId } from "./hearing/config";
+import {
+  clipSaveBanner,
+  heardFromHearing,
+  type HeardUtterance,
+  UNRECOGNIZED_TEXT,
+  voiceTurnIdForMessage,
+} from "./hearing/heard";
+
+export { UNRECOGNIZED_TEXT, clipSaveBanner, voiceTurnIdForMessage };
+export type { HeardUtterance };
 
 type SttWord = { text?: string; start?: number; end?: number };
 
@@ -19,23 +28,31 @@ export async function hearUtterance(input: {
   prompt?: string;
   speech_start?: number;
   endpoint_fired?: number;
-}) {
+}): Promise<HeardUtterance> {
+  const session = getHearingSession();
+  const turnId = newId();
+  setHearingSession({ turnId, lastTurnId: turnId });
+  const debugHearing = session.debugHearing;
   const clip =
     input.wav && input.wav.size >= 80
       ? input.wav
       : input.fallback && input.fallback.size >= 40
         ? input.fallback
         : null;
-  if (!clip) return finishHeard("", input.liveText, undefined, input.frames);
+  if (!clip) {
+    return {
+      text: debugHearing ? UNRECOGNIZED_TEXT : "",
+      turnId,
+      saveError: debugHearing ? "没有录到声音。" : undefined,
+      skipQingran: debugHearing,
+    };
+  }
 
-  const session = getHearingSession();
-  const turnId = newId();
-  setHearingSession({ turnId, lastTurnId: turnId });
   const upload_start = Date.now();
   const audioBase64 = await blobToBase64(clip);
   const mimeType = clip.type || "audio/wav";
   const provider: HearingProviderId = session.provider;
-  const persist = session.debugHearing || session.capture || session.scripted;
+  const persist = debugHearing || session.capture || session.scripted;
 
   try {
     const result = await runHearing({
@@ -55,15 +72,25 @@ export async function hearUtterance(input: {
         context: session.context || undefined,
         nbest: session.nbest,
         extraKeyterms: session.extraKeyterms,
-        debugHearing: session.debugHearing,
+        debugHearing,
         mode: session.mode,
         audioRoute: session.audioRoute,
       },
     });
     if (result.quota) throw new Error(QUOTA_HINT);
-    if (shouldDropAsNoise(result.noise_only, result.xaiText)) return "";
-    if (result.provider !== "xai" && result.tagged) return result.tagged;
-    return finishHeard(result.xaiText, input.liveText, result.words, input.frames);
+    const tagged =
+      result.provider !== "xai" && result.tagged
+        ? result.tagged
+        : finishHeard(result.xaiText, input.liveText, result.words, input.frames);
+    return heardFromHearing({
+      debugHearing,
+      turnId,
+      tagged,
+      xaiText: result.xaiText,
+      noiseOnly: result.noise_only,
+      clipId: result.clipId,
+      saveError: result.saveError,
+    });
   } catch (err) {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
@@ -83,5 +110,12 @@ export async function hearUtterance(input: {
   } catch (err) {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
-  return finishHeard(text, input.liveText, words, input.frames);
+  const finished = finishHeard(text, input.liveText, words, input.frames);
+  return heardFromHearing({
+    debugHearing,
+    turnId,
+    tagged: finished,
+    xaiText: text,
+    noiseOnly: !finished,
+  });
 }

@@ -107,7 +107,6 @@ export async function hearWithGemini(audioBase64: string, opts?: HearingCallOpts
         ],
         safetySettings: GEMINI_SAFETY_SETTINGS,
         generationConfig: {
-          temperature: 0,
           responseMimeType: "application/json",
           maxOutputTokens: 800,
           thinkingConfig: { thinkingLevel: "low" },

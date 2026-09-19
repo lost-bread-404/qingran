@@ -18,28 +18,48 @@ const EMOTION_LABEL: Record<CueEmotion, string> = {
 type Props = {
   open: boolean;
   sttText: string;
+  audioUrl?: string | null;
   onClose: () => void;
-  onConfirm: (goldText: string, source: "confirmed" | "edited", emotion: CueEmotion | null) => void;
+  onConfirm: (
+    goldText: string,
+    source: "confirmed" | "edited",
+    emotion: CueEmotion | null,
+    noiseOnly: boolean,
+  ) => Promise<void> | void;
   busy?: boolean;
+  error?: string | null;
   initialEmotion?: CueEmotion | null;
+  initialNoise?: boolean;
 };
 
-export function ConfirmTurn({ open, sttText, onClose, onConfirm, busy, initialEmotion = null }: Props) {
+export function ConfirmTurn({
+  open,
+  sttText,
+  audioUrl,
+  onClose,
+  onConfirm,
+  busy,
+  error,
+  initialEmotion = null,
+  initialNoise = false,
+}: Props) {
   const [draft, setDraft] = useState(sttText);
   const [emotion, setEmotion] = useState<CueEmotion | null>(initialEmotion);
+  const [noiseOnly, setNoiseOnly] = useState(initialNoise);
 
   useEffect(() => {
     if (!open) return;
     setDraft(sttText);
     setEmotion(initialEmotion);
-  }, [open, sttText, initialEmotion]);
+    setNoiseOnly(initialNoise);
+  }, [open, sttText, initialEmotion, initialNoise]);
 
   if (!open) return null;
 
   const edited = draft.trim() !== sttText.trim();
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end bg-bg/70">
+    <div className="fixed inset-0 z-50 flex flex-col justify-end bg-bg/80">
       <button type="button" className="min-h-0 flex-1" aria-label="关掉" onClick={onClose} />
       <div className="rounded-t-2xl bg-bg px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-lamp">
         <div className="mb-3 flex items-center justify-between">
@@ -53,11 +73,16 @@ export function ConfirmTurn({ open, sttText, onClose, onConfirm, busy, initialEm
             <X className="size-5" />
           </button>
         </div>
+        {audioUrl ? (
+          <audio className="mb-3 w-full" controls src={audioUrl} />
+        ) : (
+          <p className="mb-3 text-xs text-subtle">没有这段录音，或者还在加载。</p>
+        )}
         <Textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           className="min-h-28"
-          aria-label="识别文本"
+          aria-label="识别文字"
         />
         <div className="mt-3 flex flex-wrap gap-2">
           {EMOTIONS.map((id) => (
@@ -74,23 +99,21 @@ export function ConfirmTurn({ open, sttText, onClose, onConfirm, busy, initialEm
             </button>
           ))}
         </div>
-        <div className="mt-4 flex gap-2">
+        <label className="mt-3 flex min-h-11 items-center gap-2 text-sm">
+          <input type="checkbox" checked={noiseOnly} onChange={(e) => setNoiseOnly(e.target.checked)} />
+          这是纯噪音
+        </label>
+        {error ? <p className="mt-2 text-sm text-live">{error}</p> : null}
+        <div className="mt-4">
           <Button
             type="button"
-            variant="outline"
-            className="flex-1"
-            disabled={busy || edited}
-            onClick={() => onConfirm(sttText, "confirmed", emotion)}
+            className="w-full"
+            disabled={busy}
+            onClick={() =>
+              void onConfirm(draft.trim(), edited ? "edited" : "confirmed", emotion, noiseOnly)
+            }
           >
-            确认正确
-          </Button>
-          <Button
-            type="button"
-            className="flex-1"
-            disabled={busy || !draft.trim() || !edited}
-            onClick={() => onConfirm(draft.trim(), "edited", emotion)}
-          >
-            保存修改
+            {busy ? "正在写入…" : "确认"}
           </Button>
         </div>
       </div>

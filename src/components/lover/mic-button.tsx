@@ -10,6 +10,7 @@ type Props = {
   disabled?: boolean;
   onHoldStart: () => void;
   onHoldEnd: () => void;
+  ariaLabel?: string;
 };
 
 export function MicButton({
@@ -19,6 +20,7 @@ export function MicButton({
   disabled,
   onHoldStart,
   onHoldEnd,
+  ariaLabel,
 }: Props) {
   const armedRef = useRef(false);
   const scale = recording ? 1 + Math.min(level, 0.35) * 0.28 : 1;
@@ -59,7 +61,7 @@ export function MicButton({
       onContextMenu={(e) => e.preventDefault()}
       disabled={disabled}
       aria-pressed={recording}
-      aria-label={recording ? "松开发送" : "按住说话"}
+      aria-label={ariaLabel ?? (recording ? "松开发送" : "按住说话")}
       className={cn(
         "relative grid size-24 place-items-center rounded-full transition-[background-color] duration-150 ease-out",
         "touch-none select-none [-webkit-touch-callout:none] [-webkit-user-select:none]",

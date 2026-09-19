@@ -20,6 +20,7 @@ import {
   pageIsHidden,
 } from "@/lib/lover/audio-session";
 import { hearUtterance } from "@/lib/lover/hear";
+import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
 import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
@@ -42,7 +43,7 @@ export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing";
 const FFT_SIZE = 2048;
 
 type Options = {
-  onUtterance: (text: string) => Promise<void>;
+  onUtterance: (heard: HeardUtterance) => Promise<void>;
   prompt?: string;
 };
 
@@ -278,9 +279,9 @@ export function useCall({ onUtterance, prompt }: Options) {
     interimRef.current = "";
     lastTextAtRef.current = 0;
 
-    let heard = "";
+    let heard: HeardUtterance | null = null;
     try {
-      heard = (await hearUtterance({
+      heard = await hearUtterance({
         wav,
         fallback,
         liveText,
@@ -288,7 +289,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         prompt: promptRef.current,
         speech_start: speechStartWallRef.current,
         endpoint_fired,
-      })) ?? "";
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       if (isQuotaHint(message)) {
@@ -301,15 +302,16 @@ export function useCall({ onUtterance, prompt }: Options) {
       }
     }
     if (!liveRef.current) return;
-    if (!heard) {
-      setError("我没听清，再说一遍。");
+    if (heard?.saveError) setError(clipSaveBanner(heard.saveError));
+    if (!heard?.text) {
+      if (!getHearingSession().debugHearing) setError("我没听清，再说一遍。");
       deafRef.current = false;
       setMicEnabled(streamRef.current, true);
       listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
       setPhaseBoth("listening");
       return;
     }
-    setError(null);
+    if (!heard.saveError) setError(null);
     setPhaseBoth("listening");
     try {
       await onUtteranceRef.current(heard);
@@ -329,6 +331,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     const now = performance.now();
     if (analyser) {
       const speaking = phaseRef.current === "speaking-you";
+      const debugVad = getHearingSession().debugHearing;
       const frame = sampleProsody(
         analyser,
         ctxRef.current?.sampleRate ?? 44100,
@@ -341,7 +344,7 @@ export function useCall({ onUtterance, prompt }: Options) {
       const rms = frame.rms;
       noiseFloorRef.current = nextFloor(noiseFloorRef.current, rms, speaking);
       const floor = noiseFloorRef.current;
-      const rising = isSpeechStart(rms, floor, frame.clarity, frame.bright);
+      const rising = isSpeechStart(rms, floor, frame.clarity, frame.bright, debugVad);
       setLevel(Math.min(1, rms * 8));
       if (
         !deafRef.current &&
@@ -351,7 +354,7 @@ export function useCall({ onUtterance, prompt }: Options) {
       ) {
         beginUtterance();
       } else if (speaking) {
-        const voiced = isHoldVoiced(rms, floor);
+        const voiced = isHoldVoiced(rms, floor, debugVad);
         if (voiced) {
           if (!voiceBurstAtRef.current) voiceBurstAtRef.current = now;
           if (now - voiceBurstAtRef.current >= VOICE_SPIKE_MS) lastVoiceRef.current = now;
@@ -370,7 +373,7 @@ export function useCall({ onUtterance, prompt }: Options) {
           })
         ) {
           const spoken = now - speechStartRef.current;
-          if (!hasText && spoken < 500) abortUtterance();
+          if (!getHearingSession().debugHearing && !hasText && spoken < 500) abortUtterance();
           else void flushUtterance();
         }
       }

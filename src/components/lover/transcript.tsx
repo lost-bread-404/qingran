@@ -238,28 +238,26 @@ function UserBubble({
   onConfirmStart?: (id: string) => void;
 }) {
   const canConfirm = Boolean(debugHearing && user.voiceTurnId && onConfirmStart);
+  const goldLabel =
+    user.hearingGold === "confirmed" ? "已确认" : user.voiceTurnId && debugHearing ? "未确认" : null;
   return (
     <div className="flex items-end justify-end gap-2">
       {editable && onEditStart ? (
         <button
           type="button"
-          aria-label="改这句话"
-          onClick={() => onEditStart(user.id)}
+          aria-label={canConfirm ? "确认这句话" : "改这句话"}
+          onClick={() => (canConfirm ? onConfirmStart?.(user.id) : onEditStart(user.id))}
           className="mb-1 shrink-0 text-subtle transition-colors duration-150 hover:text-fg"
         >
           <Pencil className="size-3.5" />
         </button>
       ) : null}
-      <p
-        className={`max-w-[min(20rem,85%)] whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg${
-          canConfirm ? " cursor-pointer" : ""
-        }`}
-        onClick={() => {
-          if (canConfirm) onConfirmStart?.(user.id);
-        }}
-      >
-        {user.text}
-      </p>
+      <div className="flex max-w-[min(20rem,85%)] flex-col items-end gap-1">
+        {goldLabel ? <p className="text-[10px] text-subtle">{goldLabel}</p> : null}
+        <p className="whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
+          {user.text}
+        </p>
+      </div>
     </div>
   );
 }

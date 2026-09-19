@@ -7,6 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { backupFilename, makeBackup, parseBackup, type QingranBackup } from "@/lib/lover/backup";
 import { LogoutButton } from "@/components/lover/logout-button";
 import { HEARING_PROVIDERS, type HearingProviderId } from "@/lib/lover/hearing/config";
+import { PROVIDER_ENV } from "@/lib/lover/hearing/env";
+import { hearingEnvStatus } from "@/lib/lover/hearing/store";
 import {
   resolveManualMemory,
   sortMemoriesByTime,
@@ -34,7 +36,7 @@ type Props = {
 };
 
 const PROVIDER_LABEL: Record<HearingProviderId, string> = {
-  xai: "xAI（现有）",
+  xai: "xAI",
   qwen: "Qwen",
   gemini: "Gemini",
   selfhost: "自部署",
@@ -56,10 +58,9 @@ export function SettingsDrawer({
 }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
   const [hearingProvider, setHearingProvider] = useState<HearingProviderId>(profile.hearingProvider);
-  const [captureAudio, setCaptureAudio] = useState(profile.captureAudio);
-  const [scriptedCapture, setScriptedCapture] = useState(profile.scriptedCapture);
   const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
   const [hearingNbest, setHearingNbest] = useState(profile.hearingNbest);
+  const [providerReady, setProviderReady] = useState<Record<HearingProviderId, boolean> | null>(null);
   const [newFact, setNewFact] = useState("");
   const [newAt, setNewAt] = useState(() => toDatetimeLocal(Date.now()));
   const [newTimeTouched, setNewTimeTouched] = useState(false);
@@ -75,24 +76,28 @@ export function SettingsDrawer({
     if (open) {
       setDraft(profile.systemPrompt);
       setHearingProvider(profile.hearingProvider);
-      setCaptureAudio(profile.captureAudio);
-      setScriptedCapture(profile.scriptedCapture);
       setDebugHearing(profile.debugHearing);
       setHearingNbest(profile.hearingNbest);
       setTab("prompt");
       setNewAt(toDatetimeLocal(Date.now()));
       setNewTimeTouched(false);
       setEditingId(null);
+      void hearingEnvStatus().then((result) => setProviderReady(result.providers));
     }
   }, [open, profile]);
 
   function save() {
+    const ready = providerReady?.[hearingProvider];
+    const fallback =
+      HEARING_PROVIDERS.find((id) => providerReady?.[id]) ?? "xai";
+    const nextProvider = ready === false ? fallback : hearingProvider;
     onSave({
       ...profile,
       systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
-      hearingProvider,
-      captureAudio,
-      scriptedCapture,
+      hearingProvider: nextProvider,
+      captureAudio: debugHearing,
+      scriptedCapture: profile.scriptedCapture,
+      skippedScripted: profile.skippedScripted,
       debugHearing,
       hearingNbest,
     });
@@ -234,21 +239,28 @@ export function SettingsDrawer({
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
             <div>
               <p className="mb-2 text-sm">听力引擎</p>
-              <p className="mb-3 text-xs text-subtle">默认 xAI 现有流程。Qwen / Gemini / 自部署会输出「字 + 语气 tag」，失败自动退回 xAI。</p>
               <div className="grid grid-cols-2 gap-2">
-                {HEARING_PROVIDERS.map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setHearingProvider(id)}
-                    className={cn(
-                      "min-h-11 rounded-md px-3 py-3 text-sm",
-                      hearingProvider === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-                    )}
-                  >
-                    {PROVIDER_LABEL[id]}
-                  </button>
-                ))}
+                {HEARING_PROVIDERS.map((id) => {
+                  const ready = providerReady ? providerReady[id] : true;
+                  const missing = PROVIDER_ENV[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      disabled={!ready}
+                      onClick={() => ready && setHearingProvider(id)}
+                      className={cn(
+                        "min-h-11 rounded-md px-3 py-3 text-left text-sm disabled:opacity-50",
+                        hearingProvider === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                      )}
+                    >
+                      <span className="block">{PROVIDER_LABEL[id]}</span>
+                      <span className="mt-1 block text-[11px] opacity-80">
+                        {providerReady == null ? "正在检查…" : ready ? "已配置" : `缺少 ${missing}`}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
@@ -259,54 +271,41 @@ export function SettingsDrawer({
                 onChange={(e) => setDebugHearing(e.target.checked)}
               />
               <span>
-                <span className="block text-sm">调试模式</span>
-                <span className="block text-xs text-subtle">默认开。关掉后不显示确认入口，也不存任何录音。</span>
+                <span className="block text-sm">调试</span>
+                <span className="block text-xs text-subtle">
+                  打开后每一句都存成 clip，并启用确认面板。关掉就不存录音，铅笔只是改字。
+                </span>
               </span>
             </label>
-            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={hearingNbest}
-                onChange={(e) => setHearingNbest(e.target.checked)}
-              />
-              <span>
-                <span className="block text-sm">n-best 候选</span>
-                <span className="block text-xs text-subtle">默认关。打开后不确定的词会写成 {"{A|B}"}。</span>
-              </span>
-            </label>
-            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={captureAudio}
-                onChange={(e) => setCaptureAudio(e.target.checked)}
-              />
-              <span>
-                <span className="block text-sm">录音采集</span>
-                <span className="block text-xs text-subtle">默认关。打开后把每段 16kHz WAV 存到私有库，不含公开链接。</span>
-              </span>
-            </label>
-            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={scriptedCapture}
-                onChange={(e) => setScriptedCapture(e.target.checked)}
-              />
-              <span>
-                <span className="block text-sm">定向录制</span>
-                <span className="block text-xs text-subtle">屏幕显示当前类别和剩余配额，录完自动打标签。</span>
-              </span>
-            </label>
+            <Link
+              to="/record"
+              className="flex h-11 items-center justify-center rounded-md bg-surface-2 text-sm"
+              onClick={() => onOpenChange(false)}
+            >
+              定向录制
+            </Link>
             <Link
               to="/lab"
               className="flex h-11 items-center justify-center rounded-md bg-surface-2 text-sm"
               onClick={() => onOpenChange(false)}
             >
-              打开标注页
+              标注页
             </Link>
-            <p className="text-xs text-subtle">标注页有密码保护。密码是环境变量 HEARING_LAB_PASSWORD。</p>
+            <details className="rounded-md bg-surface-2 px-3 py-3">
+              <summary className="cursor-pointer text-sm">高级</summary>
+              <label className="mt-3 flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={hearingNbest}
+                  onChange={(e) => setHearingNbest(e.target.checked)}
+                />
+                <span>
+                  <span className="block text-sm">n-best 候选</span>
+                  <span className="block text-xs text-subtle">打开后不确定的词会写成 {"{A|B}"}。</span>
+                </span>
+              </label>
+            </details>
           </div>
         </div>
       ) : (

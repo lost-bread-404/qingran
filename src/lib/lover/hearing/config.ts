@@ -8,7 +8,7 @@ export const HEARING = {
   timeoutMs: DEFAULT_HEARING_TIMEOUT_MS,
   xai: {
     id: "xai" as const,
-    model: "grok-stt",
+    model: "grok-voice-transcribe-2.0",
     sttUrl: "https://api.x.ai/v1/stt",
     inputUsdPerM: 0,
     outputUsdPerM: 0,
@@ -38,22 +38,101 @@ export const HEARING = {
 } as const;
 
 export const SCRIPTED_CATEGORIES = [
-  { id: "en", label: "嗯", quota: 12 },
-  { id: "ah", label: "啊", quota: 12 },
-  { id: "breathy", label: "气声", quota: 10 },
-  { id: "coy", label: "撒娇", quota: 12 },
-  { id: "murmur", label: "呢喃", quota: 10 },
-  { id: "laugh", label: "笑", quota: 8 },
-  { id: "cry", label: "哭腔", quota: 8 },
-  { id: "sigh", label: "叹气", quota: 8 },
-  { id: "sleepy", label: "困倦", quota: 8 },
-  { id: "noise", label: "纯噪音", quota: 10 },
-  { id: "sentence", label: "带语气的句子", quota: 16 },
-  { id: "codeswitch", label: "中英夹杂", quota: 12 },
-  { id: "homophone", label: "同音词", quota: 10 },
+  {
+    id: "en",
+    label: "嗯",
+    quota: 12,
+    hint: "各种「嗯」，比如应声、拖长撒娇、疑问上扬。",
+    example: "嗯～ / 嗯？ / 嗯…",
+  },
+  {
+    id: "ah",
+    label: "啊",
+    quota: 12,
+    hint: "同上，用「啊」。",
+    example: "啊～ / 啊？ / 啊…",
+  },
+  {
+    id: "breathy",
+    label: "气声",
+    quota: 10,
+    hint: "气多声少，像贴着耳朵说悄悄话，但还带一点声调。",
+    example: "困的时候贴着枕头轻声说「嗯……好」。",
+  },
+  {
+    id: "coy",
+    label: "撒娇",
+    quota: 12,
+    hint: "拖长音、音调上扬、语气软。",
+    example: "「不要嘛～」",
+  },
+  {
+    id: "murmur",
+    label: "呢喃",
+    quota: 10,
+    hint: "很小声、嘴几乎不张、吐字含糊，但有声音。",
+    example: "半睡着嘟囔「再睡五分钟」。",
+  },
+  {
+    id: "laugh",
+    label: "笑",
+    quota: 8,
+    hint: "轻笑、憋笑、笑出声都可以。",
+    example: "呵呵 / 噗 / 哈哈",
+  },
+  {
+    id: "cry",
+    label: "哭腔",
+    quota: 8,
+    hint: "带哭腔说话，或者抽泣。",
+    example: "抽泣着说「不要走」。",
+  },
+  {
+    id: "sigh",
+    label: "叹气",
+    quota: 8,
+    hint: "一次长呼气，可以带「唉」或「哈」。",
+    example: "唉 / 哈——",
+  },
+  {
+    id: "sleepy",
+    label: "困倦",
+    quota: 8,
+    hint: "困的时候说话，慢、含糊、带哈欠。",
+    example: "打着哈欠说「好困」。",
+  },
+  {
+    id: "noise",
+    label: "纯噪音",
+    quota: 10,
+    hint: "不说话，只录环境声、衣服摩擦、碰到麦克风。",
+    example: "摩擦衣料、碰麦、房间底噪。",
+  },
+  {
+    id: "sentence",
+    label: "带语气的句子",
+    quota: 16,
+    hint: "一句完整的话，带明显情绪。",
+    example: "「今天好烦啊。」",
+  },
+  {
+    id: "codeswitch",
+    label: "中英夹杂",
+    quota: 12,
+    hint: "中英文混在一句里。",
+    example: "「这个 deadline 好 annoying」。",
+  },
+  {
+    id: "homophone",
+    label: "同音词",
+    quota: 10,
+    hint: "容易听错的词和专有名词。",
+    example: "「清然」。",
+  },
 ] as const;
 
-export type ScriptedCategoryId = (typeof SCRIPTED_CATEGORIES)[number]["id"];
+export type ScriptedCategory = (typeof SCRIPTED_CATEGORIES)[number];
+export type ScriptedCategoryId = ScriptedCategory["id"];
 
 export function hearingTimeoutMs(): number {
   const raw = Number(process.env.HEARING_TIMEOUT_MS);

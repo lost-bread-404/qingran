@@ -77,5 +77,6 @@ function cloneMessage(m: ChatMessage): ChatMessage {
     kind,
     scanned: m.scanned ? true : undefined,
     voiceTurnId: m.voiceTurnId ? String(m.voiceTurnId) : undefined,
+    hearingGold: m.hearingGold === "confirmed" ? "confirmed" : m.hearingGold === "unconfirmed" ? "unconfirmed" : undefined,
   };
 }

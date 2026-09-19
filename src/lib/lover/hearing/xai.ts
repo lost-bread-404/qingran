@@ -40,9 +40,9 @@ export async function transcribeWithXai(input: {
   }
 
   const form = new FormData();
+  form.append("model", HEARING.xai.model);
   form.append("filler_words", "true");
   form.append("vad_threshold", "0");
-  form.append("prompt", "口语原文。中英夹杂时英文保留英文。嗯、啊、呜、哈照实写，不要省略语气词，不要翻译。");
   for (const term of mergeKeyterms(sttKeyterms(input.prompt), input.extraKeyterms)) {
     form.append("keyterm", term);
   }
