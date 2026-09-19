@@ -60,7 +60,7 @@ import {
   unlabelHearingByTurn,
 } from "@/lib/lover/hearing/store";
 import { clipSaveBanner, UNRECOGNIZED_TEXT, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
-import { micActionForConfirmPanel } from "@/lib/lover/hearing/confirm-call";
+import { micActionForConfirmPanel, planOpenConfirmPanel, shouldAutoSpeakReply } from "@/lib/lover/hearing/confirm-call";
 import { planConfirmSave, sliceAfterMessage } from "@/lib/lover/hearing/confirm-resend";
 import type { AcousticTags, TagKey } from "@/lib/lover/hearing/tags";
 import { POST_QINGRAN_MS } from "@/lib/lover/vad";
@@ -123,6 +123,8 @@ export function VoiceRoom() {
   const [confirmAudioUrl, setConfirmAudioUrl] = useState<string | null>(null);
   const [labeledCount, setLabeledCount] = useState(0);
   const confirmWasOpenRef = useRef(false);
+  const confirmOpenRef = useRef(false);
+  const skipAutoPlayRef = useRef(false);
   const [undoConfirmId, setUndoConfirmId] = useState<string | null>(null);
   const undoTimerRef = useRef(0);
   const [audioLog, setAudioLog] = useState("");
@@ -344,7 +346,9 @@ export function VoiceRoom() {
   function resumeCallListen(turn: number) {
     if (!callActiveRef.current) return;
     window.setTimeout(() => {
-      if (callActiveRef.current && turn === turnRef.current) hearRef.current();
+      if (!callActiveRef.current || turn !== turnRef.current) return;
+      if (confirmOpenRef.current) return;
+      hearRef.current();
     }, POST_QINGRAN_MS);
   }
 
@@ -445,6 +449,7 @@ export function VoiceRoom() {
       if (!opts?.existingUser && busyRef.current) return;
       const turn = ++turnRef.current;
       busyRef.current = true;
+      skipAutoPlayRef.current = false;
       stopPlayback();
       if (callActiveRef.current) deafenRef.current();
       setBanner(null);
@@ -572,7 +577,10 @@ export function VoiceRoom() {
                 });
               } else {
                 spokenCacheRef.current.delete(reply.id);
-                if (display && !profileRef.current.muted) {
+                if (display && shouldAutoSpeakReply({
+                  muted: profileRef.current.muted,
+                  skipAutoPlay: skipAutoPlayRef.current,
+                })) {
                   void playFull(reply.id, full, turn);
                 }
               }
@@ -580,7 +588,10 @@ export function VoiceRoom() {
             }
             if (turn !== turnRef.current) return;
             if (event.t === "audio") {
-              if (profileRef.current.muted) return;
+              if (!shouldAutoSpeakReply({
+                muted: profileRef.current.muted,
+                skipAutoPlay: skipAutoPlayRef.current,
+              })) return;
               if (event.replace) {
                 stopPlayback();
                 clips.length = 0;
@@ -670,6 +681,7 @@ export function VoiceRoom() {
 
   useEffect(() => {
     const open = Boolean(confirmId);
+    confirmOpenRef.current = open;
     const action = micActionForConfirmPanel({
       panelOpen: open,
       wasOpen: confirmWasOpenRef.current,
@@ -853,6 +865,7 @@ export function VoiceRoom() {
   }) {
     const msg = chatRef.current.find((m) => m.id === confirmId);
     if (!msg?.voiceTurnId) {
+      confirmOpenRef.current = false;
       setConfirmId(null);
       return;
     }
@@ -881,6 +894,7 @@ export function VoiceRoom() {
         noiseOnly: input.noiseOnly,
       });
       const updated: ChatMessage = { ...plan.updated, hearingGold: "confirmed" };
+      confirmOpenRef.current = false;
       setConfirmId(null);
       if (plan.shouldResend) {
         void replayFrom(updated);
@@ -1156,6 +1170,10 @@ export function VoiceRoom() {
               }}
               onEditSave={() => void saveEdit()}
               onConfirmStart={(id) => {
+                const plan = planOpenConfirmPanel();
+                skipAutoPlayRef.current = plan.skipAutoPlay;
+                confirmOpenRef.current = true;
+                if (plan.stopPlayback) stopPlayback();
                 setConfirmError(null);
                 setConfirmId(id);
               }}
@@ -1249,6 +1267,7 @@ export function VoiceRoom() {
           initialLiteralMismatch={confirmMismatch}
           initialToneNote={confirmNote}
           onClose={() => {
+            confirmOpenRef.current = false;
             setConfirmId(null);
             setConfirmError(null);
           }}

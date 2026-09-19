@@ -9,3 +9,23 @@ export function micActionForConfirmPanel(input: {
   if (input.wasOpen && !input.qingranSpeaking) return "hear";
   return null;
 }
+
+export type ConfirmHushPlan = {
+  stopPlayback: true;
+  skipAutoPlay: true;
+  abort: false;
+  markInterrupted: false;
+};
+
+export function planOpenConfirmPanel(): ConfirmHushPlan {
+  return {
+    stopPlayback: true,
+    skipAutoPlay: true,
+    abort: false,
+    markInterrupted: false,
+  };
+}
+
+export function shouldAutoSpeakReply(input: { muted: boolean; skipAutoPlay: boolean }): boolean {
+  return !input.muted && !input.skipAutoPlay;
+}
