@@ -1,4 +1,5 @@
 import { isNativeShell } from "./native-shell.ts";
+import { logCallAudio } from "./call-audio-log.ts";
 
 export function audioContextNeedsResume(state: string) {
   return state === "suspended" || state === "interrupted";
@@ -104,6 +105,7 @@ export function setAudioSessionKind(kind: AudioSessionKind) {
   const next = sessionTypeIfChanged(session.type, kind);
   if (!next) return;
   try {
+    logCallAudio(`audioSession.type ${session.type || "∅"}→${next}`);
     session.type = next;
     if (kind === "yield") {
       try {

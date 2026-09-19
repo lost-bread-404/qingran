@@ -2,7 +2,7 @@ import { DEFAULT_HEARING_PROVIDER, isHearingProvider, type HearingProviderId } f
 
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
-export type MessageKind = "say" | "steer" | "setting";
+export type MessageKind = "say" | "steer" | "setting" | "unheard";
 
 export const CONTEXT_WINDOW = 60;
 
@@ -28,6 +28,7 @@ export type ChatMessage = {
   kind?: MessageKind;
   scanned?: boolean;
   voiceTurnId?: string;
+  replyTo?: string;
   hearingGold?: "unconfirmed" | "confirmed";
   hearingTiming?: {
     hearMs?: number;

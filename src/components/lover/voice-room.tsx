@@ -12,7 +12,7 @@ import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-vi
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { base64ToBytes, concatBytes } from "@/lib/lover/audio";
 import { addManualMemory, mergeFacts, replaceMemories, updateMemory } from "@/lib/lover/memory";
-import { dropIncompleteReplies } from "@/lib/lover/pair-messages";
+import { dropIncompleteReplies, historyForQingran, skipsQingran } from "@/lib/lover/pair-messages";
 import {
   enqueuePlayback,
   getPlaybackElement,
@@ -45,6 +45,7 @@ import { newId } from "@/lib/lover/storage";
 import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { formatCallAudioLog, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
   confirmHearingClip,
   getHearingTurnAudio,
@@ -115,12 +116,13 @@ export function VoiceRoom() {
   const confirmWasOpenRef = useRef(false);
   const [undoConfirmId, setUndoConfirmId] = useState<string | null>(null);
   const undoTimerRef = useRef(0);
+  const [audioLog, setAudioLog] = useState("");
 
   useEffect(() => {
     profileRef.current = profile;
     const context = buildHearingContext(
       chatRef.current
-        .filter((m) => m.kind !== "steer" && m.kind !== "setting")
+        .filter((m) => m.kind !== "steer" && m.kind !== "setting" && !skipsQingran(m))
         .map((m) => ({ role: m.role, text: m.text })),
     );
     const extraKeyterms = mergeKeyterms(
@@ -193,6 +195,12 @@ export function VoiceRoom() {
       if (result.ok) setLabeledCount(result.count);
     });
   }, [hydrated, profile.debugHearing]);
+
+  useEffect(() => {
+    if (!profile.debugHearing) return;
+    setAudioLog(formatCallAudioLog());
+    return subscribeCallAudioLog(() => setAudioLog(formatCallAudioLog()));
+  }, [profile.debugHearing]);
 
   useEffect(() => () => {
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
@@ -390,7 +398,7 @@ export function VoiceRoom() {
         role: "user",
         text: say,
         createdAt: at,
-        kind: "say",
+        kind: opts?.skipQingran ? "unheard" : "say",
         voiceTurnId: opts?.voiceTurnId,
         hearingGold: opts?.voiceTurnId ? "unconfirmed" : undefined,
         hearingTiming: hearMs != null ? { hearMs } : undefined,
@@ -416,15 +424,17 @@ export function VoiceRoom() {
       setEditingId(null);
       voice.setError(null);
 
-      const history = (opts?.history ?? chatRef.current).slice(-CONTEXT_WINDOW);
+      const sourceHistory = opts?.history ?? chatRef.current;
+      const history = historyForQingran(sourceHistory);
       const reply: ChatMessage = {
         id: newId(),
         role: "assistant",
         text: "",
         createdAt: (userMsg.createdAt || at) + 1,
+        replyTo: userMsg.id,
       };
       if (opts?.existingUser) {
-        setMessages([...history, userMsg, reply]);
+        setMessages([...(opts.history ?? sourceHistory), userMsg, reply]);
       } else {
         setMessages((prev) => [...dropIncompleteReplies(prev, pendingIdsRef.current), userMsg, reply]);
         void appendRoomMessage({ data: userMsg });
@@ -938,6 +948,9 @@ export function VoiceRoom() {
                       ? `记得 ${memories.length} 件事`
                       : "在"}
               </p>
+              {profile.debugHearing && audioLog ? (
+                <p className="max-w-[14rem] truncate text-[10px] text-subtle/80">{audioLog}</p>
+              ) : null}
             </div>
           </button>
           <div

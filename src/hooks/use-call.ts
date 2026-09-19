@@ -21,6 +21,7 @@ import {
 } from "@/lib/lover/audio-session";
 import { hearUtterance } from "@/lib/lover/hear";
 import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
+import { logCallAudio } from "@/lib/lover/call-audio-log";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
 import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
@@ -31,6 +32,7 @@ import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
 import {
   LISTEN_WARMUP_MS,
+  CALL_START_WARMUP_MS,
   holdThreshold,
   isHoldVoiced,
   isSpeechStart,
@@ -79,6 +81,8 @@ export function useCall({ onUtterance, prompt }: Options) {
   const noiseFloorRef = useRef(0.008);
   const triggerFloorRef = useRef(0.008);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
+  const recLiveRef = useRef(false);
+  const warmupTimerRef = useRef(0);
   const finalTextRef = useRef("");
   const interimRef = useRef("");
   const framesRef = useRef<ProsodyFrame[]>([]);
@@ -131,11 +135,15 @@ export function useCall({ onUtterance, prompt }: Options) {
     }
     ctxRef.current = null;
     try {
+      if (recRef.current) logCallAudio("rec.abort");
       recRef.current?.abort();
     } catch {
       /* ignore */
     }
     recRef.current = null;
+    recLiveRef.current = false;
+    if (warmupTimerRef.current) window.clearTimeout(warmupTimerRef.current);
+    warmupTimerRef.current = 0;
     finalTextRef.current = "";
     interimRef.current = "";
     setLevel(0);
@@ -407,10 +415,16 @@ export function useCall({ onUtterance, prompt }: Options) {
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) return;
     if (recRef.current) {
+      if (recLiveRef.current) {
+        logCallAudio("rec.start skipped (live)");
+        return;
+      }
       try {
         recRef.current.start();
+        recLiveRef.current = true;
+        logCallAudio("rec.start");
       } catch {
-        /* already started */
+        logCallAudio("rec.start already");
       }
       return;
     }
@@ -421,6 +435,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     rec.maxAlternatives = 3;
     rec.onresult = (ev) => {
       if (!liveRef.current || deafRef.current) return;
+      if (performance.now() < listenReadyAtRef.current) return;
       let addition = "";
       let live = "";
       for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
@@ -440,14 +455,21 @@ export function useCall({ onUtterance, prompt }: Options) {
       interimRef.current = shown.trim();
       if ((addition || live).trim()) lastTextAtRef.current = performance.now();
     };
+    rec.onstart = () => {
+      recLiveRef.current = true;
+    };
     rec.onend = () => {
-      if (liveRef.current && !deafRef.current && !pageIsHidden()) {
+      recLiveRef.current = false;
+      logCallAudio("rec.onend");
+      if (liveRef.current && !pageIsHidden()) {
         window.setTimeout(() => {
-          if (!liveRef.current || deafRef.current || pageIsHidden()) return;
+          if (!liveRef.current || pageIsHidden() || recLiveRef.current) return;
           try {
             rec.start();
+            recLiveRef.current = true;
+            logCallAudio("rec.start (onend)");
           } catch {
-            /* Chrome restarts noisily */
+            logCallAudio("rec.start onend already");
           }
         }, isAppleTouch() ? 160 : 0);
       }
@@ -455,8 +477,10 @@ export function useCall({ onUtterance, prompt }: Options) {
     recRef.current = rec;
     try {
       rec.start();
+      recLiveRef.current = true;
+      logCallAudio("rec.start");
     } catch {
-      /* already started */
+      logCallAudio("rec.start already");
     }
   };
 
@@ -497,7 +521,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     liveRef.current = true;
     deafRef.current = false;
     noiseFloorRef.current = 0.008;
-    listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
+    listenReadyAtRef.current = performance.now() + CALL_START_WARMUP_MS;
     setActive(true);
     setPhaseBoth("listening");
     setMicEnabled(streamRef.current, true);
@@ -509,6 +533,13 @@ export function useCall({ onUtterance, prompt }: Options) {
     }, 80);
     startCallHold();
     keepSelfhostWarm();
+    if (warmupTimerRef.current) window.clearTimeout(warmupTimerRef.current);
+    warmupTimerRef.current = window.setTimeout(() => {
+      warmupTimerRef.current = 0;
+      if (!liveRef.current) return;
+      pcmTapRef.current?.clear();
+      logCallAudio("warmup-clear-ring");
+    }, CALL_START_WARMUP_MS);
     try {
       wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? null;
     } catch {
@@ -520,12 +551,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     if (!liveRef.current) return;
     deafRef.current = true;
     setMicEnabled(streamRef.current, false);
-    try {
-      recRef.current?.abort();
-    } catch {
-      /* ignore */
-    }
-    recRef.current = null;
+    logCallAudio("deafen");
     if (phaseRef.current === "transcribing") return;
     void pcmTapRef.current?.stop();
     if (phaseRef.current === "speaking-you") {
@@ -553,6 +579,7 @@ export function useCall({ onUtterance, prompt }: Options) {
     interimRef.current = "";
     lastTextAtRef.current = 0;
     listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
+    logCallAudio("hear");
     if (!pageIsHidden()) startSpeechRec();
   }, []);
 

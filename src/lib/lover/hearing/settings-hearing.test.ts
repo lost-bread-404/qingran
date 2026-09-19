@@ -53,14 +53,17 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /armUndo/);
   assert.match(src, /unlabelHearingByTurn/);
   assert.match(src, /aria-label="阈值"/);
+  assert.match(src, /historyForQingran/);
+  assert.match(src, /kind: opts\?\.skipQingran \? "unheard" : "say"/);
+  assert.match(src, /replyTo: userMsg.id/);
   assert.match(src, /micActionForConfirmPanel/);
   assert.match(src, /qingranSpeaking: status === "speaking" \|\| status === "thinking"/);
 });
 
-test("call deafen stops speech rec and pcm-tap without hanging playback", () => {
+test("call deafen ignores speech rec without aborting it", () => {
   const src = readFileSync(new URL("../../../hooks/use-call.ts", import.meta.url), "utf8");
   const deafen = src.slice(src.indexOf("const deafen = useCallback"), src.indexOf("const hear = useCallback"));
-  assert.match(deafen, /recRef\.current\?\.abort/);
+  assert.doesNotMatch(deafen, /recRef\.current\?\.abort/);
   assert.match(deafen, /pcmTapRef\.current\?\.stop/);
   assert.match(deafen, /setMicEnabled\(streamRef\.current, false\)/);
   assert.doesNotMatch(deafen, /stopCallHold/);
@@ -68,6 +71,11 @@ test("call deafen stops speech rec and pcm-tap without hanging playback", () => 
   assert.doesNotMatch(deafen, /pauseMic\(/);
   const hear = src.slice(src.indexOf("const hear = useCallback"), src.indexOf("const revive = useCallback"));
   assert.match(hear, /startSpeechRec/);
+  assert.match(src, /CALL_START_WARMUP_MS/);
+  assert.match(src, /recLiveRef/);
+  assert.match(src, /warmup-clear-ring/);
+  const onend = src.slice(src.indexOf("rec.onend"), src.indexOf("recRef.current = rec"));
+  assert.doesNotMatch(onend, /deafRef\.current/);
 });
 
 test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance", () => {

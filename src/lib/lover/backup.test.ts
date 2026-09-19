@@ -75,6 +75,22 @@ test("round-trips confirmed gold flag on a voice turn", () => {
   assert.equal(parsed?.messages[0]?.voiceTurnId, "turn-9");
 });
 
+test("round-trips unheard kind and replyTo", () => {
+  const backup = makeBackup({
+    now: 1_700_000_000_000,
+    profile: lockedProfile({ debugHearing: true }),
+    memories: [],
+    messages: [
+      { id: "u0", role: "user", text: "〔未识别〕", createdAt: 2, kind: "unheard", voiceTurnId: "turn-0" },
+      { id: "u1", role: "user", text: "在吗", createdAt: 3 },
+      { id: "a1", role: "assistant", text: "在。", createdAt: 4, replyTo: "u1" },
+    ],
+  });
+  const parsed = parseBackup(JSON.parse(JSON.stringify(backup)));
+  assert.equal(parsed?.messages[0]?.kind, "unheard");
+  assert.equal(parsed?.messages[2]?.replyTo, "u1");
+});
+
 test("backup filename is a dated json", () => {
   assert.match(backupFilename(Date.UTC(2026, 8, 16)), /^qingran-backup-\d{8}\.json$/);
 });

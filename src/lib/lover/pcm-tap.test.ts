@@ -7,6 +7,7 @@ import {
   PRE_ROLL_SEC,
   pushSampleRing,
   snapshotSampleRing,
+  clearSampleRing,
   wavFromTap,
 } from "./pcm-tap.ts";
 
@@ -54,4 +55,6 @@ test("pre-roll ring keeps about 600ms and prepends it at start", () => {
   assert.ok(snap.length <= capacity);
   assert.ok(snap.length >= capacity - rate / 10);
   assert.ok(Math.abs((snap[snap.length - 1] ?? 0) - 0.4) < 1e-5);
+  clearSampleRing(ring);
+  assert.equal(snapshotSampleRing(ring).length, 0);
 });

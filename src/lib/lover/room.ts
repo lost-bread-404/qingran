@@ -210,6 +210,8 @@ function encodeStoredMessage(msg: ChatMessage): string {
   let text = msg.text;
   if (msg.kind === "steer") text = `⟦走向⟧${text}`;
   else if (msg.kind === "setting") text = `⟦设定⟧${text}`;
+  else if (msg.kind === "unheard") text = `⟦未听⟧${text}`;
+  if (msg.replyTo) text = `⟦回:${msg.replyTo}⟧${text}`;
   if (msg.voiceTurnId) {
     text =
       msg.hearingGold === "confirmed"
@@ -231,6 +233,7 @@ function decodeStoredMessage(row: {
   let kind: MessageKind | undefined;
   let voiceTurnId: string | undefined;
   let hearingGold: ChatMessage["hearingGold"];
+  let replyTo: string | undefined;
   if (text.startsWith("⟦已扫⟧")) {
     scanned = true;
     text = text.slice(4);
@@ -247,11 +250,19 @@ function decodeStoredMessage(row: {
     }
     text = text.slice(hear[0].length);
   }
+  const reply = text.match(/^⟦回:([^⟧]+)⟧/);
+  if (reply) {
+    replyTo = reply[1];
+    text = text.slice(reply[0].length);
+  }
   if (text.startsWith("⟦走向⟧")) {
     kind = "steer";
     text = text.slice(4);
   } else if (text.startsWith("⟦设定⟧")) {
     kind = "setting";
+    text = text.slice(4);
+  } else if (text.startsWith("⟦未听⟧")) {
+    kind = "unheard";
     text = text.slice(4);
   }
   return {
@@ -263,6 +274,7 @@ function decodeStoredMessage(row: {
     scanned: scanned || undefined,
     voiceTurnId,
     hearingGold,
+    replyTo,
   };
 }
 

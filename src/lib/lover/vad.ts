@@ -2,6 +2,8 @@ export const MIN_SPEECH_MS = 220;
 export const SILENCE_MS = 2000;
 export const VOICE_SPIKE_MS = 80;
 export const LISTEN_WARMUP_MS = 380;
+/** First 500ms after getUserMedia: iOS mic is often still muted/silent. */
+export const CALL_START_WARMUP_MS = 500;
 
 /** Production VAD start: max(0.01, floor * 1.95). Debug lowers both floor min and multiplier. */
 export const START_FLOOR_MIN = 0.01;

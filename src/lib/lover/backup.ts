@@ -68,7 +68,8 @@ function cloneMemory(m: Memory): Memory {
 
 function cloneMessage(m: ChatMessage): ChatMessage {
   const role = m.role === "assistant" ? "assistant" : "user";
-  const kind = m.kind === "steer" || m.kind === "setting" ? m.kind : undefined;
+  const kind =
+    m.kind === "steer" || m.kind === "setting" || m.kind === "unheard" ? m.kind : undefined;
   return {
     id: String(m.id ?? ""),
     role,
@@ -77,6 +78,7 @@ function cloneMessage(m: ChatMessage): ChatMessage {
     kind,
     scanned: m.scanned ? true : undefined,
     voiceTurnId: m.voiceTurnId ? String(m.voiceTurnId) : undefined,
+    replyTo: m.replyTo ? String(m.replyTo) : undefined,
     hearingGold: m.hearingGold === "confirmed" ? "confirmed" : m.hearingGold === "unconfirmed" ? "unconfirmed" : undefined,
   };
 }

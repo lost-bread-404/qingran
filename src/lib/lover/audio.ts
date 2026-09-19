@@ -311,6 +311,7 @@ export type SpeechRecognitionLike = {
   onresult: ((ev: SpeechResultEvent) => void) | null;
   onerror: ((ev: { error: string }) => void) | null;
   onend: (() => void) | null;
+  onstart: (() => void) | null;
 };
 
 type SpeechResultEvent = {

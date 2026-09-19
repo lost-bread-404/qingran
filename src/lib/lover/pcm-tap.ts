@@ -22,6 +22,10 @@ class QingranPcmTap extends AudioWorkletProcessor {
         this.flush();
         this.port.postMessage({ type: "end" });
       }
+      if (event.data === "clear") {
+        this.ring = [];
+        this.ringFilled = 0;
+      }
     };
   }
   pushRing(chunk) {
@@ -69,6 +73,7 @@ registerProcessor("qingran-pcm-tap", QingranPcmTap);
 export type PcmTap = {
   start: () => void;
   stop: () => Promise<Float32Array>;
+  clear: () => void;
   dispose: () => void;
 };
 
@@ -95,6 +100,11 @@ export function pushSampleRing(ring: SampleRing, chunk: Float32Array, capacity: 
     ring.chunks[0] = ring.chunks[0]!.subarray(extra);
     ring.filled = capacity;
   }
+}
+
+export function clearSampleRing(ring: SampleRing) {
+  ring.chunks = [];
+  ring.filled = 0;
 }
 
 export function snapshotSampleRing(ring: SampleRing): Float32Array {
@@ -216,6 +226,9 @@ async function attachWorklet(ctx: AudioContext, source: MediaStreamAudioSourceNo
         node.port.postMessage("stop");
       });
     },
+    clear() {
+      node.port.postMessage("clear");
+    },
     dispose() {
       try {
         node.port.postMessage("stop");
@@ -263,6 +276,9 @@ function attachProcessor(ctx: AudioContext, source: MediaStreamAudioSourceNode):
     stop() {
       capturing = false;
       return Promise.resolve(concatFloats(chunks));
+    },
+    clear() {
+      clearSampleRing(ring);
     },
     dispose() {
       capturing = false;
