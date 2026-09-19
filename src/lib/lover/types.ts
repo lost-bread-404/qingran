@@ -29,6 +29,11 @@ export type ChatMessage = {
   scanned?: boolean;
   voiceTurnId?: string;
   hearingGold?: "unconfirmed" | "confirmed";
+  hearingTiming?: {
+    hearMs?: number;
+    grokMs?: number;
+    ttsMs?: number;
+  };
 };
 
 export type Memory = {

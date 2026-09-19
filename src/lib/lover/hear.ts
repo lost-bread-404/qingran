@@ -55,6 +55,7 @@ export async function hearUtterance(input: {
   const mimeType = clip.type || "audio/wav";
   const provider: HearingProviderId = session.provider;
   const persist = debugHearing || session.capture;
+  let ranHearing = false;
 
   try {
     const result = await runHearing({
@@ -81,6 +82,7 @@ export async function hearUtterance(input: {
         liveTextSource: input.liveText.trim() ? "webspeech" : "none",
       },
     });
+    ranHearing = true;
     if (result.quota) throw new Error(QUOTA_HINT);
     const tagged =
       result.provider !== "xai" && result.tagged
@@ -94,9 +96,23 @@ export async function hearUtterance(input: {
       noiseOnly: result.noise_only,
       clipId: result.clipId,
       saveError: result.saveError,
+      endpointFired: input.endpoint_fired,
+      sttDoneAt: Date.now(),
     });
   } catch (err) {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
+  }
+
+  if (ranHearing || provider === "xai") {
+    return heardFromHearing({
+      debugHearing,
+      turnId,
+      tagged: "",
+      xaiText: "",
+      noiseOnly: true,
+      endpointFired: input.endpoint_fired,
+      sttDoneAt: Date.now(),
+    });
   }
 
   let text = "";
@@ -121,6 +137,8 @@ export async function hearUtterance(input: {
     tagged: finished,
     xaiText: text,
     noiseOnly: !finished,
+    endpointFired: input.endpoint_fired,
+    sttDoneAt: Date.now(),
   });
 }
 

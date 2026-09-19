@@ -366,12 +366,17 @@ export function VoiceRoom() {
         existingUser?: ChatMessage;
         voiceTurnId?: string;
         skipQingran?: boolean;
+        endpointFired?: number;
+        sttDoneAt?: number;
       },
     ) => {
       const tagged = sayRaw.trim();
       if (!tagged) return;
       const say = stripHearingMarkup(tagged).trim() || tagged;
       const at = Date.now();
+      const sttDoneAt = opts?.sttDoneAt ?? at;
+      const hearMs =
+        opts?.endpointFired && sttDoneAt >= opts.endpointFired ? sttDoneAt - opts.endpointFired : undefined;
       const userMsg: ChatMessage = opts?.existingUser ?? {
         id: newId(),
         role: "user",
@@ -380,7 +385,11 @@ export function VoiceRoom() {
         kind: "say",
         voiceTurnId: opts?.voiceTurnId,
         hearingGold: opts?.voiceTurnId ? "unconfirmed" : undefined,
+        hearingTiming: hearMs != null ? { hearMs } : undefined,
       };
+      if (opts?.existingUser && hearMs != null) {
+        userMsg.hearingTiming = { ...userMsg.hearingTiming, hearMs };
+      }
       if (opts?.skipQingran) {
         setBanner(null);
         setMessages((prev) => [...prev, userMsg]);
@@ -419,6 +428,12 @@ export function VoiceRoom() {
       if (opts?.voiceTurnId) {
         void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: say } });
       }
+      const stampTiming = (partial: { grokMs?: number; ttsMs?: number }) => {
+        if (!profileRef.current.debugHearing) return;
+        const next = { ...userMsg.hearingTiming, ...partial };
+        userMsg.hearingTiming = next;
+        setMessages((prev) => prev.map((m) => (m.id === userMsg.id ? { ...m, hearingTiming: next } : m)));
+      };
 
       let full = "";
       let gotAudio = false;
@@ -475,6 +490,7 @@ export function VoiceRoom() {
           },
           (event) => {
             if (event.t === "text") {
+              if (userMsg.hearingTiming?.grokMs == null) stampTiming({ grokMs: Date.now() - sttDoneAt });
               full += event.d;
               paintText(full);
               return;
@@ -520,7 +536,10 @@ export function VoiceRoom() {
                 void resumeAudio();
               }
               gotAudio = true;
-              if (!ttsFirst) ttsFirst = Date.now();
+              if (!ttsFirst) {
+                ttsFirst = Date.now();
+                if (userMsg.hearingTiming?.ttsMs == null) stampTiming({ ttsMs: ttsFirst - sttDoneAt });
+              }
               setStatus("speaking");
               const bytes = base64ToBytes(event.b);
               clips.push(bytes);
@@ -580,6 +599,8 @@ export function VoiceRoom() {
       await sendTurn(heard.text, {
         voiceTurnId: voiceTurnIdForMessage(heard),
         skipQingran: heard.skipQingran,
+        endpointFired: heard.endpointFired,
+        sttDoneAt: heard.sttDoneAt,
       });
     },
   });
@@ -633,6 +654,8 @@ export function VoiceRoom() {
         void sendTurn(heard.text, {
           voiceTurnId: voiceTurnIdForMessage(heard),
           skipQingran: heard.skipQingran,
+          endpointFired: heard.endpointFired,
+          sttDoneAt: heard.sttDoneAt,
         });
       }
     } finally {

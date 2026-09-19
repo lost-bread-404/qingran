@@ -38,6 +38,7 @@ import {
 } from "./persist.ts";
 import { silenceWavBase64, wavDurationMs, wavPeakRms } from "./wav.ts";
 import { scrubHallucination } from "../stt-text.ts";
+import { waitUntil } from "@vercel/functions";
 
 export type { LabClipFilter } from "./persist.ts";
 
@@ -323,61 +324,39 @@ export const runHearing = createServerFn({ method: "POST" })
     const drop = shouldDropAsNoise(providerNoise, xaiText);
     const tagged = drop ? "" : disagreement ? xaiText : used === "xai" ? xaiText : picked.tagged;
     const stt_done = Date.now();
+    const latency_ms = hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0);
+    const model = hearing?.model || HEARING[used].model;
 
-    await upsertTurn({
-      id: turnId,
-      provider: used,
-      model: hearing?.model || HEARING[used].model,
-      speech_start: data.speech_start,
-      endpoint_fired: data.endpoint_fired,
-      upload_start,
-      stt_done,
-      latency_ms: hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0),
-      tokens_in: hearing?.tokens_in,
-      tokens_out: hearing?.tokens_out,
-      cost_usd: hearing?.cost_usd,
-      refusal,
-      fallback,
-      fallback_reason: fallbackReason,
-      fallback_raw: scrubbed.suspect
-        ? clipFallbackRaw(picked.xaiText)
-        : clipFallbackRaw(outcome && !outcome.ok ? outcome.raw : undefined),
-      disagreement,
-      live_text_source: data.liveTextSource ?? (data.liveText?.trim() ? "webspeech" : "none"),
-      hallucination_suspect: scrubbed.suspect,
-    });
-
-    let clipId: string | undefined;
-    let saveError: string | undefined;
-    if (data.capture || data.debugHearing) {
-      try {
-        clipId = await insertClip({
-          audioBase64: data.audioBase64,
-          durationMs: Math.round(durationSec * 1000),
-          source: data.source === "scripted" ? "scripted" : "real",
-          category: data.category,
-          xaiText,
-          hearing,
-          tagged: used === "xai" ? xaiText : tagged,
-          liveText: data.liveText ?? "",
-          turnId,
-          mode: data.mode,
-          audioRoute: data.audioRoute,
-          disagreement,
-          peakRms: data.peakRms ?? peakRms,
-          vadFloor: data.vadFloor,
-        });
-      } catch (err) {
-        saveError = errorText(err);
-        console.error("[hearing] insertClip failed:", saveError);
-      }
-    }
+    waitUntil(
+      persistHearingTurn({
+        turnId,
+        used,
+        model,
+        data,
+        upload_start,
+        stt_done,
+        latency_ms,
+        hearing,
+        xaiText,
+        pickedXaiText: picked.xaiText,
+        tagged: used === "xai" ? xaiText : tagged,
+        fallback,
+        fallbackReason,
+        outcome,
+        scrubbedSuspect: scrubbed.suspect,
+        disagreement,
+        durationMs: Math.round(durationSec * 1000),
+        peakRms: data.peakRms ?? peakRms,
+        capture: Boolean(data.capture || data.debugHearing),
+        refusal,
+      }),
+    );
 
     return {
       ok: true,
       turnId,
       provider: used,
-      model: hearing?.model || HEARING[used].model,
+      model,
       tagged,
       text: hearing?.text ?? xaiText,
       xaiText,
@@ -387,11 +366,9 @@ export const runHearing = createServerFn({ method: "POST" })
       fallback,
       fallback_reason: fallbackReason,
       refusal,
-      latency_ms: hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0),
+      latency_ms,
       words,
       hearing,
-      clipId,
-      saveError,
       hallucinationSuspect: scrubbed.suspect,
     };
   });
@@ -727,6 +704,75 @@ async function dispatchProvider(provider: HearingProviderId, audioBase64: string
   if (provider === "gemini") return hearWithGemini(audioBase64, opts);
   if (provider === "selfhost") return hearWithSelfhost(audioBase64, opts);
   return xaiAsHearing("", 0);
+}
+
+async function persistHearingTurn(input: {
+  turnId: string;
+  used: HearingProviderId;
+  model: string;
+  data: RunHearingInput;
+  upload_start: number;
+  stt_done: number;
+  latency_ms: number;
+  hearing: HearingResult | null;
+  xaiText: string;
+  pickedXaiText: string;
+  tagged: string;
+  fallback: boolean;
+  fallbackReason?: string;
+  outcome: AdapterOutcome | null;
+  scrubbedSuspect: boolean;
+  disagreement: boolean;
+  durationMs: number;
+  peakRms: number;
+  capture: boolean;
+  refusal: boolean;
+}) {
+  await upsertTurn({
+    id: input.turnId,
+    provider: input.used,
+    model: input.model,
+    speech_start: input.data.speech_start,
+    endpoint_fired: input.data.endpoint_fired,
+    upload_start: input.upload_start,
+    stt_done: input.stt_done,
+    latency_ms: input.latency_ms,
+    tokens_in: input.hearing?.tokens_in,
+    tokens_out: input.hearing?.tokens_out,
+    cost_usd: input.hearing?.cost_usd,
+    refusal: input.refusal,
+    fallback: input.fallback,
+    fallback_reason: input.fallbackReason,
+    fallback_raw: input.scrubbedSuspect
+      ? clipFallbackRaw(input.pickedXaiText)
+      : clipFallbackRaw(input.outcome && !input.outcome.ok ? input.outcome.raw : undefined),
+    disagreement: input.disagreement,
+    live_text_source: input.data.liveTextSource ?? (input.data.liveText?.trim() ? "webspeech" : "none"),
+    hallucination_suspect: input.scrubbedSuspect,
+  });
+  if (!input.capture) return;
+  try {
+    await insertClip({
+      audioBase64: input.data.audioBase64,
+      durationMs: input.durationMs,
+      source: input.data.source === "scripted" ? "scripted" : "real",
+      category: input.data.category,
+      xaiText: input.xaiText,
+      hearing: input.hearing,
+      tagged: input.tagged,
+      liveText: input.data.liveText ?? "",
+      turnId: input.turnId,
+      mode: input.data.mode,
+      audioRoute: input.data.audioRoute,
+      disagreement: input.disagreement,
+      peakRms: input.peakRms,
+      vadFloor: input.data.vadFloor,
+    });
+  } catch (err) {
+    const saveError = errorText(err);
+    console.error("[hearing] insertClip failed:", saveError);
+    await upsertTurn({ id: input.turnId, save_error: saveError });
+  }
 }
 
 async function upsertTurn(patch: HearingTurnPatch) {

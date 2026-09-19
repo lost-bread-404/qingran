@@ -83,7 +83,12 @@ export async function confirmClipByTurn(
     limit 1
   `;
   const clip = rows[0];
-  if (!clip) return { ok: false, error: "没有这段录音。" };
+  if (!clip) {
+    const failed = await sql<{ save_error: string | null }>`
+      select save_error from qingran_hearing_turns where id = ${input.turnId}
+    `;
+    return { ok: false, error: failed[0]?.save_error || "没有这段录音。" };
+  }
   const hasCues = Array.isArray(clip.gold_cues) && clip.gold_cues.length > 0;
   const tier = goldTierFor({
     source: input.goldSource,
@@ -105,11 +110,16 @@ export async function confirmClipByTurn(
 }
 
 export async function patchFinalTextByTurn(sql: Sql, turnId: string, finalText: string) {
-  await sql`
-    update qingran_hearing_clips
-    set final_text = ${finalText}
-    where turn_id = ${turnId}
-  `;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const rows = await sql<{ id: string }>`
+      update qingran_hearing_clips
+      set final_text = ${finalText}
+      where turn_id = ${turnId}
+      returning id
+    `;
+    if (rows[0]?.id) return;
+    await new Promise((resolve) => setTimeout(resolve, 80 * (attempt + 1)));
+  }
 }
 
 export async function listClipRows(sql: Sql, filter: LabClipFilter = "all") {

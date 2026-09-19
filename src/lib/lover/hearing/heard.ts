@@ -8,6 +8,9 @@ export type HeardUtterance = {
   clipId?: string;
   saveError?: string;
   skipQingran: boolean;
+  persistPending?: boolean;
+  endpointFired?: number;
+  sttDoneAt?: number;
 };
 
 export function clipSaveBanner(error: string): string {
@@ -34,9 +37,15 @@ export function heardFromHearing(input: {
   noiseOnly: boolean;
   clipId?: string;
   saveError?: string;
+  endpointFired?: number;
+  sttDoneAt?: number;
 }): HeardUtterance {
   const recognized = input.tagged.trim() || input.xaiText.trim();
   const empty = !recognized || shouldDropAsNoise(input.noiseOnly, input.xaiText);
+  const timing = {
+    endpointFired: input.endpointFired,
+    sttDoneAt: input.sttDoneAt,
+  };
   if (input.debugHearing) {
     return {
       text: empty ? UNRECOGNIZED_TEXT : recognized,
@@ -44,6 +53,8 @@ export function heardFromHearing(input: {
       clipId: input.clipId,
       saveError: input.saveError,
       skipQingran: empty,
+      persistPending: true,
+      ...timing,
     };
   }
   return {
@@ -52,9 +63,12 @@ export function heardFromHearing(input: {
     clipId: input.clipId,
     saveError: input.saveError,
     skipQingran: false,
+    ...timing,
   };
 }
 
-export function voiceTurnIdForMessage(heard: Pick<HeardUtterance, "clipId" | "turnId">): string | undefined {
-  return heard.clipId ? heard.turnId : undefined;
+export function voiceTurnIdForMessage(
+  heard: Pick<HeardUtterance, "clipId" | "turnId" | "persistPending">,
+): string | undefined {
+  return heard.clipId || heard.persistPending ? heard.turnId : undefined;
 }

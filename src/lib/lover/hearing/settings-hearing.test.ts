@@ -69,3 +69,27 @@ test("lab page is score card, worst 20, and hash export only", () => {
   assert.doesNotMatch(src, /覆盖率/);
   assert.doesNotMatch(src, /分配 dev\/test/);
 });
+
+test("runHearing persists with waitUntil; xai skips audio-LLM and a second STT", () => {
+  const store = readFileSync(new URL("./store.ts", import.meta.url), "utf8");
+  const hear = readFileSync(new URL("../hear.ts", import.meta.url), "utf8");
+  assert.match(store, /from "@vercel\/functions"/);
+  assert.match(store, /waitUntil\(/);
+  assert.match(store, /provider === "xai" \? Promise.resolve\(null\)/);
+  assert.match(hear, /ranHearing \|\| provider === "xai"/);
+  assert.match(hear, /transcribeVoice/);
+});
+
+test("playback START_SEC is restored to pre-low-latency 0.42", () => {
+  const src = readFileSync(new URL("../playback.ts", import.meta.url), "utf8");
+  assert.match(src, /const START_SEC = 0\.42/);
+  assert.match(src, /5cbea61/);
+  assert.match(src, /pre-low-latency/);
+});
+
+test("debug transcript shows segmented latency", () => {
+  const src = readFileSync(new URL("../../../components/lover/transcript.tsx", import.meta.url), "utf8");
+  assert.match(src, /说完→识别完/);
+  assert.match(src, /识别完→字/);
+  assert.match(src, /→出声/);
+});

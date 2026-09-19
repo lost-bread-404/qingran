@@ -267,6 +267,17 @@ function UserBubble({
           <p className="whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
             {user.text}
           </p>
+          {debugHearing && user.hearingTiming ? (
+            <p className="text-[10px] text-subtle">
+              {[
+                user.hearingTiming.hearMs != null ? `说完→识别完 ${user.hearingTiming.hearMs}ms` : null,
+                user.hearingTiming.grokMs != null ? `识别完→字 ${user.hearingTiming.grokMs}ms` : null,
+                user.hearingTiming.ttsMs != null ? `→出声 ${user.hearingTiming.ttsMs}ms` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          ) : null}
         </div>
       </div>
       {canConfirm ? (

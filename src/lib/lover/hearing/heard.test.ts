@@ -44,7 +44,8 @@ test("voiceTurnId is omitted until the clip actually saved", () => {
     noiseOnly: false,
     saveError: "column stt_text does not exist",
   });
-  assert.equal(voiceTurnIdForMessage(heard), undefined);
+  assert.equal(voiceTurnIdForMessage({ turnId: heard.turnId, clipId: heard.clipId }), undefined);
+  assert.equal(voiceTurnIdForMessage(heard), "t3");
   assert.match(clipSaveBanner(heard.saveError ?? ""), /录音没存上/);
 });
 

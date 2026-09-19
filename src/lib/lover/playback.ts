@@ -4,7 +4,10 @@ const SILENCE =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
 const PCM_RATE = 24_000;
-const START_SEC = 0.68;
+/** Restored to 0.42 from tag pre-low-latency. Raised to 0.68 in 5cbea61
+ *  after dropping sentence-sliced TTS so the first PCM chunk had a longer
+ *  start buffer; full-reply TTS no longer needs that extra preroll. */
+const START_SEC = 0.42;
 const HOLD_SEC = 0.32;
 const SLICE_SEC = 0.18;
 export const VOICE_GAIN = 0.5;
