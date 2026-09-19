@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { pendingMigrations } from "../../../../scripts/migration-plan.mjs";
-import { confirmClipByTurn, goldCount, insertClipRow, listClipRows, patchFinalTextByTurn } from "./persist.ts";
+import { confirmClipByTurn, goldCount, hallucinationCount, insertClipRow, listClipRows, listScoreClipRows, patchFinalTextByTurn } from "./persist.ts";
 import { silenceWavBase64 } from "./wav.ts";
 
 type Sql = {
@@ -97,4 +97,9 @@ test("PGLite e2e: voice round → clip → confirm → confirmed filter", async 
   await patchFinalTextByTurn(sql, "turn-1", "在吗呀");
   const patched = await listClipRows(sql, "confirmed");
   assert.equal(patched[0]?.final_text, "在吗呀");
+
+  const scored = await listScoreClipRows(sql);
+  assert.equal(scored[0]?.id, "clip-1");
+  assert.equal(scored[0]?.final_text, "在吗呀");
+  assert.equal(await hallucinationCount(sql, "all"), 0);
 });

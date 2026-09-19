@@ -56,3 +56,16 @@ test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance",
   assert.match(hold, /vadFloor: triggerFloorRef/);
   assert.match(hold, /holdThreshold/);
 });
+
+test("lab page is score card, worst 20, and hash export only", () => {
+  const src = readFileSync(new URL("../../../routes/lab.tsx", import.meta.url), "utf8");
+  assert.match(src, /最近 7 天/);
+  assert.match(src, /CER 最终文字/);
+  assert.match(src, /最差 20 条/);
+  assert.match(src, /导出 JSON/);
+  assert.match(src, /hash 80\/20/);
+  assert.doesNotMatch(src, /重标/);
+  assert.doesNotMatch(src, /disagreement/);
+  assert.doesNotMatch(src, /覆盖率/);
+  assert.doesNotMatch(src, /分配 dev\/test/);
+});

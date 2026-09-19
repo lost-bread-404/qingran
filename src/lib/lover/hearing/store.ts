@@ -11,26 +11,27 @@ import {
   type AdapterOutcome,
   type HearingCallOpts,
 } from "./http.ts";
-import { hearingCueSchema, type CueEmotion, type HearingCue, type HearingResult } from "./schema.ts";
-import { assignSplits } from "./split.ts";
+import { EMOTIONS, hearingCueSchema, type CueEmotion, type HearingCue, type HearingResult } from "./schema.ts";
+import { assignSplits, hashSplit } from "./split.ts";
 import { transcribeWithXai, xaiAsHearing } from "./xai.ts";
 import { chooseHearing } from "./select.ts";
 import { deleteHearingWav, putHearingWav, readHearingWav } from "./blob.ts";
 import { isNoiseDisagreement, shouldDropAsNoise } from "./noise.ts";
 import { goldTierFor, isGoldSource, type GoldSource } from "./gold.ts";
-import { summarizeCoverage } from "./coverage.ts";
-import { EMOTIONS } from "./schema.ts";
 import type { AudioRoute, HearingMode } from "./route.ts";
 import { errorText } from "./heard.ts";
 import { envPresence } from "./env.ts";
+import { scoreHearing, type ScoreWindow } from "./score.ts";
 import {
   clipCount,
   confirmClipByTurn,
   goldCount,
   goldStatusByTurnIds,
+  hallucinationCount,
   insertClipRow,
   listClipRows,
   listMigrationNames,
+  listScoreClipRows,
   parseCues,
   patchFinalTextByTurn,
   type LabClipFilter,
@@ -477,29 +478,37 @@ export const listHearingClips = createServerFn({ method: "POST" })
     }
   });
 
-export const hearingLabStats = createServerFn({ method: "POST" })
-  .validator((input: { password: string }) => input)
+export const hearingLabScore = createServerFn({ method: "POST" })
+  .validator((input: { password: string; window?: ScoreWindow }) => input)
   .handler(async ({ data }) => {
+    const window: ScoreWindow = data.window === "7d" ? "7d" : "all";
     try {
       assertLab(data.password);
       const sql = await getSql();
-      const [turnCount] = await sql<{ n: number }>`select count(*)::int as n from qingran_hearing_turns`;
-      const clips = await sql<{
-        category: string | null;
-        mode: string | null;
-        gold_source: string | null;
-        storage_backend: string | null;
-      }>`
-        select category, mode, gold_source, storage_backend from qingran_hearing_clips where skip = false
-      `;
-      const coverage = summarizeCoverage(clips, Number(turnCount?.n) || 0);
-      return { ok: true as const, totalTurns: Number(turnCount?.n) || 0, coverage };
+      const rows = await listScoreClipRows(sql);
+      const hallucinationN = await hallucinationCount(sql, window);
+      const score = scoreHearing(
+        rows.map((row) => ({
+          id: row.id,
+          createdAt: row.created_at,
+          finalText: row.final_text ?? "",
+          xaiText: row.xai_text ?? "",
+          liveText: row.live_text ?? "",
+          goldText: row.gold_text ?? "",
+          noiseOnly: Boolean(row.noise_only),
+          utteranceEmotion: row.utterance_emotion,
+          turnId: row.turn_id,
+        })),
+        { window, hallucinationN },
+      );
+      return { ok: true as const, dbSource, window, ...score };
     } catch (err) {
       return {
         ok: false as const,
         error: errorText(err),
-        totalTurns: 0,
-        coverage: summarizeCoverage([], 0),
+        dbSource,
+        window,
+        ...scoreHearing([], { window, hallucinationN: 0 }),
       };
     }
   });
@@ -659,13 +668,16 @@ export const exportHearingClips = createServerFn({ method: "POST" })
       turn_id: string | null;
       disagreement: boolean | null;
       storage_backend: string | null;
+      final_text: string | null;
+      peak_rms: number | null;
+      vad_floor: number | null;
     }>`
       select id, created_at::text as created_at, duration_ms, source, category, split,
              xai_text, hearing_text, hearing_json, live_text,
              gold_text, gold_cues, noise_only, skip,
              relabel_gold_text, relabel_gold_cues, relabel_noise_only, audio_wav, blob_pathname,
              gold_source, stt_text, gold_tier, utterance_emotion, mode, audio_route,
-             turn_id, disagreement, storage_backend
+             turn_id, disagreement, storage_backend, final_text, peak_rms, vad_floor
       from qingran_hearing_clips
       order by created_at asc
     `;
@@ -680,7 +692,7 @@ export const exportHearingClips = createServerFn({ method: "POST" })
           durationMs: Number(row.duration_ms) || 0,
           source: row.source,
           category: row.category,
-          split: row.split,
+          split: hashSplit(row.id),
           xaiText: row.xai_text ?? "",
           hearingText: row.hearing_text ?? "",
           hearing: asHearing(row.hearing_json),
@@ -702,6 +714,9 @@ export const exportHearingClips = createServerFn({ method: "POST" })
           turnId: row.turn_id,
           disagreement: Boolean(row.disagreement),
           storageBackend: row.storage_backend,
+          finalText: row.final_text ?? "",
+          peakRms: row.peak_rms,
+          vadFloor: row.vad_floor,
         })),
       ),
     };

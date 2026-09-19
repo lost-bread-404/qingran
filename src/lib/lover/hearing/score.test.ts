@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { scoreHearing, type ScoreClip } from "./score.ts";
+import { hashSplit } from "./split.ts";
+
+function clip(partial: Partial<ScoreClip> & Pick<ScoreClip, "id">): ScoreClip {
+  return {
+    createdAt: "2026-09-18T00:00:00.000Z",
+    finalText: "",
+    xaiText: "",
+    liveText: "",
+    goldText: "",
+    noiseOnly: false,
+    utteranceEmotion: null,
+    turnId: partial.id,
+    ...partial,
+  };
+}
+
+test("score card CER, exact match, noise rate, and worst-20 order", () => {
+  const now = Date.parse("2026-09-19T00:00:00.000Z");
+  const scored = scoreHearing(
+    [
+      clip({ id: "a", goldText: "在吗", finalText: "在吗", xaiText: "在吗", liveText: "在吗", utteranceEmotion: "neutral" }),
+      clip({ id: "b", goldText: "嗯", finalText: "我喜欢你", xaiText: "我喜欢你", liveText: "", utteranceEmotion: "coy" }),
+      clip({ id: "c", goldText: "", finalText: "噪音", xaiText: "噪音", noiseOnly: true }),
+      clip({ id: "d", goldText: "啊", finalText: "", xaiText: "", liveText: "", noiseOnly: true }),
+      clip({
+        id: "old",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        goldText: "旧",
+        finalText: "错很多字啊",
+      }),
+    ],
+    { window: "7d", hallucinationN: 2, now },
+  );
+  assert.equal(scored.clipN, 4);
+  assert.equal(scored.goldN, 3);
+  assert.equal(scored.cerFinal, scored.worst[0] ? (0 + scored.worst[0].cer + scored.worst[1]!.cer) / 3 : null);
+  assert.equal(scored.exactMatch, 1 / 3);
+  assert.equal(scored.liveHasData, true);
+  assert.equal(scored.liveEmptyRate, 2 / 3);
+  assert.equal(scored.noiseN, 2);
+  assert.equal(scored.noiseRecognizedRate, 0.5);
+  assert.equal(scored.hallucinationN, 2);
+  assert.equal(scored.worst[0]?.id, "b");
+  assert.equal(scored.worst[0]?.hyp, "我喜欢你");
+  assert.equal(scored.worst[0]?.gold, "嗯");
+  assert.ok((scored.cerXai ?? 1) > 0);
+  assert.equal(scored.cerLive !== null, true);
+});
+
+test("Apple live_text all empty is 无数据 with empty rate 1", () => {
+  const scored = scoreHearing([
+    clip({ id: "e", goldText: "嗯", finalText: "嗯", liveText: "" }),
+    clip({ id: "f", goldText: "啊", finalText: "啊", liveText: "   " }),
+  ]);
+  assert.equal(scored.liveHasData, false);
+  assert.equal(scored.cerLive, null);
+  assert.equal(scored.liveEmptyRate, 1);
+  assert.equal(scored.exactMatch, 1);
+  assert.equal(scored.cerFinal, 0);
+});
+
+test("id hash split is stable and roughly 80/20", () => {
+  assert.equal(hashSplit("clip-1"), hashSplit("clip-1"));
+  const ids = Array.from({ length: 200 }, (_, i) => `id-${i}`);
+  const testN = ids.filter((id) => hashSplit(id) === "test").length;
+  assert.ok(testN >= 20 && testN <= 60, `got ${testN} test ids`);
+});

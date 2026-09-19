@@ -179,6 +179,45 @@ export async function goldCount(sql: Sql): Promise<number> {
   return Number(rows[0]?.n) || 0;
 }
 
+export async function listScoreClipRows(sql: Sql) {
+  return sql.query<{
+    id: string;
+    created_at: string;
+    final_text: string | null;
+    xai_text: string | null;
+    live_text: string | null;
+    gold_text: string | null;
+    stt_text: string | null;
+    hearing_text: string | null;
+    noise_only: boolean | null;
+    utterance_emotion: string | null;
+    turn_id: string | null;
+  }>(
+    `select id, created_at::text as created_at,
+            final_text, xai_text, live_text, gold_text, stt_text, hearing_text,
+            noise_only, utterance_emotion, turn_id
+     from qingran_hearing_clips
+     order by created_at desc`,
+  );
+}
+
+export async function hallucinationCount(sql: Sql, window: "7d" | "all"): Promise<number> {
+  const rows =
+    window === "7d"
+      ? await sql<{ n: number }>`
+          select count(*)::int as n
+          from qingran_hearing_turns
+          where hallucination_suspect = true
+            and created_at >= now() - interval '7 days'
+        `
+      : await sql<{ n: number }>`
+          select count(*)::int as n
+          from qingran_hearing_turns
+          where hallucination_suspect = true
+        `;
+  return Number(rows[0]?.n) || 0;
+}
+
 export async function listMigrationNames(sql: Sql): Promise<string[]> {
   const rows = await sql<{ name: string }>`select name from _migrations order by name`;
   return rows.map((row) => row.name);

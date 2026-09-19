@@ -1,145 +1,64 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { ConfirmTurn } from "@/components/lover/confirm-turn";
 import {
-  assignHearingSplits,
   confirmHearingClip,
   deleteHearingClip,
   exportHearingClips,
   getHearingClipAudio,
-  hearingConnectionTest,
-  hearingLabDiagnostics,
-  hearingLabStats,
-  listHearingClips,
-  saveHearingGold,
+  hearingLabScore,
   unlockHearingLab,
-  type LabClipFilter,
 } from "@/lib/lover/hearing/store";
-import { EMOTIONS, type CueEmotion, type HearingCue, type HearingResult } from "@/lib/lover/hearing/schema";
+import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
+import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/score";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/lab")({ component: HearingLabPage });
 
-type ClipRow = {
-  id: string;
-  createdAt: string;
-  durationMs: number;
-  source: string;
-  category: string | null;
-  split: string | null;
-  xaiText: string;
-  hearingText: string;
-  hearing: HearingResult | null;
-  liveText: string;
-  goldText: string;
-  goldCues: HearingCue[];
-  noiseOnly: boolean;
-  skip: boolean;
-  hasGold: boolean;
-  hasRelabel: boolean;
-  goldSource: string | null;
-  sttText: string;
-  goldTier: number | null;
-  utteranceEmotion: string | null;
-  mode: string | null;
-  audioRoute: string | null;
-  turnId: string | null;
-  disagreement: boolean;
-  storageBackend: string | null;
-  blobError: string | null;
+const LAB_KEY = "qingran-hearing-lab";
+
+const EMOTION_LABEL: Record<CueEmotion, string> = {
+  coy: "撒娇",
+  playful: "玩",
+  content: "满足",
+  sleepy: "困",
+  sad: "委屈",
+  annoyed: "烦",
+  neutral: "平",
 };
 
-type LabTab = "annotate" | "recent" | "coverage";
-
-const LAB_KEY = "qingran-hearing-lab";
-const FILTERS: { id: LabClipFilter; label: string }[] = [
-  { id: "all", label: "全部" },
-  { id: "confirmed", label: "已确认" },
-  { id: "unconfirmed", label: "未确认" },
-  { id: "disagreement", label: "disagreement" },
-];
+type ScorePayload = HearingScore & {
+  ok: boolean;
+  error?: string;
+  dbSource?: string;
+  window: ScoreWindow;
+};
 
 function HearingLabPage() {
   const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [clips, setClips] = useState<ClipRow[]>([]);
-  const [index, setIndex] = useState(0);
-  const [relabel, setRelabel] = useState(false);
-  const [filter, setFilter] = useState<LabClipFilter>("all");
-  const [tab, setTab] = useState<LabTab>("annotate");
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [goldText, setGoldText] = useState("");
-  const [goldCuesText, setGoldCuesText] = useState("[]");
-  const [noiseOnly, setNoiseOnly] = useState(false);
-  const [skip, setSkip] = useState(false);
+  const [windowId, setWindowId] = useState<ScoreWindow>("7d");
+  const [score, setScore] = useState<ScorePayload | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [confirmTurnId, setConfirmTurnId] = useState<string | null>(null);
-  const [confirmError, setConfirmError] = useState<string | null>(null);
-  const [confirmBusy, setConfirmBusy] = useState(false);
-  const [diag, setDiag] = useState<{
-    dbSource: string;
-    migrations: string[];
-    clipCount: number;
-    env: Record<string, boolean>;
-    error?: string;
-  } | null>(null);
-  const [ping, setPing] = useState<{
-    engines: { id: string; ok: boolean; latency_ms: number; error?: string }[];
-    env: Record<string, boolean>;
-    dbSource: string;
-    migrations: string[];
-    clipCount: number;
-    dbError?: string;
-  } | null>(null);
-  const [pingBusy, setPingBusy] = useState(false);
-  const [coverage, setCoverage] = useState<{
-    totalTurns: number;
-    coverage: {
-      confirmed: number;
-      edited: number;
-      labeled: number;
-      confirmationRate: number;
-      byCategory: Record<string, { confirmed: number; edited: number; n: number }>;
-      byMode: Record<string, { confirmed: number; edited: number; n: number }>;
-      thinCategories: string[];
-      dbBacked: number;
-    };
-  } | null>(null);
+  const [editClip, setEditClip] = useState<WorstClip | null>(null);
+  const [editAudio, setEditAudio] = useState<string | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [playUrl, setPlayUrl] = useState<string | null>(null);
 
-  const clip = clips[index] ?? null;
-  const dbBacked = clips.filter((c) => c.storageBackend === "db").length;
-
-  async function load(nextRelabel = relabel, secret = password, nextFilter = filter) {
+  async function load(secret = password, nextWindow = windowId) {
     try {
-      const listed = await listHearingClips({
-        data: { password: secret, relabel: nextRelabel, filter: nextFilter },
-      });
-      if (!listed.ok) {
-        setError(listed.error);
-        setClips([]);
+      const next = await hearingLabScore({ data: { password: secret, window: nextWindow } });
+      if (!next.ok) {
+        setError(next.error);
+        setScore(next);
         return;
       }
       setError(null);
-      setClips(listed.clips as ClipRow[]);
-      setIndex(0);
-      const stats = await hearingLabStats({ data: { password: secret } });
-      if (!stats.ok) {
-        setError(stats.error);
-      } else {
-        setCoverage({ totalTurns: stats.totalTurns, coverage: stats.coverage });
-      }
-      const nextDiag = await hearingLabDiagnostics({ data: { password: secret } });
-      setDiag({
-        dbSource: nextDiag.dbSource,
-        migrations: nextDiag.migrations,
-        clipCount: nextDiag.clipCount,
-        env: nextDiag.env,
-        error: "error" in nextDiag ? nextDiag.error : undefined,
-      });
+      setScore(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -155,7 +74,7 @@ function HearingLabPage() {
       }
       sessionStorage.setItem(LAB_KEY, password);
       setUnlocked(true);
-      await load(relabel, password);
+      await load(password, windowId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -168,45 +87,31 @@ function HearingLabPage() {
     void unlockHearingLab({ data: { password: saved } }).then((result) => {
       if (!result.ok) return;
       setUnlocked(true);
-      void load(false, saved);
+      void load(saved, windowId);
     });
   }, []);
 
   useEffect(() => {
-    if (!clip || !unlocked) {
-      setGoldText("");
-      setGoldCuesText("[]");
-      setNoiseOnly(false);
-      setSkip(false);
-      setAudioUrl(null);
+    if (!editClip) {
+      setEditAudio((url) => {
+        if (url) URL.revokeObjectURL(url);
+        return null;
+      });
       return;
     }
-    setGoldText(clip.goldText);
-    setGoldCuesText(JSON.stringify(clip.goldCues, null, 2));
-    setNoiseOnly(clip.noiseOnly);
-    setSkip(clip.skip);
     let revoked = false;
     let url: string | null = null;
-    void getHearingClipAudio({ data: { password, id: clip.id } }).then((result) => {
+    void getHearingClipAudio({ data: { password, id: editClip.id } }).then((result) => {
       if (!result.ok || revoked) return;
       const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
       url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
-      setAudioUrl(url);
+      setEditAudio(url);
     });
     return () => {
       revoked = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [clip?.id, unlocked, password]);
-
-  const hearingPreview = useMemo(() => {
-    if (!clip?.hearing || typeof clip.hearing !== "object") return "";
-    try {
-      return JSON.stringify(clip.hearing, null, 2);
-    } catch {
-      return "";
-    }
-  }, [clip]);
+  }, [editClip?.id, password]);
 
   if (!unlocked) {
     return (
@@ -232,8 +137,6 @@ function HearingLabPage() {
     );
   }
 
-  const confirmClip = clips.find((c) => c.turnId === confirmTurnId) ?? null;
-
   return (
     <div className="flex h-full flex-col bg-bg">
       <header className="flex shrink-0 items-center gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
@@ -241,350 +144,161 @@ function HearingLabPage() {
           返回
         </Link>
         <div className="min-w-0 flex-1">
-          <p className="font-display text-lg">标注</p>
+          <p className="font-display text-lg">成绩</p>
           <p className="text-xs text-subtle">
-            {clips.length} 段 · {index + 1}/{Math.max(clips.length, 1)}
-            {relabel ? " · 重标" : ""}
+            {score ? `${score.clipN} 段 · 有 gold ${score.goldN}` : "读取数据库…"}
+            {score?.dbSource ? ` · ${score.dbSource}` : ""}
           </p>
         </div>
-        <Button
-          type="button"
-          variant={relabel ? "default" : "outline"}
-          size="sm"
-          onClick={() => {
-            const next = !relabel;
-            setRelabel(next);
-            void load(next);
-          }}
-        >
-          重标
-        </Button>
       </header>
 
       {error ? <p className="mx-4 mb-2 text-sm text-live">{error}</p> : null}
 
-      <div className="mx-4 mb-3 rounded-md bg-surface-2 px-3 py-3 text-sm">
-        <div className="flex items-center justify-between gap-2">
-          <p>连接测试</p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={pingBusy}
-            onClick={async () => {
-              setPingBusy(true);
-              try {
-                const result = await hearingConnectionTest({ data: { password } });
-                setPing(result);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-              } finally {
-                setPingBusy(false);
-              }
-            }}
-          >
-            {pingBusy ? "测试中…" : "测一下"}
-          </Button>
-        </div>
-        {diag ? (
-          <p className="mt-2 text-xs text-subtle">
-            db {diag.dbSource} · clips {diag.clipCount} · migrations {diag.migrations.join(", ") || "无"}
-          </p>
-        ) : null}
-        {diag?.error ? <p className="mt-1 text-xs text-live">{diag.error}</p> : null}
-        {diag ? (
-          <p className="mt-1 text-xs text-subtle">
-            env{" "}
-            {Object.entries(diag.env)
-              .map(([k, v]) => `${k}=${v ? "有" : "无"}`)
-              .join(" · ")}
-          </p>
-        ) : null}
-        {ping ? (
-          <ul className="mt-2 flex flex-col gap-1 text-xs">
-            {ping.engines.map((engine) => (
-              <li key={engine.id}>
-                {engine.id}: {engine.ok ? "ok" : "失败"} · {engine.latency_ms}ms
-                {engine.error ? ` · ${engine.error}` : ""}
-              </li>
-            ))}
-            {ping.dbError ? <li className="text-live">db: {ping.dbError}</li> : null}
-          </ul>
-        ) : null}
-      </div>
-
-      {dbBacked > 0 || coverage?.coverage.dbBacked ? (
-        <div className="mx-4 mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-live">
-          有 {coverage?.coverage.dbBacked ?? dbBacked} 段录音落在数据库里，Blob 写入可能失败了。
-        </div>
-      ) : null}
-
-      <div className="flex shrink-0 gap-1 px-4 pb-2">
-        {(
-          [
-            ["annotate", "标注"],
-            ["recent", "最近 turn"],
-            ["coverage", "覆盖率"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={cn(
-              "flex-1 min-h-11 rounded-md py-2 text-sm",
-              tab === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex shrink-0 gap-2 overflow-x-auto px-4 pb-3">
-        {FILTERS.map((item) => (
-          <Button
-            key={item.id}
-            type="button"
-            variant={filter === item.id ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              setFilter(item.id);
-              void load(relabel, password, item.id);
-            }}
-          >
-            {item.label}
-          </Button>
-        ))}
-      </div>
-
-      {tab === "coverage" ? (
-        <CoveragePanel coverage={coverage} />
-      ) : tab === "recent" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-          {clips.length === 0 ? (
-            <p className="text-sm text-subtle">还没有 turn。</p>
-          ) : (
-            <ul className="mx-auto flex w-full max-w-xl flex-col gap-3">
-              {clips.map((row) => (
-                <li key={row.id} className="rounded-md bg-surface-2 px-3 py-3">
-                  <p className="text-xs text-subtle">
-                    {row.createdAt} · {row.mode || "?"} · {row.audioRoute || "?"}
-                    {row.disagreement ? " · disagreement" : ""}
-                    {row.goldSource ? ` · ${row.goldSource}` : " · 未确认"}
-                  </p>
-                  <p className="mt-1 text-sm">{row.sttText || row.hearingText || row.xaiText || "（空）"}</p>
-                  <div className="mt-2 flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={!row.turnId}
-                      onClick={() => setConfirmTurnId(row.turnId)}
-                    >
-                      {row.goldSource ? "再确认" : "确认 / 编辑"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setTab("annotate");
-                        setIndex(clips.findIndex((c) => c.id === row.id));
-                      }}
-                    >
-                      去标注 cues
-                    </Button>
-                  </div>
-                </li>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
+          <section className="rounded-md bg-surface-2 px-3 py-3">
+            <div className="mb-3 flex gap-2">
+              {(
+                [
+                  ["7d", "最近 7 天"],
+                  ["all", "全部"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setWindowId(id);
+                    void load(password, id);
+                  }}
+                  className={cn(
+                    "min-h-11 flex-1 rounded-md text-sm",
+                    windowId === id ? "bg-accent text-accent-fg" : "bg-bg text-muted",
+                  )}
+                >
+                  {label}
+                </button>
               ))}
-            </ul>
-          )}
-        </div>
-      ) : (
-        <>
-          <div className="flex shrink-0 gap-2 overflow-x-auto px-4 pb-3">
-            <Button type="button" variant="outline" size="sm" disabled={!clip} onClick={() => setIndex((i) => Math.max(0, i - 1))}>
-              上一段
-            </Button>
+            </div>
+            <ScoreCard score={score} />
+          </section>
+
+          <section>
+            <p className="mb-2 font-display text-lg">最差 20 条</p>
+            {!score?.worst.length ? (
+              <p className="text-sm text-subtle">还没有带 gold 的 clip。</p>
+            ) : (
+              <ul className="flex flex-col gap-3">
+                {score.worst.map((row) => (
+                  <li key={row.id} className="rounded-md bg-surface-2 px-3 py-3">
+                    <p className="text-xs text-subtle">
+                      CER {(row.cer * 100).toFixed(0)}%
+                      {row.emotion && isEmotion(row.emotion) ? ` · ${EMOTION_LABEL[row.emotion]}` : ""}
+                      {row.noiseOnly ? " · 噪音" : ""}
+                    </p>
+                    <p className="mt-1 text-sm">识别 {row.hyp || "（空）"}</p>
+                    <p className="text-sm text-muted">正确 {row.gold || "（空）"}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          if (playUrl) URL.revokeObjectURL(playUrl);
+                          const result = await getHearingClipAudio({ data: { password, id: row.id } });
+                          if (!result.ok) {
+                            setStatus(result.error);
+                            return;
+                          }
+                          const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
+                          const url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
+                          setPlayUrl(url);
+                          const audio = new Audio(url);
+                          void audio.play();
+                        }}
+                      >
+                        播放
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => {
+                        setEditError(null);
+                        setEditClip(row);
+                      }}>
+                        重新编辑
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          if (!window.confirm("删掉这段录音？")) return;
+                          try {
+                            await deleteHearingClip({ data: { password, id: row.id } });
+                            setStatus("已删除。");
+                            await load();
+                          } catch (err) {
+                            setStatus(err instanceof Error ? err.message : String(err));
+                          }
+                        }}
+                      >
+                        删除
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section>
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              disabled={!clip}
-              onClick={() => setIndex((i) => Math.min(clips.length - 1, i + 1))}
-            >
-              下一段
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
               onClick={async () => {
-                const result = await assignHearingSplits({ data: { password } });
-                setStatus(`已按类别分层分好 ${result.assigned} 段（70/30）。`);
-                await load();
-              }}
-            >
-              分配 dev/test
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                const exported = await exportHearingClips({ data: { password } });
-                const blob = new Blob([`${JSON.stringify(exported)}\n`], { type: "application/json" });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url;
-                link.download = `qingran-hearing-${new Date().toISOString().slice(0, 10)}.json`;
-                link.click();
-                URL.revokeObjectURL(url);
-                setStatus("已导出 JSON。");
+                try {
+                  const exported = await exportHearingClips({ data: { password } });
+                  const blob = new Blob([`${JSON.stringify(exported)}\n`], { type: "application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = `qingran-hearing-${new Date().toISOString().slice(0, 10)}.json`;
+                  link.click();
+                  URL.revokeObjectURL(url);
+                  setStatus("已导出 JSON（dev/test 按 id hash 80/20）。");
+                } catch (err) {
+                  setStatus(err instanceof Error ? err.message : String(err));
+                }
               }}
             >
               导出 JSON
             </Button>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-            {!clip ? (
-              <p className="text-sm text-subtle">还没有录音。打开设置里的标注模式后再通话。</p>
-            ) : (
-              <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
-                <div className="rounded-md bg-surface-2 px-3 py-2 text-sm">
-                  <p>
-                    {clip.source} · {clip.category || "未分类"} · {clip.split || "未分"} · {clip.durationMs}ms
-                    {clip.disagreement ? " · disagreement" : ""}
-                    {clip.goldSource ? ` · ${clip.goldSource}` : " · 未确认"}
-                    {clip.goldTier ? ` · tier ${clip.goldTier}` : ""}
-                    {clip.mode ? ` · ${clip.mode}` : ""}
-                    {clip.audioRoute ? ` · ${clip.audioRoute}` : ""}
-                    {clip.storageBackend ? ` · ${clip.storageBackend}` : ""}
-                  </p>
-                  {clip.blobError ? <p className="mt-1 text-xs text-live">{clip.blobError}</p> : null}
-                  {audioUrl ? (
-                    <audio className="mt-2 w-full" controls src={audioUrl} />
-                  ) : (
-                    <p className="mt-2 text-xs text-subtle">正在取录音…</p>
-                  )}
-                </div>
-                <Field label="STT 原文" value={clip.sttText} />
-                <Field label="xAI STT" value={clip.xaiText} />
-                <Field label="Hearing" value={clip.hearingText} />
-                <Field label="Web Speech" value={clip.liveText} />
-                {hearingPreview ? (
-                  <pre className="max-h-40 overflow-auto rounded-md bg-surface-2 p-3 text-xs text-muted">
-                    {hearingPreview}
-                  </pre>
-                ) : null}
-                <label className="flex flex-col gap-1 text-sm">
-                  gold_text
-                  <Textarea value={goldText} onChange={(e) => setGoldText(e.target.value)} className="min-h-24" />
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  gold_cues（JSON）
-                  <Textarea
-                    value={goldCuesText}
-                    onChange={(e) => setGoldCuesText(e.target.value)}
-                    className="min-h-32 font-mono text-xs"
-                  />
-                </label>
-                <p className="text-xs text-subtle">emotion: {EMOTIONS.join(" / ")}</p>
-                <label className="flex min-h-11 items-center gap-2 text-sm">
-                  <input type="checkbox" checked={noiseOnly} onChange={(e) => setNoiseOnly(e.target.checked)} />
-                  noise_only
-                </label>
-                {relabel ? null : (
-                  <label className="flex min-h-11 items-center gap-2 text-sm">
-                    <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} />
-                    skip
-                  </label>
-                )}
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    onClick={async () => {
-                      let cues: HearingCue[] = [];
-                      try {
-                        const parsed = JSON.parse(goldCuesText) as unknown;
-                        cues = Array.isArray(parsed) ? (parsed as HearingCue[]) : [];
-                      } catch {
-                        setStatus("cues 不是合法 JSON。");
-                        return;
-                      }
-                      try {
-                        const saved = await saveHearingGold({
-                          data: {
-                            password,
-                            id: clip.id,
-                            relabel,
-                            goldText,
-                            goldCues: cues,
-                            noiseOnly,
-                            skip,
-                            utteranceEmotion: clip.utteranceEmotion as CueEmotion | null,
-                          },
-                        });
-                        if (!saved.ok) {
-                          setStatus(saved.error);
-                          return;
-                        }
-                        setStatus(relabel ? "重标已另存。" : "已保存标注。");
-                        await load();
-                      } catch (err) {
-                        setStatus(err instanceof Error ? err.message : String(err));
-                      }
-                    }}
-                  >
-                    保存
-                  </Button>
-                  {clip.turnId ? (
-                    <Button type="button" variant="outline" onClick={() => setConfirmTurnId(clip.turnId)}>
-                      确认文本
-                    </Button>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={async () => {
-                      if (!window.confirm("删掉这段录音？")) return;
-                      await deleteHearingClip({ data: { password, id: clip.id } });
-                      setStatus("已删除。");
-                      await load();
-                    }}
-                  >
-                    删除
-                  </Button>
-                </div>
-                {status ? <p className="text-sm text-subtle">{status}</p> : null}
-              </div>
-            )}
-          </div>
-        </>
-      )}
+            {status ? <p className="mt-2 text-sm text-subtle">{status}</p> : null}
+          </section>
+        </div>
+      </div>
 
       <ConfirmTurn
-        open={Boolean(confirmClip)}
-        sttText={confirmClip?.sttText || confirmClip?.hearingText || confirmClip?.xaiText || ""}
-        audioUrl={audioUrl}
-        busy={confirmBusy}
-        error={confirmError}
-        initialEmotion={(confirmClip?.utteranceEmotion as CueEmotion | null) ?? null}
-        initialNoise={Boolean(confirmClip?.noiseOnly)}
+        open={Boolean(editClip)}
+        sttText={editClip?.hyp || ""}
+        audioUrl={editAudio}
+        busy={editBusy}
+        error={editError}
+        initialEmotion={editClip && isEmotion(editClip.emotion) ? editClip.emotion : null}
+        initialNoise={Boolean(editClip?.noiseOnly)}
         onClose={() => {
-          setConfirmTurnId(null);
-          setConfirmError(null);
+          setEditClip(null);
+          setEditError(null);
         }}
         onConfirm={async (gold, source, emotion, noiseOnly) => {
-          if (!confirmClip?.turnId) return;
-          setConfirmBusy(true);
-          setConfirmError(null);
+          if (!editClip?.turnId) {
+            setEditError("这条没有 turn_id，没法写入。");
+            return;
+          }
+          setEditBusy(true);
+          setEditError(null);
           try {
             const result = await confirmHearingClip({
               data: {
-                turnId: confirmClip.turnId,
+                turnId: editClip.turnId,
                 goldText: gold,
                 goldSource: source,
                 utteranceEmotion: emotion,
@@ -592,16 +306,16 @@ function HearingLabPage() {
               },
             });
             if (!result.ok) {
-              setConfirmError(result.error);
+              setEditError(result.error);
               return;
             }
-            setConfirmTurnId(null);
-            setStatus("已写入 eval set。");
+            setEditClip(null);
+            setStatus("已保存标注。");
             await load();
           } catch (err) {
-            setConfirmError(err instanceof Error ? err.message : String(err));
+            setEditError(err instanceof Error ? err.message : String(err));
           } finally {
-            setConfirmBusy(false);
+            setEditBusy(false);
           }
         }}
       />
@@ -609,91 +323,51 @@ function HearingLabPage() {
   );
 }
 
-function CoveragePanel({
-  coverage,
-}: {
-  coverage: {
-    totalTurns: number;
-    coverage: {
-      confirmed: number;
-      edited: number;
-      labeled: number;
-      confirmationRate: number;
-      byCategory: Record<string, { confirmed: number; edited: number; n: number }>;
-      byMode: Record<string, { confirmed: number; edited: number; n: number }>;
-      thinCategories: string[];
-      dbBacked: number;
-    };
-  } | null;
-}) {
-  if (!coverage) {
-    return <p className="px-4 text-sm text-subtle">正在统计…</p>;
-  }
-  const { coverage: stats, totalTurns } = coverage;
-  const categories = Object.keys(stats.byCategory)
-    .sort()
-    .map((id) => ({
-      id,
-      label: id,
-      row: stats.byCategory[id] ?? { confirmed: 0, edited: 0, n: 0 },
-    }));
+function ScoreCard({ score }: { score: ScorePayload | null }) {
+  if (!score) return <p className="text-sm text-subtle">正在算成绩…</p>;
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
-        <div className="rounded-md bg-surface-2 px-3 py-3 text-sm">
-          <p>
-            确认率 {(stats.confirmationRate * 100).toFixed(0)}% · 已确认 {stats.confirmed} · 已编辑 {stats.edited} ·
-            总 turn {totalTurns}
-          </p>
-        </div>
-        <div>
-          <p className="mb-2 text-sm">按类别</p>
-          <ul className="flex flex-col gap-2">
-            {categories.map((c) => {
-              const thin = c.row.n < 5;
-              return (
-                <li
-                  key={c.id}
-                  className={cn(
-                    "flex items-center justify-between rounded-md px-3 py-2 text-sm",
-                    thin ? "bg-live/15 text-live" : "bg-surface-2",
-                  )}
-                >
-                  <span>
-                    {c.label}
-                    {thin ? " · 少于 5" : ""}
-                  </span>
-                  <span className="text-xs text-subtle">
-                    确认 {c.row.confirmed} · 编辑 {c.row.edited}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-        <div>
-          <p className="mb-2 text-sm">按场景</p>
-          <ul className="flex flex-col gap-2">
-            {Object.entries(stats.byMode).map(([mode, row]) => (
-              <li key={mode} className="flex items-center justify-between rounded-md bg-surface-2 px-3 py-2 text-sm">
-                <span>{mode}</span>
-                <span className="text-xs text-subtle">
-                  确认 {row.confirmed} · 编辑 {row.edited}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
+    <dl className="flex flex-col gap-2 text-sm">
+      <Row label="CER 最终文字" value={fmtCer(score.cerFinal)} main />
+      <Row label="CER 仅 xAI" value={fmtCer(score.cerXai)} />
+      <Row
+        label="CER 仅 Apple"
+        value={
+          score.liveHasData
+            ? `${fmtCer(score.cerLive)} · 空 ${(score.liveEmptyRate * 100).toFixed(0)}%`
+            : `无数据 · 空 ${(score.liveEmptyRate * 100).toFixed(0)}%`
+        }
+      />
+      <Row label="完全正确率" value={fmtPct(score.exactMatch)} />
+      <Row
+        label="噪音里有字"
+        value={
+          score.noiseN === 0 ? "无数据" : `${fmtPct(score.noiseRecognizedRate)} · ${score.noiseN} 条`
+        }
+      />
+      <Row label="疑似幻觉" value={`${score.hallucinationN}`} />
+    </dl>
+  );
+}
+
+function Row({ label, value, main }: { label: string; value: string; main?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-muted">{label}</dt>
+      <dd className={main ? "font-medium" : ""}>{value}</dd>
     </div>
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs text-subtle">{label}</p>
-      <p className={cn("text-sm", value ? "text-fg" : "text-subtle")}>{value || "（空）"}</p>
-    </div>
-  );
+function fmtCer(n: number | null) {
+  if (n == null) return "无数据";
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+function fmtPct(n: number | null) {
+  if (n == null) return "无数据";
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+function isEmotion(value: string | null | undefined): value is CueEmotion {
+  return typeof value === "string" && (EMOTIONS as readonly string[]).includes(value);
 }
