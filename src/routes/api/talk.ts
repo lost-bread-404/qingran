@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { lockedProfile, type ChatMessage, type Memory, type Profile } from "@/lib/lover/types";
 import { runTalkStream, type TalkStreamEvent, type TalkStreamInput } from "@/lib/lover/stream-talk";
+import { logTalkTurn, talkFailFromResult } from "@/lib/lover/talk-fail";
 
 const SSE_PAD = 2048;
 
@@ -26,6 +27,7 @@ export const Route = createFileRoute("/api/talk")({
               }
               controller.enqueue(encoder.encode(frame));
             };
+            const started = Date.now();
             try {
               const input: TalkStreamInput = {
                 text: String(body.text ?? ""),
@@ -36,8 +38,21 @@ export const Route = createFileRoute("/api/talk")({
                 timeZone: String(body.timeZone || "UTC"),
               };
               await runTalkStream(input, send);
-            } catch {
-              send({ t: "err", m: "线路有点不稳，稍后再说。" });
+            } catch (err) {
+              const outcome = talkFailFromResult({
+                kind: "exception",
+                threw: err,
+                ms: Date.now() - started,
+              });
+              logTalkTurn(outcome.log);
+              send({
+                t: "err",
+                m: outcome.message ?? "线路有点不稳",
+                status: outcome.log.status,
+                finishReason: outcome.log.finishReason,
+                ms: outcome.log.ms,
+                chars: outcome.log.chars,
+              });
             } finally {
               controller.close();
             }

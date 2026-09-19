@@ -46,6 +46,7 @@ import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
 import { newId } from "@/lib/lover/storage";
 import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
+import { classifyTalkException, TALK_FAIL, talkExceptionHint } from "@/lib/lover/talk-fail";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { formatCallAudioLog, installAudioTrace, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
@@ -566,8 +567,15 @@ export function VoiceRoom() {
               pendingIdsRef.current.delete(reply.id);
               if (inflightRef.current?.id === reply.id) inflightRef.current = null;
               const display = stripSpeechTags(full);
-              const finalMsg = { ...reply, text: display };
+              const talkTrace = {
+                status: event.status ?? null,
+                finishReason: event.finishReason ?? null,
+                ms: event.ms,
+                chars: event.chars,
+              };
+              const finalMsg = { ...reply, text: display, talkTrace };
               setMessages((prev) => prev.map((m) => (m.id === reply.id ? finalMsg : m)));
+              if (!display.trim()) setBanner(TALK_FAIL.empty);
               if (turn === turnRef.current) sealPlayback();
               if (turn !== turnRef.current) return;
               if (clips.length && streamAudioCovers(clips, display)) {
@@ -610,9 +618,28 @@ export function VoiceRoom() {
               enqueuePlayback(bytes, event.m);
             } else if (event.t === "err") {
               persistReply(full);
+              setBanner(event.m);
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === reply.id
+                    ? {
+                        ...m,
+                        talkTrace: {
+                          status: event.status ?? null,
+                          finishReason: event.finishReason ?? null,
+                          ms: event.ms,
+                          chars: event.chars,
+                        },
+                      }
+                    : m,
+                ),
+              );
+              if (event.tts) {
+                skipAutoPlayRef.current = true;
+                return;
+              }
               pendingIdsRef.current.delete(reply.id);
               sealPlayback();
-              setBanner(event.m);
               setStatus("error");
             }
           },
@@ -623,7 +650,7 @@ export function VoiceRoom() {
         pendingIdsRef.current.delete(reply.id);
         if (turn !== turnRef.current) return;
         if ((err as { name?: string }).name === "AbortError") return;
-        setBanner("线路有点不稳，稍后再说。");
+        setBanner(talkExceptionHint(classifyTalkException(err).kind));
         setStatus("error");
       } finally {
         if (hearingTurnId) {

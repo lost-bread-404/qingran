@@ -3,8 +3,8 @@ import { buildSystemPrompt, formatClock } from "./prompt";
 import { spokenForTts } from "./speech-tags";
 import { ttsRequestBody, ttsSpeed } from "./tts";
 import type { ChatMessage, Memory, Profile } from "./types";
-import { readXaiFail } from "./xai-error";
 import { applyUtteranceTag } from "./hearing/tags.ts";
+import { TALK_FAIL, logTalkTurn, takeTalkDelta, talkFailFromResult } from "./talk-fail.ts";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
 const MAX_HISTORY = 60;
@@ -15,8 +15,23 @@ export type TalkStreamEvent =
   | { t: "text"; d: string }
   | { t: "text_end"; speech: string }
   | { t: "audio"; i: number; b: string; m: string; replace?: boolean }
-  | { t: "done"; speech: string }
-  | { t: "err"; m: string };
+  | {
+      t: "done";
+      speech: string;
+      status?: number | null;
+      finishReason?: string | null;
+      ms?: number;
+      chars?: number;
+    }
+  | {
+      t: "err";
+      m: string;
+      status?: number | null;
+      finishReason?: string | null;
+      ms?: number;
+      chars?: number;
+      tts?: boolean;
+    };
 
 export type TalkStreamInput = {
   text: string;
@@ -51,86 +66,134 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   }));
   const speed = ttsSpeed(data.profile.voiceSpeed);
   const tts = new LiveTts(apiKey, emit, speed);
-
-  const res = await fetch("https://api.x.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: FAST_MODEL,
-      temperature: 0.85,
-      max_tokens: 550,
-      stream: true,
-      messages: [
-        { role: "system", content: system },
-        ...history,
-        { role: "user", content: say },
-      ],
-    }),
-    signal: AbortSignal.timeout(28_000),
-  });
-
-  if (!res.ok || !res.body) {
-    tts.abort();
-    emit({ t: "err", m: await readXaiFail(res) });
-    return;
-  }
-
+  const started = Date.now();
+  let status: number | null = null;
+  let finishReason: string | null = null;
   let full = "";
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop() ?? "";
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) continue;
-      const payload = trimmed.slice(5).trim();
-      if (!payload || payload === "[DONE]") continue;
-      let token = "";
-      try {
-        const json = JSON.parse(payload) as {
-          choices?: { delta?: { content?: string } }[];
-        };
-        token = json.choices?.[0]?.delta?.content ?? "";
-      } catch {
-        continue;
-      }
-      if (!token) continue;
-      full += token;
-      emit({ t: "text", d: token });
-    }
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
+  const fail = (message: string, log: ReturnType<typeof talkFailFromResult>["log"], ttsOnly = false) => {
+    logTalkTurn(log);
+    if (!ttsOnly) tts.abort();
+    emit({
+      t: "err",
+      m: message,
+      status: log.status,
+      finishReason: log.finishReason,
+      ms: log.ms,
+      chars: log.chars,
+      tts: ttsOnly || undefined,
+    });
+  };
 
-  const speech = full.trim();
-  emit({ t: "text_end", speech });
-  if (!speech) {
-    tts.abort();
-    emit({ t: "err", m: "她好像走神了，再说一次。" });
-    return;
-  }
+  try {
+    const res = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: FAST_MODEL,
+        temperature: 0.85,
+        max_tokens: 550,
+        stream: true,
+        messages: [
+          { role: "system", content: system },
+          ...history,
+          { role: "user", content: say },
+        ],
+      }),
+      signal: AbortSignal.timeout(28_000),
+    });
+    status = res.status;
 
-  tts.push(speech);
-  await tts.finish();
-
-  if (!tts.complete) {
-    const clip = await speakRest(apiKey, speech, speed);
-    if (clip && "fail" in clip && clip.fail) {
-      emit({ t: "err", m: clip.fail });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const outcome = talkFailFromResult({
+        kind: "http",
+        status: res.status,
+        body,
+        ms: Date.now() - started,
+      });
+      fail(outcome.message ?? TALK_FAIL.network, outcome.log);
       return;
     }
-    if (clip && "b" in clip) emit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
-  }
+    if (!res.body) {
+      const outcome = talkFailFromResult({
+        kind: "ok",
+        status: res.status,
+        finishReason: null,
+        speech: "",
+        ms: Date.now() - started,
+      });
+      fail(outcome.message ?? TALK_FAIL.empty, outcome.log);
+      return;
+    }
 
-  emit({ t: "done", speech });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        try {
+          const { token, finishReason: nextReason } = takeTalkDelta(JSON.parse(payload));
+          if (nextReason) finishReason = nextReason;
+          if (!token) continue;
+          full += token;
+          emit({ t: "text", d: token });
+        } catch {
+          continue;
+        }
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    const speech = full.trim();
+    const outcome = talkFailFromResult({
+      kind: "ok",
+      status: status ?? 200,
+      finishReason,
+      speech,
+      ms: Date.now() - started,
+    });
+    emit({ t: "text_end", speech });
+    if (outcome.message) {
+      fail(outcome.message, outcome.log);
+      return;
+    }
+    logTalkTurn(outcome.log);
+
+    tts.push(speech);
+    await tts.finish();
+
+    if (!tts.complete) {
+      const clip = await speakRest(apiKey, speech, speed);
+      if (clip && "b" in clip) emit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
+      else fail(TALK_FAIL.tts, outcome.log, true);
+    }
+
+    emit({
+      t: "done",
+      speech,
+      status: outcome.log.status,
+      finishReason: outcome.log.finishReason,
+      ms: outcome.log.ms,
+      chars: outcome.log.chars,
+    });
+  } catch (err) {
+    const outcome = talkFailFromResult({ kind: "exception", threw: err, ms: Date.now() - started });
+    fail(outcome.message ?? TALK_FAIL.network, outcome.log);
+  }
 }
 
 class LiveTts {
@@ -283,7 +346,7 @@ async function speakRest(
   apiKey: string,
   text: string,
   speed: number,
-): Promise<{ b: string; m: string; fail?: undefined } | { fail: string } | null> {
+): Promise<{ b: string; m: string } | null> {
   const spoken = spokenForTts(text);
   if (!spoken) return null;
   try {
@@ -296,7 +359,7 @@ async function speakRest(
       body: JSON.stringify(ttsRequestBody(spoken, "zh", speed)),
       signal: AbortSignal.timeout(40_000),
     });
-    if (!res.ok) return { fail: await readXaiFail(res) };
+    if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     return {
       b: buf.toString("base64"),

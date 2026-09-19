@@ -38,6 +38,12 @@ export type ChatMessage = {
     ttsMs?: number;
   };
   interrupted?: boolean;
+  talkTrace?: {
+    status?: number | null;
+    finishReason?: string | null;
+    ms?: number;
+    chars?: number;
+  };
 };
 
 export type Memory = {

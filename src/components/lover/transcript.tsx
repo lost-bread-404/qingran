@@ -3,6 +3,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { pairMessages } from "@/lib/lover/pair-messages";
+import { formatTalkTrace } from "@/lib/lover/talk-fail";
 import type { ChatMessage } from "@/lib/lover/types";
 
 const PIN_PX = 96;
@@ -220,6 +221,9 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                   </button>
                 ) : null}
               </div>
+            ) : null}
+            {debugHearing && pair.assistant?.talkTrace ? (
+              <p className="self-start text-[10px] text-subtle">{formatTalkTrace(pair.assistant.talkTrace)}</p>
             ) : null}
           </div>
         ))}

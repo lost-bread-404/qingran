@@ -61,6 +61,8 @@ test("transcript has 👎 below the reply, 24pt from play, both 44pt", () => {
   assert.match(play, /grid size-11/);
   assert.match(flag, /grid size-11/);
   assert.match(src, /flex-col gap-6 self-start/);
+  assert.match(src, /talkTrace/);
+  assert.match(src, /formatTalkTrace/);
   assert.doesNotMatch(src, /flex-col gap-1/);
 });
 
@@ -95,7 +97,11 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(save, /void replayFrom/);
   assert.doesNotMatch(save, /await replayFrom/);
   assert.match(src, /正在想/);
-  assert.match(src, /prev.slice\(0, idx\), userMsg, reply/);
+  assert.match(src, /TALK_FAIL\.empty/);
+  assert.match(src, /talkTrace/);
+  assert.match(src, /event\.tts/);
+  assert.match(src, /talkExceptionHint/);
+  assert.doesNotMatch(src, /线路有点不稳，稍后再说/);
   const confirm = readFileSync(new URL("../../../components/lover/confirm-turn.tsx", import.meta.url), "utf8");
   assert.match(confirm, /disabled=\{busy\}/);
   assert.doesNotMatch(confirm, /status === "thinking"/);

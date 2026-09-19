@@ -6,8 +6,23 @@ export type TalkStreamEvent =
   | { t: "text"; d: string }
   | { t: "text_end"; speech: string }
   | { t: "audio"; i: number; b: string; m: string; replace?: boolean }
-  | { t: "done"; speech: string }
-  | { t: "err"; m: string };
+  | {
+      t: "done";
+      speech: string;
+      status?: number | null;
+      finishReason?: string | null;
+      ms?: number;
+      chars?: number;
+    }
+  | {
+      t: "err";
+      m: string;
+      status?: number | null;
+      finishReason?: string | null;
+      ms?: number;
+      chars?: number;
+      tts?: boolean;
+    };
 
 export type TalkClientInput = {
   text: string;
