@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { pendingMigrations } from "../../../../scripts/migration-plan.mjs";
-import { confirmClipByTurn, goldCount, hallucinationCount, insertClipRow, listClipRows, listScoreClipRows, patchFinalTextByTurn } from "./persist.ts";
+import { confirmClipByTurn, goldCount, hallucinationCount, insertClipRow, listClipRows, listLabeledClipRows, listScoreClipRows, patchFinalTextByTurn, unlabelClip } from "./persist.ts";
+import { scoreHearing } from "./score.ts";
 import { silenceWavBase64 } from "./wav.ts";
 
 type Sql = {
@@ -105,4 +106,76 @@ test("PGLite e2e: voice round → clip → confirm → confirmed filter", async 
   assert.equal(scored[0]?.id, "clip-1");
   assert.equal(scored[0]?.final_text, "在吗呀");
   assert.equal(await hallucinationCount(sql, "all"), 0);
+
+  const labeledPage = await listLabeledClipRows(sql, 1);
+  assert.equal(labeledPage.total, 1);
+  assert.equal(labeledPage.clips[0]?.id, "clip-1");
+  assert.equal(labeledPage.clips[0]?.goldSource, "confirmed");
+
+  const beforeUnlabel = scoreHearing(
+    scored.map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      finalText: row.final_text ?? "",
+      xaiText: row.xai_text ?? "",
+      liveText: row.live_text ?? "",
+      goldText: row.gold_text ?? "",
+      noiseOnly: Boolean(row.noise_only),
+      utteranceEmotion: row.utterance_emotion,
+      turnId: row.turn_id,
+    })),
+  );
+  assert.equal(beforeUnlabel.goldN, 1);
+
+  const unlabeled = await unlabelClip(sql, { turnId: "turn-1" });
+  assert.equal(unlabeled.ok, true);
+  assert.equal(await goldCount(sql), 0);
+  const stillThere = await listClipRows(sql, "all");
+  assert.equal(stillThere.length, 1);
+  assert.equal(stillThere[0]?.gold_source ?? null, null);
+  assert.ok(!stillThere[0]?.gold_text);
+  const afterUnlabelRows = await listScoreClipRows(sql);
+  const afterUnlabel = scoreHearing(
+    afterUnlabelRows.map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      finalText: row.final_text ?? "",
+      xaiText: row.xai_text ?? "",
+      liveText: row.live_text ?? "",
+      goldText: row.gold_text ?? "",
+      noiseOnly: Boolean(row.noise_only),
+      utteranceEmotion: row.utterance_emotion,
+      turnId: row.turn_id,
+    })),
+  );
+  assert.equal(afterUnlabel.goldN, 0);
+  assert.equal(afterUnlabel.clipN, 1);
+  assert.equal(afterUnlabel.exactMatch, null);
+  assert.equal((await listLabeledClipRows(sql, 1)).total, 0);
+
+  const reedited = await confirmClipByTurn(sql, {
+    turnId: "turn-1",
+    goldText: "在吗呀",
+    goldSource: "edited",
+  });
+  assert.equal(reedited.ok, true);
+  const afterEditRows = await listScoreClipRows(sql);
+  const afterEdit = scoreHearing(
+    afterEditRows.map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      finalText: row.final_text ?? "",
+      xaiText: row.xai_text ?? "",
+      liveText: row.live_text ?? "",
+      goldText: row.gold_text ?? "",
+      noiseOnly: Boolean(row.noise_only),
+      utteranceEmotion: row.utterance_emotion,
+      turnId: row.turn_id,
+    })),
+  );
+  assert.equal(afterEdit.goldN, 1);
+  assert.equal(afterEdit.exactMatch, 1);
+  assert.equal(afterEdit.cerFinal, 0);
+  const relisted = await listLabeledClipRows(sql, 1);
+  assert.equal(relisted.clips[0]?.goldSource, "edited");
 });

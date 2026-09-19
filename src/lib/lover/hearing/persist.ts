@@ -108,10 +108,101 @@ export async function confirmClipByTurn(
         noise_only = ${Boolean(input.noiseOnly)},
         literal_mismatch = ${Boolean(input.literalMismatch)},
         tone_note = ${note},
+        gold_at = now(),
         stt_text = coalesce(stt_text, hearing_text, xai_text)
     where id = ${clip.id}
   `;
   return { ok: true, clipId: clip.id, goldTier: nextTier };
+}
+
+export async function unlabelClip(
+  sql: Sql,
+  input: { clipId?: string; turnId?: string },
+): Promise<{ ok: true; clipId: string } | { ok: false; error: string }> {
+  const rows = input.clipId
+    ? await sql<{ id: string }>`select id from qingran_hearing_clips where id = ${input.clipId} limit 1`
+    : input.turnId
+      ? await sql<{ id: string }>`
+          select id from qingran_hearing_clips
+          where turn_id = ${input.turnId}
+          order by created_at desc
+          limit 1
+        `
+      : [];
+  const clip = rows[0];
+  if (!clip) return { ok: false, error: "没有这段录音。" };
+  await sql`
+    update qingran_hearing_clips
+    set gold_text = null,
+        gold_source = null,
+        gold_tier = 0,
+        gold_cues = null,
+        noise_only = false,
+        literal_mismatch = false,
+        tone_note = null,
+        gold_at = null
+    where id = ${clip.id}
+  `;
+  return { ok: true, clipId: clip.id };
+}
+
+export const LABELED_PAGE_SIZE = 30;
+
+export type LabeledClipRow = {
+  id: string;
+  turnId: string | null;
+  finalText: string;
+  goldText: string;
+  goldSource: string | null;
+  noiseOnly: boolean;
+  literalMismatch: boolean;
+  toneNote: string | null;
+  goldAt: string | null;
+};
+
+export async function listLabeledClipRows(sql: Sql, page = 1) {
+  const p = Math.max(1, Math.floor(Number(page) || 1));
+  const offset = (p - 1) * LABELED_PAGE_SIZE;
+  const rows = await sql.query<{
+    id: string;
+    turn_id: string | null;
+    final_text: string | null;
+    gold_text: string | null;
+    gold_source: string | null;
+    noise_only: boolean | null;
+    literal_mismatch: boolean | null;
+    tone_note: string | null;
+    gold_at: string | null;
+  }>(
+    `select id, turn_id, final_text, gold_text, gold_source,
+            noise_only, literal_mismatch, tone_note, gold_at::text as gold_at
+     from qingran_hearing_clips
+     where gold_source is not null
+     order by coalesce(gold_at, created_at) desc, id desc
+     limit $1 offset $2`,
+    [LABELED_PAGE_SIZE, offset],
+  );
+  const count = await sql<{ n: number }>`
+    select count(*)::int as n from qingran_hearing_clips where gold_source is not null
+  `;
+  return {
+    clips: rows.map(
+      (row): LabeledClipRow => ({
+        id: row.id,
+        turnId: row.turn_id,
+        finalText: row.final_text ?? "",
+        goldText: row.gold_text ?? "",
+        goldSource: row.gold_source,
+        noiseOnly: Boolean(row.noise_only),
+        literalMismatch: Boolean(row.literal_mismatch),
+        toneNote: row.tone_note,
+        goldAt: row.gold_at,
+      }),
+    ),
+    total: Number(count[0]?.n) || 0,
+    page: p,
+    pageSize: LABELED_PAGE_SIZE,
+  };
 }
 
 export async function patchFinalTextByTurn(sql: Sql, turnId: string, finalText: string) {

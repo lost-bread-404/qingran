@@ -83,6 +83,34 @@ test("tone mark accuracy compares ～ … ！ ？ and skips gold without them", 
   assert.equal(scored.exactMatch, 1);
 });
 
+test("unlabeled clips drop out of the score card; re-edit updates exactMatch", () => {
+  const labeled = scoreHearing([
+    clip({ id: "a", goldText: "在吗", finalText: "在吗呀" }),
+    clip({ id: "b", goldText: "嗯", finalText: "嗯" }),
+  ]);
+  assert.equal(labeled.goldN, 2);
+  assert.equal(labeled.exactMatch, 0.5);
+  assert.ok((labeled.cerFinal ?? 0) > 0);
+
+  const unlabeled = scoreHearing([
+    clip({ id: "a", goldText: "", finalText: "在吗呀" }),
+    clip({ id: "b", goldText: "嗯", finalText: "嗯" }),
+  ]);
+  assert.equal(unlabeled.clipN, 2);
+  assert.equal(unlabeled.goldN, 1);
+  assert.equal(unlabeled.exactMatch, 1);
+  assert.equal(unlabeled.cerFinal, 0);
+  assert.equal(unlabeled.worst[0]?.id, "b");
+
+  const reedited = scoreHearing([
+    clip({ id: "a", goldText: "在吗呀", finalText: "在吗呀" }),
+    clip({ id: "b", goldText: "嗯", finalText: "嗯" }),
+  ]);
+  assert.equal(reedited.goldN, 2);
+  assert.equal(reedited.exactMatch, 1);
+  assert.equal(reedited.cerFinal, 0);
+});
+
 test("id hash split is stable and roughly 80/20", () => {
   assert.equal(hashSplit("clip-1"), hashSplit("clip-1"));
   const ids = Array.from({ length: 200 }, (_, i) => `id-${i}`);

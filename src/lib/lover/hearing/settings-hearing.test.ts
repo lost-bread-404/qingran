@@ -25,6 +25,8 @@ test("transcript pencil opens confirm in debug; bubble text is not a hidden conf
   assert.match(src, /onConfirmQuick/);
   assert.match(src, /aria-label="确认正确"/);
   assert.match(src, /aria-label="打开标注"/);
+  assert.match(src, /aria-label="撤销标注"/);
+  assert.match(src, /undoConfirmId/);
   assert.match(src, /aria-label="改这句话"/);
   assert.match(src, /canConfirm \? \(/);
   assert.doesNotMatch(src, /if \(canConfirm\) onConfirmStart/);
@@ -48,6 +50,8 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /VolumeMeter/);
   assert.match(src, /patchHearingFinalText/);
   assert.match(src, /saveConfirmQuick/);
+  assert.match(src, /armUndo/);
+  assert.match(src, /unlabelHearingByTurn/);
   assert.match(src, /aria-label="阈值"/);
   assert.match(src, /micActionForConfirmPanel/);
   assert.match(src, /qingranSpeaking: status === "speaking" \|\| status === "thinking"/);
@@ -82,6 +86,9 @@ test("lab page is score card, worst 20, and hash export only", () => {
   assert.match(src, /CER 最终文字/);
   assert.match(src, /语气符号准确率/);
   assert.match(src, /最差 20 条/);
+  assert.match(src, /最近标注/);
+  assert.match(src, /撤销标注/);
+  assert.match(src, /listLabeledHearingClips/);
   assert.match(src, /导出 JSON/);
   assert.match(src, /hash 80\/20/);
   assert.doesNotMatch(src, /重标/);

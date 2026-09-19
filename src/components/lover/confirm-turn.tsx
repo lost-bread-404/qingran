@@ -22,6 +22,7 @@ type Props = {
   initialNoise?: boolean;
   initialLiteralMismatch?: boolean;
   initialToneNote?: string | null;
+  initialDraft?: string;
 };
 
 export function ConfirmTurn({
@@ -35,19 +36,20 @@ export function ConfirmTurn({
   initialNoise = false,
   initialLiteralMismatch = false,
   initialToneNote = "",
+  initialDraft,
 }: Props) {
-  const [draft, setDraft] = useState(sttText);
+  const [draft, setDraft] = useState(initialDraft ?? sttText);
   const [noiseOnly, setNoiseOnly] = useState(initialNoise);
   const [literalMismatch, setLiteralMismatch] = useState(initialLiteralMismatch);
   const [toneNote, setToneNote] = useState(initialToneNote ?? "");
 
   useEffect(() => {
     if (!open) return;
-    setDraft(sttText);
+    setDraft(initialDraft ?? sttText);
     setNoiseOnly(initialNoise);
     setLiteralMismatch(initialLiteralMismatch);
     setToneNote(initialToneNote ?? "");
-  }, [open, sttText, initialNoise, initialLiteralMismatch, initialToneNote]);
+  }, [open, sttText, initialDraft, initialNoise, initialLiteralMismatch, initialToneNote]);
 
   if (!open) return null;
 

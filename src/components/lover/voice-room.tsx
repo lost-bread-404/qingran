@@ -51,6 +51,7 @@ import {
   hearingLabeledCount,
   patchHearingFinalText,
   patchHearingTurn,
+  unlabelHearingByTurn,
 } from "@/lib/lover/hearing/store";
 import { clipSaveBanner, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { micActionForConfirmPanel } from "@/lib/lover/hearing/confirm-call";
@@ -112,6 +113,8 @@ export function VoiceRoom() {
   const [confirmAudioUrl, setConfirmAudioUrl] = useState<string | null>(null);
   const [labeledCount, setLabeledCount] = useState(0);
   const confirmWasOpenRef = useRef(false);
+  const [undoConfirmId, setUndoConfirmId] = useState<string | null>(null);
+  const undoTimerRef = useRef(0);
 
   useEffect(() => {
     profileRef.current = profile;
@@ -190,6 +193,10 @@ export function VoiceRoom() {
       if (result.ok) setLabeledCount(result.count);
     });
   }, [hydrated, profile.debugHearing]);
+
+  useEffect(() => () => {
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -846,6 +853,37 @@ export function VoiceRoom() {
       const updated: ChatMessage = { ...msg, hearingGold: "confirmed" };
       void updateRoomMessage({ data: updated });
       setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
+      armUndo(id);
+    } catch (err) {
+      setBanner(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function armUndo(id: string) {
+    setUndoConfirmId(id);
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = window.setTimeout(() => {
+      setUndoConfirmId((cur) => (cur === id ? null : cur));
+      undoTimerRef.current = 0;
+    }, 5000);
+  }
+
+  async function undoConfirm(id: string) {
+    const msg = chatRef.current.find((m) => m.id === id);
+    if (!msg?.voiceTurnId) return;
+    try {
+      const result = await unlabelHearingByTurn({ data: { turnId: msg.voiceTurnId } });
+      if (!result.ok) {
+        setBanner(result.error);
+        return;
+      }
+      if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = 0;
+      setUndoConfirmId(null);
+      if (msg.hearingGold === "confirmed") setLabeledCount((n) => Math.max(0, n - 1));
+      const updated: ChatMessage = { ...msg, hearingGold: "unconfirmed" };
+      void updateRoomMessage({ data: updated });
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
     } catch (err) {
       setBanner(err instanceof Error ? err.message : String(err));
     }
@@ -1017,6 +1055,8 @@ export function VoiceRoom() {
                 setConfirmId(id);
               }}
               onConfirmQuick={(id) => void saveConfirmQuick(id)}
+              onUndoConfirm={(id) => void undoConfirm(id)}
+              undoConfirmId={undoConfirmId}
             />
 
             {editingId ? null : (

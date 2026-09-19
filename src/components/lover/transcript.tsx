@@ -29,6 +29,8 @@ type Props = {
   onEditSave?: () => void;
   onConfirmStart?: (id: string) => void;
   onConfirmQuick?: (id: string) => void;
+  onUndoConfirm?: (id: string) => void;
+  undoConfirmId?: string | null;
 };
 
 function nearBottom(el: HTMLElement): boolean {
@@ -57,6 +59,8 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     onEditSave,
     onConfirmStart,
     onConfirmQuick,
+    onUndoConfirm,
+    undoConfirmId,
   },
   ref,
 ) {
@@ -181,6 +185,8 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                   onEditStart={onEditStart}
                   onConfirmStart={onConfirmStart}
                   onConfirmQuick={onConfirmQuick}
+                  onUndoConfirm={onUndoConfirm}
+                  undoConfirmId={undoConfirmId}
                 />
               )
             ) : null}
@@ -234,6 +240,8 @@ function UserBubble({
   onEditStart,
   onConfirmStart,
   onConfirmQuick,
+  onUndoConfirm,
+  undoConfirmId,
 }: {
   user: ChatMessage;
   editable: boolean;
@@ -241,9 +249,12 @@ function UserBubble({
   onEditStart?: (id: string) => void;
   onConfirmStart?: (id: string) => void;
   onConfirmQuick?: (id: string) => void;
+  onUndoConfirm?: (id: string) => void;
+  undoConfirmId?: string | null;
 }) {
   const canConfirm = Boolean(debugHearing && user.voiceTurnId && onConfirmStart);
   const labeled = user.hearingGold === "confirmed";
+  const showUndo = Boolean(canConfirm && labeled && undoConfirmId === user.id && onUndoConfirm);
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-end justify-end gap-2">
@@ -298,6 +309,16 @@ function UserBubble({
           >
             <Pencil className="size-3.5" />
           </button>
+          {showUndo ? (
+            <button
+              type="button"
+              aria-label="撤销标注"
+              onClick={() => onUndoConfirm?.(user.id)}
+              className="min-h-8 rounded-md px-2 text-xs text-muted"
+            >
+              撤销
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

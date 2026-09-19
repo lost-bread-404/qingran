@@ -30,17 +30,19 @@ import {
   hallucinationCount,
   insertClipRow,
   listClipRows,
+  listLabeledClipRows,
   listMigrationNames,
   listScoreClipRows,
   parseCues,
   patchFinalTextByTurn,
+  unlabelClip,
   type LabClipFilter,
 } from "./persist.ts";
 import { silenceWavBase64, wavDurationMs, wavPeakRms } from "./wav.ts";
 import { scrubHallucination } from "../stt-text.ts";
 import { waitUntil } from "@vercel/functions";
 
-export type { LabClipFilter } from "./persist.ts";
+export type { LabClipFilter, LabeledClipRow } from "./persist.ts";
 
 export type HearingTurnPatch = {
   id: string;
@@ -451,6 +453,49 @@ export const confirmHearingClip = createServerFn({ method: "POST" })
       });
     } catch (err) {
       return { ok: false as const, error: errorText(err) };
+    }
+  });
+
+export const unlabelHearingClip = createServerFn({ method: "POST" })
+  .validator((input: { password: string; id: string }) => input)
+  .handler(async ({ data }) => {
+    try {
+      assertLab(data.password);
+      const sql = await getSql();
+      return await unlabelClip(sql, { clipId: data.id });
+    } catch (err) {
+      return { ok: false as const, error: errorText(err) };
+    }
+  });
+
+export const unlabelHearingByTurn = createServerFn({ method: "POST" })
+  .validator((input: { turnId: string }) => input)
+  .handler(async ({ data }) => {
+    try {
+      const sql = await getSql();
+      return await unlabelClip(sql, { turnId: data.turnId });
+    } catch (err) {
+      return { ok: false as const, error: errorText(err) };
+    }
+  });
+
+export const listLabeledHearingClips = createServerFn({ method: "POST" })
+  .validator((input: { password: string; page?: number }) => input)
+  .handler(async ({ data }) => {
+    try {
+      assertLab(data.password);
+      const sql = await getSql();
+      const listed = await listLabeledClipRows(sql, data.page ?? 1);
+      return { ok: true as const, ...listed };
+    } catch (err) {
+      return {
+        ok: false as const,
+        error: errorText(err),
+        clips: [] as Awaited<ReturnType<typeof listLabeledClipRows>>["clips"],
+        total: 0,
+        page: 1,
+        pageSize: 30,
+      };
     }
   });
 

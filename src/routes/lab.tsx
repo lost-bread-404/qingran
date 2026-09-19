@@ -9,7 +9,10 @@ import {
   exportHearingClips,
   getHearingClipAudio,
   hearingLabScore,
+  listLabeledHearingClips,
+  unlabelHearingClip,
   unlockHearingLab,
+  type LabeledClipRow,
 } from "@/lib/lover/hearing/store";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
 import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/score";
@@ -36,6 +39,40 @@ type ScorePayload = HearingScore & {
   window: ScoreWindow;
 };
 
+type LabEdit = {
+  id: string;
+  turnId: string | null;
+  hyp: string;
+  gold: string;
+  noiseOnly: boolean;
+  literalMismatch: boolean;
+  toneNote: string | null;
+};
+
+function fromWorst(row: WorstClip): LabEdit {
+  return {
+    id: row.id,
+    turnId: row.turnId,
+    hyp: row.hyp,
+    gold: row.gold,
+    noiseOnly: row.noiseOnly,
+    literalMismatch: row.literalMismatch,
+    toneNote: row.toneNote,
+  };
+}
+
+function fromLabeled(row: LabeledClipRow): LabEdit {
+  return {
+    id: row.id,
+    turnId: row.turnId,
+    hyp: row.finalText,
+    gold: row.goldText,
+    noiseOnly: row.noiseOnly,
+    literalMismatch: row.literalMismatch,
+    toneNote: row.toneNote,
+  };
+}
+
 function HearingLabPage() {
   const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(false);
@@ -43,13 +80,32 @@ function HearingLabPage() {
   const [windowId, setWindowId] = useState<ScoreWindow>("7d");
   const [score, setScore] = useState<ScorePayload | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [editClip, setEditClip] = useState<WorstClip | null>(null);
+  const [editClip, setEditClip] = useState<LabEdit | null>(null);
   const [editAudio, setEditAudio] = useState<string | null>(null);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [playUrl, setPlayUrl] = useState<string | null>(null);
+  const [labeled, setLabeled] = useState<LabeledClipRow[]>([]);
+  const [labeledTotal, setLabeledTotal] = useState(0);
+  const [labeledPage, setLabeledPage] = useState(1);
+  const labeledPageSize = 30;
 
-  async function load(secret = password, nextWindow = windowId) {
+  async function loadLabeled(secret = password, page = labeledPage) {
+    try {
+      const next = await listLabeledHearingClips({ data: { password: secret, page } });
+      if (!next.ok) {
+        setStatus(next.error);
+        return;
+      }
+      setLabeled(next.clips);
+      setLabeledTotal(next.total);
+      setLabeledPage(next.page);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function load(secret = password, nextWindow = windowId, page = labeledPage) {
     try {
       const next = await hearingLabScore({ data: { password: secret, window: nextWindow } });
       if (!next.ok) {
@@ -59,9 +115,24 @@ function HearingLabPage() {
       }
       setError(null);
       setScore(next);
+      await loadLabeled(secret, page);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  async function playClip(id: string) {
+    if (playUrl) URL.revokeObjectURL(playUrl);
+    const result = await getHearingClipAudio({ data: { password, id } });
+    if (!result.ok) {
+      setStatus(result.error);
+      return;
+    }
+    const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
+    setPlayUrl(url);
+    const audio = new Audio(url);
+    void audio.play();
   }
 
   async function unlock() {
@@ -74,7 +145,7 @@ function HearingLabPage() {
       }
       sessionStorage.setItem(LAB_KEY, password);
       setUnlocked(true);
-      await load(password, windowId);
+      await load(password, windowId, 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -87,7 +158,7 @@ function HearingLabPage() {
     void unlockHearingLab({ data: { password: saved } }).then((result) => {
       if (!result.ok) return;
       setUnlocked(true);
-      void load(saved, windowId);
+      void load(saved, windowId, 1);
     });
   }, []);
 
@@ -112,6 +183,8 @@ function HearingLabPage() {
       if (url) URL.revokeObjectURL(url);
     };
   }, [editClip?.id, password]);
+
+  const labeledPages = Math.max(1, Math.ceil(labeledTotal / labeledPageSize));
 
   if (!unlocked) {
     return (
@@ -201,30 +274,18 @@ function HearingLabPage() {
                     <p className="mt-1 text-sm">识别 {row.hyp || "（空）"}</p>
                     <p className="text-sm text-muted">正确 {row.gold || "（空）"}</p>
                     <div className="mt-2 flex flex-wrap gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => void playClip(row.id)}>
+                        播放
+                      </Button>
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={async () => {
-                          if (playUrl) URL.revokeObjectURL(playUrl);
-                          const result = await getHearingClipAudio({ data: { password, id: row.id } });
-                          if (!result.ok) {
-                            setStatus(result.error);
-                            return;
-                          }
-                          const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
-                          const url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
-                          setPlayUrl(url);
-                          const audio = new Audio(url);
-                          void audio.play();
+                        onClick={() => {
+                          setEditError(null);
+                          setEditClip(fromWorst(row));
                         }}
                       >
-                        播放
-                      </Button>
-                      <Button type="button" variant="outline" size="sm" onClick={() => {
-                        setEditError(null);
-                        setEditClip(row);
-                      }}>
                         重新编辑
                       </Button>
                       <Button
@@ -249,6 +310,90 @@ function HearingLabPage() {
                 ))}
               </ul>
             )}
+          </section>
+
+          <section>
+            <p className="mb-2 font-display text-lg">最近标注</p>
+            <p className="mb-3 text-xs text-subtle">
+              {labeledTotal ? `共 ${labeledTotal} 条 · 每页 ${labeledPageSize}` : "还没有标注。"}
+            </p>
+            {labeled.length ? (
+              <ul className="flex flex-col gap-3">
+                {labeled.map((row) => (
+                  <li key={row.id} className="rounded-md bg-surface-2 px-3 py-3">
+                    <p className="text-xs text-subtle">
+                      {row.goldSource === "edited" ? "✎ edited" : "✓ confirmed"}
+                      {row.noiseOnly ? " · 噪音" : ""}
+                      {row.literalMismatch ? " · 字面≠意思" : ""}
+                      {row.toneNote ? ` · ${row.toneNote}` : ""}
+                    </p>
+                    <p className="mt-1 text-sm">识别 {row.finalText || "（空）"}</p>
+                    <p className="text-sm text-muted">标注 {row.goldText || "（空）"}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => void playClip(row.id)}>
+                        播放
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setEditError(null);
+                          setEditClip(fromLabeled(row));
+                        }}
+                      >
+                        重新编辑
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            const result = await unlabelHearingClip({ data: { password, id: row.id } });
+                            if (!result.ok) {
+                              setStatus(result.error);
+                              return;
+                            }
+                            setStatus("已撤销标注。");
+                            await load();
+                          } catch (err) {
+                            setStatus(err instanceof Error ? err.message : String(err));
+                          }
+                        }}
+                      >
+                        撤销标注
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {labeledTotal > labeledPageSize ? (
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={labeledPage <= 1}
+                  onClick={() => void load(password, windowId, labeledPage - 1)}
+                >
+                  上一页
+                </Button>
+                <p className="text-xs text-subtle">
+                  {labeledPage} / {labeledPages}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={labeledPage >= labeledPages}
+                  onClick={() => void load(password, windowId, labeledPage + 1)}
+                >
+                  下一页
+                </Button>
+              </div>
+            ) : null}
           </section>
 
           <section>
@@ -281,6 +426,7 @@ function HearingLabPage() {
       <ConfirmTurn
         open={Boolean(editClip)}
         sttText={editClip?.hyp || ""}
+        initialDraft={editClip?.gold || editClip?.hyp || ""}
         audioUrl={editAudio}
         busy={editBusy}
         error={editError}
