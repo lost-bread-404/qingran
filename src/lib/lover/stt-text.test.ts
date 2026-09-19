@@ -87,12 +87,14 @@ test("needsPunctuationHelp catches long unpunctuated speech", () => {
   assert.equal(needsPunctuationHelp("今天天气很好。我想出去走走。你呢？"), false);
 });
 
-test("extractKeyterms picks names and ABO words from the prompt", () => {
+test("extractKeyterms picks names from the prompt without dumping an ABO lexicon", () => {
   const prompt = `清然叫 Rosie 小猫。林泽住在隔壁。这是 ABO 世界观，omega 会释放信息素。`;
   const terms = extractKeyterms(prompt);
   assert.ok(terms.includes("Rosie"));
-  assert.ok(terms.includes("信息素"));
-  assert.ok(terms.includes("Omega") || terms.includes("omega"));
+  assert.equal(terms.includes("信息素"), false);
+  assert.equal(terms.includes("腺体"), false);
+  assert.equal(terms.includes("发情期"), false);
+  assert.equal(terms.includes("结合热"), false);
 });
 
 test("sttKeyterms ignores prompt extraction and only uses the fixed list", () => {
@@ -100,6 +102,13 @@ test("sttKeyterms ignores prompt extraction and only uses the fixed list", () =>
   const terms = sttKeyterms(prompt);
   assert.deepEqual(terms, [...STT_KEYTERMS]);
   assert.equal(terms.includes("信息素"), false);
+  assert.equal(terms.includes("林泽"), false);
+  assert.equal(terms.includes("嗯嗯嗯"), false);
+  assert.ok(terms.includes("姐姐"));
+  assert.ok(terms.includes("清然"));
+  assert.ok(terms.includes("小猫"));
+  assert.ok(terms.includes("Rosie"));
+  assert.ok(terms.includes("嗯"));
 });
 
 test("short quiet clip with a long xAI sentence is hallucination_suspect", () => {

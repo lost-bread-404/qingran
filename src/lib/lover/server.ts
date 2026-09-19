@@ -9,11 +9,11 @@ import {
   parseRememberResult,
 } from "./prompt";
 import { spokenForTts } from "./speech-tags";
-import { restoreSpeechText, STT_KEYTERMS } from "./stt-text";
+import { restoreSpeechText } from "./stt-text";
 import { ttsRequestBody, ttsSpeed } from "./tts";
 import type { ChatMessage, Memory } from "./types";
 import { isQuotaHint, readXaiFail } from "./xai-error";
-import { HEARING, xaiVadThreshold } from "./hearing/config";
+import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./hearing/config";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
 

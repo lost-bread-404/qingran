@@ -1,24 +1,45 @@
 #!/usr/bin/env node
 /**
  * Re-run clips through xAI STT under vad_threshold 0 / 0.3 / 0.5
- * with and without prompt-extracted keyterms (e.g. 林泽).
+ * with and without prompt-extracted keyterms (e.g. 林泽), plus the
+ * production slim keyterm list at vad 0.3.
  *
  *   node scripts/xai-hallucination-compare.mjs path/to/export.json
  *
  * Prints a markdown table. Requires XAI_API_KEY.
+ *
+ * NEW_FIXED must stay in sync with src/lib/lover/hearing/config.ts STT_KEYTERMS.
  */
 import { readFile } from "node:fs/promises";
 
 const STT_URL = "https://api.x.ai/v1/stt";
 const MODEL = "grok-voice-transcribe-2.0";
-const FIXED = [
+const LEGACY_FIXED = [
   "嗯", "啊", "呜", "哈", "哼", "嗷", "哦", "唉", "嘛", "呀", "啦", "呢", "吧", "喵",
   "嗯嗯", "嗯嗯嗯", "啊啊", "呜呜", "哈哈", "喵喵",
   "清然", "Rosie", "姐姐", "小猫", "林泽",
 ];
+const NEW_FIXED = [
+  "姐姐", "清然", "小猫", "Rosie",
+  "嗯", "啊", "呜", "哈", "哼", "哦", "唉", "嘛", "呀", "啦", "呢", "吧", "喵",
+];
 const PROMPT_EXTRA = ["林泽", "信息素", "Omega", "Rosie"];
 const FILLER = /[嗯唔呜啊哦噢喔额呃唉哎诶欸哼哈嘿哇呀哟呦切啧嘶嘛呢吧啦咯嘞嘤喵嗷呼嘻嗨嘘咿欧咕唧呐]/;
-const VADS = [0, 0.3, 0.5];
+const STACKED_FILLER = /^(嗯{2,}|啊{2,}|呜{2,}|哈{2,}|喵{2,})$/;
+
+const RUNS = [
+  { key: "vad0+prompt", vad: 0, terms: unique([...PROMPT_EXTRA, ...LEGACY_FIXED]) },
+  { key: "vad0", vad: 0, terms: LEGACY_FIXED },
+  { key: "vad0.3+prompt", vad: 0.3, terms: unique([...PROMPT_EXTRA, ...LEGACY_FIXED]) },
+  { key: "vad0.3", vad: 0.3, terms: LEGACY_FIXED },
+  { key: "vad0.5+prompt", vad: 0.5, terms: unique([...PROMPT_EXTRA, ...LEGACY_FIXED]) },
+  { key: "vad0.5", vad: 0.5, terms: LEGACY_FIXED },
+  { key: "vad0.3+new", vad: 0.3, terms: NEW_FIXED },
+];
+
+function unique(list) {
+  return [...new Set(list)];
+}
 
 function stripMarks(text) {
   return String(text ?? "").replace(/[，。！？、,.!?;；：:\s………~～"'“”‘’]+/g, "");
@@ -30,12 +51,16 @@ function isFiller(text) {
   return [...core].every((ch) => FILLER.test(ch));
 }
 
+function isStackedFiller(text) {
+  return STACKED_FILLER.test(stripMarks(text));
+}
+
 function looksHallucinated(text) {
   const core = stripMarks(text);
   return core.length > 6 && !isFiller(text);
 }
 
-async function transcribe({ audioBase64, vad, extraKeyterms }) {
+async function transcribe({ audioBase64, vad, keyterms }) {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) throw new Error("XAI_API_KEY is required");
   const bytes = Buffer.from(audioBase64, "base64");
@@ -43,7 +68,7 @@ async function transcribe({ audioBase64, vad, extraKeyterms }) {
   form.append("model", MODEL);
   form.append("filler_words", "true");
   form.append("vad_threshold", String(vad));
-  for (const term of extraKeyterms ? [...new Set([...PROMPT_EXTRA, ...FIXED])] : FIXED) {
+  for (const term of keyterms) {
     form.append("keyterm", term);
   }
   form.append("file", new Blob([bytes], { type: "audio/wav" }), "clip.wav");
@@ -82,6 +107,7 @@ function cell(result) {
   if (!result.ok) return `ERR ${result.error}`;
   const text = result.text || "∅";
   if (looksHallucinated(result.text)) return `⚠ ${text}`;
+  if (isStackedFiller(result.text)) return `叠语气词 ${text}`;
   if (isFiller(result.text) && result.text) return `语气词 ${text}`;
   return text;
 }
@@ -93,30 +119,37 @@ async function main() {
     process.exit(1);
   }
   const clips = loadClips(await readFile(path, "utf8")).slice(0, 80);
+  const keys = RUNS.map((r) => r.key);
   console.log(`# xAI hallucination compare (${clips.length} clips)\n`);
-  console.log("| id | gold | dur ms | vad0+prompt | vad0 | vad0.3+prompt | vad0.3 | vad0.5+prompt | vad0.5 |");
-  console.log("|---|---|---|---|---|---|---|---|---|");
-  const tally = { hallu: {}, cueKept: {} };
+  console.log(`| id | gold | dur ms | ${keys.join(" | ")} |`);
+  console.log(`|---|---|---|${keys.map(() => "---").join("|")}|`);
+  const tally = { hallu: {}, cueKept: {}, stacked: {} };
+  for (const key of keys) {
+    tally.hallu[key] = 0;
+    tally.cueKept[key] = 0;
+    tally.stacked[key] = 0;
+  }
   for (const clip of clips) {
     const row = [clip.id, clip.gold || "—", String(clip.durationMs)];
-    for (const vad of VADS) {
-      for (const extra of [true, false]) {
-        const key = `vad${vad}${extra ? "+p" : ""}`;
-        const result = await transcribe({ audioBase64: clip.audioBase64, vad, extraKeyterms: extra });
-        row.push(cell(result));
-        tally.hallu[key] = (tally.hallu[key] ?? 0) + (looksHallucinated(result.text) ? 1 : 0);
-        tally.cueKept[key] =
-          (tally.cueKept[key] ?? 0) + (isFiller(clip.gold) && isFiller(result.text) && result.text ? 1 : 0);
-        await new Promise((r) => setTimeout(r, 120));
-      }
+    for (const run of RUNS) {
+      const result = await transcribe({
+        audioBase64: clip.audioBase64,
+        vad: run.vad,
+        keyterms: run.terms,
+      });
+      row.push(cell(result));
+      tally.hallu[run.key] += looksHallucinated(result.text) ? 1 : 0;
+      tally.cueKept[run.key] += isFiller(clip.gold) && isFiller(result.text) && result.text ? 1 : 0;
+      tally.stacked[run.key] += isStackedFiller(result.text) ? 1 : 0;
+      await new Promise((r) => setTimeout(r, 120));
     }
     console.log(`| ${row.join(" | ")} |`);
   }
   console.log("\n## totals\n");
-  console.log("| config | hallucination sentences | filler gold kept as filler |");
-  console.log("|---|---|---|");
-  for (const key of Object.keys(tally.hallu)) {
-    console.log(`| ${key} | ${tally.hallu[key]} | ${tally.cueKept[key]} |`);
+  console.log("| config | hallucination sentences | filler gold kept as filler | stacked filler (嗯嗯嗯/啊啊…) |");
+  console.log("|---|---|---|---|");
+  for (const key of keys) {
+    console.log(`| ${key} | ${tally.hallu[key]} | ${tally.cueKept[key]} | ${tally.stacked[key]} |`);
   }
 }
 

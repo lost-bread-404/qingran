@@ -5,6 +5,7 @@ export {
   HEARING,
   HEARING_PROVIDERS,
   isHearingProvider,
+  STT_KEYTERMS,
 } from "./config.ts";
 export { formatTaggedText, parseHearingJson, stripCueTags } from "./schema.ts";
 export type { HearingCue, HearingResult } from "./schema.ts";

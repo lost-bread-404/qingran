@@ -1,53 +1,8 @@
 import { classifyCue, cuesFromProsody, glueCueParts, markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
 import { islandVoiced, listenVocal } from "./vocal-event.ts";
+import { STT_KEYTERMS } from "./hearing/config.ts";
 
-export const STT_KEYTERMS = [
-  "嗯",
-  "啊",
-  "呜",
-  "哈",
-  "哼",
-  "嗷",
-  "哦",
-  "唉",
-  "嘛",
-  "呀",
-  "啦",
-  "呢",
-  "吧",
-  "喵",
-  "嗯嗯",
-  "嗯嗯嗯",
-  "啊啊",
-  "呜呜",
-  "哈哈",
-  "喵喵",
-  "清然",
-  "Rosie",
-  "姐姐",
-  "小猫",
-  "林泽",
-];
-
-const ABO_TERMS = [
-  "ABO",
-  "Alpha",
-  "Omega",
-  "Beta",
-  "alpha",
-  "omega",
-  "beta",
-  "信息素",
-  "标记",
-  "腺体",
-  "发情",
-  "发情期",
-  "热潮",
-  "结合热",
-  "安抚",
-  "信香",
-  "分化",
-];
+export { STT_KEYTERMS };
 
 const CUE_CHARS = "嗯唔呜啊哦噢喔额呃唉哎诶欸哼哈嘿哇呀哟呦切啧嘶嘛呢吧啦咯嘞嘤喵嗷呼嘻嗨嘘咿欧咕唧呐欸喔哇";
 const FILLER = new RegExp(`[${CUE_CHARS}]`);
@@ -225,9 +180,6 @@ export function needsPunctuationHelp(text: string): boolean {
 export function extractKeyterms(prompt: string): string[] {
   const found = new Set<string>();
   const text = prompt ?? "";
-  if (/ABO|信息素|alpha|omega|beta|腺体|发情|热潮/i.test(text)) {
-    for (const term of ABO_TERMS) found.add(term);
-  }
   for (const match of text.match(/[A-Z][a-zA-Z]{2,}/g) ?? []) found.add(match);
   for (const match of text.match(/[“「『"]([^“」』"]{2,12})[”」』"]/g) ?? []) {
     const inner = match.replace(/[“”「」『』"]/g, "").trim();

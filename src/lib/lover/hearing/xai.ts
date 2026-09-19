@@ -1,6 +1,6 @@
-import { restoreSpeechText, STT_KEYTERMS } from "../stt-text.ts";
+import { restoreSpeechText } from "../stt-text.ts";
 import { isQuotaHint, readXaiFail } from "../xai-error.ts";
-import { HEARING, xaiVadThreshold } from "./config.ts";
+import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./config.ts";
 import type { AdapterOutcome } from "./http.ts";
 
 type SttWord = { text?: string; start?: number; end?: number };
