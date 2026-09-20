@@ -16,6 +16,8 @@ test("settings hearing tab is engine plus 标注模式 only", () => {
   assert.doesNotMatch(src, /to="\/record"/);
   assert.match(src, /打开标注页/);
   assert.match(src, /to="\/lab"/);
+  assert.match(src, /引擎自检/);
+  assert.match(src, /hearingConnectionTest/);
   assert.doesNotMatch(src, /定向录制/);
   assert.doesNotMatch(src, />高级</);
   assert.doesNotMatch(src, /hearingNbest/);
@@ -244,6 +246,8 @@ test("runHearing persists with waitUntil; xai skips audio-LLM and a second STT",
   assert.match(store, /engine_fallback_reason/);
   assert.match(store, /engine_error_detail/);
   assert.match(store, /engineErrorDetailFromOutcome/);
+  assert.match(store, /hearingConnectionTest/);
+  assert.match(store, /silenceWavBase64\(1\)/);
   assert.match(store, /lengthOnlyTags\(data\.predictedTags\)/);
   assert.match(store, /used !== "xai" \? withMeowFromText/);
   assert.match(hear, /ranHearing \|\| provider === "xai"/);

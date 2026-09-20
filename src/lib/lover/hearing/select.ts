@@ -48,7 +48,8 @@ export type EngineUseStats = {
 
 const FALLBACK_ORDER: EngineFallbackDisplay[] = ["timeout", "refused", "error", "missing_key"];
 
-export const ENGINE_ERROR_BODY_MAX = 200;
+export const ENGINE_ERROR_BODY_MAX = 500;
+export const ENGINE_ERROR_DISPLAY_MAX = 100;
 
 export function displayEngineFallback(reason?: string | null): EngineFallbackDisplay {
   if (reason === "timeout") return "timeout";
@@ -57,11 +58,24 @@ export function displayEngineFallback(reason?: string | null): EngineFallbackDis
   return "error";
 }
 
+export function redactEngineSecrets(raw: string): string {
+  return raw
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "[redacted]")
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/([?&]key=)[^&\s"]+/gi, "$1[redacted]")
+    .replace(/("?(?:api[_-]?key|access[_-]?token)"?\s*[:=]\s*")[^"]*/gi, "$1[redacted]");
+}
+
 export function formatEngineErrorDetail(status?: number | null, body?: string | null): string | null {
-  const snippet = (body ?? "").slice(0, ENGINE_ERROR_BODY_MAX);
+  const snippet = redactEngineSecrets(body ?? "").slice(0, ENGINE_ERROR_BODY_MAX);
   if (status == null && !snippet) return null;
   if (status == null) return snippet;
   return snippet ? `${status} ${snippet}` : String(status);
+}
+
+export function displayEngineErrorDetail(detail?: string | null): string {
+  return (detail ?? "").trim().slice(0, ENGINE_ERROR_DISPLAY_MAX);
 }
 
 export function engineErrorDetailFromOutcome(
@@ -81,7 +95,7 @@ export function formatEngineLine(input: {
   const used = input.used || "xai";
   if (!input.fallback || !input.fallbackReason) return `引擎：${used}`;
   const line = `引擎：${used}(fallback: ${displayEngineFallback(input.fallbackReason)})`;
-  const detail = input.fallbackReason === "http" ? input.errorDetail?.trim() : "";
+  const detail = input.fallbackReason === "http" ? displayEngineErrorDetail(input.errorDetail) : "";
   return detail ? `${line} ${detail}` : line;
 }
 

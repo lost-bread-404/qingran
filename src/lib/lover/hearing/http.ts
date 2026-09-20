@@ -10,7 +10,7 @@ import {
 import { HEARING_INSTRUCTION } from "./instruction.ts";
 import { NBEST_INSTRUCTION } from "./nbest.ts";
 import { looksLikeRefusal, parseHearingJson, type HearingResult } from "./schema.ts";
-import type { HearingAdapterOutcome, HearingFailReason } from "./select.ts";
+import { formatEngineErrorDetail, type HearingAdapterOutcome, type HearingFailReason } from "./select.ts";
 
 export type AdapterFail = Extract<HearingAdapterOutcome, { ok: false }>;
 export type AdapterOk = Extract<HearingAdapterOutcome, { ok: true }>;
@@ -75,8 +75,10 @@ export async function hearWithQwen(audioBase64: string, opts?: HearingCallOpts):
     apiKey,
     audioBase64,
     audioStyle: "input_audio",
-    extra: { modalities: ["text"] },
+    extra: { modalities: ["text"], stream_options: { include_usage: true } },
     preferStream: true,
+    requireStream: true,
+    omitTemperature: true,
     opts,
   });
 }
@@ -125,7 +127,7 @@ export async function hearWithGemini(audioBase64: string, opts?: HearingCallOpts
     const rawBody = (rawText || JSON.stringify(body)).slice(0, 2000);
     if (!res.ok) {
       const msg = body.error?.message || rawBody || `gemini ${res.status}`;
-      return {
+      return logFail({
         ok: false,
         reason: res.status === 408 ? "timeout" : isModerationHttpError(res.status, msg) ? "refusal" : "http",
         raw: rawBody || msg,
@@ -133,7 +135,7 @@ export async function hearWithGemini(audioBase64: string, opts?: HearingCallOpts
         latency_ms,
         provider: "gemini",
         model,
-      };
+      });
     }
     const verdict = classifyGeminiResponse(body);
     if (verdict === "refusal") {
@@ -238,6 +240,8 @@ async function openaiAudioChat(input: {
   audioBase64: string;
   extra?: Record<string, unknown>;
   preferStream: boolean;
+  requireStream?: boolean;
+  omitTemperature?: boolean;
   audioStyle: "input_audio" | "audio_url";
   opts?: HearingCallOpts;
 }): Promise<AdapterOutcome> {
@@ -245,7 +249,7 @@ async function openaiAudioChat(input: {
   const timeout = hearingTimeoutMs();
   const payload = {
     model: input.model,
-    temperature: 0,
+    ...(input.omitTemperature ? {} : { temperature: 0 }),
     max_tokens: 800,
     messages: [
       { role: "system", content: hearingSystemPrompt(input.opts) },
@@ -275,12 +279,13 @@ async function openaiAudioChat(input: {
 
   try {
     let res = await tryOnce(input.preferStream);
-    if (!res.ok && input.preferStream && (res.status === 400 || res.status === 422)) {
+    const canFlipStream = !input.requireStream;
+    if (canFlipStream && !res.ok && input.preferStream && (res.status === 400 || res.status === 422)) {
       const peek = await res.clone().text().catch(() => "");
       if (!isModerationHttpError(res.status, peek)) {
         res = await tryOnce(false);
       }
-    } else if (!res.ok && !input.preferStream && (res.status === 400 || res.status === 422)) {
+    } else if (canFlipStream && !res.ok && !input.preferStream && (res.status === 400 || res.status === 422)) {
       const peek = await res.clone().text().catch(() => "");
       if (!isModerationHttpError(res.status, peek)) {
         res = await tryOnce(true);
@@ -289,7 +294,7 @@ async function openaiAudioChat(input: {
     const latency_ms = Date.now() - started;
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
-      return {
+      return logFail({
         ok: false,
         reason: res.status === 408 ? "timeout" : isModerationHttpError(res.status, errText) ? "refusal" : "http",
         raw: errText.slice(0, 2000),
@@ -297,7 +302,7 @@ async function openaiAudioChat(input: {
         latency_ms,
         provider: input.provider,
         model: input.model,
-      };
+      });
     }
     if (res.headers.get("content-type")?.includes("text/event-stream") || input.preferStream) {
       const streamed = await readOpenAiStream(res);
@@ -353,10 +358,10 @@ async function readOpenAiStream(res: Response): Promise<{
       if (!payload || payload === "[DONE]") continue;
       try {
         const json = JSON.parse(payload) as {
-          choices?: { delta?: { content?: string }; message?: { content?: string } }[];
+          choices?: { delta?: { content?: string | { text?: string }[] }; message?: { content?: string | { text?: string }[] } }[];
           usage?: { prompt_tokens?: number; completion_tokens?: number };
         };
-        text += json.choices?.[0]?.delta?.content ?? json.choices?.[0]?.message?.content ?? "";
+        text += messageContent(json.choices?.[0]?.delta?.content) || messageContent(json.choices?.[0]?.message?.content);
         if (json.usage) {
           usage = { in: json.usage.prompt_tokens, out: json.usage.completion_tokens };
         }
@@ -414,6 +419,15 @@ function missing(provider: HearingProviderId, model: string): AdapterFail {
   return { ok: false, reason: "missing_key", latency_ms: 0, provider, model };
 }
 
+function logFail(fail: AdapterFail): AdapterFail {
+  if (fail.reason === "http") {
+    console.error(
+      `[qingran-hear] ${fail.provider} engine_error_detail=${formatEngineErrorDetail(fail.status, fail.raw) ?? "-"}`,
+    );
+  }
+  return fail;
+}
+
 function parseJsonBody(raw: string): Record<string, unknown> {
   if (!raw) return {};
   try {
@@ -434,12 +448,12 @@ function failFromError(
   const message = err instanceof Error ? err.message : "";
   const timeout = name === "TimeoutError" || name === "AbortError" || /timeout|aborted/i.test(message);
   const reason: HearingFailReason = timeout ? "timeout" : "http";
-  return {
+  return logFail({
     ok: false,
     reason,
     raw: message.slice(0, 2000),
     latency_ms,
     provider,
     model,
-  };
+  });
 }

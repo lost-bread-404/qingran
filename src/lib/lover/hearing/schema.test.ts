@@ -9,7 +9,7 @@ import {
 } from "./schema.ts";
 import { assignSplits } from "./split.ts";
 import { cer, cueTokenF1, fieldAccuracy, selfConsistency } from "./metrics.ts";
-import { chooseHearing, formatEngineLine, aggregateEngineUse, formatEngineMix, formatEngineErrorDetail, engineErrorDetailFromOutcome, engineLineFromHeard, ENGINE_ERROR_BODY_MAX } from "./select.ts";
+import { chooseHearing, formatEngineLine, aggregateEngineUse, formatEngineMix, formatEngineErrorDetail, engineErrorDetailFromOutcome, engineLineFromHeard, redactEngineSecrets, ENGINE_ERROR_BODY_MAX, ENGINE_ERROR_DISPLAY_MAX } from "./select.ts";
 import { HEARING } from "./config.ts";
 import { classifyGeminiResponse, clipFallbackRaw, hearingSystemPrompt, isModerationHttpError } from "./http.ts";
 
@@ -123,12 +123,12 @@ describe("hearing schema", () => {
     );
   });
 
-  it("records http status and a 200-char body snippet on http fallback", () => {
+  it("records http status and a 500-char body snippet on http fallback", () => {
     assert.equal(formatEngineErrorDetail(503, '{"error":"UNAVAILABLE"}'), '503 {"error":"UNAVAILABLE"}');
     assert.equal(formatEngineErrorDetail(429, ""), "429");
     assert.equal(formatEngineErrorDetail(undefined, "fetch failed"), "fetch failed");
     assert.equal(formatEngineErrorDetail(null, null), null);
-    const body = "x".repeat(500);
+    const body = "x".repeat(800);
     const detail = formatEngineErrorDetail(502, body);
     assert.equal(detail, `502 ${"x".repeat(ENGINE_ERROR_BODY_MAX)}`);
     assert.equal(detail?.length, 4 + ENGINE_ERROR_BODY_MAX);
@@ -157,6 +157,22 @@ describe("hearing schema", () => {
       null,
     );
     assert.equal(engineErrorDetailFromOutcome(null), null);
+    const secretBody = 'Bearer sk-supersecretkeyvalue {"api_key":"AIzaSyDummyKeyThatLooksReal0001"}';
+    const redacted = redactEngineSecrets(secretBody);
+    assert.doesNotMatch(redacted, /sk-supersecretkeyvalue/);
+    assert.doesNotMatch(redacted, /AIzaSyDummyKeyThatLooksReal0001/);
+    assert.match(redacted, /\[redacted\]/);
+    assert.doesNotMatch(formatEngineErrorDetail(401, secretBody) ?? "", /sk-supersecretkeyvalue/);
+    const long = `503 ${"y".repeat(200)}`;
+    assert.equal(
+      formatEngineLine({
+        used: "xai",
+        fallback: true,
+        fallbackReason: "http",
+        errorDetail: long,
+      }),
+      `引擎：xai(fallback: error) ${long.slice(0, ENGINE_ERROR_DISPLAY_MAX)}`,
+    );
   });
 
   it("mixes engine use and fallback reasons for the lab card", () => {

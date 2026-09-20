@@ -9,7 +9,7 @@ import { backupFilename, makeBackup, parseBackup, type QingranBackup } from "@/l
 import { LogoutButton } from "@/components/lover/logout-button";
 import { HEARING_PROVIDERS, type HearingProviderId } from "@/lib/lover/hearing/config";
 import { PROVIDER_ENV } from "@/lib/lover/hearing/env";
-import { hearingEnvStatus } from "@/lib/lover/hearing/store";
+import { hearingConnectionTest, hearingEnvStatus } from "@/lib/lover/hearing/store";
 import {
   resolveManualMemory,
   sortMemoriesByTime,
@@ -44,6 +44,15 @@ const PROVIDER_LABEL: Record<HearingProviderId, string> = {
   selfhost: "自部署",
 };
 
+const LAB_KEY = "qingran-hearing-lab";
+
+type EngineProbeRow = {
+  id: HearingProviderId;
+  ok: boolean;
+  latency_ms: number;
+  error?: string;
+};
+
 export function SettingsDrawer({
   open,
   onOpenChange,
@@ -71,6 +80,10 @@ export function SettingsDrawer({
   const [tab, setTab] = useState<Tab>("prompt");
   const [consolidating, setConsolidating] = useState(false);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [labPassword, setLabPassword] = useState("");
+  const [probeBusy, setProbeBusy] = useState(false);
+  const [probeError, setProbeError] = useState<string | null>(null);
+  const [probeRows, setProbeRows] = useState<EngineProbeRow[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const viewport = useVisualViewportHeight(open);
 
@@ -83,6 +96,8 @@ export function SettingsDrawer({
       setNewAt(toDatetimeLocal(Date.now()));
       setNewTimeTouched(false);
       setEditingId(null);
+      setLabPassword(sessionStorage.getItem(LAB_KEY) ?? "");
+      setProbeError(null);
       void hearingEnvStatus().then((result) => setProviderReady(result.providers));
     }
   }, [open, profile]);
@@ -282,6 +297,58 @@ export function SettingsDrawer({
                   );
                 })}
               </div>
+            </div>
+            <div className="rounded-md bg-surface-2 px-3 py-3">
+              <p className="text-sm">引擎自检</p>
+              <p className="mt-1 text-xs text-subtle">用 lab 密码。对各引擎发 1 秒测试音频，看能不能通。</p>
+              <Input
+                type="password"
+                value={labPassword}
+                onChange={(e) => setLabPassword(e.target.value)}
+                placeholder="lab 密码"
+                className="mt-3"
+                autoComplete="off"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-2 min-h-11 w-full"
+                disabled={probeBusy || !labPassword.trim()}
+                onClick={() => {
+                  const secret = labPassword.trim();
+                  if (!secret) return;
+                  setProbeBusy(true);
+                  setProbeError(null);
+                  void hearingConnectionTest({ data: { password: secret } })
+                    .then((result) => {
+                      sessionStorage.setItem(LAB_KEY, secret);
+                      setProbeRows(result.engines as EngineProbeRow[]);
+                    })
+                    .catch((err) => {
+                      setProbeRows(null);
+                      const message = err instanceof Error ? err.message : String(err);
+                      setProbeError(message === "lab-locked" ? "密码不对。" : message);
+                    })
+                    .finally(() => setProbeBusy(false));
+                }}
+              >
+                {probeBusy ? "正在自检…" : "引擎自检"}
+              </Button>
+              {probeError ? <p className="mt-2 text-xs text-subtle">{probeError}</p> : null}
+              {probeRows ? (
+                <ul className="mt-3 flex flex-col gap-2">
+                  {probeRows.map((row) => (
+                    <li key={row.id} className="text-xs leading-relaxed">
+                      <span className="text-sm text-fg">
+                        {PROVIDER_LABEL[row.id]} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
+                      </span>
+                      {!row.ok && row.error ? (
+                        <span className="mt-1 block break-all text-subtle">{row.error}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
             <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
               <input

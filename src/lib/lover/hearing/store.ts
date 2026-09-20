@@ -14,7 +14,7 @@ import {
 import { EMOTIONS, hearingCueSchema, stripCueTags, type CueEmotion, type HearingCue, type HearingResult } from "./schema.ts";
 import { assignSplits, hashSplit } from "./split.ts";
 import { transcribeWithXai, xaiAsHearing } from "./xai.ts";
-import { chooseHearing, emptyEngineUse, engineErrorDetailFromOutcome, logHearingTurn } from "./select.ts";
+import { chooseHearing, emptyEngineUse, engineErrorDetailFromOutcome, formatEngineErrorDetail, logHearingTurn } from "./select.ts";
 import { deleteHearingWav, putHearingWav, readHearingWav } from "./blob.ts";
 import { isNoiseDisagreement, shouldDropAsNoise } from "./noise.ts";
 import { goldTierFor, isGoldSource, type GoldSource } from "./gold.ts";
@@ -261,19 +261,31 @@ export const hearingConnectionTest = createServerFn({ method: "POST" })
         const result = await hearWithQwen(audioBase64);
         return result.ok
           ? { ok: true, latency_ms: result.result.latency_ms }
-          : { ok: false, latency_ms: result.latency_ms, error: result.raw || result.reason };
+          : {
+              ok: false,
+              latency_ms: result.latency_ms,
+              error: formatEngineErrorDetail(result.status, result.raw) || result.raw || result.reason,
+            };
       }),
       ping("gemini", async () => {
         const result = await hearWithGemini(audioBase64);
         return result.ok
           ? { ok: true, latency_ms: result.result.latency_ms }
-          : { ok: false, latency_ms: result.latency_ms, error: result.raw || result.reason };
+          : {
+              ok: false,
+              latency_ms: result.latency_ms,
+              error: formatEngineErrorDetail(result.status, result.raw) || result.raw || result.reason,
+            };
       }),
       ping("selfhost", async () => {
         const result = await hearWithSelfhost(audioBase64);
         return result.ok
           ? { ok: true, latency_ms: result.result.latency_ms }
-          : { ok: false, latency_ms: result.latency_ms, error: result.raw || result.reason };
+          : {
+              ok: false,
+              latency_ms: result.latency_ms,
+              error: formatEngineErrorDetail(result.status, result.raw) || result.raw || result.reason,
+            };
       }),
     ]);
     let migrations: string[] = [];
