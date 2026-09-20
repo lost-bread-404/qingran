@@ -12,6 +12,7 @@ import {
 } from "../store.ts";
 import { isoWeek } from "../time.ts";
 import { routePriority } from "../spend/policy.ts";
+import { computeDailyMetrics, type DailyMetrics } from "../../../../../scripts/metrics/daily.ts";
 
 export type DailyDigestData = {
   day: string;
@@ -43,6 +44,7 @@ export type DailyDigestData = {
     dbBytes?: number | null;
     dbDeltaBytes?: number | null;
   };
+  metrics?: DailyMetrics;
 };
 
 function pct(xs: number[], p: number): number | null {
@@ -306,6 +308,12 @@ export async function writeDailyDigest(day: string): Promise<void> {
     }
   } catch {
     /* PGLite 没有 pg_database_size 时跳过 */
+  }
+
+  try {
+    data.metrics = await computeDailyMetrics(day);
+  } catch (err) {
+    console.error("[digest] metrics failed", err);
   }
 
   const markdown = md(data);

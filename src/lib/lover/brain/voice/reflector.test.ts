@@ -180,11 +180,11 @@ test("memory_ids outside core ∪ related are dropped", () => {
   assert.deepEqual(next.memory_ids, ["n1", "n9"]);
 });
 
-test("core index refreshes when notesVersion or day changes", () => {
+test("core index refreshes only when the local day changes", () => {
   const scored = [item("a", { score: 9 }), item("b", { score: 8 })];
   const cached = { version: 3, day: "2026-09-14", ids: ["old"] };
   assert.deepEqual(resolveCoreIndex(cached, 3, "2026-09-14", scored), { ids: ["old"], refresh: false });
-  assert.equal(resolveCoreIndex(cached, 4, "2026-09-14", scored).refresh, true);
+  assert.equal(resolveCoreIndex(cached, 4, "2026-09-14", scored).refresh, false);
   assert.equal(resolveCoreIndex(cached, 3, "2026-09-15", scored).refresh, true);
-  assert.deepEqual(resolveCoreIndex(cached, 4, "2026-09-14", scored).ids, ["a", "b"]);
+  assert.deepEqual(resolveCoreIndex(cached, 4, "2026-09-15", scored).ids, ["a", "b"]);
 });

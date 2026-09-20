@@ -21,6 +21,7 @@ import { DUSK_DAY_SYSTEM } from "./prompts.ts";
 import { applyIntentionOps, type IntentionOp } from "./intentions.ts";
 import { recomputeStats } from "./recompute.ts";
 import { writeDailyDigest } from "./digest.ts";
+import { getCoreIndexItems } from "../voice/retrieve.ts";
 
 const DAY_SCHEMA = {
   name: "day_log",
@@ -123,6 +124,12 @@ const FACTOR_SCHEMA = {
   },
 };
 
+async function warmupCoreIndex(): Promise<void> {
+  const meta = await getMeta();
+  const today = localDay(now(), resolveTz(meta.timeZone));
+  await getCoreIndexItems(today);
+}
+
 function coverageOf(msgCount: number, diaryNotes: number): DayLog["coverage"] {
   if (msgCount === 0) return "none";
   if (msgCount < 10 || diaryNotes < 2) return "thin";
@@ -185,6 +192,7 @@ export async function runDusk(
     await writeEmptyDay(day, notes);
     await recomputeStats();
     await writeDailyDigest(day);
+    await warmupCoreIndex();
     const meta = await getMeta();
     if (!meta.lastDuskDay || meta.lastDuskDay < day) await patchMeta({ lastDuskDay: day });
     return;
@@ -295,6 +303,7 @@ ${notes.map((n) => n.text).join("\n")}
   await updatePortraitSelfBond(day, jobId);
   await recomputeStats();
   await writeDailyDigest(day);
+  await warmupCoreIndex();
   // 手动整理（通常是还没结束的今天）不推进 lastDuskDay，这一天结束后自动 dusk 仍会完整重跑
   if (!opts.manual) {
     const meta = await getMeta();

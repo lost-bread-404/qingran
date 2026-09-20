@@ -18,6 +18,38 @@ function asNum(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function fmtRate(v: unknown): string {
+  if (v == null || v === "") return "–";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "–";
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+function metricsOf(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== "object") return null;
+  const m = (data as { metrics?: unknown }).metrics;
+  if (!m || typeof m !== "object") return null;
+  return m as Record<string, unknown>;
+}
+
+function metricRows(m: Record<string, unknown>): Array<[string, string]> {
+  const cache = m.cache_hit && typeof m.cache_hit === "object" ? (m.cache_hit as Record<string, unknown>) : {};
+  const cacheLine = Object.entries(cache)
+    .map(([k, v]) => `${k} ${fmtRate(v)}`)
+    .join(" · ");
+  return [
+    ["跳话题时 query 命中", fmtRate(m.fallback_rate_jump)],
+    ["未跳话题时 query 命中", fmtRate(m.fallback_rate_nojump)],
+    ["内心 memory_ids Jaccard", fmtRate(m.mind_churn)],
+    ["过期内心", fmtRate(m.stale_rate)],
+    ["内心失败", fmtRate(m.reflect_fail_rate)],
+    ["prompt cache", cacheLine || "–"],
+    ["block B 变化", fmtRate(m.blockB_churn)],
+    ["无人问津笔记", fmtRate(m.dead_note_ratio)],
+    ["改写召回@30", fmtRate(m.paraphrase_recall_at_30)],
+  ];
+}
+
 export function BrainSystemArchive() {
   const [rows, setRows] = useState<DigestRow[]>([]);
   const [open, setOpen] = useState<string | null>(null);
@@ -196,6 +228,19 @@ export function BrainSystemArchive() {
         <article className="whitespace-pre-wrap rounded-xl bg-surface p-4 text-sm leading-relaxed">
           {String(detail.digest.markdown)}
         </article>
+      ) : null}
+      {metricsOf(detail?.digest?.data) ? (
+        <div className="rounded-xl bg-surface p-4 text-sm">
+          <p className="mb-2 text-xs text-subtle">当天检索指标（只读）</p>
+          <ul className="flex flex-col gap-1 text-xs">
+            {metricRows(metricsOf(detail?.digest?.data)!).map((row) => (
+              <li key={row[0]} className="flex justify-between gap-3">
+                <span className="text-subtle">{row[0]}</span>
+                <span>{row[1]}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       {Array.isArray(detail?.turns) && detail.turns.length ? (
         <div>

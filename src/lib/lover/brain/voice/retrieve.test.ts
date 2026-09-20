@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import MiniSearch from "minisearch";
 import { formatIndexLine, tokenizeMemory } from "../text.ts";
-import { bumpNotesVersion, upsertNote } from "../store.ts";
+import { bumpNotesVersion, patchMeta, upsertNote } from "../store.ts";
 import type { Note } from "../types.ts";
+import { EMPTY_MIND } from "../types.ts";
 import { openIsolatedSql } from "../eval-db.ts";
-import { pickHotNotes, resetRetrieveCache } from "./retrieve.ts";
+import { setClock } from "../clock.ts";
+import { sha256Text } from "../log-refs.ts";
+import { getCoreIndexItems, pickHotNotes, resetRetrieveCache, resolveCoreIndex } from "./retrieve.ts";
+import { buildReflectorInput } from "./reflector.ts";
 
 test("Chinese tokenizer emits bigrams plus latin words", () => {
   const tokens = tokenizeMemory("Rosie 很难过想被叫小猫");
@@ -40,6 +44,18 @@ test("index line format", () => {
     }),
     "n1|09-10|rosie|她喜欢被叫小猫，不想听讲道理的安慰方式".slice(0, "n1|09-10|rosie|".length + 30),
   );
+});
+
+test("resolveCoreIndex expires only on day change, not notesVersion", () => {
+  const scored = [
+    { id: "a", text: "a", searchText: "a", subject: "rosie" as const, lens: ["diary" as const], weight: 4, happenedAt: 0, localDay: "2026-09-16", recallCount: 0, score: 9 },
+    { id: "b", text: "b", searchText: "b", subject: "rosie" as const, lens: ["diary" as const], weight: 4, happenedAt: 0, localDay: "2026-09-16", recallCount: 0, score: 8 },
+  ];
+  const cached = { version: 3, day: "2026-09-16", ids: ["old"] };
+  assert.equal(resolveCoreIndex(cached, 3, "2026-09-16", scored).refresh, false);
+  assert.equal(resolveCoreIndex(cached, 99, "2026-09-16", scored).refresh, false);
+  assert.equal(resolveCoreIndex(cached, 3, "2026-09-17", scored).refresh, true);
+  assert.deepEqual(resolveCoreIndex(cached, 99, "2026-09-17", scored).ids, ["a", "b"]);
 });
 
 function note(id: string, text: string): Note {
@@ -176,6 +192,52 @@ test("MiniSearch matches tags and aliases via searchText without putting them in
       false,
     );
   } finally {
+    await iso.close();
+  }
+});
+
+test("archive without dusk does not change reflector block B", async () => {
+  const iso = await openIsolatedSql();
+  const at = Date.UTC(2026, 8, 16, 20, 0, 0);
+  setClock(() => at);
+  try {
+    await patchMeta({ timeZone: "America/New_York" });
+    for (let i = 0; i < 8; i++) {
+      await upsertNote(note(`c${i}`, `Rosie 的长期笔记${i}：论文拖延和睡眠 ${i}`));
+    }
+    await bumpNotesVersion();
+    resetRetrieveCache();
+    const day = "2026-09-16";
+    const first = await getCoreIndexItems(day);
+    assert.ok(first.length >= 1);
+    const parts = {
+      charter: "你就是清然。",
+      selfSummary: "医学院",
+      bondSummary: "小猫",
+      portrait: [],
+      themes: [],
+      findings: [],
+      clock: "x",
+      relatedIndex: [],
+      oldMind: EMPTY_MIND,
+      conversation: "hi",
+    };
+    const hash1 = sha256Text(buildReflectorInput({ ...parts, coreIndex: first }).stable);
+
+    await upsertNote(note("new-today", "今晚她说想吃火锅，这是今天新归档的"));
+    await bumpNotesVersion();
+    const second = await getCoreIndexItems(day);
+    assert.deepEqual(
+      second.map((i) => i.id),
+      first.map((i) => i.id),
+    );
+    assert.equal(second.some((i) => i.id === "new-today"), false);
+    const hash2 = sha256Text(
+      buildReflectorInput({ ...parts, coreIndex: second, clock: "later", conversation: "bye" }).stable,
+    );
+    assert.equal(hash2, hash1);
+  } finally {
+    setClock(null);
     await iso.close();
   }
 });

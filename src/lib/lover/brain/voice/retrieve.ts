@@ -83,14 +83,15 @@ export function noteAsIndex(n: Note, score = 0): IndexItem {
   };
 }
 
-/** 核心集合：notesVersion + 本地日期不变时复用 ids，不按实时 recency 重排。 */
+/** 核心集合：同一本地日期内复用 ids。notesVersion 只写入 meta 作记录，不参与失效。 */
 export function resolveCoreIndex(
   cached: { version: number; day: string; ids: string[] } | null | undefined,
   notesVersion: number,
   day: string,
   scored: IndexItem[],
 ): { ids: string[]; refresh: boolean } {
-  if (cached && cached.version === notesVersion && cached.day === day) {
+  void notesVersion;
+  if (cached && cached.day === day) {
     return { ids: cached.ids, refresh: false };
   }
   return { ids: scored.slice(0, INDEX_CORE_MAX).map((i) => i.id), refresh: true };
