@@ -8,6 +8,7 @@ const note: Note = {
   id: "n1",
   text: "她说过难过时想被叫小猫",
   tags: ["偏好"],
+  aliases: [],
   subject: "rosie",
   lens: ["bond"],
   fromRosie: true,

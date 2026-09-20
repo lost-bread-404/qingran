@@ -11,6 +11,7 @@ const TZ = "America/New_York";
 function note(partial: Partial<Note> & Pick<Note, "id" | "text">): Note {
   return {
     tags: ["测"],
+    aliases: [],
     subject: "rosie",
     lens: ["diary"],
     fromRosie: true,

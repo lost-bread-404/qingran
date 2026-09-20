@@ -109,6 +109,7 @@ async function mockReply(name: string, input: string): Promise<unknown> {
             target_id: "",
             text: n.text,
             tags: n.tags,
+            aliases: [],
             subject: "rosie",
             lens: n.lens,
             from_rosie: true,

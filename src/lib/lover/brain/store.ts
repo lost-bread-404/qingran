@@ -111,6 +111,7 @@ function rowNote(r: Record<string, unknown>): Note {
     id: String(r.id),
     text: String(r.text ?? ""),
     tags: fromPgArray(r.tags),
+    aliases: fromPgArray(r.aliases),
     subject: (r.subject as Subject) || "rosie",
     lens: fromPgArray(r.lens) as Lens[],
     fromRosie: asBool(r.from_rosie),
@@ -434,19 +435,19 @@ export async function upsertNote(
   const existing = await getNote(note.id);
   await db.query(
     `insert into mem_notes (
-       id, text, tags, subject, lens, from_rosie, weight, status, superseded_by, links,
+       id, text, tags, aliases, subject, lens, from_rosie, weight, status, superseded_by, links,
        happened_at, local_day, source_ids, recall_count, last_recalled_at, created_at, updated_at
      ) values (
-       $1,$2,$3::text[],$4,$5::text[],$6,$7,$8,$9,$10::text[],
-       $11,$12,$13::text[],$14,$15,$16,$17
+       $1,$2,$3::text[],$4::text[],$5,$6::text[],$7,$8,$9,$10,$11::text[],
+       $12,$13,$14::text[],$15,$16,$17,$18
      )
      on conflict (id) do update set
-       text = excluded.text, tags = excluded.tags, subject = excluded.subject, lens = excluded.lens,
+       text = excluded.text, tags = excluded.tags, aliases = excluded.aliases, subject = excluded.subject, lens = excluded.lens,
        from_rosie = excluded.from_rosie, weight = excluded.weight, status = excluded.status,
        superseded_by = excluded.superseded_by, links = excluded.links, happened_at = excluded.happened_at,
        local_day = excluded.local_day, source_ids = excluded.source_ids, updated_at = excluded.updated_at`,
     [
-      note.id, note.text, pgTextArray(note.tags), note.subject, pgTextArray(note.lens),
+      note.id, note.text, pgTextArray(note.tags), pgTextArray(note.aliases ?? []), note.subject, pgTextArray(note.lens),
       note.fromRosie, note.weight, note.status, note.supersededBy, pgTextArray(note.links),
       note.happenedAt, note.localDay, pgTextArray(note.sourceIds), note.recallCount,
       note.lastRecalledAt, note.createdAt, note.updatedAt,
@@ -690,7 +691,8 @@ export async function listIndexNotes(): Promise<IndexItem[]> {
     const ageDays = Math.max(0, (ts - n.happenedAt) / 86_400_000);
     const score = n.weight + 2 * Math.exp(-ageDays / 14) + 0.5 * Math.min(n.recallCount, 4) + (bond ? 1 : 0);
     items.push({
-      id: n.id, text: n.text, subject: n.subject, lens: n.lens, weight: n.weight,
+      id: n.id, text: n.text, searchText: [n.text, ...n.tags, ...(n.aliases ?? [])].join(" "),
+      subject: n.subject, lens: n.lens, weight: n.weight,
       happenedAt: n.happenedAt, localDay: n.localDay, recallCount: n.recallCount, score,
     });
   }

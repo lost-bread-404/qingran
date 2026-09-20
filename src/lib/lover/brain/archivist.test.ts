@@ -17,6 +17,7 @@ function msg(partial: Partial<StoredMessage> & Pick<StoredMessage, "id" | "role"
 function note(partial: Partial<Note> & Pick<Note, "id" | "text">): Note {
   return {
     tags: [],
+    aliases: [],
     subject: "rosie",
     lens: ["diary"],
     fromRosie: true,
@@ -159,4 +160,27 @@ test("weight and tags are clamped", () => {
   assert.equal(out[0]!.note.weight, 5);
   assert.ok(out[0]!.note.tags.length <= 6);
   assert.deepEqual(out[0]!.note.lens.sort(), ["bond", "diary"]);
+});
+
+test("aliases are clamped to 6 x 12 and stored on the note", () => {
+  const batch = [msg({ id: "u1", role: "user", text: "Citadel superday 好紧张" })];
+  const out = validateOps(
+    [
+      {
+        op: "ADD",
+        text: "她周五有 Citadel 面试",
+        tags: ["面试"],
+        aliases: ["citadel", "超级日", "superday", "too-long-alias-name", "a", "b", "c"],
+        subject: "rosie",
+        lens: ["diary"],
+        from_rosie: true,
+        source_ids: ["u1"],
+      },
+    ],
+    batch,
+    [],
+  );
+  assert.equal(out[0]!.note.aliases.length, 6);
+  assert.ok(out[0]!.note.aliases.every((a) => a.length <= 12));
+  assert.ok(out[0]!.note.aliases.includes("citadel"));
 });

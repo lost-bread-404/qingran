@@ -41,11 +41,17 @@ let cache: Cache | null = null;
 
 function buildMini(items: IndexItem[]): MiniSearch<IndexItem> {
   const mini = new MiniSearch<IndexItem>({
-    fields: ["text"],
+    fields: ["text", "searchText"],
     storeFields: ["id", "text", "localDay", "subject"],
     tokenize: tokenizeMemory,
     processTerm: (t) => t,
-    searchOptions: { tokenize: tokenizeMemory, processTerm: (t) => t, prefix: true, fuzzy: 0.2 },
+    searchOptions: {
+      tokenize: tokenizeMemory,
+      processTerm: (t) => t,
+      prefix: true,
+      fuzzy: 0.2,
+      boost: { text: 3, searchText: 1 },
+    },
   });
   mini.addAll(items);
   return mini;
@@ -66,6 +72,7 @@ export function noteAsIndex(n: Note, score = 0): IndexItem {
   return {
     id: n.id,
     text: n.text,
+    searchText: [n.text, ...n.tags, ...(n.aliases ?? [])].join(" "),
     subject: n.subject,
     lens: n.lens,
     weight: n.weight,
@@ -143,7 +150,7 @@ export async function getRelatedIndexItems(query: string, coreIds: Set<string>):
   const { items, mini } = await getMemoryIndex();
   const recent = await heavyRecentNotes(7, 4);
   const recentItems = recent.map((n) => noteAsIndex(n)).filter((i) => !coreIds.has(i.id));
-  const hits = query.trim() ? mini.search(query, { boost: { text: 2 } }) : [];
+  const hits = query.trim() ? mini.search(query) : [];
   const byId = new Map(items.map((i) => [i.id, i]));
   for (const i of recentItems) byId.set(i.id, i);
   return assembleRelatedIndex({
@@ -171,7 +178,7 @@ export async function pickHotNotes(
   if (query.trim()) {
     const { mini } = await getMemoryIndex();
     queryHits = mini
-      .search(query, { boost: { text: 2 } })
+      .search(query)
       .filter((h) => (Number(h.score) || 0) >= FALLBACK_MIN_SCORE && !mindPartSet.has(String(h.id)))
       .map((h) => ({ id: String(h.id), score: Number(h.score) || 0 }));
   }

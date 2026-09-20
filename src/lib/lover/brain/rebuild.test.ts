@@ -29,6 +29,7 @@ function makeNote(id: string, text: string, at: number): Note {
     id,
     text,
     tags: ["论文"],
+    aliases: [],
     subject: "rosie",
     lens: ["diary"],
     fromRosie: true,

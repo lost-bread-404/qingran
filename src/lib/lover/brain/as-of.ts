@@ -12,6 +12,7 @@ function asNote(raw: unknown, fallback: Note | null): Note | null {
     id: String(r.id ?? base?.id ?? ""),
     text,
     tags: Array.isArray(r.tags) ? r.tags.map(String) : (base?.tags ?? []),
+    aliases: Array.isArray(r.aliases) ? r.aliases.map(String) : (base?.aliases ?? []),
     subject: (typeof r.subject === "string" ? r.subject : base?.subject ?? "rosie") as Note["subject"],
     lens: Array.isArray(r.lens) ? (r.lens as Note["lens"]) : (base?.lens ?? []),
     fromRosie: typeof r.fromRosie === "boolean" ? r.fromRosie : (base?.fromRosie ?? true),

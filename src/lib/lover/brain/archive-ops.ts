@@ -9,6 +9,7 @@ export type RawOp = {
   target_id?: string;
   text?: string;
   tags?: unknown;
+  aliases?: unknown;
   subject?: string;
   lens?: unknown;
   from_rosie?: unknown;
@@ -56,6 +57,7 @@ export function validateOps(
     const lens = asStrings(raw.lens, 2, 10).filter((x): x is Lens => x === "diary" || x === "bond");
     if (!lens.length) continue;
     const tags = asStrings(raw.tags, 6, 10);
+    const aliases = asStrings(raw.aliases, 6, 12);
     const weight = Math.min(5, Math.max(1, Math.round(Number(raw.weight) || 3)));
     const links = asStrings(raw.links, 6, 80).filter((id) => candMap.has(id));
     let op = raw.op === "SUPERSEDE" ? "SUPERSEDE" : "ADD";
@@ -83,6 +85,7 @@ export function validateOps(
         id,
         text,
         tags,
+        aliases,
         subject,
         lens,
         fromRosie,

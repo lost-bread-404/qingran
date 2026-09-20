@@ -196,6 +196,7 @@ export const brainSaveNote = createServerFn({ method: "POST" })
       id: existing?.id || `n:${newId()}`,
       text: data.text.slice(0, 120),
       tags: (data.tags ?? existing?.tags ?? []).slice(0, 6),
+      aliases: existing?.aliases ?? [],
       subject: data.subject ?? existing?.subject ?? "us",
       lens: data.lens ?? existing?.lens ?? ["bond", "diary"],
       fromRosie: existing?.fromRosie ?? true,

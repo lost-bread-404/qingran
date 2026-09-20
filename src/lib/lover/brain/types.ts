@@ -8,6 +8,7 @@ export type Note = {
   id: string;
   text: string;
   tags: string[];
+  aliases: string[];
   subject: Subject;
   lens: Lens[];
   fromRosie: boolean;
@@ -273,6 +274,7 @@ export type VoiceChatMessage = {
 export type IndexItem = {
   id: string;
   text: string;
+  searchText: string;
   subject: Subject;
   lens: Lens[];
   weight: number;

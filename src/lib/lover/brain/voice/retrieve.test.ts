@@ -47,6 +47,7 @@ function note(id: string, text: string): Note {
     id,
     text,
     tags: ["测"],
+    aliases: [],
     subject: "rosie",
     lens: ["diary"],
     fromRosie: true,
@@ -124,21 +125,55 @@ test("pickHotNotes jump path takes more query slots and fills a short mind", asy
 test("migration 0010 is idempotent on PGLite", async () => {
   const iso = await openIsolatedSql();
   try {
-    const sql = `alter table brain_turns
+    const turns = `alter table brain_turns
       add column if not exists jump boolean not null default false,
       add column if not exists jump_score real,
       add column if not exists query_ids text[] not null default '{}',
       add column if not exists query_scores real[] not null default '{}'`;
-    await iso.sql.query(sql);
-    await iso.sql.query(sql);
+    const notes = `alter table mem_notes add column if not exists aliases text[] not null default '{}'`;
+    await iso.sql.query(turns);
+    await iso.sql.query(notes);
+    await iso.sql.query(turns);
+    await iso.sql.query(notes);
     const cols = await iso.sql.query<{ column_name: string }>(
       `select column_name from information_schema.columns
-       where table_name = 'brain_turns' and column_name in ('jump','jump_score','query_ids','query_scores')
+       where (table_name = 'brain_turns' and column_name in ('jump','jump_score','query_ids','query_scores'))
+          or (table_name = 'mem_notes' and column_name = 'aliases')
        order by column_name`,
     );
     assert.deepEqual(
       cols.map((c) => c.column_name),
-      ["jump", "jump_score", "query_ids", "query_scores"],
+      ["aliases", "jump", "jump_score", "query_ids", "query_scores"],
+    );
+  } finally {
+    await iso.close();
+  }
+});
+
+test("MiniSearch matches tags and aliases via searchText without putting them in the prompt", async () => {
+  const iso = await openIsolatedSql();
+  try {
+    await upsertNote(
+      note("alias-n", "她周五要去那家投行面试"),
+    );
+    const withAlias: Note = {
+      ...note("alias-n", "她周五要去那家投行面试"),
+      tags: ["面试"],
+      aliases: ["Citadel", "超级日"],
+    };
+    await upsertNote(withAlias);
+    await bumpNotesVersion();
+    resetRetrieveCache();
+    const picked = await pickHotNotes([], "citadel superday", { jump: false });
+    assert.ok(picked.queryIds.includes("alias-n") || picked.notes.some((n) => n.id === "alias-n"));
+    assert.equal(
+      formatIndexLine({
+        id: "alias-n",
+        text: withAlias.text,
+        subject: "rosie",
+        localDay: "2026-09-10",
+      }).includes("Citadel"),
+      false,
     );
   } finally {
     await iso.close();

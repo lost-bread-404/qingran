@@ -24,6 +24,7 @@
     "eval": "node --import ./scripts/eval/register-alias.mjs --experimental-strip-types scripts/eval/run-all.ts",
     "demo:offline": "node --import ./scripts/eval/register-alias.mjs --experimental-strip-types scripts/eval/offline-demo.ts",
     "analyze": "node --import ./scripts/eval/register-alias.mjs --experimental-strip-types scripts/analyze/usage-report.ts",
+    "backfill:aliases": "node --import ./scripts/eval/register-alias.mjs --experimental-strip-types scripts/backfill-aliases.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

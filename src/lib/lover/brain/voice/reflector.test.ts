@@ -10,6 +10,7 @@ function item(id: string, extra: Partial<IndexItem> = {}): IndexItem {
   return {
     id,
     text: `笔记${id}`,
+    searchText: `笔记${id}`,
     subject: "rosie",
     lens: ["diary"],
     weight: 4,
