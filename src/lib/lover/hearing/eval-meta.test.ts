@@ -17,7 +17,7 @@ test("qingran prompt hash changes when the system prompt changes", () => {
   assert.notEqual(a, b);
 });
 
-test("context_before keeps the last 4 rounds", () => {
+test("context_before keeps the last 8 rounds", () => {
   const turns = lastContextTurns(
     [
       { role: "user", text: "1" },
@@ -30,11 +30,18 @@ test("context_before keeps the last 4 rounds", () => {
       { role: "assistant", text: "8" },
       { role: "user", text: "9" },
       { role: "assistant", text: "10" },
+      { role: "user", text: "11" },
+      { role: "assistant", text: "12" },
+      { role: "user", text: "13" },
+      { role: "assistant", text: "14" },
+      { role: "user", text: "15" },
+      { role: "assistant", text: "16" },
+      { role: "user", text: "17" },
+      { role: "assistant", text: "18" },
     ],
-    4,
   );
   assert.deepEqual(
     turns.map((t) => t.text),
-    ["3", "4", "5", "6", "7", "8", "9", "10"],
+    ["3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18"],
   );
 });

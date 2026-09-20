@@ -6,22 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { goldTextForSave, confirmNoiseOnly } from "@/lib/lover/hearing/confirm-resend";
 import { cn } from "@/lib/utils";
-import {
-  EVENT_CHIP_LABELS,
-  EVENT_CHIP_VALUES,
-  TAG_CONTOURS,
-  TAG_KEYS,
-  TAG_LABELS,
-  TAG_LENGTHS,
-  TAG_VALUE_LABELS,
-  TAG_VOICES,
-  goldTagsFromTouched,
-  parsePartialAcousticTags,
-  tagsTouched,
-  toggleEventChip,
-  type AcousticTags,
-  type TagKey,
-} from "@/lib/lover/hearing/tags";
+import type { AcousticTags, TagKey } from "@/lib/lover/hearing/tags";
 
 type Props = {
   open: boolean;
@@ -47,22 +32,6 @@ type Props = {
   initialGoldTags?: Partial<AcousticTags> | null;
 };
 
-const OPTIONS: Record<"length" | "contour" | "voice", readonly string[]> = {
-  length: TAG_LENGTHS,
-  contour: TAG_CONTOURS,
-  voice: TAG_VOICES,
-};
-
-function mergeChosen(predicted: AcousticTags, gold?: Partial<AcousticTags> | null): AcousticTags {
-  const parsed = parsePartialAcousticTags(gold) ?? {};
-  return {
-    length: parsed.length ?? predicted.length,
-    contour: parsed.contour ?? predicted.contour,
-    voice: parsed.voice ?? predicted.voice,
-    events: parsed.events ?? predicted.events,
-  };
-}
-
 function caretOf(el: HTMLTextAreaElement | HTMLInputElement) {
   keepCaretVisible(el);
 }
@@ -76,31 +45,22 @@ export function ConfirmTurn({
   busy,
   error,
   initialNoise = false,
-  initialLiteralMismatch = false,
   initialToneNote = "",
   initialDraft,
-  initialPredicted,
-  initialGoldTags,
 }: Props) {
-  const predicted = initialPredicted ?? {};
   const [draft, setDraft] = useState(initialDraft ?? sttText);
   const [noiseOnly, setNoiseOnly] = useState(initialNoise);
-  const [literalMismatch, setLiteralMismatch] = useState(initialLiteralMismatch);
   const [toneNote, setToneNote] = useState(initialToneNote ?? "");
-  const [chosen, setChosen] = useState<AcousticTags>(() => mergeChosen(predicted, initialGoldTags));
   const viewport = useVisualViewportHeight(open);
   const draftRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    const nextPredicted = initialPredicted ?? {};
     setDraft(initialDraft ?? sttText);
     setNoiseOnly(initialNoise);
-    setLiteralMismatch(initialLiteralMismatch);
     setToneNote(initialToneNote ?? "");
-    setChosen(mergeChosen(nextPredicted, initialGoldTags));
-  }, [open, sttText, initialDraft, initialNoise, initialLiteralMismatch, initialToneNote, initialPredicted, initialGoldTags]);
+  }, [open, sttText, initialDraft, initialNoise, initialToneNote]);
 
   useEffect(() => {
     if (!open) return;
@@ -116,7 +76,6 @@ export function ConfirmTurn({
   const nextNoise = confirmNoiseOnly({
     goldText: draft,
     noiseOnly,
-    events: chosen.events,
   });
 
   return (
@@ -171,65 +130,6 @@ export function ConfirmTurn({
             className="min-h-28"
             aria-label="识别文字"
           />
-          <div className="mt-3 flex flex-col gap-3">
-            {TAG_KEYS.map((key) => (
-              <div key={key}>
-                <p className="mb-1 text-xs text-subtle">
-                  {TAG_LABELS[key]}
-                  {key === "events"
-                    ? chosen.events === undefined
-                      ? " · 未预测"
-                      : ""
-                    : chosen[key] == null
-                      ? " · 未预测"
-                      : ""}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {key === "events"
-                    ? EVENT_CHIP_VALUES.map((value) => {
-                        const selected =
-                          value === "none"
-                            ? Array.isArray(chosen.events) && chosen.events.length === 0
-                            : Boolean(chosen.events?.includes(value));
-                        return (
-                          <button
-                            key={value}
-                            type="button"
-                            aria-pressed={selected}
-                            onClick={() =>
-                              setChosen((cur) => ({ ...cur, events: toggleEventChip(cur.events ?? [], value) }))
-                            }
-                            className={cn(
-                              "min-h-11 rounded-md px-3 text-sm",
-                              selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-                            )}
-                          >
-                            {EVENT_CHIP_LABELS[value]}
-                          </button>
-                        );
-                      })
-                    : OPTIONS[key].map((value) => {
-                        const selected = chosen[key] === value;
-                        const label = TAG_VALUE_LABELS[key][value as never] as string;
-                        return (
-                          <button
-                            key={value}
-                            type="button"
-                            aria-pressed={selected}
-                            onClick={() => setChosen((cur) => ({ ...cur, [key]: value }))}
-                            className={cn(
-                              "min-h-11 rounded-md px-3 text-sm",
-                              selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-                            )}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                </div>
-              </div>
-            ))}
-          </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
@@ -242,19 +142,7 @@ export function ConfirmTurn({
             >
               噪音
             </button>
-            <button
-              type="button"
-              aria-pressed={literalMismatch}
-              onClick={() => setLiteralMismatch((cur) => !cur)}
-              className={cn(
-                "min-h-11 rounded-md px-3 text-sm",
-                literalMismatch ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-              )}
-            >
-              字面≠意思
-            </button>
           </div>
-          <p className="mt-2 text-xs text-subtle">反话、玩笑、嘴上说讨厌其实在撒娇。</p>
           <Input
             value={toneNote}
             onChange={(e) => {
@@ -281,16 +169,14 @@ export function ConfirmTurn({
               className="w-full"
               disabled={busy}
               onClick={() => {
-                const nextPredicted = initialPredicted ?? {};
-                const touched = tagsTouched(nextPredicted, chosen);
                 void onConfirm({
                   goldText,
                   source: !goldText || goldText !== sttText.trim() ? "edited" : "confirmed",
                   noiseOnly: nextNoise,
-                  literalMismatch,
+                  literalMismatch: false,
                   toneNote: toneNote.trim(),
-                  goldTags: goldTagsFromTouched(chosen, touched),
-                  tagsTouched: touched,
+                  goldTags: {},
+                  tagsTouched: [],
                 });
               }}
             >

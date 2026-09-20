@@ -42,7 +42,16 @@ export async function transcribeWithXai(input: {
   form.append("model", HEARING.xai.model);
   form.append("filler_words", "true");
   form.append("vad_threshold", String(xaiVadThreshold()));
-  for (const term of STT_KEYTERMS) {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const term of [...STT_KEYTERMS, ...(input.extraKeyterms ?? [])]) {
+    const next = term.trim().slice(0, 50);
+    if (!next || seen.has(next)) continue;
+    seen.add(next);
+    terms.push(next);
+    if (terms.length >= 100) break;
+  }
+  for (const term of terms) {
     form.append("keyterm", term);
   }
   const blob = new Blob([new Uint8Array(bytes)], { type: mime });

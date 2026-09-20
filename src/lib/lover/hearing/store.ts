@@ -53,21 +53,32 @@ import {
   insertClipRow,
   insertReplyFlag,
   listClipRows,
+  listClipsMissingProsody,
   listEvalClipIds,
   listEvalRunExportRows,
   listEvalScoreRows,
+  listHearingConfusions,
   listLabeledClipRows,
   listMigrationNames,
   listReplyFlagRows,
   listScoreClipRows,
+  listToneTuneClips,
   parseCues,
   patchFinalTextByTurn,
   patchReplyMessageId,
+  rebuildHearingConfusions,
+  setConfusionEnabled,
   unlabelClip,
+  updateClipProsody,
+  countProsodyClips,
   upsertEvalRun,
+  hearingSttKeyterms,
   type LabClipFilter,
 } from "./persist.ts";
-import { silenceWavBase64, wavDurationMs, wavPeakRms } from "./wav.ts";
+import { applyConfusions } from "./confusions.ts";
+import { parseTuneClips, tuneToneThresholds } from "./tone-tune.ts";
+import { silenceWavBase64, wavDurationMs, wavPeakRms, prosodyFromWav } from "./wav.ts";
+import { parseStoredProsody } from "../prosody.ts";
 import { scrubHallucination } from "../stt-text.ts";
 import { waitUntil } from "@vercel/functions";
 import { gitCommitSha, hashQingranPrompt } from "./eval-meta.ts";
@@ -85,6 +96,7 @@ import {
 
 export type { LabClipFilter, LabeledClipRow, ReplyFlagRow } from "./persist.ts";
 export type { EngineEvalScore } from "./eval-compare.ts";
+export type { ConfusionRule } from "./confusions.ts";
 
 export type HearingTurnPatch = {
   id: string;
@@ -118,6 +130,9 @@ export type HearingTurnPatch = {
   audio_llm_ms?: number | null;
   engine_fallback_reason?: string | null;
   engine_error_detail?: string | null;
+  stt_raw_text?: string | null;
+  stt_corrected_text?: string | null;
+  stt_corrections?: unknown;
 };
 
 export type RunHearingInput = {
@@ -148,6 +163,7 @@ export type RunHearingInput = {
   contextBefore?: { role: string; text: string }[];
   systemPrompt?: string;
   holdToTalk?: boolean;
+  prosody?: unknown;
 };
 
 export type RunHearingOutput = {
@@ -177,6 +193,8 @@ export type RunHearingOutput = {
   engine_fallback_reason?: string;
   engine_error_detail?: string;
   audio_llm_ms?: number;
+  correctedText?: string;
+  sttCorrections?: { wrong: string; correct: string }[];
 };
 
 function labSecret(): string {
@@ -314,11 +332,20 @@ export const runHearing = createServerFn({ method: "POST" })
       context: data.context,
       nbest: Boolean(data.nbest),
     };
+    let extraKeyterms = data.extraKeyterms ?? [];
+    let confusionRules: Awaited<ReturnType<typeof listHearingConfusions>> = [];
+    try {
+      const sql = await getSql();
+      extraKeyterms = await hearingSttKeyterms(sql, extraKeyterms);
+      confusionRules = await listHearingConfusions(sql);
+    } catch {
+      extraKeyterms = data.extraKeyterms ?? [];
+    }
     const xaiPromise = transcribeWithXai({
       audioBase64: data.audioBase64,
       mimeType: data.mimeType,
       prompt: data.prompt,
-      extraKeyterms: data.extraKeyterms,
+      extraKeyterms,
     });
     const hearingPromise: Promise<AdapterOutcome | null> =
       provider === "xai" ? Promise.resolve(null) : dispatchProvider(provider, data.audioBase64, callOpts);
@@ -350,7 +377,8 @@ export const runHearing = createServerFn({ method: "POST" })
     let fallback = picked.fallback;
     let fallbackReason: string | undefined = picked.fallback_reason;
     const originalXai = picked.xaiText;
-    let xaiText = originalXai;
+    const corrected = applyConfusions(originalXai, confusionRules);
+    let xaiText = corrected.text;
     const durationSec = wavDurationMs(data.audioBase64) / 1000;
     const peakRms = wavPeakRms(data.audioBase64);
     const liveText = data.liveText ?? "";
@@ -414,7 +442,7 @@ export const runHearing = createServerFn({ method: "POST" })
         stt_done,
         latency_ms,
         hearing,
-        xaiText,
+        xaiText: originalXai,
         pickedXaiText: originalXai,
         tagged,
         predictedTags: predicted,
@@ -434,6 +462,8 @@ export const runHearing = createServerFn({ method: "POST" })
         engineFallback,
         engineErrorDetail,
         audioLlmMs,
+        sttCorrectedText: corrected.text,
+        sttCorrections: corrected.replacements,
       }),
     );
 
@@ -463,6 +493,8 @@ export const runHearing = createServerFn({ method: "POST" })
       engine_fallback_reason: engineFallback,
       engine_error_detail: engineErrorDetail ?? undefined,
       audio_llm_ms: audioLlmMs ?? undefined,
+      correctedText: corrected.text,
+      sttCorrections: corrected.replacements,
     };
   });
 
@@ -666,6 +698,72 @@ export const listHearingClips = createServerFn({ method: "POST" })
     } catch (err) {
       return { ok: false as const, error: errorText(err), clips: [] as ReturnType<typeof mapClipRow>[] };
     }
+  });
+
+export const listHearingConfusionRules = createServerFn({ method: "POST" })
+  .validator((input: { password: string }) => input)
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    try {
+      const sql = await getSql();
+      return { ok: true as const, rules: await listHearingConfusions(sql) };
+    } catch (err) {
+      return { ok: false as const, error: errorText(err), rules: [] };
+    }
+  });
+
+export const setHearingConfusionEnabled = createServerFn({ method: "POST" })
+  .validator((input: { password: string; id: string; enabled: boolean }) => input)
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    const sql = await getSql();
+    await setConfusionEnabled(sql, data.id, data.enabled);
+    return { ok: true as const, rules: await listHearingConfusions(sql) };
+  });
+
+export const rebuildHearingConfusionRules = createServerFn({ method: "POST" })
+  .validator((input: { password: string }) => input)
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    const sql = await getSql();
+    const rules = await rebuildHearingConfusions(sql);
+    return { ok: true as const, rules };
+  });
+
+export const backfillHearingProsody = createServerFn({ method: "POST" })
+  .validator((input: { password: string }) => input)
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    const sql = await getSql();
+    const missing = await listClipsMissingProsody(sql, 10);
+    let filledNow = 0;
+    let skipped = 0;
+    for (const row of missing) {
+      const wav = row.audio_wav || (row.blob_pathname ? await readHearingWav(row.blob_pathname) : null);
+      if (!wav) {
+        skipped += 1;
+        continue;
+      }
+      const prosody = prosodyFromWav(wav);
+      if (!prosody?.rms.length) {
+        skipped += 1;
+        continue;
+      }
+      await updateClipProsody(sql, row.id, prosody);
+      filledNow += 1;
+    }
+    const counts = await countProsodyClips(sql);
+    return { ok: true as const, filled: filledNow, skipped, processed: missing.length, missing: counts.missing, stored: counts.filled };
+  });
+
+export const tuneHearingTone = createServerFn({ method: "POST" })
+  .validator((input: { password: string }) => input)
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    const sql = await getSql();
+    const rows = await listToneTuneClips(sql);
+    const result = tuneToneThresholds(parseTuneClips(rows));
+    return { ok: true as const, clipN: rows.length, ...result };
   });
 
 export const hearingLabScore = createServerFn({ method: "POST" })
@@ -1188,6 +1286,8 @@ async function persistHearingTurn(input: {
   engineFallback?: string;
   engineErrorDetail?: string | null;
   audioLlmMs?: number | null;
+  sttCorrectedText?: string;
+  sttCorrections?: { wrong: string; correct: string }[];
 }) {
   await upsertTurn({
     id: input.turnId,
@@ -1218,6 +1318,9 @@ async function persistHearingTurn(input: {
     audio_llm_ms: input.audioLlmMs ?? null,
     engine_fallback_reason: input.engineFallback ?? null,
     engine_error_detail: input.engineErrorDetail ?? null,
+    stt_raw_text: input.pickedXaiText,
+    stt_corrected_text: input.sttCorrectedText ?? null,
+    stt_corrections: input.sttCorrections?.length ? input.sttCorrections : null,
   });
   if (!input.capture) return;
   try {
@@ -1243,6 +1346,8 @@ async function persistHearingTurn(input: {
       promptHash: input.promptHash,
       contextBefore: input.data.contextBefore,
       hallucinationSuspect: input.scrubbedSuspect,
+      prosody: parseStoredProsody(input.data.prosody) ?? (input.data.audioBase64 ? prosodyFromWav(input.data.audioBase64) : null),
+      sttCorrectedText: input.sttCorrectedText ?? null,
     });
   } catch (err) {
     const saveError = errorText(err);
@@ -1261,7 +1366,8 @@ async function upsertTurn(patch: HearingTurnPatch) {
         refusal, fallback, fallback_reason, fallback_raw, cold_start_ms, disagreement,
         live_text_source, hallucination_suspect, save_error,
         commit_sha, prompt_hash, context_before, reply_message_id,
-        engine_requested, engine_used, audio_llm_ms, engine_fallback_reason, engine_error_detail
+        engine_requested, engine_used, audio_llm_ms, engine_fallback_reason, engine_error_detail,
+        stt_raw_text, stt_corrected_text, stt_corrections
       )
       values (
         ${patch.id},
@@ -1294,7 +1400,10 @@ async function upsertTurn(patch: HearingTurnPatch) {
         ${patch.engine_used ?? null},
         ${patch.audio_llm_ms ?? null},
         ${patch.engine_fallback_reason ?? null},
-        ${patch.engine_error_detail ?? null}
+        ${patch.engine_error_detail ?? null},
+        ${patch.stt_raw_text ?? null},
+        ${patch.stt_corrected_text ?? null},
+        ${patch.stt_corrections ? JSON.stringify(patch.stt_corrections) : null}::jsonb
       )
       on conflict (id) do update set
         provider = coalesce(excluded.provider, qingran_hearing_turns.provider),
@@ -1326,7 +1435,10 @@ async function upsertTurn(patch: HearingTurnPatch) {
         engine_used = coalesce(excluded.engine_used, qingran_hearing_turns.engine_used),
         audio_llm_ms = coalesce(excluded.audio_llm_ms, qingran_hearing_turns.audio_llm_ms),
         engine_fallback_reason = coalesce(excluded.engine_fallback_reason, qingran_hearing_turns.engine_fallback_reason),
-        engine_error_detail = coalesce(excluded.engine_error_detail, qingran_hearing_turns.engine_error_detail)
+        engine_error_detail = coalesce(excluded.engine_error_detail, qingran_hearing_turns.engine_error_detail),
+        stt_raw_text = coalesce(excluded.stt_raw_text, qingran_hearing_turns.stt_raw_text),
+        stt_corrected_text = coalesce(excluded.stt_corrected_text, qingran_hearing_turns.stt_corrected_text),
+        stt_corrections = coalesce(excluded.stt_corrections, qingran_hearing_turns.stt_corrections)
     `;
   } catch (err) {
     console.error("[hearing] upsertTurn failed:", errorText(err));
@@ -1355,6 +1467,8 @@ async function insertClip(input: {
   promptHash?: string | null;
   contextBefore?: unknown;
   hallucinationSuspect?: boolean;
+  prosody?: unknown;
+  sttCorrectedText?: string | null;
 }): Promise<string> {
   const id = newId();
   const sql = await getSql();
@@ -1392,6 +1506,8 @@ async function insertClip(input: {
     commitSha: input.commitSha,
     promptHash: input.promptHash,
     contextBefore: input.contextBefore,
+    prosody: input.prosody ?? null,
+    sttCorrectedText: input.sttCorrectedText ?? null,
   });
   return id;
 }

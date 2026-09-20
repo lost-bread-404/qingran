@@ -39,6 +39,7 @@ test("score card CER, exact match, noise rate, and worst-20 order", () => {
   assert.equal(scored.goldN, 3);
   assert.equal(scored.cerFinal, scored.worst[0] ? (0 + scored.worst[0].cer + scored.worst[1]!.cer) / 3 : null);
   assert.equal(scored.exactMatch, 1 / 3);
+  assert.ok(scored.toneAccuracy != null);
   assert.equal(scored.liveHasData, true);
   assert.equal(scored.liveEmptyRate, 2 / 3);
   assert.equal(scored.noiseN, 2);
@@ -145,4 +146,13 @@ test("id hash split is stable and roughly 80/20", () => {
   const ids = Array.from({ length: 200 }, (_, i) => `id-${i}`);
   const testN = ids.filter((id) => hashSplit(id) === "test").length;
   assert.ok(testN >= 20 && testN <= 60, `got ${testN} test ids`);
+});
+
+test("toneAccuracy compares punctuation marks not characters", () => {
+  const scored = scoreHearing([
+    clip({ id: "a", goldText: "嗯～", finalText: "嗯～" }),
+    clip({ id: "b", goldText: "在吗？", finalText: "在吗。" }),
+    clip({ id: "c", goldText: "啊…", finalText: "啊～" }),
+  ]);
+  assert.equal(scored.toneAccuracy, 1 / 3);
 });

@@ -10,7 +10,9 @@ const QUOTED_RE = /[“「『"]([^“」』"]{2,12})[”」』"]/g;
 const CALLED_RE = /(?:叫|名叫|是)\s*([\u4e00-\u9fffA-Za-z]{2,8})/g;
 const CJK_NAME_RE = /[\u4e00-\u9fff]{2,4}/g;
 
-export function lastDialogueTurns(messages: ContextTurn[], rounds = 4): ContextTurn[] {
+export const HEARING_CONTEXT_ROUNDS = 8;
+
+export function lastDialogueTurns(messages: ContextTurn[], rounds = HEARING_CONTEXT_ROUNDS): ContextTurn[] {
   return messages.filter((m) => m.text.trim()).slice(-rounds * 2);
 }
 
@@ -22,8 +24,8 @@ export function stripAltTags(text: string): string {
   return text.replace(/\{([^|{}]+)\|[^}]+\}/g, "$1");
 }
 
-export function buildHearingContext(messages: ContextTurn[], take = 4): string {
-  const recent = messages.filter((m) => m.text.trim()).slice(-take);
+export function buildHearingContext(messages: ContextTurn[], rounds = HEARING_CONTEXT_ROUNDS): string {
+  const recent = lastDialogueTurns(messages, rounds);
   if (!recent.length) return "";
   const lines = recent.map((m) => {
     const who = m.role === "assistant" ? "清然" : "Rosie";

@@ -3,12 +3,27 @@ import { hearingCueSchema, EMOTIONS, type CueEmotion, type HearingCue } from "./
 import { aggregateEngineUse, type EngineUseStats } from "./select.ts";
 import type { EvalScoreRow } from "./eval-compare.ts";
 import {
+  confusionId,
+  extractConfusionPairs,
+  isActiveConfusion,
+  parseExamples,
+  type ConfusionExample,
+  type ConfusionRule,
+} from "./confusions.ts";
+import {
+  buildPersonalLexicon,
+  LEXICON_PHRASE_CAP,
+  LEXICON_STALE_MS,
+  LEXICON_WORD_CAP,
+} from "./lexicon.ts";
+import {
   parseAcousticTags,
   parsePartialAcousticTags,
   parseTagKeys,
   type AcousticTags,
   type TagKey,
 } from "./tags.ts";
+import { mergeKeyterms } from "./context.ts";
 
 export type Sql = {
   <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
@@ -44,6 +59,8 @@ export type InsertClipRowInput = {
   commitSha?: string | null;
   promptHash?: string | null;
   contextBefore?: unknown;
+  prosody?: unknown;
+  sttCorrectedText?: string | null;
 };
 
 export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promise<void> {
@@ -53,7 +70,7 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       xai_text, hearing_text, hearing_json, live_text,
       blob_error, storage_backend, stt_text, mode, audio_route, turn_id, disagreement,
       final_text, peak_rms, vad_floor, hear_to_trigger_ms, preroll_peak_rms,
-      predicted_tags, commit_sha, prompt_hash, context_before
+      predicted_tags, commit_sha, prompt_hash, context_before, prosody, stt_corrected_text
     )
     values (
       ${input.id},
@@ -82,7 +99,9 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       ${input.predictedTags ? JSON.stringify(input.predictedTags) : null}::jsonb,
       ${input.commitSha ?? null},
       ${input.promptHash ?? null},
-      ${input.contextBefore ? JSON.stringify(input.contextBefore) : null}::jsonb
+      ${input.contextBefore ? JSON.stringify(input.contextBefore) : null}::jsonb,
+      ${input.prosody ? JSON.stringify(input.prosody) : null}::jsonb,
+      ${input.sttCorrectedText ?? null}
     )
   `;
 }
@@ -157,6 +176,13 @@ export async function confirmClipByTurn(
           stt_text = coalesce(stt_text, hearing_text, xai_text)
       where id = ${clip.id}
     `;
+  }
+  if (input.goldSource === "edited") {
+    try {
+      await rebuildHearingConfusions(sql);
+    } catch {
+      // additive table may not exist yet on old deploys
+    }
   }
   return { ok: true, clipId: clip.id, goldTier: nextTier };
 }
@@ -763,3 +789,183 @@ function visibleMessageBody(body: string | null): string {
   }
   return text;
 }
+
+export async function listHearingConfusions(sql: Sql): Promise<ConfusionRule[]> {
+  const rows = await sql.query<{
+    id: string;
+    wrong: string;
+    correct: string;
+    count: number;
+    examples: unknown;
+    enabled: boolean;
+  }>(
+    `select id, wrong, correct, count, examples, enabled
+     from qingran_hearing_confusions
+     order by count desc, wrong, correct`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    wrong: row.wrong,
+    correct: row.correct,
+    count: Number(row.count) || 0,
+    examples: parseExamples(row.examples),
+    enabled: row.enabled !== false,
+  }));
+}
+
+export async function setConfusionEnabled(sql: Sql, id: string, enabled: boolean): Promise<void> {
+  await sql`update qingran_hearing_confusions set enabled = ${enabled}, updated_at = now() where id = ${id}`;
+}
+
+export async function rebuildHearingConfusions(sql: Sql): Promise<ConfusionRule[]> {
+  const clips = await sql.query<{
+    id: string;
+    xai_text: string | null;
+    stt_text: string | null;
+    gold_text: string | null;
+  }>(
+    `select id, xai_text, stt_text, gold_text
+     from qingran_hearing_clips
+     where gold_source = 'edited'`,
+  );
+  const counts = new Map<string, { wrong: string; correct: string; count: number; examples: ConfusionExample[] }>();
+  for (const clip of clips) {
+    const hyp = clip.xai_text || clip.stt_text || "";
+    const gold = clip.gold_text ?? "";
+    const pairs = extractConfusionPairs(hyp, gold);
+    for (const pair of pairs) {
+      const id = confusionId(pair.wrong, pair.correct);
+      const cur = counts.get(id) ?? { wrong: pair.wrong, correct: pair.correct, count: 0, examples: [] };
+      cur.count += 1;
+      if (cur.examples.length < 5) {
+        cur.examples.push({ hyp, gold, clipId: clip.id });
+      }
+      counts.set(id, cur);
+    }
+  }
+  const existing = await sql.query<{ id: string; enabled: boolean }>(
+    `select id, enabled from qingran_hearing_confusions`,
+  );
+  const enabledById = new Map(existing.map((row) => [row.id, row.enabled !== false]));
+  for (const [id, row] of counts) {
+    const enabled = enabledById.has(id) ? Boolean(enabledById.get(id)) : true;
+    await sql`
+      insert into qingran_hearing_confusions (id, wrong, correct, count, examples, enabled, updated_at)
+      values (
+        ${id},
+        ${row.wrong},
+        ${row.correct},
+        ${row.count},
+        ${JSON.stringify(row.examples)}::jsonb,
+        ${enabled},
+        now()
+      )
+      on conflict (wrong, correct) do update set
+        count = excluded.count,
+        examples = excluded.examples,
+        updated_at = now()
+    `;
+  }
+  for (const row of existing) {
+    if (counts.has(row.id)) continue;
+    await sql`update qingran_hearing_confusions set count = 0, updated_at = now() where id = ${row.id}`;
+  }
+  return listHearingConfusions(sql);
+}
+
+export async function activeConfusionRules(sql: Sql): Promise<ConfusionRule[]> {
+  const rules = await listHearingConfusions(sql);
+  return rules.filter(isActiveConfusion);
+}
+
+export async function maybeRebuildLexicon(sql: Sql): Promise<void> {
+  const rows = await sql<{ t: string | null }>`select max(updated_at)::text as t from qingran_personal_lexicon`;
+  const last = rows[0]?.t ? Date.parse(rows[0].t) : 0;
+  if (Number.isFinite(last) && last > 0 && Date.now() - last < LEXICON_STALE_MS) return;
+  await rebuildPersonalLexicon(sql);
+}
+
+export async function rebuildPersonalLexicon(sql: Sql): Promise<void> {
+  const messages = await sql<{ body: string | null }>`
+    select body from qingran_messages where role = 'user' order by created_at desc limit 4000
+  `;
+  const entries = buildPersonalLexicon(messages.map((row) => ({ text: visibleMessageBody(row.body) })));
+  await sql`delete from qingran_personal_lexicon`;
+  for (const entry of entries) {
+    await sql`
+      insert into qingran_personal_lexicon (id, kind, term, count, updated_at)
+      values (${`${entry.kind}:${entry.term}`}, ${entry.kind}, ${entry.term}, ${entry.count}, now())
+    `;
+  }
+}
+
+export async function lexiconKeyterms(sql: Sql): Promise<string[]> {
+  await maybeRebuildLexicon(sql);
+  const words = await sql<{ term: string }>`
+    select term from qingran_personal_lexicon where kind = 'word' order by count desc, term limit ${LEXICON_WORD_CAP}
+  `;
+  const phrases = await sql<{ term: string }>`
+    select term from qingran_personal_lexicon
+    where kind = 'phrase'
+    order by count desc, term
+    limit ${LEXICON_PHRASE_CAP}
+  `;
+  return [...words.map((row) => row.term), ...phrases.map((row) => row.term)];
+}
+
+export async function hearingSttKeyterms(sql: Sql, extra: string[] = []): Promise<string[]> {
+  try {
+    const rules = await activeConfusionRules(sql);
+    const corrections = rules.map((rule) => rule.correct);
+    const lexicon = await lexiconKeyterms(sql);
+    return mergeKeyterms(corrections, lexicon, extra);
+  } catch {
+    return mergeKeyterms(extra);
+  }
+}
+
+export async function listClipsMissingProsody(sql: Sql, limit = 10) {
+  return sql.query<{
+    id: string;
+    audio_wav: string | null;
+    blob_pathname: string | null;
+  }>(
+    `select id, audio_wav, blob_pathname
+     from qingran_hearing_clips
+     where prosody is null
+       and (audio_wav is not null or blob_pathname is not null)
+     order by created_at desc
+     limit $1`,
+    [Math.max(1, Math.min(40, limit))],
+  );
+}
+
+export async function updateClipProsody(sql: Sql, id: string, prosody: unknown): Promise<void> {
+  await sql`update qingran_hearing_clips set prosody = ${JSON.stringify(prosody)}::jsonb where id = ${id}`;
+}
+
+export async function countProsodyClips(sql: Sql) {
+  const rows = await sql<{ missing: number; filled: number }>`
+    select
+      count(*) filter (where prosody is null and (audio_wav is not null or blob_pathname is not null))::int as missing,
+      count(*) filter (where prosody is not null)::int as filled
+  from qingran_hearing_clips
+  `;
+  return { missing: Number(rows[0]?.missing) || 0, filled: Number(rows[0]?.filled) || 0 };
+}
+
+export async function listToneTuneClips(sql: Sql) {
+  return sql.query<{
+    id: string;
+    gold_text: string | null;
+    final_text: string | null;
+    xai_text: string | null;
+    prosody: unknown;
+  }>(
+    `select id, gold_text, final_text, xai_text, prosody
+     from qingran_hearing_clips
+     where gold_source is not null and prosody is not null
+     order by coalesce(gold_at, created_at) desc`,
+  );
+}
+

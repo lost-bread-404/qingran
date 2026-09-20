@@ -1,4 +1,4 @@
-import { cer, textsExact } from "./metrics.ts";
+import { cer, textsExact, toneMarksMatch } from "./metrics.ts";
 import { emptyEngineUse, type EngineUseStats } from "./select.ts";
 import { scoreTagAccuracy, type AcousticTags, type TagAccuracy, type TagKey } from "./tags.ts";
 
@@ -46,6 +46,7 @@ export type HearingScore = {
   liveEmptyRate: number;
   liveHasData: boolean;
   exactMatch: number | null;
+  toneAccuracy: number | null;
   tagAccuracy: TagAccuracy;
   noiseN: number;
   noiseRecognizedRate: number | null;
@@ -115,6 +116,9 @@ export function scoreHearing(
     liveHasData: liveGolded.length > 0,
     exactMatch: golded.length
       ? golded.filter((clip) => textsExact(clip.goldText, clip.finalText)).length / golded.length
+      : null,
+    toneAccuracy: golded.length
+      ? golded.filter((clip) => toneMarksMatch(clip.goldText, clip.finalText)).length / golded.length
       : null,
     tagAccuracy: scoreTagAccuracy(golded),
     noiseN: noise.length,

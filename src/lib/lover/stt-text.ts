@@ -1,4 +1,4 @@
-import { classifyCue, cuesFromProsody, glueCueParts, markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
+import { classifyCue, cuesFromProsody, glueCueParts, hasCueEnergy, hasVoicedPitch, markForFrames, utteranceToneMark, voicedIslands, type CueWord, type ProsodyFrame, type ToneThresholds } from "./prosody.ts";
 import { islandVoiced, listenVocal } from "./vocal-event.ts";
 import { STT_KEYTERMS, VOCAL_CUES } from "./hearing/config.ts";
 
@@ -442,24 +442,50 @@ export function pickTranscript(server: string, browser: string): string {
   return salvaged ? punctuateSpeech(salvaged) : "";
 }
 
-export function recoverCues(stt: string, frames?: ProsodyFrame[]): string {
+export function recoverCues(stt: string, frames?: ProsodyFrame[], th?: ToneThresholds): string {
   const existing = stripHehe(stt.trim());
   if (!frames?.length) return existing;
-  const islands = voicedIslands(frames);
   const heard = listenVocal(frames);
   const fixed = rewriteMisheardCues(existing, frames);
 
-  if (fixed) return fixed;
+  if (fixed && !isMostlyFiller(fixed)) {
+    return shapeSajiaoTail(applyTonePunctuation(fixed, frames, th), frames);
+  }
+
+  if (fixed && isMostlyFiller(fixed)) {
+    const mark = utteranceToneMark(frames, th);
+    const stripped = fixed.replace(/[，。！？…～~!?]+$/g, "");
+    if (!stripped) return fixed;
+    if (!mark) return stripped;
+    return `${stripped}${mark === "？" || mark === "！" ? "～" : mark}`;
+  }
 
   if (heard.kind === "laugh") return heard.text;
   if (heard.kind === "cry") return heard.text;
   if (heard.kind === "pant") return heard.text;
   if (heard.kind === "hum") return heard.text;
 
+  if (hasCueEnergy(frames) && hasVoicedPitch(frames)) return cuesFromProsody(frames);
+  const islands = voicedIslands(frames);
   const voiced = islands.filter(islandVoiced);
   if (!voiced.length) return "";
   if (voiced.length === islands.length) return cuesFromProsody(frames);
   return "";
+}
+
+export function applyTonePunctuation(
+  text: string,
+  frames?: ProsodyFrame[],
+  th?: ToneThresholds,
+): string {
+  if (!text || !frames?.length) return text;
+  if (isMostlyFiller(text)) return shapeCueProsody(text, undefined, frames);
+  const mark = utteranceToneMark(frames, th);
+  if (!mark) return text;
+  const stripped = text.replace(/[，。！？…～~!?]+$/g, "");
+  if (!stripped) return text;
+  if (/[吗么呢]$/.test(stripped) && mark !== "？") return `${stripped}？`;
+  return `${stripped}${mark}`;
 }
 
 function stripHehe(text: string) {

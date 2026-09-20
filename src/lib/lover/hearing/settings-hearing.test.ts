@@ -7,7 +7,7 @@ test("storage failure banner keeps the original error", () => {
   assert.equal(clipSaveBanner("column stt_text does not exist"), "录音没存上：column stt_text does not exist");
 });
 
-test("settings hearing tab is engine plus 标注模式 only", () => {
+test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高级", () => {
   const src = readFileSync(new URL("../../../components/lover/settings-drawer.tsx", import.meta.url), "utf8");
   assert.match(src, />标注模式</);
   assert.doesNotMatch(src, />调试</);
@@ -16,10 +16,10 @@ test("settings hearing tab is engine plus 标注模式 only", () => {
   assert.doesNotMatch(src, /to="\/record"/);
   assert.match(src, /打开标注页/);
   assert.match(src, /to="\/lab"/);
+  assert.match(src, />高级</);
   assert.match(src, /引擎自检/);
   assert.match(src, /hearingConnectionTest/);
   assert.doesNotMatch(src, /定向录制/);
-  assert.doesNotMatch(src, />高级</);
   assert.doesNotMatch(src, /hearingNbest/);
 });
 
@@ -36,21 +36,20 @@ test("transcript pencil opens confirm in debug; bubble text is not a hidden conf
   assert.doesNotMatch(src, /if \(canConfirm\) onConfirmStart/);
 });
 
-test("confirm panel keeps 噪音 and 字面≠意思, plus acoustic chips", () => {
+test("confirm panel keeps 噪音 and optional note, drops acoustic chips", () => {
   const src = readFileSync(new URL("../../../components/lover/confirm-turn.tsx", import.meta.url), "utf8");
   assert.match(src, />\s*噪音\s*</);
-  assert.match(src, /字面≠意思/);
+  assert.doesNotMatch(src, /字面≠意思/);
   assert.match(src, /aria-label="语气备注"/);
-  assert.match(src, /toggleEventChip/);
-  assert.match(src, /EVENT_CHIP_VALUES/);
-  assert.match(src, /EVENT_CHIP_LABELS/);
+  assert.doesNotMatch(src, /toggleEventChip/);
+  assert.doesNotMatch(src, /EVENT_CHIP_VALUES/);
+  assert.doesNotMatch(src, /EVENT_CHIP_LABELS/);
   assert.doesNotMatch(src, /EMOTION_LABEL/);
   assert.doesNotMatch(src, /CueEmotion/);
   assert.doesNotMatch(src, /这是纯噪音/);
   assert.match(src, /<audio className="mb-3 w-full shrink-0" controls src=\{audioUrl\} \/>/);
   assert.doesNotMatch(src, /<audio[^>]*muted/);
-  assert.match(src, /未预测/);
-  assert.match(src, /chosen\.events === undefined/);
+  assert.doesNotMatch(src, /未预测/);
   assert.match(src, /goldTextForSave/);
   assert.match(src, /confirmNoiseOnly/);
   assert.match(src, /source: !goldText \|\| goldText !== sttText\.trim\(\) \? "edited" : "confirmed"/);
@@ -141,18 +140,18 @@ test("call deafen ignores speech rec without aborting it", () => {
   assert.doesNotMatch(onend, /deafRef\.current/);
 });
 
-test("lab scorecard uses acoustic tag accuracy and has 👎 list", () => {
+test("lab scorecard keeps punctuation accuracy and drops tag stats", () => {
   const src = readFileSync(new URL("../../../routes/lab.tsx", import.meta.url), "utf8");
-  assert.match(src, /声学标签/);
-  assert.match(src, /tagAccuracy/);
-  assert.match(src, /fmtEventPr/);
-  assert.match(src, /TAG_EVENT_VALUES/);
+  assert.match(src, /语气符号准确率/);
+  assert.match(src, /toneAccuracy/);
+  assert.doesNotMatch(src, /声学标签/);
+  assert.doesNotMatch(src, /tagAccuracy/);
+  assert.doesNotMatch(src, /fmtEventPr/);
+  assert.doesNotMatch(src, /TAG_EVENT_VALUES/);
+  assert.doesNotMatch(src, /引擎占比/);
+  assert.doesNotMatch(src, /formatEngineMix/);
   assert.match(src, /👎 列表/);
   assert.match(src, /exportReplyFlags/);
-  assert.match(src, /引擎占比/);
-  assert.match(src, /formatEngineMix/);
-  assert.doesNotMatch(src, /语气符号准确率/);
-  assert.doesNotMatch(src, /toneAccuracy/);
 });
 
 test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance", () => {
@@ -169,17 +168,18 @@ test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance",
   assert.match(hold, /holdToTalk: true/);
 });
 
-test("lab page is score card, worst 20, and hash export only", () => {
+test("lab page is score card, worst 20, labels, homophones, and hash export", () => {
   const src = readFileSync(new URL("../../../routes/lab.tsx", import.meta.url), "utf8");
   assert.match(src, /最近 7 天/);
   assert.match(src, /CER 最终文字/);
-  assert.match(src, /声学标签/);
+  assert.match(src, /语气符号准确率/);
   assert.match(src, /最差 20 条/);
   assert.match(src, /最近标注/);
   assert.match(src, /撤销标注/);
   assert.match(src, /listLabeledHearingClips/);
-  assert.match(src, /接话/);
-  assert.match(src, /前1\.5秒峰值/);
+  assert.match(src, /同音词/);
+  assert.match(src, /listHearingConfusionRules/);
+  assert.match(src, /回填韵律/);
   assert.match(src, /导出 JSON/);
   assert.match(src, /hash 80\/20/);
   assert.match(src, /apple_empty/);
@@ -191,28 +191,18 @@ test("lab page is score card, worst 20, and hash export only", () => {
   assert.doesNotMatch(src, /disagreement/);
   assert.doesNotMatch(src, /覆盖率/);
   assert.doesNotMatch(src, /分配 dev\/test/);
+  assert.doesNotMatch(src, /引擎对比/);
+  assert.doesNotMatch(src, /引擎自检/);
 });
 
-test("lab engine compare is password-gated, batches of 10, and does not write live turns", () => {
+test("lab engine compare stays in store but is off the lab page", () => {
   const src = readFileSync(new URL("../../../routes/lab.tsx", import.meta.url), "utf8");
-  assert.match(src, /引擎对比/);
-  assert.match(src, /引擎自检/);
-  assert.match(src, /hearingConnectionTest/);
-  assert.match(src, /Qwen 3\.5/);
-  assert.match(src, /Qwen 3\.8/);
-  assert.match(src, /LAB_EVAL_ENGINES/);
-  assert.match(src, /runEngineEvalBatch/);
-  assert.match(src, /hearingEvalCompare/);
-  assert.match(src, /exportEvalCompare/);
-  assert.match(src, /每次 10 条/);
-  assert.match(src, /最近 N 条，空=全部/);
-  assert.match(src, /已跑 \$\{progress\.done\} \/ \$\{progress\.total\}/);
-  assert.match(src, /完全正确率/);
-  assert.match(src, /拒答率/);
-  assert.match(src, /硬拒答/);
-  assert.match(src, /软拒答/);
-  assert.match(src, /p50/);
-  assert.match(src, /qingran-engine-eval/);
+  assert.doesNotMatch(src, /引擎对比/);
+  assert.doesNotMatch(src, /引擎自检/);
+  assert.doesNotMatch(src, /hearingConnectionTest/);
+  assert.doesNotMatch(src, /runEngineEvalBatch/);
+  assert.doesNotMatch(src, /hearingEvalCompare/);
+  assert.doesNotMatch(src, /exportEvalCompare/);
   const store = readFileSync(new URL("./store.ts", import.meta.url), "utf8");
   assert.match(store, /EVAL_BATCH_SIZE/);
   assert.match(store, /export const runEngineEvalBatch/);

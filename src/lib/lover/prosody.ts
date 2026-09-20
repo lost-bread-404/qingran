@@ -192,11 +192,47 @@ function avg(values: number[]) {
   return values.reduce((sum, n) => sum + n, 0) / values.length;
 }
 
-export function markForFrames(frames: ProsodyFrame[]): "…" | "～" | "！" | "" {
+export type ToneThresholds = {
+  glideRatio: number;
+  riseQuestion: number;
+  fadeRatio: number;
+  longDur: number;
+  waveDur: number;
+  bangPeak: number;
+  bangDur: number;
+  voicedClarity: number;
+};
+
+export const DEFAULT_TONE_THRESHOLDS: ToneThresholds = {
+  glideRatio: 0.055,
+  riseQuestion: 1.18,
+  fadeRatio: 0.72,
+  longDur: 0.42,
+  waveDur: 0.16,
+  bangPeak: 0.08,
+  bangDur: 0.24,
+  voicedClarity: 0.68,
+};
+
+export type StoredProsody = {
+  hopMs: number;
+  rms: number[];
+  hz: number[];
+  clarity: number[];
+  centroid: number[];
+  bright: number[];
+};
+
+export const PROSODY_HOP_MS = 40;
+
+export function markForFrames(
+  frames: ProsodyFrame[],
+  th: ToneThresholds = DEFAULT_TONE_THRESHOLDS,
+): "…" | "～" | "！" | "" {
   if (frames.length < 2) return "";
   const dur = (frames[frames.length - 1]?.t ?? 0) - (frames[0]?.t ?? 0);
   const rms = frames.map((f) => f.rms);
-  const hz = frames.filter((f) => f.hz > 80 && f.clarity >= 0.68).map((f) => f.hz);
+  const hz = frames.filter((f) => f.hz > 80 && f.clarity >= th.voicedClarity).map((f) => f.hz);
   const third = Math.max(1, Math.ceil(rms.length / 3));
   const head = avg(rms.slice(0, third));
   const tail = avg(rms.slice(-third));
@@ -204,13 +240,13 @@ export function markForFrames(frames: ProsodyFrame[]): "…" | "～" | "！" | "
   const mean = avg(rms);
   const span = hz.length >= 3 ? Math.max(...hz) - Math.min(...hz) : 0;
   const mid = avg(hz);
-  const glide = mid > 0 && span / mid >= 0.055;
+  const glide = mid > 0 && span / mid >= th.glideRatio;
   const tilt = avg(frames.map((f) => f.tilt ?? 0));
-  if (dur <= 0.24 && peak >= 0.08) return "！";
+  if (dur <= th.bangDur && peak >= th.bangPeak) return "！";
   if (peak > Math.max(0.04, mean * 1.55) && dur <= 0.32) return "！";
   if (glide && dur >= 0.1) return "～";
-  if (dur >= 0.16 && tail >= head * 0.86 && peak <= 0.08 && tilt >= 0) return "～";
-  if ((tail < head * 0.72 && dur >= 0.22) || dur >= 0.42) return "…";
+  if (dur >= th.waveDur && tail >= head * 0.86 && peak <= th.bangPeak && tilt >= 0) return "～";
+  if ((tail < head * th.fadeRatio && dur >= 0.22) || dur >= th.longDur) return "…";
   return "";
 }
 
@@ -314,3 +350,161 @@ function cueRepeat(kind: CueKind, dur: number) {
   if (dur >= 0.28) return 2;
   return 1;
 }
+
+export function hasVoicedPitch(frames: ProsodyFrame[]): boolean {
+  return frames.some((f) => f.hz > 80 && f.clarity >= 0.65 && f.rms >= 0.01);
+}
+
+export function utteranceToneMark(
+  frames: ProsodyFrame[],
+  th: ToneThresholds = DEFAULT_TONE_THRESHOLDS,
+): "～" | "…" | "？" | "！" | "" {
+  const islands = voicedIslands(frames);
+  const last = islands[islands.length - 1];
+  if (!last) return "";
+  const hz = last.frames.filter((f) => f.hz > 80 && f.clarity >= th.voicedClarity).map((f) => f.hz);
+  if (hz.length >= 4) {
+    const third = Math.max(1, Math.ceil(hz.length / 3));
+    const start = avg(hz.slice(0, third));
+    const end = avg(hz.slice(-third));
+    if (start > 80 && end / start >= th.riseQuestion) return "？";
+  }
+  return markForFrames(last.frames, th);
+}
+
+export function downsampleProsody(frames: ProsodyFrame[], hopMs = PROSODY_HOP_MS): StoredProsody {
+  const hop = Math.max(20, hopMs) / 1000;
+  const rms: number[] = [];
+  const hz: number[] = [];
+  const clarity: number[] = [];
+  const centroid: number[] = [];
+  const bright: number[] = [];
+  if (!frames.length) return { hopMs, rms, hz, clarity, centroid, bright };
+  const start = frames[0]?.t ?? 0;
+  const end = frames[frames.length - 1]?.t ?? start;
+  for (let t = start; t <= end + 1e-6; t += hop) {
+    const slice = frames.filter((f) => f.t >= t - hop / 2 && f.t < t + hop / 2);
+    const used = slice.length ? slice : nearestFrame(frames, t);
+    rms.push(round4(avg(used.map((f) => f.rms))));
+    const voiced = used.filter((f) => f.hz > 80);
+    hz.push(Math.round(avg(voiced.map((f) => f.hz))));
+    clarity.push(round4(avg(used.map((f) => f.clarity))));
+    centroid.push(Math.round(avg(used.map((f) => f.centroid))));
+    bright.push(round4(avg(used.map((f) => f.bright))));
+  }
+  return { hopMs, rms, hz, clarity, centroid, bright };
+}
+
+export function framesFromStored(stored: StoredProsody | null | undefined): ProsodyFrame[] {
+  if (!stored?.rms?.length) return [];
+  const hop = Math.max(1, stored.hopMs || PROSODY_HOP_MS) / 1000;
+  return stored.rms.map((rms, i) => ({
+    t: i * hop,
+    rms: rms || 0,
+    hz: stored.hz?.[i] ?? 0,
+    clarity: stored.clarity?.[i] ?? 0,
+    centroid: stored.centroid?.[i] ?? 0,
+    bright: stored.bright?.[i] ?? 0,
+  }));
+}
+
+export function parseStoredProsody(value: unknown): StoredProsody | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (!Array.isArray(row.rms)) return null;
+  return {
+    hopMs: Number(row.hopMs) || PROSODY_HOP_MS,
+    rms: row.rms.map((n) => Number(n) || 0),
+    hz: Array.isArray(row.hz) ? row.hz.map((n) => Number(n) || 0) : [],
+    clarity: Array.isArray(row.clarity) ? row.clarity.map((n) => Number(n) || 0) : [],
+    centroid: Array.isArray(row.centroid) ? row.centroid.map((n) => Number(n) || 0) : [],
+    bright: Array.isArray(row.bright) ? row.bright.map((n) => Number(n) || 0) : [],
+  };
+}
+
+export function prosodyFromSamples(
+  samples: Float32Array,
+  sampleRate: number,
+  hopMs = PROSODY_HOP_MS,
+): StoredProsody {
+  const hop = Math.max(1, Math.round((sampleRate * hopMs) / 1000));
+  const win = Math.max(hop, Math.round(sampleRate * 0.04));
+  const frames: ProsodyFrame[] = [];
+  for (let i = 0; i + 80 < samples.length; i += hop) {
+    const n = Math.min(win, samples.length - i);
+    const time = new Uint8Array(n);
+    const slice = new Float32Array(n);
+    for (let k = 0; k < n; k += 1) {
+      const v = samples[i + k] ?? 0;
+      slice[k] = v;
+      time[k] = Math.max(0, Math.min(255, Math.round(v * 128 + 128)));
+    }
+    let sum = 0;
+    for (let k = 0; k < n; k += 1) {
+      const v = ((time[k] ?? 128) - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / Math.max(1, n));
+    const pitch = rms >= 0.008 ? pitchWithClarity(time, sampleRate) : { hz: 0, clarity: 0 };
+    const shape = cheapSpectrum(slice, sampleRate);
+    frames.push({
+      t: i / sampleRate,
+      rms,
+      hz: pitch.hz,
+      clarity: pitch.clarity,
+      centroid: shape.centroid,
+      bright: shape.bright,
+      tilt: shape.tilt,
+    });
+  }
+  return downsampleProsody(frames, hopMs);
+}
+
+function nearestFrame(frames: ProsodyFrame[], t: number): ProsodyFrame[] {
+  let best = frames[0];
+  let dist = Infinity;
+  for (const frame of frames) {
+    const d = Math.abs(frame.t - t);
+    if (d < dist) {
+      dist = d;
+      best = frame;
+    }
+  }
+  return best ? [best] : [];
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
+function cheapSpectrum(buf: Float32Array, sampleRate: number) {
+  const n = Math.min(128, buf.length);
+  if (n < 16) return { centroid: 0, bright: 0, tilt: 0 };
+  const binHz = sampleRate / n;
+  let mag = 0;
+  let weighted = 0;
+  let high = 0;
+  let low = 0;
+  for (let k = 1; k < n / 2; k += 1) {
+    let re = 0;
+    let im = 0;
+    for (let i = 0; i < n; i += 2) {
+      const ang = (2 * Math.PI * k * i) / n;
+      const v = buf[i] ?? 0;
+      re += v * Math.cos(ang);
+      im -= v * Math.sin(ang);
+    }
+    const v = Math.hypot(re, im);
+    const hz = k * binHz;
+    mag += v;
+    weighted += v * hz;
+    if (hz >= 1100) high += v;
+    else if (hz <= 400) low += v;
+  }
+  return {
+    centroid: mag ? weighted / mag : 0,
+    bright: mag ? high / mag : 0,
+    tilt: mag ? (low - high) / mag : 0,
+  };
+}
+

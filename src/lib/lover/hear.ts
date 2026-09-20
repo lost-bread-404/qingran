@@ -3,7 +3,7 @@ import { runHearing } from "./hearing/store";
 import { getHearingSession, setHearingSession } from "./hearing/session";
 import { transcribeVoice } from "./server";
 import { finishHeard, scrubHallucination } from "./stt-text";
-import type { ProsodyFrame } from "./prosody";
+import { downsampleProsody, type ProsodyFrame } from "./prosody";
 import { QUOTA_HINT, isQuotaHint } from "./xai-error";
 import { newId } from "./storage";
 import type { HearingProviderId } from "./hearing/config";
@@ -110,6 +110,7 @@ export async function hearUtterance(input: {
         contextBefore: session.contextBefore,
         systemPrompt: session.systemPrompt || input.prompt,
         holdToTalk: Boolean(input.holdToTalk),
+        prosody: downsampleProsody(input.frames),
       },
     });
     ranHearing = true;
@@ -133,10 +134,11 @@ export async function hearUtterance(input: {
         ...engine,
       });
     }
+    const xaiForFinish = result.correctedText ?? result.xaiText;
     const core =
       result.provider !== "xai" && result.tagged
-        ? stripAcousticTags(result.tagged).trim() || finishHeard(result.xaiText, input.liveText, result.words, input.frames, audioStats(input.frames), { holdToTalk: input.holdToTalk })
-        : finishHeard(result.xaiText, input.liveText, result.words, input.frames, audioStats(input.frames), { holdToTalk: input.holdToTalk });
+        ? stripAcousticTags(result.tagged).trim() || finishHeard(xaiForFinish, input.liveText, result.words, input.frames, audioStats(input.frames), { holdToTalk: input.holdToTalk })
+        : finishHeard(xaiForFinish, input.liveText, result.words, input.frames, audioStats(input.frames), { holdToTalk: input.holdToTalk });
     const tagged = core ? applyUtteranceTag(core, predicted) : "";
     return heardFromHearing({
       debugHearing,

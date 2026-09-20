@@ -471,7 +471,7 @@ test("算了 hummed as 嗯 is not kept as 算了", () => {
   assert.doesNotMatch(heard, /算了/);
 });
 
-test("short 嗯 is passed through without 语气 marks", () => {
+test("short rising 嗯 gets a lengthening mark", () => {
   const ng = Array.from({ length: 10 }, (_, i) =>
     frame({
       t: i * 0.04,
@@ -482,8 +482,8 @@ test("short 嗯 is passed through without 语气 marks", () => {
       bright: 0.12,
     }),
   );
-  assert.equal(finishHeard("嗯", "", undefined, ng), "嗯");
-  assert.equal(finishHeard("嗯嗯", "", undefined, ng), "嗯嗯");
+  assert.equal(finishHeard("嗯", "", undefined, ng), "嗯～");
+  assert.equal(finishHeard("嗯嗯", "", undefined, ng), "嗯嗯～");
 });
 
 test("STT 嗯嗯嗯 is not rewritten with commas", () => {
@@ -504,7 +504,9 @@ test("STT 嗯嗯嗯 is not rewritten with commas", () => {
     }
     frames.push(hush(t0 + 0.4));
   }
-  assert.equal(finishHeard("嗯嗯嗯", "", undefined, frames), "嗯嗯嗯");
+  const heard = finishHeard("嗯嗯嗯", "", undefined, frames);
+  assert.doesNotMatch(heard, /，/);
+  assert.equal(stripMarks(heard), "嗯嗯嗯");
 });
 
 test("browser STT with real words can skip the server", () => {
@@ -523,6 +525,38 @@ test("hold-to-talk keeps xAI when Apple is empty", () => {
   assert.equal(scrubbed.suspect, false);
   assert.equal(stripMarks(scrubbed.text), "谢谢观看");
   assert.equal(stripMarks(finishHeard(xai, "", undefined, undefined, audio, { holdToTalk: true })), "谢谢观看");
+});
+
+test("empty STT with energy and F0 becomes a punctuated particle, not unrecognized", () => {
+  const moan = Array.from({ length: 16 }, (_, i) =>
+    frame({
+      t: i * 0.04,
+      rms: 0.05,
+      hz: 180 + i * 6,
+      clarity: 0.88,
+      centroid: 700,
+      bright: 0.2,
+    }),
+  );
+  const heard = recoverCues("", moan);
+  assert.match(heard, /[嗯啊呜]/);
+  assert.match(heard, /[～…]/);
+  assert.doesNotMatch(heard, /未识别/);
+});
+
+test("recoverCues adds question mark on a clearly rising sentence", () => {
+  const rise = Array.from({ length: 18 }, (_, i) =>
+    frame({
+      t: i * 0.04,
+      rms: 0.05,
+      hz: 160 + i * 8,
+      clarity: 0.9,
+      centroid: 800,
+      bright: 0.22,
+    }),
+  );
+  const heard = recoverCues("在吗", rise);
+  assert.match(heard, /？$/);
 });
 
 

@@ -162,7 +162,7 @@ export function VoiceRoom() {
       mode: callActiveRef.current ? "call" : "text",
       context,
       extraKeyterms,
-      contextBefore: lastDialogueTurns(contextTurns, 4),
+      contextBefore: lastDialogueTurns(contextTurns),
       systemPrompt: profile.systemPrompt,
     });
   }, [profile, messages.length, memories]);

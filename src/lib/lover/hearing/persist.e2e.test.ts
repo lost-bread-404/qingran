@@ -660,3 +660,17 @@ test("PGLite e2e: eval runs overwrite the same clip+engine and only use labeled 
   assert.equal(turns[0]?.n, 0);
 });
 
+test("0015 confusions migration is additive", async () => {
+  const sql = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations/0015_hearing_confusions.sql"),
+    "utf8",
+  );
+  assert.match(sql, /qingran_hearing_confusions/);
+  assert.match(sql, /qingran_personal_lexicon/);
+  assert.match(sql, /add column if not exists prosody/);
+  assert.match(sql, /stt_corrected_text/);
+  assert.match(sql, /stt_corrections/);
+  assert.doesNotMatch(sql, /drop column/i);
+  assert.doesNotMatch(sql, /alter column/i);
+});
+

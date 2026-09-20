@@ -272,84 +272,6 @@ export function SettingsDrawer({
       ) : tab === "hearing" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
-            <div>
-              <p className="mb-2 text-sm">听力引擎</p>
-              <div className="grid grid-cols-2 gap-2">
-                {HEARING_PROVIDERS.map((id) => {
-                  const ready = providerReady ? providerReady[id] : true;
-                  const missing = PROVIDER_ENV[id];
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      disabled={!ready}
-                      onClick={() => ready && setHearingProvider(id)}
-                      className={cn(
-                        "min-h-11 rounded-md px-3 py-3 text-left text-sm disabled:opacity-50",
-                        hearingProvider === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-                      )}
-                    >
-                      <span className="block">{PROVIDER_LABEL[id]}</span>
-                      <span className="mt-1 block text-[11px] opacity-80">
-                        {providerReady == null ? "正在检查…" : ready ? "已配置" : `缺少 ${missing}`}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="rounded-md bg-surface-2 px-3 py-3">
-              <p className="text-sm">引擎自检</p>
-              <p className="mt-1 text-xs text-subtle">用 lab 密码。对各引擎发 1 秒测试音频，看能不能通。</p>
-              <Input
-                type="password"
-                value={labPassword}
-                onChange={(e) => setLabPassword(e.target.value)}
-                placeholder="lab 密码"
-                className="mt-3"
-                autoComplete="off"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-2 min-h-11 w-full"
-                disabled={probeBusy || !labPassword.trim()}
-                onClick={() => {
-                  const secret = labPassword.trim();
-                  if (!secret) return;
-                  setProbeBusy(true);
-                  setProbeError(null);
-                  void hearingConnectionTest({ data: { password: secret } })
-                    .then((result) => {
-                      sessionStorage.setItem(LAB_KEY, secret);
-                      setProbeRows(result.engines as EngineProbeRow[]);
-                    })
-                    .catch((err) => {
-                      setProbeRows(null);
-                      const message = err instanceof Error ? err.message : String(err);
-                      setProbeError(message === "lab-locked" ? "密码不对。" : message);
-                    })
-                    .finally(() => setProbeBusy(false));
-                }}
-              >
-                {probeBusy ? "正在自检…" : "引擎自检"}
-              </Button>
-              {probeError ? <p className="mt-2 text-xs text-subtle">{probeError}</p> : null}
-              {probeRows ? (
-                <ul className="mt-3 flex flex-col gap-2">
-                  {probeRows.map((row) => (
-                    <li key={row.id} className="text-xs leading-relaxed">
-                      <span className="text-sm text-fg">
-                        {labEngineLabel(row.id)} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
-                      </span>
-                      {!row.ok && row.error ? (
-                        <span className="mt-1 block break-all text-subtle">{row.error}</span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
             <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
               <input
                 type="checkbox"
@@ -371,6 +293,90 @@ export function SettingsDrawer({
             >
               打开标注页
             </Link>
+            <details className="rounded-md bg-surface-2 px-3 py-3">
+              <summary className="cursor-pointer text-sm">高级</summary>
+              <div className="mt-3 flex flex-col gap-4">
+                <div>
+                  <p className="mb-2 text-sm">听力引擎</p>
+                  <p className="mb-2 text-xs text-subtle">实时默认 xAI + Apple。其它引擎会拒答亲密内容，只留在这里备查。</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {HEARING_PROVIDERS.map((id) => {
+                      const ready = providerReady ? providerReady[id] : true;
+                      const missing = PROVIDER_ENV[id];
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          disabled={!ready}
+                          onClick={() => ready && setHearingProvider(id)}
+                          className={cn(
+                            "min-h-11 rounded-md px-3 py-3 text-left text-sm disabled:opacity-50",
+                            hearingProvider === id ? "bg-accent text-accent-fg" : "bg-bg text-muted",
+                          )}
+                        >
+                          <span className="block">{PROVIDER_LABEL[id]}</span>
+                          <span className="mt-1 block text-[11px] opacity-80">
+                            {providerReady == null ? "正在检查…" : ready ? "已配置" : `缺少 ${missing}`}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm">引擎自检</p>
+                  <p className="mt-1 text-xs text-subtle">用 lab 密码。对各引擎发 1 秒测试音频，看能不能通。</p>
+                  <Input
+                    type="password"
+                    value={labPassword}
+                    onChange={(e) => setLabPassword(e.target.value)}
+                    placeholder="lab 密码"
+                    className="mt-3"
+                    autoComplete="off"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-2 min-h-11 w-full"
+                    disabled={probeBusy || !labPassword.trim()}
+                    onClick={() => {
+                      const secret = labPassword.trim();
+                      if (!secret) return;
+                      setProbeBusy(true);
+                      setProbeError(null);
+                      void hearingConnectionTest({ data: { password: secret } })
+                        .then((result) => {
+                          sessionStorage.setItem(LAB_KEY, secret);
+                          setProbeRows(result.engines as EngineProbeRow[]);
+                        })
+                        .catch((err) => {
+                          setProbeRows(null);
+                          const message = err instanceof Error ? err.message : String(err);
+                          setProbeError(message === "lab-locked" ? "密码不对。" : message);
+                        })
+                        .finally(() => setProbeBusy(false));
+                    }}
+                  >
+                    {probeBusy ? "正在自检…" : "引擎自检"}
+                  </Button>
+                  {probeError ? <p className="mt-2 text-xs text-subtle">{probeError}</p> : null}
+                  {probeRows ? (
+                    <ul className="mt-3 flex flex-col gap-2">
+                      {probeRows.map((row) => (
+                        <li key={row.id} className="text-xs leading-relaxed">
+                          <span className="text-sm text-fg">
+                            {labEngineLabel(row.id)} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
+                          </span>
+                          {!row.ok && row.error ? (
+                            <span className="mt-1 block break-all text-subtle">{row.error}</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              </div>
+            </details>
             {debugHearing ? <AudioTracePanel /> : null}
           </div>
         </div>
