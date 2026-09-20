@@ -90,7 +90,18 @@ async function loadMindAt(turnSeq: number): Promise<Mind | null> {
   return { ...EMPTY_MIND, ...(data as Partial<Mind>), turn_seq: turnSeq };
 }
 
+function asNumArr(v: unknown): number[] {
+  if (Array.isArray(v)) return v.map(Number).filter((n) => Number.isFinite(n));
+  if (typeof v === "string") {
+    const inner = v.trim().replace(/^\{/, "").replace(/\}$/, "");
+    if (!inner) return [];
+    return inner.split(",").map(Number).filter((n) => Number.isFinite(n));
+  }
+  return [];
+}
+
 function voiceRefsFromTurn(turn: Record<string, unknown>): VoiceRefs {
+  const queryIds = asStrArr(turn.query_ids).length ? asStrArr(turn.query_ids) : asStrArr(turn.fallback_ids);
   return {
     charterHash: String(turn.charter_hash ?? ""),
     longtermHash: String(turn.longterm_hash ?? ""),
@@ -98,7 +109,11 @@ function voiceRefsFromTurn(turn: Record<string, unknown>): VoiceRefs {
     mindTurnSeq: Number(turn.mind_turn_seq) || 0,
     mindStale: turn.mind_stale === true || turn.mind_stale === "t",
     pickedIds: asStrArr(turn.picked_ids),
-    fallbackIds: asStrArr(turn.fallback_ids),
+    fallbackIds: queryIds,
+    queryIds,
+    queryScores: asNumArr(turn.query_scores),
+    jump: turn.jump === true || turn.jump === "t",
+    jumpScore: Number(turn.jump_score) || 0,
     careHint: turn.care_hint === true || turn.care_hint === "t",
     clockText: String(turn.clock_text ?? ""),
     userMsgId: String(turn.user_msg_id ?? ""),
@@ -150,7 +165,7 @@ export async function rebuildVoiceMessages(turnSeq: number): Promise<RebuildResu
   const user = refs.userMsgId ? await messageAsOf(refs.userMsgId, t) : null;
   if (refs.userMsgId && !user) warnings.push("用户消息缺失");
   if (user && (await messageEditedAfter(refs.userMsgId, t))) warnings.push(`消息在调用后被编辑过：${refs.userMsgId}`);
-  const notes = await notesInOrder([...(refs.pickedIds ?? []), ...(refs.fallbackIds ?? [])], t, warnings);
+  const notes = await notesInOrder([...(refs.pickedIds ?? []), ...(refs.queryIds ?? refs.fallbackIds ?? [])], t, warnings);
   const mind = refs.mindTurnSeq ? await loadMindAt(refs.mindTurnSeq) : EMPTY_MIND;
   if (refs.mindTurnSeq && !mind) warnings.push("内心记录缺失");
   const liveMind = mind ?? EMPTY_MIND;
@@ -164,6 +179,7 @@ export async function rebuildVoiceMessages(turnSeq: number): Promise<RebuildResu
     careHint: Boolean(refs.careHint),
     nowMs,
     stale: Boolean(refs.mindStale),
+    jump: Boolean(refs.jump),
   });
   const messages = buildVoiceMessages({
     charter: charter ?? "",

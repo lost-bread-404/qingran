@@ -56,6 +56,7 @@ export function buildTail(opts: {
   careHint: boolean;
   nowMs?: number;
   stale?: boolean;
+  jump?: boolean;
 }): string {
   let reading = readingLine(opts.mind);
   let threads = opts.mind.threads.join("；");
@@ -67,6 +68,11 @@ export function buildTail(opts: {
   const stale =
     opts.stale ??
     (!mindIsEmpty(opts.mind) && Boolean(opts.nowMs) && Boolean(opts.mind.updated_at) && mindAge > SESSION_GAP_MS);
+  const jump = Boolean(opts.jump) && !stale && !mindIsEmpty(opts.mind);
+  const innerHint = jump
+    ? "（这是你上一刻的想法，但她刚跳到了新的话题。以她这句话为准，先跟上她，再决定要不要把上面那条路走回来。）"
+    : "（这是你上一刻的想法；如果她这句话改变了情况，以这句话为准。说不说出来、怎么说，由你判断。）";
+  const jumpRoad = jump ? "上面这条路可能不适用了。\n" : "";
 
   const inner = mindIsEmpty(opts.mind)
     ? ""
@@ -80,7 +86,7 @@ export function buildTail(opts: {
 先重新感受她现在的状态，再决定怎么带她。
 
 `
-      : `【你此刻的内心】（这是你上一刻的想法；如果她这句话改变了情况，以这句话为准。说不说出来、怎么说，由你判断。）
+      : `【你此刻的内心】${innerHint}
 她现在：${opts.mind.rosie_now}
 底下的东西：${opts.mind.undercurrent}
 你的推断：${reading}
@@ -89,7 +95,7 @@ ${opts.mind.soft_spot ? `心软的地方：${opts.mind.soft_spot}\n` : ""}你的
 你的思路：${opts.mind.my_logic}
 你要带她走的路：${core.lead}
 这一句：${core.intent}
-要跟进：${threads}
+${jumpRoad}要跟进：${threads}
 
 `;
 
@@ -110,7 +116,7 @@ ${QINGRAN_STANCE_ONE_LINE}
     threads = "";
     tail = `现在是${opts.clock}。
 
-【你此刻的内心】（这是你上一刻的想法；如果她这句话改变了情况，以这句话为准。说不说出来、怎么说，由你判断。）
+【你此刻的内心】${innerHint}
 她现在：${opts.mind.rosie_now}
 底下的东西：${opts.mind.undercurrent}
 你的感受：${opts.mind.my_feel}
@@ -118,7 +124,7 @@ ${QINGRAN_STANCE_ONE_LINE}
 你的思路：${opts.mind.my_logic}
 你要带她走的路：${core.lead}
 这一句：${core.intent}
-
+${jumpRoad}
 【可以用的记忆】
 ${formatMemories(opts.notes, opts.timeZone)}
 

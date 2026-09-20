@@ -109,6 +109,10 @@ export const INDEX_CORE_MAX = 60; // 放在 Reflector B 段（可缓存）
 export const INDEX_RELATED_MAX = 30; // 放在 Reflector C 段（每轮变化）
 export const REFLECT_PROMPT_CACHE_KEY = "qingran-reflect";
 export const PICK_MAX = 6;
+export const PICK_MIND_SLOTS = 4;
+export const PICK_QUERY_SLOTS = 2;
+export const JUMP_PICK_MIND_SLOTS = 2;
+export const JUMP_PICK_QUERY_SLOTS = 4;
 export const HOT_FALLBACK_K = 2;
 export const MIND_MAX_CHARS = 500;
 export const PORTRAIT_MAX_CHARS = 600;
@@ -158,6 +162,7 @@ function envNum(name: string, fallback: number): number {
 export const LOG_TEXT_DAYS = envNum("QR_LOG_TEXT_DAYS", 7);
 export const SNAPSHOT_DAYS = envNum("QR_SNAPSHOT_DAYS", 90);
 export const DB_LIMIT_MB = envNum("QR_DB_LIMIT_MB", 512);
+export const JUMP_SCORE_MAX = envNum("QR_JUMP_MAX", 0.12);
 
 export const QR_VOICE_READS_DIARY = process.env.QR_VOICE_READS_DIARY !== "false";
 export const QR_CARE_CHECKIN = process.env.QR_CARE_CHECKIN === "true";

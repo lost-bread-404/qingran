@@ -1,5 +1,13 @@
 import MiniSearch from "minisearch";
-import { HOT_FALLBACK_K, INDEX_CORE_MAX, INDEX_RELATED_MAX, PICK_MAX } from "../config.ts";
+import {
+  INDEX_CORE_MAX,
+  INDEX_RELATED_MAX,
+  JUMP_PICK_MIND_SLOTS,
+  JUMP_PICK_QUERY_SLOTS,
+  PICK_MAX,
+  PICK_MIND_SLOTS,
+  PICK_QUERY_SLOTS,
+} from "../config.ts";
 import {
   bumpRecall,
   getMeta,
@@ -15,6 +23,13 @@ import type { IndexItem, Note } from "../types.ts";
 export { tokenizeMemory, formatIndexLine };
 
 export const FALLBACK_MIN_SCORE = 0.3;
+
+export type HotPick = {
+  notes: Note[];
+  mindIds: string[];
+  queryIds: string[];
+  queryScores: number[];
+};
 
 type Cache = {
   version: number;
@@ -139,28 +154,76 @@ export async function getRelatedIndexItems(query: string, coreIds: Set<string>):
   });
 }
 
-export async function pickHotNotes(mindIds: string[], query: string): Promise<Note[]> {
-  const { items, mini } = await getMemoryIndex();
-  const allowed = new Set(items.map((i) => i.id));
-  const picked: string[] = [];
-  for (const id of mindIds) {
-    if (!allowed.has(id)) continue;
-    if (picked.includes(id)) continue;
-    picked.push(id);
-    if (picked.length >= PICK_MAX) break;
+export async function pickHotNotes(
+  mindIds: string[],
+  query: string,
+  opts: { jump: boolean },
+): Promise<HotPick> {
+  const N = opts.jump ? JUMP_PICK_MIND_SLOTS : PICK_MIND_SLOTS;
+  const M = opts.jump ? JUMP_PICK_QUERY_SLOTS : PICK_QUERY_SLOTS;
+
+  const mindNotes = (await listNotesByIds(mindIds)).filter((n) => n.status === "active");
+  const mindActive = mindNotes.map((n) => n.id);
+  const mindPart = mindActive.slice(0, N);
+  const mindPartSet = new Set(mindPart);
+
+  let queryHits: Array<{ id: string; score: number }> = [];
+  if (query.trim()) {
+    const { mini } = await getMemoryIndex();
+    queryHits = mini
+      .search(query, { boost: { text: 2 } })
+      .filter((h) => (Number(h.score) || 0) >= FALLBACK_MIN_SCORE && !mindPartSet.has(String(h.id)))
+      .map((h) => ({ id: String(h.id), score: Number(h.score) || 0 }));
   }
-  if (picked.length < PICK_MAX && query.trim()) {
-    const hits = mini.search(query, { boost: { text: 2 } });
-    for (const hit of hits) {
-      if (hit.score < FALLBACK_MIN_SCORE) continue;
-      if (picked.includes(hit.id)) continue;
-      picked.push(hit.id);
-      if (picked.length >= Math.min(PICK_MAX, mindIds.length + HOT_FALLBACK_K)) break;
+  const queryPart = queryHits.slice(0, M);
+
+  const picked: string[] = [...mindPart];
+  const seen = new Set(picked);
+  const queryIds: string[] = [];
+  const queryScores: number[] = [];
+
+  const pushQuery = (hit: { id: string; score: number }) => {
+    if (picked.length >= PICK_MAX || seen.has(hit.id)) return;
+    picked.push(hit.id);
+    seen.add(hit.id);
+    queryIds.push(hit.id);
+    queryScores.push(hit.score);
+  };
+  const pushMind = (id: string) => {
+    if (picked.length >= PICK_MAX || seen.has(id)) return;
+    picked.push(id);
+    seen.add(id);
+  };
+
+  for (const hit of queryPart) pushQuery(hit);
+
+  if (picked.length < PICK_MAX) {
+    if (mindPart.length < N) {
+      for (const hit of queryHits.slice(M)) {
+        if (picked.length >= PICK_MAX) break;
+        pushQuery(hit);
+      }
+    }
+    if (queryPart.length < M) {
+      for (const id of mindActive.slice(N)) {
+        if (picked.length >= PICK_MAX) break;
+        pushMind(id);
+      }
     }
   }
-  const notes = (await listNotesByIds(picked)).filter((n) => n.status === "active");
-  void bumpRecall(notes.map((n) => n.id));
-  return notes.slice(0, PICK_MAX);
+
+  const fetched = (await listNotesByIds(picked)).filter((n) => n.status === "active");
+  const byId = new Map(fetched.map((n) => [n.id, n]));
+  const notes = picked.map((id) => byId.get(id)).filter((n): n is Note => Boolean(n)).slice(0, PICK_MAX);
+  const keep = new Set(notes.map((n) => n.id));
+  await bumpRecall(notes.map((n) => n.id));
+  const queryIdSet = new Set(queryIds);
+  return {
+    notes,
+    mindIds: notes.filter((n) => !queryIdSet.has(n.id)).map((n) => n.id),
+    queryIds: queryIds.filter((id) => keep.has(id)),
+    queryScores: queryScores.filter((_, i) => keep.has(queryIds[i]!)),
+  };
 }
 
 export async function notesForIds(ids: string[]): Promise<Note[]> {

@@ -14,6 +14,7 @@ import { formatClock, localDay } from "../time.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { pickHotNotes } from "./retrieve.ts";
+import { topicJump } from "./jump.ts";
 import { buildTail, buildVoiceMessages, renderVoiceLongterm } from "./pack-build.ts";
 
 export { buildTail, buildVoiceMessages, renderVoiceLongterm } from "./pack-build.ts";
@@ -30,6 +31,10 @@ export type HotContext = {
   mindStale: boolean;
   pickedIds: string[];
   fallbackIds: string[];
+  queryIds: string[];
+  queryScores: number[];
+  jump: boolean;
+  jumpScore: number;
   careHint: boolean;
   charterHash: string;
   longtermHash: string;
@@ -71,9 +76,12 @@ export async function loadHotContext(input: {
     getMeta(),
   ]);
 
-  const notes = await pickHotNotes(mind.memory_ids ?? [], input.text);
-  const pickedIds = notes.filter((n) => (mind.memory_ids ?? []).includes(n.id)).map((n) => n.id);
-  const fallbackIds = notes.filter((n) => !(mind.memory_ids ?? []).includes(n.id)).map((n) => n.id);
+  const liveMind = mind.turn_seq ? mind : EMPTY_MIND;
+  const jumped = topicJump(input.text, liveMind);
+  const picked = await pickHotNotes(mind.memory_ids ?? [], input.text, { jump: jumped.jump });
+  const notes = picked.notes;
+  const pickedIds = picked.mindIds;
+  const fallbackIds = picked.queryIds;
   let careHint = false;
   if (process.env.QR_CARE_CHECKIN === "true") {
     const day = localDay(input.nowMs, input.timeZone);
@@ -84,7 +92,6 @@ export async function loadHotContext(input: {
     careHint = Boolean(log && log.coverage !== "ok" && !asked);
   }
 
-  const liveMind = mind.turn_seq ? mind : EMPTY_MIND;
   const mindAgeMs = liveMind.updated_at ? input.nowMs - liveMind.updated_at : 0;
   const mindStale = Boolean(liveMind.updated_at) && mindAgeMs > SESSION_GAP_MS;
   const clockText = formatClock(input.nowMs, input.timeZone);
@@ -96,6 +103,7 @@ export async function loadHotContext(input: {
     careHint,
     nowMs: input.nowMs,
     stale: mindStale && Boolean(liveMind.updated_at) && liveMind.turn_seq > 0,
+    jump: jumped.jump,
   });
 
   const longterm = renderVoiceLongterm(meta.selfSummary, meta.bondSummary, portrait);
@@ -122,6 +130,10 @@ export async function loadHotContext(input: {
     mindStale,
     pickedIds,
     fallbackIds,
+    queryIds: picked.queryIds,
+    queryScores: picked.queryScores,
+    jump: jumped.jump,
+    jumpScore: jumped.score,
     careHint,
     clockText,
     userMsgId: input.userMsgId,
@@ -141,6 +153,10 @@ export async function loadHotContext(input: {
     mindStale,
     pickedIds,
     fallbackIds,
+    queryIds: picked.queryIds,
+    queryScores: picked.queryScores,
+    jump: jumped.jump,
+    jumpScore: jumped.score,
     careHint,
     charterHash,
     longtermHash,

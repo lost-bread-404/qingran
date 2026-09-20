@@ -14,6 +14,10 @@ export type VoiceRefs = {
   mindStale: boolean;
   pickedIds: string[];
   fallbackIds: string[];
+  queryIds: string[];
+  queryScores: number[];
+  jump: boolean;
+  jumpScore: number;
   careHint: boolean;
   clockText: string;
   userMsgId: string;

@@ -152,3 +152,60 @@ test("stale uses strict greater-than session gap", () => {
   });
   assert.match(over, /你上次的内心/);
 });
+
+test("jump replaces the inner hint and flags the old road without dropping fields", () => {
+  const jumped = {
+    ...EMPTY_MIND,
+    turn_seq: 3,
+    rosie_now: "她刚说论文写不下去",
+    undercurrent: "怕自己不够好",
+    my_feel: "心疼",
+    my_view: "先睡",
+    my_logic: "焦虑 → 熬夜",
+    lead_plan: ["今晚让她早点睡"],
+    intent: "把她拉去睡觉",
+    threads: ["论文"],
+  };
+  const tail = buildTail({
+    clock: "星期二 21:00",
+    mind: jumped,
+    notes: [note],
+    timeZone: "UTC",
+    careHint: false,
+    jump: true,
+  });
+  assert.match(tail, /你此刻的内心/);
+  assert.match(tail, /她刚跳到了新的话题/);
+  assert.match(tail, /先跟上她/);
+  assert.match(tail, /上面这条路可能不适用了/);
+  assert.match(tail, /今晚让她早点睡/);
+  assert.match(tail, /把她拉去睡觉/);
+  assert.match(tail, /她刚说论文写不下去/);
+  assert.doesNotMatch(tail, /如果她这句话改变了情况/);
+});
+
+test("jump does not rewrite the stale branch", () => {
+  const mind = {
+    ...EMPTY_MIND,
+    turn_seq: 4,
+    updated_at: Date.UTC(2026, 8, 15, 14, 0, 0),
+    rosie_now: "她刚说：嘴里长溃疡了好疼",
+    undercurrent: "她其实是怕自己不够好",
+    my_view: "熬夜换不来安全感",
+    lead_plan: ["今晚让她 1 点前睡"],
+    intent: "温柔但坚定地让她放下手机",
+    threads: ["周五 Citadel 面试"],
+  };
+  const tail = buildTail({
+    clock: "星期三 19:00",
+    mind,
+    notes: [],
+    timeZone: "UTC",
+    careHint: false,
+    nowMs: Date.UTC(2026, 8, 16, 19, 0, 0),
+    jump: true,
+  });
+  assert.match(tail, /你上次的内心/);
+  assert.doesNotMatch(tail, /刚跳到了新的话题/);
+  assert.doesNotMatch(tail, /上面这条路可能不适用了/);
+});

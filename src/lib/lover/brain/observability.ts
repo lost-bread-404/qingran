@@ -6,6 +6,11 @@ function textArray(values: string[]): string {
   return `{${escaped.join(",")}}`;
 }
 
+function realArray(values: number[]): string {
+  if (!values.length) return "{}";
+  return `{${values.map((v) => (Number.isFinite(v) ? String(v) : "0")).join(",")}}`;
+}
+
 export type BrainTurnRow = {
   turnSeq: number;
   userMsgId: string;
@@ -17,6 +22,10 @@ export type BrainTurnRow = {
   mindStale?: boolean;
   pickedIds?: string[];
   fallbackIds?: string[];
+  queryIds?: string[];
+  queryScores?: number[];
+  jump?: boolean;
+  jumpScore?: number | null;
   careHint?: boolean;
   tail?: string | null;
   replyChars?: number | null;
@@ -41,10 +50,12 @@ export async function insertBrainTurn(row: BrainTurnRow): Promise<void> {
          turn_seq, user_msg_id, reply_msg_id, local_day, session_id,
          mind_turn_seq, mind_age_ms, mind_stale, picked_ids, fallback_ids, care_hint,
          tail, reply_chars, pack_ms, db_first_ms, ttft_ms, first_audio_ms, total_ms, voice_model, created_at,
-         code_version, charter_hash, longterm_hash, history_ids, clock_text
+         code_version, charter_hash, longterm_hash, history_ids, clock_text,
+         jump, jump_score, query_ids, query_scores
        ) values (
          $1,$2,$3,$4,$5,$6,$7,$8,$9::text[],$10::text[],$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-         $21,$22,$23,$24::text[],$25
+         $21,$22,$23,$24::text[],$25,
+         $26,$27,$28::text[],$29::real[]
        )
        on conflict (turn_seq) do update set
          reply_msg_id = excluded.reply_msg_id,
@@ -59,7 +70,13 @@ export async function insertBrainTurn(row: BrainTurnRow): Promise<void> {
          charter_hash = excluded.charter_hash,
          longterm_hash = excluded.longterm_hash,
          history_ids = excluded.history_ids,
-         clock_text = excluded.clock_text`,
+         clock_text = excluded.clock_text,
+         jump = excluded.jump,
+         jump_score = excluded.jump_score,
+         query_ids = excluded.query_ids,
+         query_scores = excluded.query_scores,
+         fallback_ids = excluded.fallback_ids,
+         picked_ids = excluded.picked_ids`,
       [
         row.turnSeq,
         row.userMsgId,
@@ -70,7 +87,7 @@ export async function insertBrainTurn(row: BrainTurnRow): Promise<void> {
         row.mindAgeMs ?? null,
         Boolean(row.mindStale),
         textArray(row.pickedIds ?? []),
-        textArray(row.fallbackIds ?? []),
+        textArray(row.queryIds ?? row.fallbackIds ?? []),
         Boolean(row.careHint),
         null,
         row.replyChars ?? null,
@@ -86,6 +103,10 @@ export async function insertBrainTurn(row: BrainTurnRow): Promise<void> {
         row.longtermHash ?? null,
         textArray(row.historyIds ?? []),
         row.clockText ?? null,
+        Boolean(row.jump),
+        row.jumpScore ?? null,
+        textArray(row.queryIds ?? row.fallbackIds ?? []),
+        realArray(row.queryScores ?? []),
       ],
     );
   } catch {
