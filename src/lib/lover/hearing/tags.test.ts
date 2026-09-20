@@ -15,6 +15,8 @@ import {
   tagsTouched,
   toggleEventChip,
   withMeowFromText,
+  EVENT_CHIP_LABELS,
+  TAG_VALUE_LABELS,
   type AcousticTags,
 } from "./tags.ts";
 
@@ -40,6 +42,11 @@ test("utterance tag format joins events with + and leaves the slot empty", () =>
     "〔long·wavering·breathy｜cry+moan〕",
   );
   assert.equal(formatAcousticTag({ ...base, events: ["meow"] }), "〔long·rising·breathy｜meow〕");
+  assert.equal(formatAcousticTag({ ...base, events: ["coy"] }), "〔long·rising·breathy｜coy〕");
+  assert.equal(
+    formatAcousticTag({ ...base, events: ["coy", "meow"] }),
+    "〔long·rising·breathy｜meow+coy〕",
+  );
 });
 
 test("xAI text with 喵 or 嗷呜 predicts meow", () => {
@@ -78,6 +85,10 @@ test("无 clears other events; picking an event cancels 无", () => {
   assert.deepEqual(toggleEventChip(["laugh"], "cry"), ["laugh", "cry"]);
   assert.deepEqual(toggleEventChip(["laugh", "cry"], "laugh"), ["cry"]);
   assert.deepEqual(toggleEventChip([], "meow"), ["meow"]);
+  assert.deepEqual(toggleEventChip([], "coy"), ["coy"]);
+  assert.deepEqual(toggleEventChip(["coy"], "none"), []);
+  assert.equal(TAG_VALUE_LABELS.events.coy, "撒娇");
+  assert.equal(EVENT_CHIP_LABELS.coy, "撒娇");
 });
 
 test("whisper and breath cues collapse into breathy / moan; cues merge events", () => {

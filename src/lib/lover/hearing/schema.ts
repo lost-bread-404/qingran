@@ -14,7 +14,7 @@ export const EMOTIONS = [
   "annoyed",
   "neutral",
 ] as const;
-export const EVENTS = ["laugh", "cry", "breath", "sigh", "moan", "meow"] as const;
+export const EVENTS = ["laugh", "cry", "breath", "sigh", "moan", "meow", "coy"] as const;
 
 export type CueContour = (typeof CONTOURS)[number];
 export type CueLength = (typeof LENGTHS)[number];
