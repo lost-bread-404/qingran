@@ -191,6 +191,46 @@ test("lab page is score card, worst 20, and hash export only", () => {
   assert.doesNotMatch(src, /分配 dev\/test/);
 });
 
+test("lab engine compare is password-gated, batches of 10, and does not write live turns", () => {
+  const src = readFileSync(new URL("../../../routes/lab.tsx", import.meta.url), "utf8");
+  assert.match(src, /引擎对比/);
+  assert.match(src, /runEngineEvalBatch/);
+  assert.match(src, /hearingEvalCompare/);
+  assert.match(src, /exportEvalCompare/);
+  assert.match(src, /每次 10 条/);
+  assert.match(src, /最近 N 条，空=全部/);
+  assert.match(src, /已跑 \$\{progress\.done\} \/ \$\{progress\.total\}/);
+  assert.match(src, /完全正确率/);
+  assert.match(src, /拒答率/);
+  assert.match(src, /硬拒答/);
+  assert.match(src, /软拒答/);
+  assert.match(src, /p50/);
+  assert.match(src, /qingran-engine-eval/);
+  const store = readFileSync(new URL("./store.ts", import.meta.url), "utf8");
+  assert.match(store, /EVAL_BATCH_SIZE/);
+  assert.match(store, /export const runEngineEvalBatch/);
+  const batch = store.slice(
+    store.indexOf("export const runEngineEvalBatch"),
+    store.indexOf("export const hearingEvalCompare"),
+  );
+  assert.match(batch, /EVAL_BATCH_SIZE/);
+  assert.match(batch, /runEvalJob/);
+  assert.match(batch, /listEvalClipIds/);
+  assert.doesNotMatch(batch, /persistHearingTurn/);
+  assert.doesNotMatch(batch, /insertClipRow/);
+  assert.doesNotMatch(batch, /qingran_messages/);
+  assert.doesNotMatch(batch, /qingran_hearing_turns/);
+  const job = store.slice(store.indexOf("async function runEvalJob"), store.indexOf("async function persistHearingTurn"));
+  assert.match(job, /upsertEvalRun/);
+  assert.match(job, /evalClipAudioRow/);
+  assert.match(job, /没有这段录音/);
+  assert.doesNotMatch(job, /persistHearingTurn/);
+  assert.doesNotMatch(job, /insertClipRow/);
+  assert.doesNotMatch(job, /qingran_messages/);
+  assert.doesNotMatch(job, /qingran_hearing_turns/);
+  assert.doesNotMatch(job, /upsertTurn/);
+});
+
 test("runHearing persists with waitUntil; xai skips audio-LLM and a second STT", () => {
   const store = readFileSync(new URL("./store.ts", import.meta.url), "utf8");
   const hear = readFileSync(new URL("../hear.ts", import.meta.url), "utf8");

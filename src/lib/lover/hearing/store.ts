@@ -11,7 +11,7 @@ import {
   type AdapterOutcome,
   type HearingCallOpts,
 } from "./http.ts";
-import { EMOTIONS, hearingCueSchema, type CueEmotion, type HearingCue, type HearingResult } from "./schema.ts";
+import { EMOTIONS, hearingCueSchema, stripCueTags, type CueEmotion, type HearingCue, type HearingResult } from "./schema.ts";
 import { assignSplits, hashSplit } from "./split.ts";
 import { transcribeWithXai, xaiAsHearing } from "./xai.ts";
 import { chooseHearing, emptyEngineUse, logHearingTurn } from "./select.ts";
@@ -23,9 +23,20 @@ import { errorText } from "./heard.ts";
 import { envPresence } from "./env.ts";
 import { scoreHearing, type ScoreWindow } from "./score.ts";
 import {
+  EVAL_BATCH_SIZE,
+  evalBatchWindow,
+  evalJobs,
+  parseEvalTags,
+  scoreEngineEvalByEngine,
+  statusFromFailReason,
+  statusFromXaiError,
+  type EngineEvalScore,
+} from "./eval-compare.ts";
+import {
   clipCount,
   clipLabelByTurn,
   confirmClipByTurn,
+  evalClipAudioRow,
   exportReplyFlagDataset,
   goldCount,
   goldStatusByTurnIds,
@@ -34,6 +45,9 @@ import {
   insertClipRow,
   insertReplyFlag,
   listClipRows,
+  listEvalClipIds,
+  listEvalRunExportRows,
+  listEvalScoreRows,
   listLabeledClipRows,
   listMigrationNames,
   listReplyFlagRows,
@@ -42,6 +56,7 @@ import {
   patchFinalTextByTurn,
   patchReplyMessageId,
   unlabelClip,
+  upsertEvalRun,
   type LabClipFilter,
 } from "./persist.ts";
 import { silenceWavBase64, wavDurationMs, wavPeakRms } from "./wav.ts";
@@ -61,6 +76,7 @@ import {
 } from "./tags.ts";
 
 export type { LabClipFilter, LabeledClipRow, ReplyFlagRow } from "./persist.ts";
+export type { EngineEvalScore } from "./eval-compare.ts";
 
 export type HearingTurnPatch = {
   id: string;
@@ -707,6 +723,102 @@ export const hearingLabScore = createServerFn({ method: "POST" })
     }
   });
 
+export const runEngineEvalBatch = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      password: string;
+      engines: HearingProviderId[];
+      limit?: number | null;
+      offset?: number;
+    }) => input,
+  )
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    const engines = data.engines.filter(isHearingProvider);
+    if (!engines.length) return { ok: false as const, error: "请选择引擎。" };
+    try {
+      const sql = await getSql();
+      const clipIds = await listEvalClipIds(sql, data.limit);
+      const jobs = evalJobs(clipIds, engines);
+      const window = evalBatchWindow({
+        total: jobs.length,
+        offset: data.offset ?? 0,
+        batchSize: EVAL_BATCH_SIZE,
+      });
+      const slice = jobs.slice(window.start, window.end);
+      for (const job of slice) {
+        await runEvalJob(sql, job.clipId, job.engine);
+      }
+      return {
+        ok: true as const,
+        total: window.total,
+        offset: window.start,
+        nextOffset: window.nextOffset,
+        done: window.done,
+        processed: window.count,
+        batchSize: EVAL_BATCH_SIZE,
+      };
+    } catch (err) {
+      return { ok: false as const, error: errorText(err) };
+    }
+  });
+
+export const hearingEvalCompare = createServerFn({ method: "POST" })
+  .validator((input: { password: string; engines?: HearingProviderId[]; limit?: number | null }) => input)
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    const engines = (data.engines ?? []).filter(isHearingProvider);
+    try {
+      const sql = await getSql();
+      const clipIds = await listEvalClipIds(sql, data.limit);
+      const rows = await listEvalScoreRows(sql, {
+        clipIds,
+        engines: engines.length ? engines : undefined,
+      });
+      const scores = scoreEngineEvalByEngine(rows, engines.length ? engines : undefined);
+      return { ok: true as const, engines: scores, clipN: clipIds.length };
+    } catch (err) {
+      return { ok: false as const, error: errorText(err), engines: [] as EngineEvalScore[], clipN: 0 };
+    }
+  });
+
+export const exportEvalCompare = createServerFn({ method: "POST" })
+  .validator((input: { password: string; engines?: HearingProviderId[]; limit?: number | null }) => input)
+  .handler(async ({ data }) => {
+    assertLab(data.password);
+    const sql = await getSql();
+    const engines = (data.engines ?? []).filter(isHearingProvider);
+    const clipIds = await listEvalClipIds(sql, data.limit);
+    const rows = await listEvalScoreRows(sql, {
+      clipIds,
+      engines: engines.length ? engines : undefined,
+    });
+    const exported = await listEvalRunExportRows(sql);
+    const clipSet = new Set(clipIds);
+    const engineSet = engines.length ? new Set<string>(engines) : null;
+    return {
+      kind: "qingran-engine-eval" as const,
+      version: 1,
+      exportedAt: Date.now(),
+      clipN: clipIds.length,
+      engines: scoreEngineEvalByEngine(rows, engines.length ? engines : undefined),
+      runs: exported
+        .filter((row) => clipSet.has(row.clip_id) && (!engineSet || engineSet.has(row.engine)))
+        .map((row) => ({
+          id: row.id,
+          clipId: row.clip_id,
+          engine: row.engine,
+          text: row.text ?? "",
+          tags: parseEvalTags(row.tags),
+          latencyMs: row.latency_ms,
+          status: row.status,
+          error: row.error,
+          createdAt: row.created_at,
+          goldText: row.gold_text ?? "",
+        })),
+    };
+  });
+
 export const getHearingClipAudio = createServerFn({ method: "POST" })
   .validator((input: { password: string; id: string }) => input)
   .handler(async ({ data }) => {
@@ -943,6 +1055,94 @@ async function dispatchProvider(provider: HearingProviderId, audioBase64: string
   if (provider === "gemini") return hearWithGemini(audioBase64, opts);
   if (provider === "selfhost") return hearWithSelfhost(audioBase64, opts);
   return xaiAsHearing("", 0);
+}
+
+async function runEvalJob(sql: Awaited<ReturnType<typeof getSql>>, clipId: string, engine: HearingProviderId) {
+  const started = Date.now();
+  try {
+    await runEvalJobInner(sql, clipId, engine);
+  } catch (err) {
+    await upsertEvalRun(sql, {
+      id: newId(),
+      clipId,
+      engine,
+      text: "",
+      tags: null,
+      latencyMs: Date.now() - started,
+      status: "error",
+      error: errorText(err).slice(0, 2000),
+    });
+  }
+}
+
+async function runEvalJobInner(sql: Awaited<ReturnType<typeof getSql>>, clipId: string, engine: HearingProviderId) {
+  const audioRow = await evalClipAudioRow(sql, clipId);
+  const audioBase64 =
+    audioRow?.audio_wav || (audioRow?.blob_pathname ? await readHearingWav(audioRow.blob_pathname) : null);
+  if (!audioBase64) {
+    await upsertEvalRun(sql, {
+      id: newId(),
+      clipId,
+      engine,
+      text: "",
+      tags: null,
+      latencyMs: null,
+      status: "error",
+      error: "没有这段录音。",
+    });
+    return;
+  }
+  if (engine === "xai") {
+    const xai = await transcribeWithXai({ audioBase64, mimeType: "audio/wav" });
+    if (!xai.ok) {
+      await upsertEvalRun(sql, {
+        id: newId(),
+        clipId,
+        engine,
+        text: "",
+        tags: null,
+        latencyMs: xai.latency_ms,
+        status: statusFromXaiError(xai.error),
+        error: xai.error.slice(0, 2000),
+      });
+      return;
+    }
+    await upsertEvalRun(sql, {
+      id: newId(),
+      clipId,
+      engine,
+      text: xai.text,
+      tags: {},
+      latencyMs: xai.latency_ms,
+      status: "ok",
+      error: null,
+    });
+    return;
+  }
+  const outcome = await dispatchProvider(engine, audioBase64);
+  if (!outcome.ok) {
+    await upsertEvalRun(sql, {
+      id: newId(),
+      clipId,
+      engine,
+      text: "",
+      tags: null,
+      latencyMs: outcome.latency_ms,
+      status: statusFromFailReason(outcome.reason),
+      error: clipFallbackRaw(outcome.raw),
+    });
+    return;
+  }
+  await upsertEvalRun(sql, {
+    id: newId(),
+    clipId,
+    engine,
+    text: stripCueTags(outcome.result.text),
+    tags: tagsFromCues(outcome.result.cues ?? []),
+    latencyMs: outcome.result.latency_ms,
+    status: outcome.result.refusal ? "hard_refusal" : "ok",
+    error: null,
+  });
 }
 
 async function persistHearingTurn(input: {

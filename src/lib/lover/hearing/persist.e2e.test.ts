@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { pendingMigrations } from "../../../../scripts/migration-plan.mjs";
-import { confirmClipByTurn, exportReplyFlagDataset, goldCount, hallucinationCount, engineUseStats, insertClipRow, insertReplyFlag, listClipRows, listLabeledClipRows, listReplyFlagRows, listScoreClipRows, patchFinalTextByTurn, unlabelClip } from "./persist.ts";
+import { confirmClipByTurn, exportReplyFlagDataset, goldCount, hallucinationCount, engineUseStats, insertClipRow, insertReplyFlag, listClipRows, listEvalClipIds, listEvalScoreRows, listLabeledClipRows, listReplyFlagRows, listScoreClipRows, patchFinalTextByTurn, unlabelClip, upsertEvalRun } from "./persist.ts";
 import { scoreHearing } from "./score.ts";
 import { silenceWavBase64 } from "./wav.ts";
 import type { AcousticTags } from "./tags.ts";
@@ -439,5 +439,202 @@ test("PGLite e2e: engine mix counts used engines and fallback reasons", async ()
     { reason: "timeout", n: 1 },
     { reason: "refused", n: 1 },
   ]);
+});
+
+test("0013 eval-run migration only adds the comparison table", async () => {
+  const sql = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations/0013_eval_runs.sql"),
+    "utf8",
+  );
+  assert.match(sql, /create table if not exists qingran_eval_runs/);
+  assert.match(sql, /unique \(clip_id, engine\)/);
+  assert.match(sql, /tags jsonb/);
+  assert.match(sql, /latency_ms/);
+  assert.doesNotMatch(sql, /drop table/i);
+  assert.doesNotMatch(sql, /drop column/i);
+  assert.doesNotMatch(sql, /alter column/i);
+  assert.doesNotMatch(sql, /\bupdate\b/i);
+  assert.doesNotMatch(sql, /\bdelete\b/i);
+  assert.doesNotMatch(sql, /qingran_hearing_turns/);
+  assert.doesNotMatch(sql, /qingran_messages/);
+});
+
+test("PGLite e2e: eval runs overwrite the same clip+engine and only use labeled audio", async () => {
+  const pg = new PGlite();
+  await pg.waitReady;
+  await pg.exec(
+    "create table if not exists _migrations (name text primary key, applied_at timestamptz not null default now())",
+  );
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations");
+  const entries = await readdir(dir);
+  const files = Object.fromEntries(
+    await Promise.all(
+      entries
+        .filter((name) => name.endsWith(".sql"))
+        .map(async (name) => [name, await readFile(join(dir, name), "utf8")] as const),
+    ),
+  );
+  for (const { name } of pendingMigrations(Object.keys(files), [])) {
+    await pg.exec(files[name] ?? "");
+    await pg.query("insert into _migrations (name) values ($1)", [name]);
+  }
+
+  const sql = toSql(async <T>(text: string, params: unknown[]) => {
+    const result = await pg.query<T>(text, params);
+    return result.rows;
+  });
+
+  const wav = silenceWavBase64(0.4);
+  await insertClipRow(sql, {
+    id: "clip-eval-1",
+    durationMs: 400,
+    source: "real",
+    audioWav: wav,
+    xaiText: "在吗",
+    hearingText: "在吗",
+    hearingJson: null,
+    liveText: "",
+    storageBackend: "db",
+    sttText: "在吗",
+    turnId: "turn-eval-1",
+    disagreement: false,
+    finalText: "在吗",
+  });
+  await insertClipRow(sql, {
+    id: "clip-eval-2",
+    durationMs: 400,
+    source: "real",
+    audioWav: wav,
+    xaiText: "嗯",
+    hearingText: "嗯",
+    hearingJson: null,
+    liveText: "",
+    storageBackend: "db",
+    sttText: "嗯",
+    turnId: "turn-eval-2",
+    disagreement: false,
+    finalText: "嗯",
+  });
+  await insertClipRow(sql, {
+    id: "clip-eval-unlabeled",
+    durationMs: 400,
+    source: "real",
+    audioWav: wav,
+    xaiText: "嗨",
+    hearingText: "嗨",
+    hearingJson: null,
+    liveText: "",
+    storageBackend: "db",
+    sttText: "嗨",
+    turnId: "turn-eval-unlabeled",
+    disagreement: false,
+    finalText: "嗨",
+  });
+  await insertClipRow(sql, {
+    id: "clip-eval-silent",
+    durationMs: 400,
+    source: "real",
+    audioWav: null,
+    xaiText: "空",
+    hearingText: "空",
+    hearingJson: null,
+    liveText: "",
+    storageBackend: "db",
+    sttText: "空",
+    turnId: "turn-eval-silent",
+    disagreement: false,
+    finalText: "空",
+  });
+
+  assert.deepEqual(await listEvalClipIds(sql), []);
+  const labeled1 = await confirmClipByTurn(sql, {
+    turnId: "turn-eval-1",
+    goldText: "在吗",
+    goldSource: "edited",
+    goldTags: { length: "short", events: ["laugh"] },
+    tagsTouched: ["length", "events"],
+  });
+  assert.equal(labeled1.ok, true);
+  const labeled2 = await confirmClipByTurn(sql, {
+    turnId: "turn-eval-2",
+    goldText: "嗯呐",
+    goldSource: "confirmed",
+  });
+  assert.equal(labeled2.ok, true);
+  const labeledSilent = await confirmClipByTurn(sql, {
+    turnId: "turn-eval-silent",
+    goldText: "空",
+    goldSource: "edited",
+  });
+  assert.equal(labeledSilent.ok, true);
+
+  assert.deepEqual(await listEvalClipIds(sql), ["clip-eval-2", "clip-eval-1"]);
+  assert.deepEqual(await listEvalClipIds(sql, 1), ["clip-eval-2"]);
+
+  await upsertEvalRun(sql, {
+    id: "run-old",
+    clipId: "clip-eval-1",
+    engine: "gemini",
+    text: "旧识别",
+    tags: { length: "long" },
+    latencyMs: 12,
+    status: "ok",
+    error: null,
+  });
+  await upsertEvalRun(sql, {
+    id: "run-new",
+    clipId: "clip-eval-1",
+    engine: "gemini",
+    text: "在吗",
+    tags: { length: "short", events: ["laugh"] },
+    latencyMs: 34,
+    status: "ok",
+    error: null,
+  });
+  await upsertEvalRun(sql, {
+    id: "run-xai",
+    clipId: "clip-eval-1",
+    engine: "xai",
+    text: "",
+    tags: null,
+    latencyMs: 8000,
+    status: "timeout",
+    error: "TimeoutError",
+  });
+
+  const stored = await sql<{
+    id: string;
+    clip_id: string;
+    engine: string;
+    text: string | null;
+    latency_ms: number | null;
+    status: string;
+  }>`
+    select id, clip_id, engine, text, latency_ms, status
+    from qingran_eval_runs
+    order by engine
+  `;
+  assert.equal(stored.length, 2);
+  assert.equal(stored[0]?.engine, "gemini");
+  assert.equal(stored[0]?.id, "run-old");
+  assert.equal(stored[0]?.text, "在吗");
+  assert.equal(stored[0]?.latency_ms, 34);
+  assert.equal(stored[0]?.status, "ok");
+  assert.equal(stored[1]?.engine, "xai");
+  assert.equal(stored[1]?.status, "timeout");
+
+  const scored = await listEvalScoreRows(sql, { engines: ["gemini"] });
+  assert.equal(scored.length, 1);
+  assert.equal(scored[0]?.engine, "gemini");
+  assert.equal(scored[0]?.text, "在吗");
+  assert.equal(scored[0]?.goldText, "在吗");
+  assert.equal(scored[0]?.goldTags?.length, "short");
+  assert.deepEqual(scored[0]?.goldTags?.events, ["laugh"]);
+  assert.equal(scored[0]?.tags?.length, "short");
+
+  const messages = await sql<{ n: number }>`select count(*)::int as n from qingran_messages`;
+  const turns = await sql<{ n: number }>`select count(*)::int as n from qingran_hearing_turns`;
+  assert.equal(messages[0]?.n, 0);
+  assert.equal(turns[0]?.n, 0);
 });
 

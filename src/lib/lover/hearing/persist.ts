@@ -1,6 +1,7 @@
 import { goldTierFor, isGoldSource, type GoldSource } from "./gold.ts";
 import { hearingCueSchema, EMOTIONS, type CueEmotion, type HearingCue } from "./schema.ts";
 import { aggregateEngineUse, type EngineUseStats } from "./select.ts";
+import type { EvalScoreRow } from "./eval-compare.ts";
 import {
   parseAcousticTags,
   parsePartialAcousticTags,
@@ -442,6 +443,127 @@ export async function engineUseStats(sql: Sql, window: "7d" | "all"): Promise<En
           group by 1, 2
         `;
   return aggregateEngineUse(rows);
+}
+
+export async function listEvalClipIds(sql: Sql, limit?: number | null): Promise<string[]> {
+  const cap =
+    typeof limit === "number" && Number.isFinite(limit) && limit > 0 ? Math.min(2000, Math.floor(limit)) : 0;
+  const rows = cap
+    ? await sql.query<{ id: string }>(
+        `select id from qingran_hearing_clips
+         where gold_source is not null
+           and (audio_wav is not null or blob_pathname is not null)
+         order by coalesce(gold_at, created_at) desc, id desc
+         limit $1`,
+        [cap],
+      )
+    : await sql<{ id: string }>`
+        select id from qingran_hearing_clips
+        where gold_source is not null
+          and (audio_wav is not null or blob_pathname is not null)
+        order by coalesce(gold_at, created_at) desc, id desc
+      `;
+  return rows.map((row) => row.id);
+}
+
+export async function evalClipAudioRow(sql: Sql, clipId: string) {
+  const rows = await sql<{ audio_wav: string | null; blob_pathname: string | null }>`
+    select audio_wav, blob_pathname from qingran_hearing_clips where id = ${clipId}
+  `;
+  return rows[0] ?? null;
+}
+
+export async function upsertEvalRun(
+  sql: Sql,
+  input: {
+    id: string;
+    clipId: string;
+    engine: string;
+    text: string;
+    tags: AcousticTags | null;
+    latencyMs: number | null;
+    status: string;
+    error: string | null;
+  },
+): Promise<void> {
+  await sql`
+    insert into qingran_eval_runs (id, clip_id, engine, text, tags, latency_ms, status, error)
+    values (
+      ${input.id},
+      ${input.clipId},
+      ${input.engine},
+      ${input.text},
+      ${input.tags ? JSON.stringify(input.tags) : null}::jsonb,
+      ${input.latencyMs},
+      ${input.status},
+      ${input.error}
+    )
+    on conflict (clip_id, engine) do update set
+      text = excluded.text,
+      tags = excluded.tags,
+      latency_ms = excluded.latency_ms,
+      status = excluded.status,
+      error = excluded.error,
+      created_at = now()
+  `;
+}
+
+export async function listEvalScoreRows(
+  sql: Sql,
+  input: { clipIds?: string[]; engines?: string[] } = {},
+): Promise<EvalScoreRow[]> {
+  const rows = await sql<{
+    clip_id: string;
+    engine: string;
+    text: string | null;
+    tags: unknown;
+    latency_ms: number | null;
+    status: string;
+    gold_text: string | null;
+    gold_tags: unknown;
+    tags_touched: string[] | null;
+  }>`
+    select r.clip_id, r.engine, r.text, r.tags, r.latency_ms, r.status,
+           c.gold_text, c.gold_tags, c.tags_touched
+    from qingran_eval_runs r
+    join qingran_hearing_clips c on c.id = r.clip_id
+    where c.gold_source is not null
+  `;
+  const clipSet = input.clipIds ? new Set(input.clipIds) : null;
+  const engineSet = input.engines ? new Set(input.engines) : null;
+  return rows
+    .filter((row) => (!clipSet || clipSet.has(row.clip_id)) && (!engineSet || engineSet.has(row.engine)))
+    .map((row) => ({
+      engine: row.engine,
+      text: row.text ?? "",
+      tags: parseAcousticTags(row.tags),
+      latencyMs: row.latency_ms,
+      status: row.status,
+      goldText: row.gold_text ?? "",
+      goldTags: parsePartialAcousticTags(row.gold_tags),
+      tagsTouched: parseTagKeys(row.tags_touched),
+    }));
+}
+
+export async function listEvalRunExportRows(sql: Sql) {
+  return sql<{
+    id: string;
+    clip_id: string;
+    engine: string;
+    text: string | null;
+    tags: unknown;
+    latency_ms: number | null;
+    status: string;
+    error: string | null;
+    created_at: string;
+    gold_text: string | null;
+  }>`
+    select r.id, r.clip_id, r.engine, r.text, r.tags, r.latency_ms, r.status, r.error,
+           r.created_at::text as created_at, c.gold_text
+    from qingran_eval_runs r
+    join qingran_hearing_clips c on c.id = r.clip_id
+    order by r.created_at desc, r.id desc
+  `;
 }
 
 export async function listMigrationNames(sql: Sql): Promise<string[]> {

@@ -6,17 +6,22 @@ import { ConfirmTurn } from "@/components/lover/confirm-turn";
 import {
   confirmHearingClip,
   deleteHearingClip,
+  exportEvalCompare,
   exportHearingClips,
   exportReplyFlags,
   getHearingClipAudio,
+  hearingEvalCompare,
   hearingLabScore,
   listLabeledHearingClips,
   listReplyFlags,
+  runEngineEvalBatch,
   unlabelHearingClip,
   unlockHearingLab,
+  type EngineEvalScore,
   type LabeledClipRow,
   type ReplyFlagRow,
 } from "@/lib/lover/hearing/store";
+import { HEARING_PROVIDERS, type HearingProviderId } from "@/lib/lover/hearing/config";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
 import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/score";
 import { formatEngineMix } from "@/lib/lover/hearing/select";
@@ -26,6 +31,20 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/lab")({ component: HearingLabPage });
 
 const LAB_KEY = "qingran-hearing-lab";
+
+const ENGINE_LABEL: Record<HearingProviderId, string> = {
+  xai: "xAI",
+  qwen: "Qwen",
+  gemini: "Gemini",
+  selfhost: "自建",
+};
+
+const FAIL_LABEL = {
+  hard_refusal: "硬拒答",
+  soft_refusal: "软拒答",
+  timeout: "超时",
+  error: "报错",
+} as const;
 
 const EMOTION_LABEL: Record<CueEmotion, string> = {
   coy: "撒娇",
@@ -101,6 +120,16 @@ function HearingLabPage() {
   const [labeledPage, setLabeledPage] = useState(1);
   const labeledPageSize = 30;
   const [flags, setFlags] = useState<ReplyFlagRow[]>([]);
+  const [evalEngines, setEvalEngines] = useState<Record<HearingProviderId, boolean>>({
+    xai: true,
+    qwen: true,
+    gemini: true,
+    selfhost: true,
+  });
+  const [evalLimit, setEvalLimit] = useState("");
+  const [evalRunning, setEvalRunning] = useState(false);
+  const [evalProgress, setEvalProgress] = useState<{ done: number; total: number } | null>(null);
+  const [evalScores, setEvalScores] = useState<EngineEvalScore[] | null>(null);
 
   async function loadFlags(secret = password) {
     try {
@@ -285,6 +314,77 @@ function HearingLabPage() {
             </div>
             <ScoreCard score={score} />
           </section>
+
+          <EngineCompare
+            engines={evalEngines}
+            limit={evalLimit}
+            running={evalRunning}
+            progress={evalProgress}
+            scores={evalScores}
+            onToggle={(id) => setEvalEngines((cur) => ({ ...cur, [id]: !cur[id] }))}
+            onLimit={setEvalLimit}
+            onRun={async () => {
+              const selected = HEARING_PROVIDERS.filter((id) => evalEngines[id]);
+              if (!selected.length) {
+                setStatus("请选择引擎。");
+                return;
+              }
+              const limit = evalLimit.trim() ? Number(evalLimit) : undefined;
+              if (evalLimit.trim() && (!Number.isFinite(limit) || (limit ?? 0) < 1)) {
+                setStatus("最近 N 条要填正整数，或者留空表示全部。");
+                return;
+              }
+              setEvalRunning(true);
+              setStatus(null);
+              setEvalProgress({ done: 0, total: 0 });
+              try {
+                let offset = 0;
+                let done = false;
+                let total = 0;
+                while (!done) {
+                  const next = await runEngineEvalBatch({
+                    data: { password, engines: selected, limit: limit || null, offset },
+                  });
+                  if (!next.ok) {
+                    setStatus(next.error);
+                    return;
+                  }
+                  offset = next.nextOffset;
+                  done = next.done;
+                  total = next.total;
+                  setEvalProgress({ done: Math.min(offset, next.total), total: next.total });
+                  const scored = await hearingEvalCompare({
+                    data: { password, engines: selected, limit: limit || null },
+                  });
+                  if (scored.ok) setEvalScores(scored.engines);
+                }
+                setStatus(total === 0 ? "没有可对比的已标注录音。" : "对比跑完了。");
+              } catch (err) {
+                setStatus(err instanceof Error ? err.message : String(err));
+              } finally {
+                setEvalRunning(false);
+              }
+            }}
+            onExport={async () => {
+              try {
+                const selected = HEARING_PROVIDERS.filter((id) => evalEngines[id]);
+                const limit = evalLimit.trim() ? Number(evalLimit) : undefined;
+                const exported = await exportEvalCompare({
+                  data: { password, engines: selected, limit: limit || null },
+                });
+                const blob = new Blob([`${JSON.stringify(exported)}\n`], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `qingran-engine-eval-${new Date().toISOString().slice(0, 10)}.json`;
+                link.click();
+                URL.revokeObjectURL(url);
+                setStatus("已导出引擎对比 JSON。");
+              } catch (err) {
+                setStatus(err instanceof Error ? err.message : String(err));
+              }
+            }}
+          />
 
           <section>
             <p className="mb-2 font-display text-lg">最差 20 条</p>
@@ -548,6 +648,123 @@ function HearingLabPage() {
           }
         }}
       />
+    </div>
+  );
+}
+
+function EngineCompare({
+  engines,
+  limit,
+  running,
+  progress,
+  scores,
+  onToggle,
+  onLimit,
+  onRun,
+  onExport,
+}: {
+  engines: Record<HearingProviderId, boolean>;
+  limit: string;
+  running: boolean;
+  progress: { done: number; total: number } | null;
+  scores: EngineEvalScore[] | null;
+  onToggle: (id: HearingProviderId) => void;
+  onLimit: (value: string) => void;
+  onRun: () => void;
+  onExport: () => void;
+}) {
+  return (
+    <section className="rounded-md bg-surface-2 px-3 py-3">
+      <p className="mb-2 font-display text-lg">引擎对比</p>
+      <p className="mb-3 text-xs text-subtle">只读已标注录音，不改对话。每次 10 条，同一 clip 同一引擎再跑会覆盖。</p>
+      <div className="mb-3 flex flex-wrap gap-2">
+        {HEARING_PROVIDERS.map((id) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={engines[id]}
+            onClick={() => onToggle(id)}
+            className={cn(
+              "min-h-11 rounded-md px-3 text-sm",
+              engines[id] ? "bg-accent text-accent-fg" : "bg-bg text-muted",
+            )}
+          >
+            {ENGINE_LABEL[id]}
+          </button>
+        ))}
+      </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Input
+          value={limit}
+          onChange={(e) => onLimit(e.target.value)}
+          inputMode="numeric"
+          placeholder="最近 N 条，空=全部"
+          aria-label="最近 N 条"
+          className="max-w-[11rem]"
+        />
+        <Button type="button" disabled={running} onClick={onRun}>
+          {running ? "正在跑…" : "开始对比"}
+        </Button>
+        <Button type="button" variant="outline" disabled={running} onClick={onExport}>
+          导出对比 JSON
+        </Button>
+      </div>
+      {progress ? (
+        <p className="mb-3 text-sm text-subtle">
+          {progress.total === 0 ? "没有可对比的录音。" : `已跑 ${progress.done} / ${progress.total}`}
+        </p>
+      ) : null}
+      {scores?.length ? (
+        <div className="flex flex-col gap-4">
+          {scores.map((row) => (
+            <EngineEvalCard key={row.engine} score={row} />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function EngineEvalCard({ score }: { score: EngineEvalScore }) {
+  const engine = (HEARING_PROVIDERS as readonly string[]).includes(score.engine)
+    ? ENGINE_LABEL[score.engine as HearingProviderId]
+    : score.engine;
+  return (
+    <div className="rounded-md bg-bg px-3 py-3">
+      <p className="mb-2 font-medium">{engine}</p>
+      <dl className="flex flex-col gap-2 text-sm">
+        <Row label="CER" value={score.n === 0 ? "无数据" : fmtCer(score.cer)} main />
+        <Row label="完全正确率" value={fmtPct(score.exactMatch)} />
+        <Row
+          label="拒答率"
+          value={
+            score.n === 0
+              ? "无数据"
+              : (Object.keys(FAIL_LABEL) as (keyof typeof FAIL_LABEL)[])
+                  .map((key) => `${FAIL_LABEL[key]} ${fmtPct(score.refusals[key] / score.n)}`)
+                  .join(" · ")
+          }
+        />
+        <Row label={`声学标签 · ${TAG_LABELS.length}`} value={fmtPct(score.tagAccuracy.length)} />
+        <Row label={`声学标签 · ${TAG_LABELS.contour}`} value={fmtPct(score.tagAccuracy.contour)} />
+        <Row label={`声学标签 · ${TAG_LABELS.voice}`} value={fmtPct(score.tagAccuracy.voice)} />
+        {TAG_EVENT_VALUES.map((event) => (
+          <Row
+            key={event}
+            label={`声学标签 · ${TAG_VALUE_LABELS.events[event]}`}
+            value={fmtEventPr(score.tagAccuracy.events[event])}
+          />
+        ))}
+        <Row
+          label="延迟"
+          value={
+            score.latencyP50 == null
+              ? "无数据"
+              : `p50 ${Math.round(score.latencyP50)}ms · p95 ${Math.round(score.latencyP95 ?? score.latencyP50)}ms`
+          }
+        />
+        <Row label="条数" value={`${score.okN} 成功 / ${score.n}`} />
+      </dl>
     </div>
   );
 }
