@@ -196,6 +196,8 @@ test("lab page is score card, worst 20, and hash export only", () => {
 test("lab engine compare is password-gated, batches of 10, and does not write live turns", () => {
   const src = readFileSync(new URL("../../../routes/lab.tsx", import.meta.url), "utf8");
   assert.match(src, /引擎对比/);
+  assert.match(src, /引擎自检/);
+  assert.match(src, /hearingConnectionTest/);
   assert.match(src, /runEngineEvalBatch/);
   assert.match(src, /hearingEvalCompare/);
   assert.match(src, /exportEvalCompare/);

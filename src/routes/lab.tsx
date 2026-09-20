@@ -17,6 +17,7 @@ import {
   runEngineEvalBatch,
   unlabelHearingClip,
   unlockHearingLab,
+  hearingConnectionTest,
   type EngineEvalScore,
   type LabeledClipRow,
   type ReplyFlagRow,
@@ -314,6 +315,8 @@ function HearingLabPage() {
             </div>
             <ScoreCard score={score} />
           </section>
+
+          <EngineProbe password={password} />
 
           <EngineCompare
             engines={evalEngines}
@@ -649,6 +652,55 @@ function HearingLabPage() {
         }}
       />
     </div>
+  );
+}
+
+function EngineProbe({ password }: { password: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<
+    { id: HearingProviderId; ok: boolean; latency_ms: number; error?: string }[] | null
+  >(null);
+
+  return (
+    <section className="rounded-md bg-surface-2 px-3 py-3">
+      <p className="mb-2 font-display text-lg">引擎自检</p>
+      <p className="mb-3 text-xs text-subtle">对各引擎发 1 秒测试音频。不写对话、不改标注。</p>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          setError(null);
+          void hearingConnectionTest({ data: { password } })
+            .then((result) => {
+              setRows(result.engines as { id: HearingProviderId; ok: boolean; latency_ms: number; error?: string }[]);
+            })
+            .catch((err) => {
+              setRows(null);
+              const message = err instanceof Error ? err.message : String(err);
+              setError(message === "lab-locked" ? "密码不对。" : message);
+            })
+            .finally(() => setBusy(false));
+        }}
+      >
+        {busy ? "正在自检…" : "引擎自检"}
+      </Button>
+      {error ? <p className="mt-2 text-sm text-subtle">{error}</p> : null}
+      {rows ? (
+        <ul className="mt-3 flex flex-col gap-2">
+          {rows.map((row) => (
+            <li key={row.id} className="text-sm leading-relaxed">
+              <span>
+                {ENGINE_LABEL[row.id]} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
+              </span>
+              {!row.ok && row.error ? <span className="mt-1 block break-all text-xs text-subtle">{row.error}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 

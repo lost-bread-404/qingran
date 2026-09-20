@@ -64,6 +64,11 @@ export function clipFallbackRaw(raw?: string | null): string | null {
   return raw.slice(0, 2000);
 }
 
+export function wavDataUri(audioBase64: string): string {
+  if (/^data:/i.test(audioBase64)) return audioBase64;
+  return `data:audio/wav;base64,${audioBase64}`;
+}
+
 export async function hearWithQwen(audioBase64: string, opts?: HearingCallOpts): Promise<AdapterOutcome> {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   const model = HEARING.qwen.model;
@@ -75,6 +80,7 @@ export async function hearWithQwen(audioBase64: string, opts?: HearingCallOpts):
     apiKey,
     audioBase64,
     audioStyle: "input_audio",
+    dataUri: true,
     extra: { modalities: ["text"], stream_options: { include_usage: true } },
     preferStream: true,
     requireStream: true,
@@ -90,32 +96,8 @@ export async function hearWithGemini(audioBase64: string, opts?: HearingCallOpts
   const started = Date.now();
   const timeout = hearingTimeoutMs();
   try {
-    const res = await fetch(`${HEARING.gemini.generateUrl}?key=${encodeURIComponent(apiKey)}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: hearingSystemPrompt(opts) }] },
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { inline_data: { mime_type: "audio/wav", data: audioBase64 } },
-              { text: USER_PROMPT },
-            ],
-          },
-        ],
-        safetySettings: GEMINI_SAFETY_SETTINGS,
-        generationConfig: {
-          responseMimeType: "application/json",
-          maxOutputTokens: 800,
-          thinkingConfig: { thinkingLevel: "low" },
-        },
-      }),
-      signal: AbortSignal.timeout(timeout),
-    });
+    let res = await postGemini(apiKey, audioBase64, opts, timeout);
+    if (res.status === 503) res = await postGemini(apiKey, audioBase64, opts, timeout);
     const latency_ms = Date.now() - started;
     const rawText = await res.text().catch(() => "");
     const body = parseJsonBody(rawText) as {
@@ -160,6 +142,40 @@ export async function hearWithGemini(audioBase64: string, opts?: HearingCallOpts
   } catch (err) {
     return failFromError("gemini", model, started, err);
   }
+}
+
+async function postGemini(
+  apiKey: string,
+  audioBase64: string,
+  opts: HearingCallOpts | undefined,
+  timeout: number,
+): Promise<Response> {
+  return fetch(`${HEARING.gemini.generateUrl}?key=${encodeURIComponent(apiKey)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: hearingSystemPrompt(opts) }] },
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inline_data: { mime_type: "audio/wav", data: audioBase64 } },
+            { text: USER_PROMPT },
+          ],
+        },
+      ],
+      safetySettings: GEMINI_SAFETY_SETTINGS,
+      generationConfig: {
+        responseMimeType: "application/json",
+        maxOutputTokens: 800,
+        thinkingConfig: { thinkingLevel: "low" },
+      },
+    }),
+    signal: AbortSignal.timeout(timeout),
+  });
 }
 
 export async function hearWithSelfhost(audioBase64: string, opts?: HearingCallOpts): Promise<AdapterOutcome> {
@@ -243,6 +259,7 @@ async function openaiAudioChat(input: {
   requireStream?: boolean;
   omitTemperature?: boolean;
   audioStyle: "input_audio" | "audio_url";
+  dataUri?: boolean;
   opts?: HearingCallOpts;
 }): Promise<AdapterOutcome> {
   const started = Date.now();
@@ -257,7 +274,7 @@ async function openaiAudioChat(input: {
         role: "user",
         content: [
           { type: "text", text: USER_PROMPT },
-          audioPart(input.audioBase64, input.audioStyle),
+          audioPart(input.audioBase64, input.audioStyle, input.dataUri),
         ],
       },
     ],
@@ -322,16 +339,16 @@ async function openaiAudioChat(input: {
   }
 }
 
-function audioPart(audioBase64: string, style: "input_audio" | "audio_url") {
+function audioPart(audioBase64: string, style: "input_audio" | "audio_url", dataUri = false) {
   if (style === "audio_url") {
     return {
       type: "audio_url",
-      audio_url: { url: `data:audio/wav;base64,${audioBase64}` },
+      audio_url: { url: wavDataUri(audioBase64) },
     };
   }
   return {
     type: "input_audio",
-    input_audio: { data: audioBase64, format: "wav" },
+    input_audio: { data: dataUri ? wavDataUri(audioBase64) : audioBase64, format: "wav" },
   };
 }
 

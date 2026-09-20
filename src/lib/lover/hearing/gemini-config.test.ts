@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { DEFAULT_HEARING_TIMEOUT_MS } from "./config.ts";
+import { wavDataUri } from "./http.ts";
 
 test("Gemini 3.8 Flash generationConfig omits temperature and keeps thinkingLevel low", () => {
   const src = readFileSync(new URL("./http.ts", import.meta.url), "utf8");
@@ -10,6 +11,18 @@ test("Gemini 3.8 Flash generationConfig omits temperature and keeps thinkingLeve
   assert.doesNotMatch(gemini, /topP|top_p|topK|top_k|candidateCount|candidate_count/);
   assert.match(gemini, /thinkingLevel:\s*["']low["']/);
   assert.match(gemini, /status:\s*res\.status/);
+  assert.match(gemini, /res\.status === 503/);
+  assert.doesNotMatch(gemini, /429/);
+});
+
+test("Qwen Omni sends input_audio as a wav data URI", () => {
+  assert.equal(wavDataUri("abc"), "data:audio/wav;base64,abc");
+  assert.equal(wavDataUri("data:audio/wav;base64,abc"), "data:audio/wav;base64,abc");
+  const src = readFileSync(new URL("./http.ts", import.meta.url), "utf8");
+  const qwen = src.slice(src.indexOf("export async function hearWithQwen"), src.indexOf("export async function hearWithGemini"));
+  assert.match(qwen, /dataUri:\s*true/);
+  assert.match(src, /data:audio\/wav;base64,\$\{/);
+  assert.match(src, /format:\s*["']wav["']/);
 });
 
 test("Qwen Omni always streams and never retries without stream", () => {
