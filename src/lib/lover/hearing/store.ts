@@ -683,6 +683,7 @@ export const hearingLabScore = createServerFn({ method: "POST" })
           xaiText: row.xai_text ?? "",
           liveText: row.live_text ?? "",
           goldText: row.gold_text ?? "",
+          goldSource: row.gold_source,
           noiseOnly: Boolean(row.noise_only),
           utteranceEmotion: row.utterance_emotion,
           literalMismatch: Boolean(row.literal_mismatch),

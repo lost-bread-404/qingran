@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { historyForQingran } from "../pair-messages.ts";
 import type { ChatMessage } from "../types.ts";
 import { UNRECOGNIZED_TEXT } from "./heard.ts";
-import { planConfirmSave, shouldResendAfterConfirm } from "./confirm-resend.ts";
+import {
+  confirmKind,
+  confirmNoiseOnly,
+  displayConfirmText,
+  goldTextForSave,
+  planConfirmSave,
+  shouldResendAfterConfirm,
+} from "./confirm-resend.ts";
 
 function chat(): ChatMessage[] {
   return [
@@ -115,4 +123,61 @@ test("tag-only or empty gold does not resend", () => {
     shouldResendAfterConfirm({ goldText: "新A", previousText: "旧A", noiseOnly: false, isLastUser: false }),
     false,
   );
+});
+
+test("empty gold means no speech: keep gold empty, show 未识别, stay out of history", () => {
+  assert.equal(goldTextForSave(""), "");
+  assert.equal(goldTextForSave("   "), "");
+  assert.equal(goldTextForSave(UNRECOGNIZED_TEXT), "");
+  assert.equal(goldTextForSave("嗯"), "嗯");
+  assert.equal(displayConfirmText(""), UNRECOGNIZED_TEXT);
+  assert.equal(confirmKind({ noiseOnly: false, goldText: "" }), "unheard");
+
+  const messages = chat();
+  const last = planConfirmSave(messages, messages[2]!, { goldText: "", noiseOnly: false });
+  assert.equal(last.shouldResend, false);
+  assert.equal(last.updated.text, UNRECOGNIZED_TEXT);
+  assert.equal(last.updated.kind, "unheard");
+  assert.deepEqual(
+    last.removed.map((m) => m.id),
+    ["b1"],
+  );
+  const next = [messages[0]!, messages[1]!, last.updated];
+  assert.deepEqual(
+    historyForQingran(next).map((m) => m.id),
+    ["A", "a1"],
+  );
+
+  const earlier = planConfirmSave(messages, messages[0]!, { goldText: "", noiseOnly: false });
+  assert.equal(earlier.shouldResend, false);
+  assert.deepEqual(earlier.removed, []);
+  assert.equal(earlier.updated.text, UNRECOGNIZED_TEXT);
+  assert.equal(earlier.updated.kind, "unheard");
+});
+
+test("empty gold auto-selects noise when no event is tagged", () => {
+  assert.equal(confirmNoiseOnly({ goldText: "", noiseOnly: false }), true);
+  assert.equal(confirmNoiseOnly({ goldText: "  ", noiseOnly: false, events: [] }), true);
+  assert.equal(confirmNoiseOnly({ goldText: UNRECOGNIZED_TEXT, noiseOnly: false }), true);
+  assert.equal(confirmNoiseOnly({ goldText: "", noiseOnly: false, events: ["laugh"] }), false);
+  assert.equal(confirmNoiseOnly({ goldText: "嗯", noiseOnly: false }), false);
+  assert.equal(confirmNoiseOnly({ goldText: "嗯", noiseOnly: true }), true);
+  const last = planConfirmSave(chat(), chat()[2]!, {
+    goldText: "",
+    noiseOnly: false,
+    events: ["laugh"],
+  });
+  assert.equal(last.shouldResend, false);
+  assert.equal(last.updated.kind, "unheard");
+  assert.deepEqual(
+    last.removed.map((m) => m.id),
+    ["b1"],
+  );
+});
+
+test("confirm save does not fall back empty gold to the original bubble text", () => {
+  const src = readFileSync(new URL("./confirm-resend.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /goldText\.trim\(\)\s*\|\|\s*msg\.text/);
+  assert.match(src, /goldTextForSave/);
+  assert.match(src, /dropReply/);
 });

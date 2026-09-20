@@ -926,6 +926,7 @@ export function VoiceRoom() {
       const plan = planConfirmSave(chatRef.current, msg, {
         goldText: input.goldText,
         noiseOnly: input.noiseOnly,
+        events: input.goldTags.events,
       });
       const updated: ChatMessage = { ...plan.updated, hearingGold: "confirmed" };
       confirmOpenRef.current = false;
@@ -933,8 +934,22 @@ export function VoiceRoom() {
       if (plan.shouldResend) {
         void replayFrom(updated);
       } else {
+        if (plan.removed.length) {
+          abortRef.current?.abort();
+          abortRef.current = null;
+          turnRef.current += 1;
+          busyRef.current = false;
+          stopPlayback();
+          setStatus("idle");
+          inflightRef.current = null;
+          speakingIdRef.current = null;
+          void deleteRoomMessages({ data: { ids: plan.removed.map((m) => m.id) } });
+        }
         void updateRoomMessage({ data: updated });
-        setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
+        setMessages((prev) => {
+          const drop = new Set(plan.removed.map((m) => m.id));
+          return prev.filter((m) => !drop.has(m.id)).map((m) => (m.id === msg.id ? updated : m));
+        });
       }
     } catch (err) {
       setConfirmError(err instanceof Error ? err.message : String(err));

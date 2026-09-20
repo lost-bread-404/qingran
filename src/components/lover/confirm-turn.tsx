@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
+import { goldTextForSave, confirmNoiseOnly } from "@/lib/lover/hearing/confirm-resend";
 import { cn } from "@/lib/utils";
 import {
   EVENT_CHIP_LABELS,
@@ -111,7 +112,12 @@ export function ConfirmTurn({
 
   if (!open) return null;
 
-  const edited = draft.trim() !== sttText.trim();
+  const goldText = goldTextForSave(draft);
+  const nextNoise = confirmNoiseOnly({
+    goldText: draft,
+    noiseOnly,
+    events: chosen.events,
+  });
 
   return (
     <div
@@ -227,11 +233,11 @@ export function ConfirmTurn({
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              aria-pressed={noiseOnly}
+              aria-pressed={nextNoise}
               onClick={() => setNoiseOnly((cur) => !cur)}
               className={cn(
                 "min-h-11 rounded-md px-3 text-sm",
-                noiseOnly ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                nextNoise ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
               )}
             >
               噪音
@@ -278,9 +284,9 @@ export function ConfirmTurn({
                 const nextPredicted = initialPredicted ?? {};
                 const touched = tagsTouched(nextPredicted, chosen);
                 void onConfirm({
-                  goldText: draft.trim(),
-                  source: edited ? "edited" : "confirmed",
-                  noiseOnly,
+                  goldText,
+                  source: !goldText || goldText !== sttText.trim() ? "edited" : "confirmed",
+                  noiseOnly: nextNoise,
                   literalMismatch,
                   toneNote: toneNote.trim(),
                   goldTags: goldTagsFromTouched(chosen, touched),

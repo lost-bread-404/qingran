@@ -49,6 +49,9 @@ test("confirm panel keeps 噪音 and 字面≠意思, plus acoustic chips", () =
   assert.doesNotMatch(src, /<audio[^>]*muted/);
   assert.match(src, /未预测/);
   assert.match(src, /chosen\.events === undefined/);
+  assert.match(src, /goldTextForSave/);
+  assert.match(src, /confirmNoiseOnly/);
+  assert.match(src, /source: !goldText \|\| goldText !== sttText\.trim\(\) \? "edited" : "confirmed"/);
 });
 
 test("transcript has 👎 below the reply, 24pt from play, both 44pt", () => {
@@ -100,6 +103,9 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   const save = src.slice(src.indexOf("async function saveConfirm"), src.indexOf("async function saveConfirmQuick"));
   assert.match(save, /void replayFrom/);
   assert.doesNotMatch(save, /await replayFrom/);
+  assert.match(save, /plan\.removed/);
+  assert.match(save, /deleteRoomMessages/);
+  assert.doesNotMatch(save, /input\.goldText\.trim\(\) \|\| msg\.text/);
   assert.match(src, /正在想/);
   assert.match(src, /TALK_FAIL\.empty/);
   assert.match(src, /talkTrace/);

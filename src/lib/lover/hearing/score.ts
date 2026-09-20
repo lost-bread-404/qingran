@@ -11,6 +11,7 @@ export type ScoreClip = {
   xaiText: string;
   liveText: string;
   goldText: string;
+  goldSource?: string | null;
   noiseOnly: boolean;
   utteranceEmotion: string | null;
   literalMismatch?: boolean;
@@ -76,7 +77,7 @@ export function scoreHearing(
   const window = input.window ?? "all";
   const now = input.now ?? Date.now();
   const rows = clips.filter((clip) => inScoreWindow(clip.createdAt, window, now));
-  const golded = rows.filter((clip) => clip.goldText.trim().length > 0);
+  const golded = rows.filter(isGoldLabeled);
   const liveGolded = golded.filter((clip) => clip.liveText.trim().length > 0);
   const liveEmptyRate = golded.length
     ? golded.filter((clip) => !clip.liveText.trim()).length / golded.length
@@ -126,6 +127,11 @@ export function scoreHearing(
     engineUse: input.engineUse ?? emptyEngineUse(),
     worst,
   };
+}
+
+function isGoldLabeled(clip: ScoreClip): boolean {
+  if (clip.goldSource) return true;
+  return clip.goldText.trim().length > 0;
 }
 
 function mean(values: number[]): number | null {

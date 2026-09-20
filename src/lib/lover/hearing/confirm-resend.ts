@@ -10,10 +10,30 @@ export function lastUserMessage<T extends { id: string; role?: string; kind?: st
   return null;
 }
 
+export function goldTextForSave(raw: string): string {
+  const text = raw.trim();
+  if (!text || text === UNRECOGNIZED_TEXT) return "";
+  return text;
+}
+
+export function displayConfirmText(goldText: string): string {
+  return goldTextForSave(goldText) || UNRECOGNIZED_TEXT;
+}
+
+export function confirmNoiseOnly(input: {
+  goldText: string;
+  noiseOnly: boolean;
+  events?: readonly string[] | null;
+}): boolean {
+  if (input.noiseOnly) return true;
+  if (goldTextForSave(input.goldText)) return false;
+  return !input.events?.length;
+}
+
 export function confirmKind(input: { noiseOnly: boolean; goldText: string }): "unheard" | "say" {
   if (input.noiseOnly) return "unheard";
-  const text = input.goldText.trim();
-  if (!text || text === UNRECOGNIZED_TEXT) return "unheard";
+  const text = goldTextForSave(input.goldText);
+  if (!text) return "unheard";
   return "say";
 }
 
@@ -24,7 +44,7 @@ export function shouldResendAfterConfirm(input: {
   isLastUser: boolean;
 }): boolean {
   if (!input.isLastUser || input.noiseOnly) return false;
-  const next = input.goldText.trim();
+  const next = goldTextForSave(input.goldText);
   if (!next) return false;
   return next !== input.previousText.trim();
 }
@@ -42,20 +62,27 @@ export function sliceAfterMessage<T extends { id: string }>(messages: T[], id: s
 export function planConfirmSave<T extends { id: string; role?: string; kind?: string; text: string }>(
   messages: T[],
   msg: T,
-  input: { goldText: string; noiseOnly: boolean },
+  input: { goldText: string; noiseOnly: boolean; events?: readonly string[] | null },
 ): { updated: T; shouldResend: boolean; removed: T[] } {
-  const goldText = input.goldText.trim() || msg.text;
+  const goldText = goldTextForSave(input.goldText);
+  const noiseOnly = confirmNoiseOnly({
+    goldText: input.goldText,
+    noiseOnly: input.noiseOnly,
+    events: input.events,
+  });
   const updated = {
     ...msg,
-    text: goldText,
-    kind: confirmKind({ noiseOnly: input.noiseOnly, goldText }),
+    text: displayConfirmText(goldText),
+    kind: confirmKind({ noiseOnly, goldText }),
   };
+  const isLastUser = lastUserMessage(messages)?.id === msg.id;
   const shouldResend = shouldResendAfterConfirm({
     goldText,
     previousText: msg.text,
-    noiseOnly: input.noiseOnly,
-    isLastUser: lastUserMessage(messages)?.id === msg.id,
+    noiseOnly,
+    isLastUser,
   });
-  const sliced = shouldResend ? sliceAfterMessage(messages, msg.id) : null;
+  const dropReply = Boolean(isLastUser && !shouldResend && !goldText);
+  const sliced = shouldResend || dropReply ? sliceAfterMessage(messages, msg.id) : null;
   return { updated, shouldResend, removed: sliced?.removed ?? [] };
 }

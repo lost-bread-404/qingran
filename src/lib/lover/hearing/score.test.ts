@@ -126,6 +126,20 @@ test("unlabeled clips drop out of the score card; re-edit updates exactMatch", (
   assert.equal(reedited.cerFinal, 0);
 });
 
+test("labeled empty gold vs nonempty hyp is CER 1", () => {
+  assert.equal(cer("", "谢谢观看"), 1);
+  assert.equal(cer("", ""), 0);
+  const scored = scoreHearing([
+    clip({ id: "a", goldText: "", goldSource: "edited", finalText: "谢谢观看" }),
+    clip({ id: "b", goldText: "嗯", goldSource: "confirmed", finalText: "嗯" }),
+  ]);
+  assert.equal(scored.goldN, 2);
+  assert.equal(scored.cerFinal, 0.5);
+  assert.equal(scored.worst[0]?.id, "a");
+  assert.equal(scored.worst[0]?.cer, 1);
+  assert.equal(scored.exactMatch, 0.5);
+});
+
 test("id hash split is stable and roughly 80/20", () => {
   assert.equal(hashSplit("clip-1"), hashSplit("clip-1"));
   const ids = Array.from({ length: 200 }, (_, i) => `id-${i}`);

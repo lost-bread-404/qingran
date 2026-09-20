@@ -360,6 +360,7 @@ export async function listScoreClipRows(sql: Sql) {
     xai_text: string | null;
     live_text: string | null;
     gold_text: string | null;
+    gold_source: string | null;
     stt_text: string | null;
     hearing_text: string | null;
     noise_only: boolean | null;
@@ -372,7 +373,7 @@ export async function listScoreClipRows(sql: Sql) {
     tags_touched: string[] | null;
   }>(
     `select id, created_at::text as created_at,
-            final_text, xai_text, live_text, gold_text, stt_text, hearing_text,
+            final_text, xai_text, live_text, gold_text, gold_source, stt_text, hearing_text,
             noise_only, utterance_emotion, literal_mismatch, tone_note, turn_id,
             predicted_tags, gold_tags, tags_touched
      from qingran_hearing_clips

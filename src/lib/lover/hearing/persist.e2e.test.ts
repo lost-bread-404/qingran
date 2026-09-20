@@ -275,6 +275,86 @@ test("PGLite e2e: predicted tags, tags_touched gold, ✓ keeps tags, reply flags
   assert.equal(exported.flags[0]?.promptHash, "deadbeefcafe");
 });
 
+test("PGLite e2e: empty gold is labeled no-speech, not a fallback to STT", async () => {
+  const pg = new PGlite();
+  await pg.waitReady;
+  await pg.exec(
+    "create table if not exists _migrations (name text primary key, applied_at timestamptz not null default now())",
+  );
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations");
+  const entries = await readdir(dir);
+  const files = Object.fromEntries(
+    await Promise.all(
+      entries
+        .filter((name) => name.endsWith(".sql"))
+        .map(async (name) => [name, await readFile(join(dir, name), "utf8")] as const),
+    ),
+  );
+  for (const { name } of pendingMigrations(Object.keys(files), [])) {
+    await pg.exec(files[name] ?? "");
+    await pg.query("insert into _migrations (name) values ($1)", [name]);
+  }
+
+  const sql = toSql(async <T>(text: string, params: unknown[]) => {
+    const result = await pg.query<T>(text, params);
+    return result.rows;
+  });
+
+  await insertClipRow(sql, {
+    id: "clip-empty",
+    durationMs: 400,
+    source: "real",
+    audioWav: silenceWavBase64(0.4),
+    xaiText: "谢谢观看",
+    hearingText: "谢谢观看",
+    hearingJson: null,
+    liveText: "",
+    storageBackend: "db",
+    sttText: "谢谢观看",
+    turnId: "turn-empty",
+    disagreement: false,
+    finalText: "谢谢观看",
+  });
+
+  const confirmed = await confirmClipByTurn(sql, {
+    turnId: "turn-empty",
+    goldText: "",
+    goldSource: "edited",
+    noiseOnly: true,
+  });
+  assert.equal(confirmed.ok, true);
+  assert.equal(await goldCount(sql), 1);
+  const labeled = await listLabeledClipRows(sql, 1);
+  assert.equal(labeled.clips[0]?.goldText, "");
+  assert.equal(labeled.clips[0]?.goldSource, "edited");
+  assert.equal(labeled.clips[0]?.noiseOnly, true);
+  const raw = await sql<{ gold_text: string | null; gold_source: string | null }>`
+    select gold_text, gold_source from qingran_hearing_clips where id = 'clip-empty'
+  `;
+  assert.equal(raw[0]?.gold_text, "");
+  assert.equal(raw[0]?.gold_source, "edited");
+
+  const scored = await listScoreClipRows(sql);
+  const card = scoreHearing(
+    scored.map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      finalText: row.final_text ?? "",
+      xaiText: row.xai_text ?? "",
+      liveText: row.live_text ?? "",
+      goldText: row.gold_text ?? "",
+      goldSource: row.gold_source,
+      noiseOnly: Boolean(row.noise_only),
+      utteranceEmotion: row.utterance_emotion,
+      turnId: row.turn_id,
+    })),
+  );
+  assert.equal(card.goldN, 1);
+  assert.equal(card.cerFinal, 1);
+  assert.equal(card.worst[0]?.gold, "");
+  assert.equal(card.worst[0]?.hyp, "谢谢观看");
+});
+
 test("0010 eval-tag migration only adds columns and tables", async () => {
   const sql = await readFile(
     join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations/0010_hearing_eval_tags.sql"),
