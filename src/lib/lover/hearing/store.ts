@@ -14,7 +14,7 @@ import {
 import { EMOTIONS, hearingCueSchema, stripCueTags, type CueEmotion, type HearingCue, type HearingResult } from "./schema.ts";
 import { assignSplits, hashSplit } from "./split.ts";
 import { transcribeWithXai, xaiAsHearing } from "./xai.ts";
-import { chooseHearing, emptyEngineUse, logHearingTurn } from "./select.ts";
+import { chooseHearing, emptyEngineUse, engineErrorDetailFromOutcome, logHearingTurn } from "./select.ts";
 import { deleteHearingWav, putHearingWav, readHearingWav } from "./blob.ts";
 import { isNoiseDisagreement, shouldDropAsNoise } from "./noise.ts";
 import { goldTierFor, isGoldSource, type GoldSource } from "./gold.ts";
@@ -109,6 +109,7 @@ export type HearingTurnPatch = {
   engine_used?: string | null;
   audio_llm_ms?: number | null;
   engine_fallback_reason?: string | null;
+  engine_error_detail?: string | null;
 };
 
 export type RunHearingInput = {
@@ -166,6 +167,7 @@ export type RunHearingOutput = {
   predictedTags?: AcousticTags;
   engine_requested?: HearingProviderId;
   engine_fallback_reason?: string;
+  engine_error_detail?: string;
   audio_llm_ms?: number;
 };
 
@@ -408,6 +410,7 @@ export const runHearing = createServerFn({ method: "POST" })
           ? hearing?.latency_ms
           : null;
     const engineFallback = picked.fallback ? picked.fallback_reason : undefined;
+    const engineErrorDetail = engineErrorDetailFromOutcome(outcome);
     const model = hearing?.model || HEARING[used].model;
     const commitSha = gitCommitSha() || null;
     const promptHash = data.systemPrompt ? hashQingranPrompt(data.systemPrompt) : null;
@@ -416,6 +419,7 @@ export const runHearing = createServerFn({ method: "POST" })
       used,
       fallbackReason: engineFallback,
       audioLlmMs,
+      errorDetail: engineErrorDetail,
     });
 
     waitUntil(
@@ -446,6 +450,7 @@ export const runHearing = createServerFn({ method: "POST" })
         engineRequested: data.provider,
         engineUsed: used,
         engineFallback,
+        engineErrorDetail,
         audioLlmMs,
       }),
     );
@@ -474,6 +479,7 @@ export const runHearing = createServerFn({ method: "POST" })
       predictedTags: predicted,
       engine_requested: data.provider,
       engine_fallback_reason: engineFallback,
+      engine_error_detail: engineErrorDetail ?? undefined,
       audio_llm_ms: audioLlmMs ?? undefined,
     };
   });
@@ -1172,6 +1178,7 @@ async function persistHearingTurn(input: {
   engineRequested?: string;
   engineUsed?: string;
   engineFallback?: string;
+  engineErrorDetail?: string | null;
   audioLlmMs?: number | null;
 }) {
   await upsertTurn({
@@ -1202,6 +1209,7 @@ async function persistHearingTurn(input: {
     engine_used: input.engineUsed,
     audio_llm_ms: input.audioLlmMs ?? null,
     engine_fallback_reason: input.engineFallback ?? null,
+    engine_error_detail: input.engineErrorDetail ?? null,
   });
   if (!input.capture) return;
   try {
@@ -1245,7 +1253,7 @@ async function upsertTurn(patch: HearingTurnPatch) {
         refusal, fallback, fallback_reason, fallback_raw, cold_start_ms, disagreement,
         live_text_source, hallucination_suspect, save_error,
         commit_sha, prompt_hash, context_before, reply_message_id,
-        engine_requested, engine_used, audio_llm_ms, engine_fallback_reason
+        engine_requested, engine_used, audio_llm_ms, engine_fallback_reason, engine_error_detail
       )
       values (
         ${patch.id},
@@ -1277,7 +1285,8 @@ async function upsertTurn(patch: HearingTurnPatch) {
         ${patch.engine_requested ?? null},
         ${patch.engine_used ?? null},
         ${patch.audio_llm_ms ?? null},
-        ${patch.engine_fallback_reason ?? null}
+        ${patch.engine_fallback_reason ?? null},
+        ${patch.engine_error_detail ?? null}
       )
       on conflict (id) do update set
         provider = coalesce(excluded.provider, qingran_hearing_turns.provider),
@@ -1308,7 +1317,8 @@ async function upsertTurn(patch: HearingTurnPatch) {
         engine_requested = coalesce(excluded.engine_requested, qingran_hearing_turns.engine_requested),
         engine_used = coalesce(excluded.engine_used, qingran_hearing_turns.engine_used),
         audio_llm_ms = coalesce(excluded.audio_llm_ms, qingran_hearing_turns.audio_llm_ms),
-        engine_fallback_reason = coalesce(excluded.engine_fallback_reason, qingran_hearing_turns.engine_fallback_reason)
+        engine_fallback_reason = coalesce(excluded.engine_fallback_reason, qingran_hearing_turns.engine_fallback_reason),
+        engine_error_detail = coalesce(excluded.engine_error_detail, qingran_hearing_turns.engine_error_detail)
     `;
   } catch (err) {
     console.error("[hearing] upsertTurn failed:", errorText(err));

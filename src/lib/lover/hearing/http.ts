@@ -115,19 +115,21 @@ export async function hearWithGemini(audioBase64: string, opts?: HearingCallOpts
       signal: AbortSignal.timeout(timeout),
     });
     const latency_ms = Date.now() - started;
-    const body = (await res.json().catch(() => ({}))) as {
+    const rawText = await res.text().catch(() => "");
+    const body = parseJsonBody(rawText) as {
       error?: { message?: string };
       promptFeedback?: { blockReason?: string };
       candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[];
       usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
     };
-    const rawBody = JSON.stringify(body).slice(0, 2000);
+    const rawBody = (rawText || JSON.stringify(body)).slice(0, 2000);
     if (!res.ok) {
       const msg = body.error?.message || rawBody || `gemini ${res.status}`;
       return {
         ok: false,
         reason: res.status === 408 ? "timeout" : isModerationHttpError(res.status, msg) ? "refusal" : "http",
-        raw: msg,
+        raw: rawBody || msg,
+        status: res.status,
         latency_ms,
         provider: "gemini",
         model,
@@ -291,6 +293,7 @@ async function openaiAudioChat(input: {
         ok: false,
         reason: res.status === 408 ? "timeout" : isModerationHttpError(res.status, errText) ? "refusal" : "http",
         raw: errText.slice(0, 2000),
+        status: res.status,
         latency_ms,
         provider: input.provider,
         model: input.model,
@@ -409,6 +412,15 @@ function finishParse(
 
 function missing(provider: HearingProviderId, model: string): AdapterFail {
   return { ok: false, reason: "missing_key", latency_ms: 0, provider, model };
+}
+
+function parseJsonBody(raw: string): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
 }
 
 function failFromError(

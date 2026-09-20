@@ -8,6 +8,7 @@ test("Gemini 3.8 Flash generationConfig omits temperature and keeps thinkingLeve
   const gemini = src.slice(src.indexOf("export async function hearWithGemini"), src.indexOf("export async function hearWithSelfhost"));
   assert.doesNotMatch(gemini, /temperature/);
   assert.match(gemini, /thinkingLevel:\s*["']low["']/);
+  assert.match(gemini, /status:\s*res\.status/);
 });
 
 test("audio-LLM timeout defaults to 8s and is configurable", () => {

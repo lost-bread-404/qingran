@@ -18,6 +18,7 @@ export type HeardUtterance = {
   engineRequested?: string;
   engineUsed?: string;
   engineFallback?: string;
+  engineErrorDetail?: string;
   audioLlmMs?: number;
 };
 
@@ -53,6 +54,7 @@ export function heardFromHearing(input: {
   engineRequested?: string;
   engineUsed?: string;
   engineFallback?: string;
+  engineErrorDetail?: string;
   audioLlmMs?: number;
 }): HeardUtterance {
   const recognized = input.tagged.trim() || input.xaiText.trim();
@@ -68,6 +70,7 @@ export function heardFromHearing(input: {
     engineRequested: input.engineRequested,
     engineUsed: input.engineUsed,
     engineFallback: input.engineFallback,
+    engineErrorDetail: input.engineErrorDetail,
     audioLlmMs: input.audioLlmMs,
   };
   if (input.debugHearing) {

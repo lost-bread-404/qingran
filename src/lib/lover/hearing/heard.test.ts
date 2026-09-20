@@ -158,3 +158,19 @@ test("heardFromHearing keeps engine debug fields", () => {
   assert.equal(heard.engineFallback, "timeout");
   assert.equal(heard.audioLlmMs, 8000);
 });
+
+test("heardFromHearing keeps http error detail for debug", () => {
+  const heard = heardFromHearing({
+    debugHearing: true,
+    turnId: "t-http",
+    tagged: "嗯",
+    xaiText: "嗯",
+    noiseOnly: false,
+    engineRequested: "gemini",
+    engineUsed: "xai",
+    engineFallback: "http",
+    engineErrorDetail: '503 {"error":"UNAVAILABLE"}',
+  });
+  assert.equal(heard.engineFallback, "http");
+  assert.equal(heard.engineErrorDetail, '503 {"error":"UNAVAILABLE"}');
+});

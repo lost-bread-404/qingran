@@ -242,12 +242,15 @@ test("runHearing persists with waitUntil; xai skips audio-LLM and a second STT",
   assert.match(store, /short_quiet/);
   assert.match(store, /holdToTalk/);
   assert.match(store, /engine_fallback_reason/);
+  assert.match(store, /engine_error_detail/);
+  assert.match(store, /engineErrorDetailFromOutcome/);
   assert.match(store, /lengthOnlyTags\(data\.predictedTags\)/);
   assert.match(store, /used !== "xai" \? withMeowFromText/);
   assert.match(hear, /ranHearing \|\| provider === "xai"/);
   assert.match(hear, /transcribeVoice/);
   assert.match(hear, /hallucinationSuspect/);
   assert.match(hear, /engine_fallback_reason/);
+  assert.match(hear, /engine_error_detail/);
   assert.match(hear, /engineRequested/);
 });
 

@@ -396,6 +396,18 @@ test("0012 engine migration only adds turn columns", async () => {
   assert.doesNotMatch(sql, /\bdelete\b/i);
 });
 
+test("0014 engine error detail migration only adds a turn column", async () => {
+  const sql = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations/0014_hearing_engine_error.sql"),
+    "utf8",
+  );
+  assert.match(sql, /add column if not exists engine_error_detail/);
+  assert.doesNotMatch(sql, /drop column/i);
+  assert.doesNotMatch(sql, /alter column/i);
+  assert.doesNotMatch(sql, /\bupdate\b/i);
+  assert.doesNotMatch(sql, /\bdelete\b/i);
+});
+
 test("PGLite e2e: engine mix counts used engines and fallback reasons", async () => {
   const pg = new PGlite();
   await pg.waitReady;
@@ -439,6 +451,16 @@ test("PGLite e2e: engine mix counts used engines and fallback reasons", async ()
     { reason: "timeout", n: 1 },
     { reason: "refused", n: 1 },
   ]);
+
+  await sql`
+    insert into qingran_hearing_turns (id, provider, engine_requested, engine_used, engine_fallback_reason, engine_error_detail)
+    values ('e5', 'xai', 'gemini', 'xai', 'http', '503 {"error":"UNAVAILABLE"}')
+  `;
+  const detail = await sql.query<{ engine_error_detail: string | null }>(
+    "select engine_error_detail from qingran_hearing_turns where id = $1",
+    ["e5"],
+  );
+  assert.equal(detail[0]?.engine_error_detail, '503 {"error":"UNAVAILABLE"}');
 });
 
 test("0013 eval-run migration only adds the comparison table", async () => {

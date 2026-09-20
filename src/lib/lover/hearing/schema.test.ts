@@ -9,7 +9,7 @@ import {
 } from "./schema.ts";
 import { assignSplits } from "./split.ts";
 import { cer, cueTokenF1, fieldAccuracy, selfConsistency } from "./metrics.ts";
-import { chooseHearing, formatEngineLine, aggregateEngineUse, formatEngineMix } from "./select.ts";
+import { chooseHearing, formatEngineLine, aggregateEngineUse, formatEngineMix, formatEngineErrorDetail, engineErrorDetailFromOutcome, engineLineFromHeard, ENGINE_ERROR_BODY_MAX } from "./select.ts";
 import { HEARING } from "./config.ts";
 import { classifyGeminiResponse, clipFallbackRaw, hearingSystemPrompt, isModerationHttpError } from "./http.ts";
 
@@ -90,10 +90,73 @@ describe("hearing schema", () => {
       "引擎：xai(fallback: error)",
     );
     assert.equal(
+      formatEngineLine({
+        used: "xai",
+        fallback: true,
+        fallbackReason: "http",
+        errorDetail: "503 {\"error\":\"UNAVAILABLE\"}",
+      }),
+      "引擎：xai(fallback: error) 503 {\"error\":\"UNAVAILABLE\"}",
+    );
+    assert.equal(
+      formatEngineLine({
+        used: "xai",
+        fallback: true,
+        fallbackReason: "timeout",
+        errorDetail: "503 nope",
+      }),
+      "引擎：xai(fallback: timeout)",
+    );
+    assert.equal(
       formatEngineLine({ used: "xai", fallback: true, fallbackReason: "missing_key" }),
       "引擎：xai(fallback: missing_key)",
     );
     assert.equal(formatEngineLine({ used: "xai", fallback: true }), "引擎：xai");
+    assert.equal(
+      engineLineFromHeard({
+        engineRequested: "gemini",
+        engineUsed: "xai",
+        engineFallback: "http",
+        engineErrorDetail: "503 overloaded",
+      }),
+      "引擎：xai(fallback: error) 503 overloaded",
+    );
+  });
+
+  it("records http status and a 200-char body snippet on http fallback", () => {
+    assert.equal(formatEngineErrorDetail(503, '{"error":"UNAVAILABLE"}'), '503 {"error":"UNAVAILABLE"}');
+    assert.equal(formatEngineErrorDetail(429, ""), "429");
+    assert.equal(formatEngineErrorDetail(undefined, "fetch failed"), "fetch failed");
+    assert.equal(formatEngineErrorDetail(null, null), null);
+    const body = "x".repeat(500);
+    const detail = formatEngineErrorDetail(502, body);
+    assert.equal(detail, `502 ${"x".repeat(ENGINE_ERROR_BODY_MAX)}`);
+    assert.equal(detail?.length, 4 + ENGINE_ERROR_BODY_MAX);
+    assert.equal(
+      engineErrorDetailFromOutcome({
+        ok: false,
+        reason: "http",
+        status: 503,
+        raw: '{"error":"overloaded"}',
+        latency_ms: 12,
+        provider: "gemini",
+        model: HEARING.gemini.model,
+      }),
+      '503 {"error":"overloaded"}',
+    );
+    assert.equal(
+      engineErrorDetailFromOutcome({
+        ok: false,
+        reason: "timeout",
+        status: 408,
+        raw: "timed out",
+        latency_ms: 8000,
+        provider: "qwen",
+        model: HEARING.qwen.model,
+      }),
+      null,
+    );
+    assert.equal(engineErrorDetailFromOutcome(null), null);
   });
 
   it("mixes engine use and fallback reasons for the lab card", () => {

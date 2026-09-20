@@ -27,6 +27,7 @@ function engineFields(
     provider?: string;
     engine_requested?: string;
     engine_fallback_reason?: string;
+    engine_error_detail?: string;
     audio_llm_ms?: number;
   },
 ) {
@@ -34,6 +35,7 @@ function engineFields(
     engineRequested: result?.engine_requested ?? requested,
     engineUsed: result?.provider,
     engineFallback: result?.engine_fallback_reason,
+    engineErrorDetail: result?.engine_error_detail,
     audioLlmMs: result?.audio_llm_ms,
   };
 }

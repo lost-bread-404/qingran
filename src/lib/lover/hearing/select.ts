@@ -5,7 +5,15 @@ export type HearingFailReason = "timeout" | "refusal" | "schema" | "http" | "mis
 
 export type HearingAdapterOutcome =
   | { ok: true; result: HearingResult }
-  | { ok: false; reason: HearingFailReason; raw?: string; latency_ms: number; provider: HearingProviderId; model: string };
+  | {
+      ok: false;
+      reason: HearingFailReason;
+      raw?: string;
+      status?: number;
+      latency_ms: number;
+      provider: HearingProviderId;
+      model: string;
+    };
 
 export type XaiSide =
   | {
@@ -40,6 +48,8 @@ export type EngineUseStats = {
 
 const FALLBACK_ORDER: EngineFallbackDisplay[] = ["timeout", "refused", "error", "missing_key"];
 
+export const ENGINE_ERROR_BODY_MAX = 200;
+
 export function displayEngineFallback(reason?: string | null): EngineFallbackDisplay {
   if (reason === "timeout") return "timeout";
   if (reason === "refusal" || reason === "refused") return "refused";
@@ -47,15 +57,32 @@ export function displayEngineFallback(reason?: string | null): EngineFallbackDis
   return "error";
 }
 
+export function formatEngineErrorDetail(status?: number | null, body?: string | null): string | null {
+  const snippet = (body ?? "").slice(0, ENGINE_ERROR_BODY_MAX);
+  if (status == null && !snippet) return null;
+  if (status == null) return snippet;
+  return snippet ? `${status} ${snippet}` : String(status);
+}
+
+export function engineErrorDetailFromOutcome(
+  outcome: HearingAdapterOutcome | null | undefined,
+): string | null {
+  if (!outcome || outcome.ok || outcome.reason !== "http") return null;
+  return formatEngineErrorDetail(outcome.status, outcome.raw);
+}
+
 export function formatEngineLine(input: {
   requested?: string | null;
   used?: string | null;
   fallback?: boolean;
   fallbackReason?: string | null;
+  errorDetail?: string | null;
 }): string {
   const used = input.used || "xai";
   if (!input.fallback || !input.fallbackReason) return `引擎：${used}`;
-  return `引擎：${used}(fallback: ${displayEngineFallback(input.fallbackReason)})`;
+  const line = `引擎：${used}(fallback: ${displayEngineFallback(input.fallbackReason)})`;
+  const detail = input.fallbackReason === "http" ? input.errorDetail?.trim() : "";
+  return detail ? `${line} ${detail}` : line;
 }
 
 export function emptyEngineUse(): EngineUseStats {
@@ -103,6 +130,7 @@ export function engineLineFromHeard(heard: {
   engineRequested?: string;
   engineUsed?: string;
   engineFallback?: string;
+  engineErrorDetail?: string;
 }): string | undefined {
   if (!heard.engineUsed && !heard.engineRequested) return undefined;
   return formatEngineLine({
@@ -110,6 +138,7 @@ export function engineLineFromHeard(heard: {
     used: heard.engineUsed,
     fallback: Boolean(heard.engineFallback),
     fallbackReason: heard.engineFallback,
+    errorDetail: heard.engineErrorDetail,
   });
 }
 
@@ -118,9 +147,10 @@ export function logHearingTurn(log: {
   used: string;
   fallbackReason?: string | null;
   audioLlmMs?: number | null;
+  errorDetail?: string | null;
 }) {
   console.error(
-    `[qingran-hear] engine_requested=${log.requested} engine_used=${log.used} fallback_reason=${log.fallbackReason ?? "-"} audio_llm_ms=${log.audioLlmMs ?? "-"}`,
+    `[qingran-hear] engine_requested=${log.requested} engine_used=${log.used} fallback_reason=${log.fallbackReason ?? "-"} audio_llm_ms=${log.audioLlmMs ?? "-"} engine_error_detail=${log.errorDetail ?? "-"}`,
   );
 }
 
