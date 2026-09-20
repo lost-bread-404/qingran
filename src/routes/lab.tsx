@@ -22,7 +22,7 @@ import {
   type LabeledClipRow,
   type ReplyFlagRow,
 } from "@/lib/lover/hearing/store";
-import { HEARING_PROVIDERS, type HearingProviderId } from "@/lib/lover/hearing/config";
+import { LAB_EVAL_ENGINES, labEngineLabel, type LabEvalEngine } from "@/lib/lover/hearing/config";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
 import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/score";
 import { formatEngineMix } from "@/lib/lover/hearing/select";
@@ -33,12 +33,9 @@ export const Route = createFileRoute("/lab")({ component: HearingLabPage });
 
 const LAB_KEY = "qingran-hearing-lab";
 
-const ENGINE_LABEL: Record<HearingProviderId, string> = {
-  xai: "xAI",
-  qwen: "Qwen",
-  gemini: "Gemini",
-  selfhost: "自建",
-};
+function allEvalEngines(on: boolean): Record<LabEvalEngine, boolean> {
+  return Object.fromEntries(LAB_EVAL_ENGINES.map((id) => [id, on])) as Record<LabEvalEngine, boolean>;
+}
 
 const FAIL_LABEL = {
   hard_refusal: "硬拒答",
@@ -121,12 +118,7 @@ function HearingLabPage() {
   const [labeledPage, setLabeledPage] = useState(1);
   const labeledPageSize = 30;
   const [flags, setFlags] = useState<ReplyFlagRow[]>([]);
-  const [evalEngines, setEvalEngines] = useState<Record<HearingProviderId, boolean>>({
-    xai: true,
-    qwen: true,
-    gemini: true,
-    selfhost: true,
-  });
+  const [evalEngines, setEvalEngines] = useState<Record<LabEvalEngine, boolean>>(() => allEvalEngines(true));
   const [evalLimit, setEvalLimit] = useState("");
   const [evalRunning, setEvalRunning] = useState(false);
   const [evalProgress, setEvalProgress] = useState<{ done: number; total: number } | null>(null);
@@ -327,7 +319,7 @@ function HearingLabPage() {
             onToggle={(id) => setEvalEngines((cur) => ({ ...cur, [id]: !cur[id] }))}
             onLimit={setEvalLimit}
             onRun={async () => {
-              const selected = HEARING_PROVIDERS.filter((id) => evalEngines[id]);
+              const selected = LAB_EVAL_ENGINES.filter((id) => evalEngines[id]);
               if (!selected.length) {
                 setStatus("请选择引擎。");
                 return;
@@ -370,7 +362,7 @@ function HearingLabPage() {
             }}
             onExport={async () => {
               try {
-                const selected = HEARING_PROVIDERS.filter((id) => evalEngines[id]);
+                const selected = LAB_EVAL_ENGINES.filter((id) => evalEngines[id]);
                 const limit = evalLimit.trim() ? Number(evalLimit) : undefined;
                 const exported = await exportEvalCompare({
                   data: { password, engines: selected, limit: limit || null },
@@ -658,24 +650,46 @@ function HearingLabPage() {
 function EngineProbe({ password }: { password: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [engines, setEngines] = useState<Record<LabEvalEngine, boolean>>(() => allEvalEngines(true));
   const [rows, setRows] = useState<
-    { id: HearingProviderId; ok: boolean; latency_ms: number; error?: string }[] | null
+    { id: string; ok: boolean; latency_ms: number; error?: string }[] | null
   >(null);
 
   return (
     <section className="rounded-md bg-surface-2 px-3 py-3">
       <p className="mb-2 font-display text-lg">引擎自检</p>
-      <p className="mb-3 text-xs text-subtle">对各引擎发 1 秒测试音频。不写对话、不改标注。</p>
+      <p className="mb-3 text-xs text-subtle">对各引擎发 1 秒测试音频。不写对话、不改标注。Qwen 3.8 实时链路关闭 thinking。</p>
+      <div className="mb-3 flex flex-wrap gap-2">
+        {LAB_EVAL_ENGINES.map((id) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={engines[id]}
+            onClick={() => setEngines((cur) => ({ ...cur, [id]: !cur[id] }))}
+            className={cn(
+              "min-h-11 rounded-md px-3 text-sm",
+              engines[id] ? "bg-accent text-accent-fg" : "bg-bg text-muted",
+            )}
+          >
+            {labEngineLabel(id)}
+          </button>
+        ))}
+      </div>
       <Button
         type="button"
         variant="outline"
         disabled={busy}
         onClick={() => {
+          const selected = LAB_EVAL_ENGINES.filter((id) => engines[id]);
+          if (!selected.length) {
+            setError("请选择引擎。");
+            return;
+          }
           setBusy(true);
           setError(null);
-          void hearingConnectionTest({ data: { password } })
+          void hearingConnectionTest({ data: { password, engines: selected } })
             .then((result) => {
-              setRows(result.engines as { id: HearingProviderId; ok: boolean; latency_ms: number; error?: string }[]);
+              setRows(result.engines);
             })
             .catch((err) => {
               setRows(null);
@@ -693,7 +707,7 @@ function EngineProbe({ password }: { password: string }) {
           {rows.map((row) => (
             <li key={row.id} className="text-sm leading-relaxed">
               <span>
-                {ENGINE_LABEL[row.id]} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
+                {labEngineLabel(row.id)} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
               </span>
               {!row.ok && row.error ? <span className="mt-1 block break-all text-xs text-subtle">{row.error}</span> : null}
             </li>
@@ -715,12 +729,12 @@ function EngineCompare({
   onRun,
   onExport,
 }: {
-  engines: Record<HearingProviderId, boolean>;
+  engines: Record<LabEvalEngine, boolean>;
   limit: string;
   running: boolean;
   progress: { done: number; total: number } | null;
   scores: EngineEvalScore[] | null;
-  onToggle: (id: HearingProviderId) => void;
+  onToggle: (id: LabEvalEngine) => void;
   onLimit: (value: string) => void;
   onRun: () => void;
   onExport: () => void;
@@ -728,9 +742,9 @@ function EngineCompare({
   return (
     <section className="rounded-md bg-surface-2 px-3 py-3">
       <p className="mb-2 font-display text-lg">引擎对比</p>
-      <p className="mb-3 text-xs text-subtle">只读已标注录音，不改对话。每次 10 条，同一 clip 同一引擎再跑会覆盖。</p>
+      <p className="mb-3 text-xs text-subtle">只读已标注录音，不改对话。每次 10 条，同一 clip 同一引擎再跑会覆盖。Qwen 3.5 和 3.8 分开记分。</p>
       <div className="mb-3 flex flex-wrap gap-2">
-        {HEARING_PROVIDERS.map((id) => (
+        {LAB_EVAL_ENGINES.map((id) => (
           <button
             key={id}
             type="button"
@@ -741,7 +755,7 @@ function EngineCompare({
               engines[id] ? "bg-accent text-accent-fg" : "bg-bg text-muted",
             )}
           >
-            {ENGINE_LABEL[id]}
+            {labEngineLabel(id)}
           </button>
         ))}
       </div>
@@ -778,12 +792,9 @@ function EngineCompare({
 }
 
 function EngineEvalCard({ score }: { score: EngineEvalScore }) {
-  const engine = (HEARING_PROVIDERS as readonly string[]).includes(score.engine)
-    ? ENGINE_LABEL[score.engine as HearingProviderId]
-    : score.engine;
   return (
     <div className="rounded-md bg-bg px-3 py-3">
-      <p className="mb-2 font-medium">{engine}</p>
+      <p className="mb-2 font-medium">{labEngineLabel(score.engine)}</p>
       <dl className="flex flex-col gap-2 text-sm">
         <Row label="CER" value={score.n === 0 ? "无数据" : fmtCer(score.cer)} main />
         <Row label="完全正确率" value={fmtPct(score.exactMatch)} />

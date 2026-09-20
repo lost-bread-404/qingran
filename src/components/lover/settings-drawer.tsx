@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { backupFilename, makeBackup, parseBackup, type QingranBackup } from "@/lib/lover/backup";
 import { LogoutButton } from "@/components/lover/logout-button";
-import { HEARING_PROVIDERS, type HearingProviderId } from "@/lib/lover/hearing/config";
+import { HEARING_PROVIDERS, labEngineLabel, type HearingProviderId } from "@/lib/lover/hearing/config";
 import { PROVIDER_ENV } from "@/lib/lover/hearing/env";
 import { hearingConnectionTest, hearingEnvStatus } from "@/lib/lover/hearing/store";
 import {
@@ -47,7 +47,7 @@ const PROVIDER_LABEL: Record<HearingProviderId, string> = {
 const LAB_KEY = "qingran-hearing-lab";
 
 type EngineProbeRow = {
-  id: HearingProviderId;
+  id: string;
   ok: boolean;
   latency_ms: number;
   error?: string;
@@ -340,7 +340,7 @@ export function SettingsDrawer({
                   {probeRows.map((row) => (
                     <li key={row.id} className="text-xs leading-relaxed">
                       <span className="text-sm text-fg">
-                        {PROVIDER_LABEL[row.id]} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
+                        {labEngineLabel(row.id)} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
                       </span>
                       {!row.ok && row.error ? (
                         <span className="mt-1 block break-all text-subtle">{row.error}</span>

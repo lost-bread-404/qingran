@@ -14,10 +14,11 @@ import {
 
 test("eval jobs flatten clip × engine and batches of 10 report progress", () => {
   assert.equal(EVAL_BATCH_SIZE, 10);
-  const jobs = evalJobs(["a", "b", "c"], ["xai", "gemini"]);
+  const jobs = evalJobs(["a", "b"], ["xai", "qwen3.5-omni-flash", "qwen3.8-omni-flash"]);
   assert.equal(jobs.length, 6);
   assert.deepEqual(jobs[0], { clipId: "a", engine: "xai" });
-  assert.deepEqual(jobs[1], { clipId: "a", engine: "gemini" });
+  assert.deepEqual(jobs[1], { clipId: "a", engine: "qwen3.5-omni-flash" });
+  assert.deepEqual(jobs[2], { clipId: "a", engine: "qwen3.8-omni-flash" });
 
   const first = evalBatchWindow({ total: 25, offset: 0 });
   assert.deepEqual(first, { start: 0, end: 10, count: 10, nextOffset: 10, done: false, total: 25 });

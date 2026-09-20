@@ -1,7 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { dbSource, getSql } from "@/lib/db";
 import { newId } from "../storage";
-import { HEARING, isHearingProvider, type HearingProviderId } from "./config.ts";
+import {
+  HEARING,
+  isHearingProvider,
+  isLabEvalEngine,
+  isQwenHearingModel,
+  LAB_EVAL_ENGINES,
+  type HearingProviderId,
+  type LabEvalEngine,
+} from "./config.ts";
 import {
   hearWithGemini,
   hearWithQwen,
@@ -233,61 +241,23 @@ export const hearingLabDiagnostics = createServerFn({ method: "POST" })
   });
 
 export const hearingConnectionTest = createServerFn({ method: "POST" })
-  .validator((input: { password: string }) => input)
+  .validator((input: { password: string; engines?: string[] }) => input)
   .handler(async ({ data }) => {
     assertLab(data.password);
     const audioBase64 = silenceWavBase64(1);
     const env = envPresence();
-    const ping = async (
-      id: HearingProviderId,
-      run: () => Promise<{ ok: boolean; latency_ms: number; error?: string }>,
-    ) => {
+    const selected = (data.engines ?? []).filter(isLabEvalEngine);
+    const ids = selected.length ? selected : [...LAB_EVAL_ENGINES];
+    const ping = async (id: LabEvalEngine) => {
       const started = Date.now();
       try {
-        const result = await run();
+        const result = await probeLabEngine(id, audioBase64);
         return { id, ...result };
       } catch (err) {
         return { id, ok: false, latency_ms: Date.now() - started, error: errorText(err) };
       }
     };
-    const engines = await Promise.all([
-      ping("xai", async () => {
-        const result = await transcribeWithXai({ audioBase64, mimeType: "audio/wav" });
-        return result.ok
-          ? { ok: true, latency_ms: result.latency_ms }
-          : { ok: false, latency_ms: result.latency_ms, error: result.error };
-      }),
-      ping("qwen", async () => {
-        const result = await hearWithQwen(audioBase64);
-        return result.ok
-          ? { ok: true, latency_ms: result.result.latency_ms }
-          : {
-              ok: false,
-              latency_ms: result.latency_ms,
-              error: formatEngineErrorDetail(result.status, result.raw) || result.raw || result.reason,
-            };
-      }),
-      ping("gemini", async () => {
-        const result = await hearWithGemini(audioBase64);
-        return result.ok
-          ? { ok: true, latency_ms: result.result.latency_ms }
-          : {
-              ok: false,
-              latency_ms: result.latency_ms,
-              error: formatEngineErrorDetail(result.status, result.raw) || result.raw || result.reason,
-            };
-      }),
-      ping("selfhost", async () => {
-        const result = await hearWithSelfhost(audioBase64);
-        return result.ok
-          ? { ok: true, latency_ms: result.result.latency_ms }
-          : {
-              ok: false,
-              latency_ms: result.latency_ms,
-              error: formatEngineErrorDetail(result.status, result.raw) || result.raw || result.reason,
-            };
-      }),
-    ]);
+    const engines = await Promise.all(ids.map((id) => ping(id)));
     let migrations: string[] = [];
     let clips = 0;
     let dbError: string | undefined;
@@ -745,14 +715,14 @@ export const runEngineEvalBatch = createServerFn({ method: "POST" })
   .validator(
     (input: {
       password: string;
-      engines: HearingProviderId[];
+      engines: string[];
       limit?: number | null;
       offset?: number;
     }) => input,
   )
   .handler(async ({ data }) => {
     assertLab(data.password);
-    const engines = data.engines.filter(isHearingProvider);
+    const engines = data.engines.filter(isLabEvalEngine);
     if (!engines.length) return { ok: false as const, error: "请选择引擎。" };
     try {
       const sql = await getSql();
@@ -782,10 +752,10 @@ export const runEngineEvalBatch = createServerFn({ method: "POST" })
   });
 
 export const hearingEvalCompare = createServerFn({ method: "POST" })
-  .validator((input: { password: string; engines?: HearingProviderId[]; limit?: number | null }) => input)
+  .validator((input: { password: string; engines?: string[]; limit?: number | null }) => input)
   .handler(async ({ data }) => {
     assertLab(data.password);
-    const engines = (data.engines ?? []).filter(isHearingProvider);
+    const engines = (data.engines ?? []).filter(isLabEvalEngine);
     try {
       const sql = await getSql();
       const clipIds = await listEvalClipIds(sql, data.limit);
@@ -801,11 +771,11 @@ export const hearingEvalCompare = createServerFn({ method: "POST" })
   });
 
 export const exportEvalCompare = createServerFn({ method: "POST" })
-  .validator((input: { password: string; engines?: HearingProviderId[]; limit?: number | null }) => input)
+  .validator((input: { password: string; engines?: string[]; limit?: number | null }) => input)
   .handler(async ({ data }) => {
     assertLab(data.password);
     const sql = await getSql();
-    const engines = (data.engines ?? []).filter(isHearingProvider);
+    const engines = (data.engines ?? []).filter(isLabEvalEngine);
     const clipIds = await listEvalClipIds(sql, data.limit);
     const rows = await listEvalScoreRows(sql, {
       clipIds,
@@ -1068,14 +1038,40 @@ export const exportHearingClips = createServerFn({ method: "POST" })
     };
   });
 
-async function dispatchProvider(provider: HearingProviderId, audioBase64: string, opts?: HearingCallOpts) {
-  if (provider === "qwen") return hearWithQwen(audioBase64, opts);
+async function probeLabEngine(
+  id: LabEvalEngine,
+  audioBase64: string,
+): Promise<{ ok: boolean; latency_ms: number; error?: string }> {
+  if (id === "xai") {
+    const result = await transcribeWithXai({ audioBase64, mimeType: "audio/wav" });
+    return result.ok
+      ? { ok: true, latency_ms: result.latency_ms }
+      : { ok: false, latency_ms: result.latency_ms, error: result.error };
+  }
+  const outcome =
+    id === "gemini"
+      ? await hearWithGemini(audioBase64)
+      : id === "selfhost"
+        ? await hearWithSelfhost(audioBase64)
+        : await hearWithQwen(audioBase64, undefined, id);
+  if (outcome.ok) return { ok: true, latency_ms: outcome.result.latency_ms };
+  return {
+    ok: false,
+    latency_ms: outcome.latency_ms,
+    error: formatEngineErrorDetail(outcome.status, outcome.raw) || outcome.raw || outcome.reason,
+  };
+}
+
+async function dispatchProvider(provider: string, audioBase64: string, opts?: HearingCallOpts) {
+  if (provider === "qwen" || isQwenHearingModel(provider)) {
+    return hearWithQwen(audioBase64, opts, provider === "qwen" ? undefined : provider);
+  }
   if (provider === "gemini") return hearWithGemini(audioBase64, opts);
   if (provider === "selfhost") return hearWithSelfhost(audioBase64, opts);
   return xaiAsHearing("", 0);
 }
 
-async function runEvalJob(sql: Awaited<ReturnType<typeof getSql>>, clipId: string, engine: HearingProviderId) {
+async function runEvalJob(sql: Awaited<ReturnType<typeof getSql>>, clipId: string, engine: string) {
   const started = Date.now();
   try {
     await runEvalJobInner(sql, clipId, engine);
@@ -1093,7 +1089,7 @@ async function runEvalJob(sql: Awaited<ReturnType<typeof getSql>>, clipId: strin
   }
 }
 
-async function runEvalJobInner(sql: Awaited<ReturnType<typeof getSql>>, clipId: string, engine: HearingProviderId) {
+async function runEvalJobInner(sql: Awaited<ReturnType<typeof getSql>>, clipId: string, engine: string) {
   const audioRow = await evalClipAudioRow(sql, clipId);
   const audioBase64 =
     audioRow?.audio_wav || (audioRow?.blob_pathname ? await readHearingWav(audioRow.blob_pathname) : null);

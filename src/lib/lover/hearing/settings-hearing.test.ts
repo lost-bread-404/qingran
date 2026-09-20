@@ -198,6 +198,9 @@ test("lab engine compare is password-gated, batches of 10, and does not write li
   assert.match(src, /引擎对比/);
   assert.match(src, /引擎自检/);
   assert.match(src, /hearingConnectionTest/);
+  assert.match(src, /Qwen 3\.5/);
+  assert.match(src, /Qwen 3\.8/);
+  assert.match(src, /LAB_EVAL_ENGINES/);
   assert.match(src, /runEngineEvalBatch/);
   assert.match(src, /hearingEvalCompare/);
   assert.match(src, /exportEvalCompare/);
@@ -250,6 +253,9 @@ test("runHearing persists with waitUntil; xai skips audio-LLM and a second STT",
   assert.match(store, /engineErrorDetailFromOutcome/);
   assert.match(store, /hearingConnectionTest/);
   assert.match(store, /silenceWavBase64\(1\)/);
+  assert.match(store, /isLabEvalEngine/);
+  assert.match(store, /isQwenHearingModel/);
+  assert.match(store, /hearWithQwen\(audioBase64, undefined, id\)/);
   assert.match(store, /lengthOnlyTags\(data\.predictedTags\)/);
   assert.match(store, /used !== "xai" \? withMeowFromText/);
   assert.match(hear, /ranHearing \|\| provider === "xai"/);

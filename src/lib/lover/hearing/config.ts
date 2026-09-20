@@ -5,6 +5,19 @@ export const DEFAULT_HEARING_PROVIDER: HearingProviderId = "xai";
 export const DEFAULT_HEARING_TIMEOUT_MS = 8000;
 export const DEFAULT_XAI_VAD_THRESHOLD = 0.3;
 
+export const QWEN_HEARING_MODELS = ["qwen3.5-omni-flash", "qwen3.8-omni-flash"] as const;
+export type QwenHearingModel = (typeof QWEN_HEARING_MODELS)[number];
+export const DEFAULT_QWEN_HEARING_MODEL: QwenHearingModel = "qwen3.5-omni-flash";
+
+export const LAB_EVAL_ENGINES = [
+  "xai",
+  "qwen3.5-omni-flash",
+  "qwen3.8-omni-flash",
+  "gemini",
+  "selfhost",
+] as const;
+export type LabEvalEngine = (typeof LAB_EVAL_ENGINES)[number];
+
 /** xAI STT keyterms. Single-char fillers + names we actually want biased. */
 export const STT_KEYTERMS: readonly string[] = [
   "姐姐",
@@ -61,7 +74,7 @@ export const HEARING = {
   },
   qwen: {
     id: "qwen" as const,
-    model: "qwen3.5-omni-flash",
+    model: DEFAULT_QWEN_HEARING_MODEL,
     baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     inputUsdPerM: 0.065,
     outputUsdPerM: 0.26,
@@ -105,6 +118,33 @@ export function selfhostApiKey(): string {
 
 export function selfhostModel(): string {
   return process.env.SELFHOST_MODEL || HEARING.selfhost.servedName;
+}
+
+export function qwenHearingModel(): string {
+  const raw = process.env.QWEN_HEARING_MODEL?.trim();
+  return raw || DEFAULT_QWEN_HEARING_MODEL;
+}
+
+export function isQwenHearingModel(value: unknown): value is QwenHearingModel {
+  return typeof value === "string" && (QWEN_HEARING_MODELS as readonly string[]).includes(value);
+}
+
+export function isLabEvalEngine(value: unknown): value is LabEvalEngine {
+  return typeof value === "string" && (LAB_EVAL_ENGINES as readonly string[]).includes(value);
+}
+
+export function qwenReasoningEffort(model: string): "none" | undefined {
+  return /qwen3\.8-omni/i.test(model) ? "none" : undefined;
+}
+
+export function labEngineLabel(id: string): string {
+  if (id === "xai") return "xAI";
+  if (id === "qwen") return "Qwen";
+  if (id === "qwen3.5-omni-flash") return "Qwen 3.5";
+  if (id === "qwen3.8-omni-flash") return "Qwen 3.8";
+  if (id === "gemini") return "Gemini";
+  if (id === "selfhost") return "自建";
+  return id;
 }
 
 export function isHearingProvider(value: unknown): value is HearingProviderId {

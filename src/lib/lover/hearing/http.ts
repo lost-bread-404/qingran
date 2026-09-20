@@ -2,6 +2,8 @@ import {
   estimateCostUsd,
   HEARING,
   hearingTimeoutMs,
+  qwenHearingModel,
+  qwenReasoningEffort,
   selfhostApiKey,
   selfhostBaseUrl,
   selfhostModel,
@@ -69,10 +71,14 @@ export function wavDataUri(audioBase64: string): string {
   return `data:audio/wav;base64,${audioBase64}`;
 }
 
-export async function hearWithQwen(audioBase64: string, opts?: HearingCallOpts): Promise<AdapterOutcome> {
+export async function hearWithQwen(
+  audioBase64: string,
+  opts?: HearingCallOpts,
+  model = qwenHearingModel(),
+): Promise<AdapterOutcome> {
   const apiKey = process.env.DASHSCOPE_API_KEY;
-  const model = HEARING.qwen.model;
   if (!apiKey) return missing("qwen", model);
+  const effort = qwenReasoningEffort(model);
   return openaiAudioChat({
     provider: "qwen",
     model,
@@ -81,7 +87,11 @@ export async function hearWithQwen(audioBase64: string, opts?: HearingCallOpts):
     audioBase64,
     audioStyle: "input_audio",
     dataUri: true,
-    extra: { modalities: ["text"], stream_options: { include_usage: true } },
+    extra: {
+      modalities: ["text"],
+      stream_options: { include_usage: true },
+      ...(effort ? { reasoning_effort: effort } : {}),
+    },
     preferStream: true,
     requireStream: true,
     omitTemperature: true,

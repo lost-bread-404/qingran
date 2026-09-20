@@ -8,13 +8,12 @@ import {
   type TagAccuracy,
   type TagKey,
 } from "./tags.ts";
-import type { HearingProviderId } from "./config.ts";
 
 export const EVAL_BATCH_SIZE = 10;
 export const EVAL_STATUSES = ["ok", "hard_refusal", "soft_refusal", "timeout", "error"] as const;
 export type EvalRunStatus = (typeof EVAL_STATUSES)[number];
 
-export type EvalJob = { clipId: string; engine: HearingProviderId };
+export type EvalJob = { clipId: string; engine: string };
 
 export type EvalBatchWindow = {
   start: number;
@@ -71,7 +70,7 @@ export function statusFromXaiError(error: string): EvalRunStatus {
   return "error";
 }
 
-export function evalJobs(clipIds: string[], engines: HearingProviderId[]): EvalJob[] {
+export function evalJobs(clipIds: string[], engines: string[]): EvalJob[] {
   const jobs: EvalJob[] = [];
   for (const clipId of clipIds) {
     for (const engine of engines) jobs.push({ clipId, engine });
