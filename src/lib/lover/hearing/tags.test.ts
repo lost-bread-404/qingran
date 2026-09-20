@@ -15,6 +15,7 @@ import {
   tagsTouched,
   toggleEventChip,
   withMeowFromText,
+  lengthOnlyTags,
   EVENT_CHIP_LABELS,
   TAG_VALUE_LABELS,
   type AcousticTags,
@@ -167,7 +168,7 @@ test("tag accuracy keeps scalar dims; events use per-label precision and recall"
   assert.equal(events.events.sigh.recall, null);
 });
 
-test("prosody maps duration, pitch glide, and laugh bursts", () => {
+test("prosody maps duration only; pitch is not guessed into contour or voice", () => {
   const shortFlat = tagsFromProsody(
     frames([
       { t: 0, rms: 0.04, hz: 180, clarity: 0.85 },
@@ -176,6 +177,9 @@ test("prosody maps duration, pitch glide, and laugh bursts", () => {
     ]),
   );
   assert.equal(shortFlat.length, "short");
+  assert.equal(shortFlat.contour, undefined);
+  assert.equal(shortFlat.voice, undefined);
+  assert.equal(shortFlat.events, undefined);
 
   const rising = tagsFromProsody(
     frames(Array.from({ length: 12 }, (_, i) => ({
@@ -186,7 +190,29 @@ test("prosody maps duration, pitch glide, and laugh bursts", () => {
     }))),
   );
   assert.equal(rising.length, "long");
-  assert.equal(rising.contour, "rising");
+  assert.equal(rising.contour, undefined);
+  assert.equal(rising.voice, undefined);
+  assert.equal(rising.events, undefined);
+});
+
+test("xAI path contour / voice / events stay unpredicted; length still from duration", () => {
+  const fromFrames = predictUtteranceTags({
+    frames: frames([
+      { t: 0, rms: 0.05, hz: 140, clarity: 0.85 },
+      { t: 0.5, rms: 0.05, hz: 220, clarity: 0.85 },
+    ]),
+  });
+  assert.equal(fromFrames.length, "long");
+  assert.equal(fromFrames.contour, undefined);
+  assert.equal(fromFrames.voice, undefined);
+  assert.equal(fromFrames.events, undefined);
+  assert.deepEqual(
+    lengthOnlyTags({ length: "short", contour: "rising", voice: "breathy", events: ["laugh"] }),
+    { length: "short" },
+  );
+  assert.deepEqual(lengthOnlyTags({}), {});
+  assert.deepEqual(tagsFromCues([]), {});
+  assert.deepEqual(parseAcousticTags({ length: "short" }), { length: "short" });
 });
 
 test("predictUtteranceTags prefers cues over frames", () => {

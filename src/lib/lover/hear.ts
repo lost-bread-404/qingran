@@ -21,6 +21,23 @@ export type { HeardUtterance };
 
 type SttWord = { text?: string; start?: number; end?: number };
 
+function engineFields(
+  requested: string,
+  result?: {
+    provider?: string;
+    engine_requested?: string;
+    engine_fallback_reason?: string;
+    audio_llm_ms?: number;
+  },
+) {
+  return {
+    engineRequested: result?.engine_requested ?? requested,
+    engineUsed: result?.provider,
+    engineFallback: result?.engine_fallback_reason,
+    audioLlmMs: result?.audio_llm_ms,
+  };
+}
+
 export async function hearUtterance(input: {
   wav: Blob | null;
   fallback?: Blob | null;
@@ -96,6 +113,7 @@ export async function hearUtterance(input: {
     ranHearing = true;
     if (result.quota) throw new Error(QUOTA_HINT);
     const predicted = result.predictedTags ?? predictedFromFrames;
+    const engine = engineFields(provider, result);
     if (result.hallucinationSuspect) {
       return heardFromHearing({
         debugHearing,
@@ -110,6 +128,7 @@ export async function hearUtterance(input: {
         predictedTags: predicted,
         hallucinationSuspect: true,
         hallucinationReason: result.hallucinationReason,
+        ...engine,
       });
     }
     const core =
@@ -128,6 +147,7 @@ export async function hearUtterance(input: {
       endpointFired: input.endpoint_fired,
       sttDoneAt: Date.now(),
       predictedTags: predicted,
+      ...engine,
     });
   } catch (err) {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
@@ -143,6 +163,8 @@ export async function hearUtterance(input: {
       endpointFired: input.endpoint_fired,
       sttDoneAt: Date.now(),
       predictedTags: predictedFromFrames,
+      engineRequested: provider,
+      engineUsed: "xai",
     });
   }
 
@@ -179,6 +201,8 @@ export async function hearUtterance(input: {
     hallucinationSuspect: scrubbed.suspect,
     hallucinationReason:
       scrubbed.reason === "apple_empty" || scrubbed.reason === "short_quiet" ? scrubbed.reason : undefined,
+    engineRequested: provider,
+    engineUsed: "xai",
   });
 }
 

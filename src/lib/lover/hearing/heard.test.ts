@@ -140,3 +140,21 @@ test("hold-to-talk + Apple empty + xAI content is sent", () => {
   assert.equal(heard.hallucinationSuspect, false);
   assert.match(heard.text, /我想你了/);
 });
+
+test("heardFromHearing keeps engine debug fields", () => {
+  const heard = heardFromHearing({
+    debugHearing: true,
+    turnId: "t-e",
+    tagged: "嗯",
+    xaiText: "嗯",
+    noiseOnly: false,
+    engineRequested: "gemini",
+    engineUsed: "xai",
+    engineFallback: "timeout",
+    audioLlmMs: 8000,
+  });
+  assert.equal(heard.engineRequested, "gemini");
+  assert.equal(heard.engineUsed, "xai");
+  assert.equal(heard.engineFallback, "timeout");
+  assert.equal(heard.audioLlmMs, 8000);
+});

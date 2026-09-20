@@ -36,6 +36,7 @@ export type ChatMessage = {
     hearMs?: number;
     grokMs?: number;
     ttsMs?: number;
+    engine?: string;
   };
   interrupted?: boolean;
   talkTrace?: {

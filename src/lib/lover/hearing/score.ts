@@ -1,4 +1,5 @@
 import { cer, textsExact } from "./metrics.ts";
+import { emptyEngineUse, type EngineUseStats } from "./select.ts";
 import { scoreTagAccuracy, type AcousticTags, type TagAccuracy, type TagKey } from "./tags.ts";
 
 export type ScoreWindow = "7d" | "all";
@@ -49,6 +50,7 @@ export type HearingScore = {
   noiseRecognizedRate: number | null;
   hallucinationN: number;
   hallucinationByReason: { apple_empty: number; short_quiet: number };
+  engineUse: EngineUseStats;
   worst: WorstClip[];
 };
 
@@ -67,6 +69,7 @@ export function scoreHearing(
     window?: ScoreWindow;
     hallucinationN?: number;
     hallucinationByReason?: { apple_empty?: number; short_quiet?: number };
+    engineUse?: EngineUseStats;
     now?: number;
   } = {},
 ): HearingScore {
@@ -120,6 +123,7 @@ export function scoreHearing(
       apple_empty: input.hallucinationByReason?.apple_empty ?? 0,
       short_quiet: input.hallucinationByReason?.short_quiet ?? 0,
     },
+    engineUse: input.engineUse ?? emptyEngineUse(),
     worst,
   };
 }

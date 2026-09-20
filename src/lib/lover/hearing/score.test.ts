@@ -46,6 +46,7 @@ test("score card CER, exact match, noise rate, and worst-20 order", () => {
   assert.equal(scored.hallucinationN, 2);
   assert.equal(scored.hallucinationByReason.apple_empty, 1);
   assert.equal(scored.hallucinationByReason.short_quiet, 1);
+  assert.equal(scored.engineUse.n, 0);
   assert.equal(scored.worst[0]?.id, "b");
   assert.equal(scored.worst[0]?.hyp, "我喜欢你");
   assert.equal(scored.worst[0]?.gold, "嗯");

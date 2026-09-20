@@ -14,7 +14,6 @@ import {
   TAG_LENGTHS,
   TAG_VALUE_LABELS,
   TAG_VOICES,
-  defaultTags,
   goldTagsFromTouched,
   parsePartialAcousticTags,
   tagsTouched,
@@ -82,7 +81,7 @@ export function ConfirmTurn({
   initialPredicted,
   initialGoldTags,
 }: Props) {
-  const predicted = initialPredicted ?? defaultTags();
+  const predicted = initialPredicted ?? {};
   const [draft, setDraft] = useState(initialDraft ?? sttText);
   const [noiseOnly, setNoiseOnly] = useState(initialNoise);
   const [literalMismatch, setLiteralMismatch] = useState(initialLiteralMismatch);
@@ -94,7 +93,7 @@ export function ConfirmTurn({
 
   useEffect(() => {
     if (!open) return;
-    const nextPredicted = initialPredicted ?? defaultTags();
+    const nextPredicted = initialPredicted ?? {};
     setDraft(initialDraft ?? sttText);
     setNoiseOnly(initialNoise);
     setLiteralMismatch(initialLiteralMismatch);
@@ -169,17 +168,31 @@ export function ConfirmTurn({
           <div className="mt-3 flex flex-col gap-3">
             {TAG_KEYS.map((key) => (
               <div key={key}>
-                <p className="mb-1 text-xs text-subtle">{TAG_LABELS[key]}</p>
+                <p className="mb-1 text-xs text-subtle">
+                  {TAG_LABELS[key]}
+                  {key === "events"
+                    ? chosen.events === undefined
+                      ? " · 未预测"
+                      : ""
+                    : chosen[key] == null
+                      ? " · 未预测"
+                      : ""}
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {key === "events"
                     ? EVENT_CHIP_VALUES.map((value) => {
-                        const selected = value === "none" ? chosen.events.length === 0 : chosen.events.includes(value);
+                        const selected =
+                          value === "none"
+                            ? Array.isArray(chosen.events) && chosen.events.length === 0
+                            : Boolean(chosen.events?.includes(value));
                         return (
                           <button
                             key={value}
                             type="button"
                             aria-pressed={selected}
-                            onClick={() => setChosen((cur) => ({ ...cur, events: toggleEventChip(cur.events, value) }))}
+                            onClick={() =>
+                              setChosen((cur) => ({ ...cur, events: toggleEventChip(cur.events ?? [], value) }))
+                            }
                             className={cn(
                               "min-h-11 rounded-md px-3 text-sm",
                               selected ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
@@ -262,7 +275,7 @@ export function ConfirmTurn({
               className="w-full"
               disabled={busy}
               onClick={() => {
-                const nextPredicted = initialPredicted ?? defaultTags();
+                const nextPredicted = initialPredicted ?? {};
                 const touched = tagsTouched(nextPredicted, chosen);
                 void onConfirm({
                   goldText: draft.trim(),

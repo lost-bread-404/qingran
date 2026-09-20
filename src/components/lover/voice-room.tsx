@@ -48,6 +48,7 @@ import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import { classifyTalkException, TALK_FAIL, talkExceptionHint } from "@/lib/lover/talk-fail";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { engineLineFromHeard } from "@/lib/lover/hearing/select";
 import { formatCallAudioLog, installAudioTrace, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
   confirmHearingClip,
@@ -415,6 +416,7 @@ export function VoiceRoom() {
         endpointFired?: number;
         sttDoneAt?: number;
         predictedTags?: AcousticTags;
+        engine?: string;
       },
     ) => {
       const tagged = sayRaw.trim();
@@ -433,10 +435,13 @@ export function VoiceRoom() {
         voiceTurnId: opts?.voiceTurnId,
         predictedTags: opts?.predictedTags,
         hearingGold: opts?.voiceTurnId ? "unconfirmed" : undefined,
-        hearingTiming: hearMs != null ? { hearMs } : undefined,
+        hearingTiming:
+          hearMs != null || opts?.engine
+            ? { hearMs, engine: opts?.engine }
+            : undefined,
       };
-      if (opts?.existingUser && hearMs != null) {
-        userMsg.hearingTiming = { ...userMsg.hearingTiming, hearMs };
+      if (opts?.existingUser && (hearMs != null || opts?.engine)) {
+        userMsg.hearingTiming = { ...userMsg.hearingTiming, hearMs, engine: opts.engine ?? userMsg.hearingTiming?.engine };
       }
       if (opts?.skipQingran) {
         setBanner(null);
@@ -692,6 +697,7 @@ export function VoiceRoom() {
         endpointFired: heard.endpointFired,
         sttDoneAt: heard.sttDoneAt,
         predictedTags: heard.predictedTags,
+        engine: engineLineFromHeard(heard),
       });
     },
   });
@@ -780,6 +786,7 @@ export function VoiceRoom() {
           endpointFired: heard.endpointFired,
           sttDoneAt: heard.sttDoneAt,
           predictedTags: heard.predictedTags,
+          engine: engineLineFromHeard(heard),
         });
       }
     } finally {

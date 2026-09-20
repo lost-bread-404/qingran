@@ -19,6 +19,7 @@ import {
 } from "@/lib/lover/hearing/store";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
 import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/score";
+import { formatEngineMix } from "@/lib/lover/hearing/select";
 import { TAG_EVENT_VALUES, TAG_LABELS, TAG_VALUE_LABELS, type AcousticTags, type EventPr } from "@/lib/lover/hearing/tags";
 import { cn } from "@/lib/utils";
 
@@ -590,6 +591,7 @@ function ScoreCard({ score }: { score: ScorePayload | null }) {
             : `${score.hallucinationN}（apple_empty ${score.hallucinationByReason?.apple_empty ?? 0} · short_quiet ${score.hallucinationByReason?.short_quiet ?? 0}）`
         }
       />
+      <Row label="引擎占比" value={formatEngineMix(score.engineUse)} />
     </dl>
   );
 }

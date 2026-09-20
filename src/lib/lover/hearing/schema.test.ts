@@ -9,7 +9,7 @@ import {
 } from "./schema.ts";
 import { assignSplits } from "./split.ts";
 import { cer, cueTokenF1, fieldAccuracy, selfConsistency } from "./metrics.ts";
-import { chooseHearing } from "./select.ts";
+import { chooseHearing, formatEngineLine, aggregateEngineUse, formatEngineMix } from "./select.ts";
 import { HEARING } from "./config.ts";
 import { classifyGeminiResponse, clipFallbackRaw, hearingSystemPrompt, isModerationHttpError } from "./http.ts";
 
@@ -54,9 +54,9 @@ describe("hearing schema", () => {
     assert.equal(looksLikeRefusal('{"text":"嗯","cues":[],"utterance_emotion":"neutral","noise_only":false}'), false);
   });
 
-  it("falls back to xai on timeout, refusal, schema, http", () => {
+  it("falls back to xai on timeout, refusal, schema, http, missing_key", () => {
     const xai = { ok: true as const, text: "嗯", words: [], latency_ms: 12, raw: "嗯" };
-    for (const reason of ["timeout", "refusal", "schema", "http"] as const) {
+    for (const reason of ["timeout", "refusal", "schema", "http", "missing_key"] as const) {
       const picked = chooseHearing({
         provider: "qwen",
         outcome: { ok: false, reason, latency_ms: 4000, provider: "qwen", model: HEARING.qwen.model },
@@ -68,6 +68,51 @@ describe("hearing schema", () => {
       assert.equal(picked.tagged, "嗯");
       assert.equal(picked.refusal, reason === "refusal");
     }
+  });
+
+  it("records fallback reason on the debug engine line", () => {
+    assert.equal(formatEngineLine({ used: "gemini" }), "引擎：gemini");
+    assert.equal(formatEngineLine({ used: "xai" }), "引擎：xai");
+    assert.equal(
+      formatEngineLine({ used: "xai", fallback: true, fallbackReason: "timeout" }),
+      "引擎：xai(fallback: timeout)",
+    );
+    assert.equal(
+      formatEngineLine({ used: "xai", fallback: true, fallbackReason: "refusal" }),
+      "引擎：xai(fallback: refused)",
+    );
+    assert.equal(
+      formatEngineLine({ used: "xai", fallback: true, fallbackReason: "schema" }),
+      "引擎：xai(fallback: error)",
+    );
+    assert.equal(
+      formatEngineLine({ used: "xai", fallback: true, fallbackReason: "http" }),
+      "引擎：xai(fallback: error)",
+    );
+    assert.equal(
+      formatEngineLine({ used: "xai", fallback: true, fallbackReason: "missing_key" }),
+      "引擎：xai(fallback: missing_key)",
+    );
+    assert.equal(formatEngineLine({ used: "xai", fallback: true }), "引擎：xai");
+  });
+
+  it("mixes engine use and fallback reasons for the lab card", () => {
+    const stats = aggregateEngineUse([
+      { engine: "gemini", reason: null, n: 6 },
+      { engine: "xai", reason: "timeout", n: 3 },
+      { engine: "xai", reason: "refusal", n: 1 },
+    ]);
+    assert.equal(stats.n, 10);
+    assert.deepEqual(stats.used, [
+      { engine: "gemini", n: 6 },
+      { engine: "xai", n: 4 },
+    ]);
+    assert.deepEqual(stats.fallback, [
+      { reason: "timeout", n: 3 },
+      { reason: "refused", n: 1 },
+    ]);
+    assert.equal(formatEngineMix(stats), "gemini 60% · xai 40% · 退回 timeout 3 · refused 1");
+    assert.equal(formatEngineMix({ n: 0, used: [], fallback: [] }), "无数据");
   });
 
   it("keeps audio-llm result when schema is valid", () => {

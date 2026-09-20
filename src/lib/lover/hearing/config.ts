@@ -2,7 +2,7 @@ export const HEARING_PROVIDERS = ["xai", "qwen", "gemini", "selfhost"] as const;
 export type HearingProviderId = (typeof HEARING_PROVIDERS)[number];
 
 export const DEFAULT_HEARING_PROVIDER: HearingProviderId = "xai";
-export const DEFAULT_HEARING_TIMEOUT_MS = 4000;
+export const DEFAULT_HEARING_TIMEOUT_MS = 8000;
 export const DEFAULT_XAI_VAD_THRESHOLD = 0.3;
 
 /** xAI STT keyterms. Single-char fillers + names we actually want biased. */

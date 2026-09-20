@@ -1,4 +1,3 @@
-import { listenVocal } from "../vocal-event.ts";
 import { voicedIslands, type ProsodyFrame } from "../prosody.ts";
 
 export const TAG_LENGTHS = ["short", "long"] as const;
@@ -16,10 +15,10 @@ export type EventChip = (typeof EVENT_CHIP_VALUES)[number];
 export type TagKey = (typeof TAG_KEYS)[number];
 
 export type AcousticTags = {
-  length: TagLength;
-  contour: TagContour;
-  voice: TagVoice;
-  events: TagEvent[];
+  length?: TagLength;
+  contour?: TagContour;
+  voice?: TagVoice;
+  events?: TagEvent[];
 };
 
 export const TAG_LABELS: Record<TagKey, string> = {
@@ -85,7 +84,9 @@ export function uniqueEvents(values: readonly unknown[]): TagEvent[] {
   return TAG_EVENT_VALUES.filter((event) => set.has(event));
 }
 
-export function eventsEqual(a: readonly TagEvent[], b: readonly TagEvent[]): boolean {
+export function eventsEqual(a: readonly TagEvent[] | undefined, b: readonly TagEvent[] | undefined): boolean {
+  if (a === undefined && b === undefined) return true;
+  if (a === undefined || b === undefined) return false;
   return uniqueEvents(a).join("+") === uniqueEvents(b).join("+");
 }
 
@@ -119,16 +120,10 @@ export function toggleEventChip(events: readonly TagEvent[], chip: EventChip): T
 }
 
 export function parseAcousticTags(value: unknown): AcousticTags | null {
-  if (!value || typeof value !== "object") return null;
-  const row = value as Record<string, unknown>;
-  const voice = row.voice === "whisper" ? "breathy" : row.voice;
-  if (!isTagLength(row.length) || !isTagContour(row.contour) || !isTagVoice(voice)) return null;
-  return {
-    length: row.length,
-    contour: row.contour,
-    voice,
-    events: normalizeEvents(row.events ?? row.event),
-  };
+  const parsed = parsePartialAcousticTags(value);
+  if (!parsed) return null;
+  if (parsed.length == null && parsed.contour == null && parsed.voice == null && parsed.events == null) return null;
+  return parsed;
 }
 
 export function parsePartialAcousticTags(value: unknown): Partial<AcousticTags> | null {
@@ -187,8 +182,12 @@ export function goldTagsFromTouched(chosen: AcousticTags, touched: TagKey[]): Pa
 }
 
 export function formatAcousticTag(tags: AcousticTags): string {
-  const right = uniqueEvents(tags.events).join("+");
-  return `〔${tags.length}·${tags.contour}·${tags.voice}｜${right}〕`;
+  const length = tags.length ?? "";
+  const contour = tags.contour ?? "";
+  const voice = tags.voice ?? "";
+  const right = tags.events ? uniqueEvents(tags.events).join("+") : "";
+  if (!length && !contour && !voice && !right) return "";
+  return `〔${length}·${contour}·${voice}｜${right}〕`;
 }
 
 export function stripAcousticTags(text: string): string {
@@ -205,7 +204,7 @@ export function applyUtteranceTag(text: string, tags: AcousticTags | null | unde
 export function tagsFromCues(
   cues: Array<{ length?: string; contour?: string; voice?: string; event?: string | null }>,
 ): AcousticTags {
-  const tags = defaultTags();
+  const tags: AcousticTags = {};
   if (!cues.length) return tags;
   if (cues.some((cue) => cue.length === "long")) tags.length = "long";
   else if (cues.some((cue) => cue.length === "short")) tags.length = "short";
@@ -217,14 +216,20 @@ export function tagsFromCues(
   else if (contours[0]) tags.contour = contours[0];
 
   if (cues.some((cue) => cue.voice === "breathy" || cue.voice === "whisper")) tags.voice = "breathy";
+  else if (cues.some((cue) => cue.voice === "normal")) tags.voice = "normal";
 
-  tags.events = uniqueEvents(cues.map((cue) => cueEventToTag(cue.event)));
+  const events = uniqueEvents(cues.map((cue) => cueEventToTag(cue.event)));
+  tags.events = events;
   return tags;
 }
 
 export function withMeowFromText(tags: AcousticTags, text: string): AcousticTags {
   if (!/喵|嗷呜/.test(text)) return tags;
-  return { ...tags, events: uniqueEvents([...tags.events, "meow"]) };
+  return { ...tags, events: uniqueEvents([...(tags.events ?? []), "meow"]) };
+}
+
+export function lengthOnlyTags(tags: AcousticTags | null | undefined): AcousticTags {
+  return tags?.length ? { length: tags.length } : {};
 }
 
 export function predictUtteranceTags(input: {
@@ -233,11 +238,11 @@ export function predictUtteranceTags(input: {
 }): AcousticTags {
   if (input.cues?.length) return tagsFromCues(input.cues);
   if (input.frames?.length) return tagsFromProsody(input.frames);
-  return defaultTags();
+  return {};
 }
 
 export function tagsFromProsody(frames: ProsodyFrame[]): AcousticTags {
-  const tags = defaultTags();
+  const tags: AcousticTags = {};
   if (!frames.length) return tags;
   const islands = voicedIslands(frames);
   const dur =
@@ -245,38 +250,6 @@ export function tagsFromProsody(frames: ProsodyFrame[]): AcousticTags {
       ? islands.reduce((sum, island) => sum + Math.max(0, island.end - island.start), 0)
       : Math.max(0, (frames.at(-1)?.t ?? 0) - (frames[0]?.t ?? 0));
   tags.length = dur >= 0.42 ? "long" : "short";
-
-  const voiced = frames.filter((f) => f.hz > 80 && f.clarity >= 0.6);
-  const hz = voiced.map((f) => f.hz);
-  if (hz.length >= 3) {
-    const third = Math.max(1, Math.ceil(hz.length / 3));
-    const startHz = avg(hz.slice(0, third));
-    const endHz = avg(hz.slice(-third));
-    const rise = startHz > 80 ? endHz / startHz : 1;
-    const jitter = cv(hz);
-    if (jitter >= 0.2 && rise < 1.14 && rise > 0.88) tags.contour = "wavering";
-    else if (rise >= 1.12) tags.contour = "rising";
-    else if (rise <= 0.9) tags.contour = "falling";
-    else tags.contour = "flat";
-  }
-
-  const rms = frames.map((f) => f.rms);
-  const peak = Math.max(0, ...rms);
-  const loud = frames.filter((f) => f.rms >= 0.006);
-  const voicedShare = voiced.length / Math.max(1, loud.length);
-  const meanBright = avg(frames.map((f) => f.bright));
-  if (voicedShare <= 0.38 && meanBright >= 0.16) tags.voice = "breathy";
-
-  const vocal = listenVocal(frames);
-  if (vocal.kind === "laugh") tags.events = ["laugh"];
-  else if (vocal.kind === "cry") tags.events = ["cry"];
-  else if (vocal.kind === "pant") tags.events = ["moan"];
-  else {
-    const third = Math.max(1, Math.ceil(rms.length / 3));
-    const head = avg(rms.slice(0, third));
-    const tail = avg(rms.slice(-third));
-    if (dur >= 0.28 && peak < 0.045 && head > 0 && tail < head * 0.72) tags.events = ["sigh"];
-  }
   return tags;
 }
 
@@ -353,16 +326,4 @@ export function scoreTagAccuracy(
 function eventsOf(tags: { events?: unknown; event?: unknown } | null | undefined): TagEvent[] {
   if (!tags) return [];
   return normalizeEvents(tags.events ?? tags.event);
-}
-
-function avg(values: number[]) {
-  if (!values.length) return 0;
-  return values.reduce((sum, n) => sum + n, 0) / values.length;
-}
-
-function cv(values: number[]) {
-  if (values.length < 2) return 0;
-  const mean = avg(values);
-  if (mean <= 0) return 0;
-  return Math.sqrt(avg(values.map((n) => (n - mean) ** 2))) / mean;
 }

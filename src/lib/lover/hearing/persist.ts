@@ -1,5 +1,6 @@
 import { goldTierFor, isGoldSource, type GoldSource } from "./gold.ts";
 import { hearingCueSchema, EMOTIONS, type CueEmotion, type HearingCue } from "./schema.ts";
+import { aggregateEngineUse, type EngineUseStats } from "./select.ts";
 import {
   parseAcousticTags,
   parsePartialAcousticTags,
@@ -419,6 +420,27 @@ export async function hallucinationCountByReason(
     else out.short_quiet += Number(row.n) || 0;
   }
   return out;
+}
+
+export async function engineUseStats(sql: Sql, window: "7d" | "all"): Promise<EngineUseStats> {
+  const rows =
+    window === "7d"
+      ? await sql<{ engine: string | null; reason: string | null; n: number }>`
+          select coalesce(nullif(engine_used, ''), nullif(provider, ''), 'xai') as engine,
+                 engine_fallback_reason as reason,
+                 count(*)::int as n
+          from qingran_hearing_turns
+          where created_at >= now() - interval '7 days'
+          group by 1, 2
+        `
+      : await sql<{ engine: string | null; reason: string | null; n: number }>`
+          select coalesce(nullif(engine_used, ''), nullif(provider, ''), 'xai') as engine,
+                 engine_fallback_reason as reason,
+                 count(*)::int as n
+          from qingran_hearing_turns
+          group by 1, 2
+        `;
+  return aggregateEngineUse(rows);
 }
 
 export async function listMigrationNames(sql: Sql): Promise<string[]> {

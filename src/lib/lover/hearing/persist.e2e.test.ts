@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { pendingMigrations } from "../../../../scripts/migration-plan.mjs";
-import { confirmClipByTurn, exportReplyFlagDataset, goldCount, hallucinationCount, insertClipRow, insertReplyFlag, listClipRows, listLabeledClipRows, listReplyFlagRows, listScoreClipRows, patchFinalTextByTurn, unlabelClip } from "./persist.ts";
+import { confirmClipByTurn, exportReplyFlagDataset, goldCount, hallucinationCount, engineUseStats, insertClipRow, insertReplyFlag, listClipRows, listLabeledClipRows, listReplyFlagRows, listScoreClipRows, patchFinalTextByTurn, unlabelClip } from "./persist.ts";
 import { scoreHearing } from "./score.ts";
 import { silenceWavBase64 } from "./wav.ts";
 import type { AcousticTags } from "./tags.ts";
@@ -300,3 +300,64 @@ test("0011 preroll migration only adds clip columns", async () => {
   assert.doesNotMatch(sql, /\bupdate\b/i);
   assert.doesNotMatch(sql, /\bdelete\b/i);
 });
+
+test("0012 engine migration only adds turn columns", async () => {
+  const sql = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations/0012_hearing_engine.sql"),
+    "utf8",
+  );
+  assert.match(sql, /add column if not exists engine_requested/);
+  assert.match(sql, /add column if not exists engine_used/);
+  assert.match(sql, /add column if not exists audio_llm_ms/);
+  assert.match(sql, /add column if not exists engine_fallback_reason/);
+  assert.doesNotMatch(sql, /drop column/i);
+  assert.doesNotMatch(sql, /alter column/i);
+  assert.doesNotMatch(sql, /\bupdate\b/i);
+  assert.doesNotMatch(sql, /\bdelete\b/i);
+});
+
+test("PGLite e2e: engine mix counts used engines and fallback reasons", async () => {
+  const pg = new PGlite();
+  await pg.waitReady;
+  await pg.exec(
+    "create table if not exists _migrations (name text primary key, applied_at timestamptz not null default now())",
+  );
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations");
+  const entries = await readdir(dir);
+  const files = Object.fromEntries(
+    await Promise.all(
+      entries
+        .filter((name) => name.endsWith(".sql"))
+        .map(async (name) => [name, await readFile(join(dir, name), "utf8")] as const),
+    ),
+  );
+  for (const { name } of pendingMigrations(Object.keys(files), [])) {
+    await pg.exec(files[name] ?? "");
+    await pg.query("insert into _migrations (name) values ($1)", [name]);
+  }
+
+  const sql = toSql(async <T>(text: string, params: unknown[]) => {
+    const result = await pg.query<T>(text, params);
+    return result.rows;
+  });
+
+  await sql`
+    insert into qingran_hearing_turns (id, provider, engine_requested, engine_used, engine_fallback_reason)
+    values
+      ('e1', 'gemini', 'gemini', 'gemini', null),
+      ('e2', 'gemini', 'gemini', 'gemini', null),
+      ('e3', 'xai', 'gemini', 'xai', 'timeout'),
+      ('e4', 'xai', 'gemini', 'xai', 'refusal')
+  `;
+  const stats = await engineUseStats(sql, "7d");
+  assert.equal(stats.n, 4);
+  assert.deepEqual(stats.used, [
+    { engine: "gemini", n: 2 },
+    { engine: "xai", n: 2 },
+  ]);
+  assert.deepEqual(stats.fallback, [
+    { reason: "timeout", n: 1 },
+    { reason: "refused", n: 1 },
+  ]);
+});
+

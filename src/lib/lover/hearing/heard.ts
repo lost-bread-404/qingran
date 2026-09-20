@@ -15,6 +15,10 @@ export type HeardUtterance = {
   predictedTags?: AcousticTags;
   hallucinationSuspect?: boolean;
   hallucinationReason?: "apple_empty" | "short_quiet";
+  engineRequested?: string;
+  engineUsed?: string;
+  engineFallback?: string;
+  audioLlmMs?: number;
 };
 
 export function clipSaveBanner(error: string): string {
@@ -46,6 +50,10 @@ export function heardFromHearing(input: {
   predictedTags?: AcousticTags;
   hallucinationSuspect?: boolean;
   hallucinationReason?: "apple_empty" | "short_quiet";
+  engineRequested?: string;
+  engineUsed?: string;
+  engineFallback?: string;
+  audioLlmMs?: number;
 }): HeardUtterance {
   const recognized = input.tagged.trim() || input.xaiText.trim();
   const empty =
@@ -57,6 +65,10 @@ export function heardFromHearing(input: {
   const extra = {
     hallucinationSuspect: input.hallucinationSuspect,
     hallucinationReason: input.hallucinationReason,
+    engineRequested: input.engineRequested,
+    engineUsed: input.engineUsed,
+    engineFallback: input.engineFallback,
+    audioLlmMs: input.audioLlmMs,
   };
   if (input.debugHearing) {
     return {

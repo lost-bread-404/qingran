@@ -30,6 +30,7 @@ test("transcript pencil opens confirm in debug; bubble text is not a hidden conf
   assert.match(src, /undoConfirmId/);
   assert.match(src, /aria-label="改这句话"/);
   assert.match(src, /canConfirm \? \(/);
+  assert.match(src, /hearingTiming\.engine/);
   assert.doesNotMatch(src, /if \(canConfirm\) onConfirmStart/);
 });
 
@@ -46,6 +47,8 @@ test("confirm panel keeps 噪音 and 字面≠意思, plus acoustic chips", () =
   assert.doesNotMatch(src, /这是纯噪音/);
   assert.match(src, /<audio className="mb-3 w-full shrink-0" controls src=\{audioUrl\} \/>/);
   assert.doesNotMatch(src, /<audio[^>]*muted/);
+  assert.match(src, /未预测/);
+  assert.match(src, /chosen\.events === undefined/);
 });
 
 test("transcript has 👎 below the reply, 24pt from play, both 44pt", () => {
@@ -92,6 +95,7 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /planConfirmSave/);
   assert.match(src, /sliceAfterMessage/);
   assert.match(src, /async function replayFrom/);
+  assert.match(src, /engineLineFromHeard/);
   assert.doesNotMatch(src, /alreadySent/);
   const save = src.slice(src.indexOf("async function saveConfirm"), src.indexOf("async function saveConfirmQuick"));
   assert.match(save, /void replayFrom/);
@@ -137,6 +141,8 @@ test("lab scorecard uses acoustic tag accuracy and has 👎 list", () => {
   assert.match(src, /TAG_EVENT_VALUES/);
   assert.match(src, /👎 列表/);
   assert.match(src, /exportReplyFlags/);
+  assert.match(src, /引擎占比/);
+  assert.match(src, /formatEngineMix/);
   assert.doesNotMatch(src, /语气符号准确率/);
   assert.doesNotMatch(src, /toneAccuracy/);
 });
@@ -189,9 +195,14 @@ test("runHearing persists with waitUntil; xai skips audio-LLM and a second STT",
   assert.match(store, /apple_empty/);
   assert.match(store, /short_quiet/);
   assert.match(store, /holdToTalk/);
+  assert.match(store, /engine_fallback_reason/);
+  assert.match(store, /lengthOnlyTags\(data\.predictedTags\)/);
+  assert.match(store, /used !== "xai" \? withMeowFromText/);
   assert.match(hear, /ranHearing \|\| provider === "xai"/);
   assert.match(hear, /transcribeVoice/);
   assert.match(hear, /hallucinationSuspect/);
+  assert.match(hear, /engine_fallback_reason/);
+  assert.match(hear, /engineRequested/);
 });
 
 test("playback START_SEC is restored to pre-low-latency 0.42", () => {
@@ -206,6 +217,7 @@ test("debug transcript shows segmented latency", () => {
   assert.match(src, /说完→识别完/);
   assert.match(src, /识别完→字/);
   assert.match(src, /→出声/);
+  assert.match(src, /hearingTiming\.engine/);
 });
 
 test("confirm panel and settings drawer follow visualViewport and keep the caret visible", () => {
