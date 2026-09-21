@@ -281,22 +281,8 @@ export function VoiceRoom() {
   }, [hydrated]);
 
   useEffect(() => {
-    const persistInflight = () => {
-      const cur = inflightRef.current;
-      const display = cur ? stripSpeechTags(cur.text) : "";
-      if (!cur || !display) return;
-      void appendRoomMessage({
-        data: {
-          id: cur.id,
-          role: "assistant",
-          text: display,
-          createdAt: cur.createdAt,
-        },
-      });
-    };
     const stopLife = listenAppLifecycle({
       onBackground: () => {
-        persistInflight();
         if (callActiveRef.current) return;
         stopPlayback();
         turnRef.current += 1;
@@ -304,10 +290,8 @@ export function VoiceRoom() {
         setStatus((s) => (s === "speaking" || s === "thinking" ? "idle" : s));
       },
     });
-    window.addEventListener("beforeunload", persistInflight);
     return () => {
       stopLife();
-      window.removeEventListener("beforeunload", persistInflight);
     };
   }, []);
 
@@ -521,10 +505,7 @@ export function VoiceRoom() {
       let ttsFirst = 0;
       const hearingTurnId = getHearingSession().lastTurnId;
       const persistReply = (text: string) => {
-        const display = stripSpeechTags(text);
         inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
-        if (!display) return;
-        void appendRoomMessage({ data: { ...reply, text: display } });
       };
       const flushPaint = () => {
         paintHandle = 0;
@@ -559,6 +540,7 @@ export function VoiceRoom() {
             text: tagged,
             userMsgId: userMsg.id,
             userCreatedAt: userMsg.createdAt || at,
+            replyId: reply.id,
             profile: lockedProfile(profileRef.current),
             nowMs: Date.now(),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",

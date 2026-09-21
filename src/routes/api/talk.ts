@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { enqueueArchiveIfNeeded } from "@/lib/lover/brain/archivist";
-import { assertModelConfig, DRAIN_BUDGET_MS } from "@/lib/lover/brain/config";
+import { assertModelConfig, LONG_DRAIN_MS } from "@/lib/lover/brain/config";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
 import { drainJobs, enqueue } from "@/lib/lover/brain/jobs";
+import { runInBackground } from "@/lib/lover/brain/wait-until";
 import { upsertMessage } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
 import { parseUsage } from "@/lib/lover/brain/usage";
@@ -24,6 +25,7 @@ type TalkBody = {
   text?: string;
   userMsgId?: string;
   userCreatedAt?: number;
+  replyId?: string;
   profile?: Profile;
   nowMs?: number;
   timeZone?: string;
@@ -88,7 +90,7 @@ export const Route = createFileRoute("/api/talk")({
               const nowMs = Number(body.nowMs) || Date.now();
               const userMsgId = String(body.userMsgId || newId());
               const userCreatedAt = Number(body.userCreatedAt) || nowMs;
-              const replyId = newId();
+              const replyId = String(body.replyId || "").trim() || newId();
 
               const ctx = await loadHotContext({
                 text,
@@ -134,7 +136,7 @@ export const Route = createFileRoute("/api/talk")({
                 await upsertMessage({
                   id: replyId,
                   role: "assistant",
-                  text: display.slice(0, 4000),
+                  text: `⟦回:${userMsgId}⟧${display}`.slice(0, 4000),
                   createdAt: userCreatedAt + 1,
                   timeZone,
                 });
@@ -199,7 +201,7 @@ export const Route = createFileRoute("/api/talk")({
               await enqueue("reflect", `reflect:${userCreatedAt}`, { turnSeq: userCreatedAt });
               await enqueueArchiveIfNeeded(userCreatedAt);
               await enqueuePeriodicIfDue(nowMs, timeZone);
-              await drainJobs(DRAIN_BUDGET_MS);
+              await runInBackground(() => drainJobs(LONG_DRAIN_MS));
             } catch (err) {
               const outcome = talkFailFromResult({
                 kind: "exception",

@@ -60,6 +60,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [newTopic, setNewTopic] = useState("");
   const [newBody, setNewBody] = useState("");
   const [dbWarn, setDbWarn] = useState(false);
+  const [clearArmed, setClearArmed] = useState(false);
   const viewport = useVisualViewportHeight(open);
 
   useEffect(() => {
@@ -72,6 +73,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     void hearingEnvStatus().then((result) => setProviderReady(result.providers)).catch(() => undefined);
     setEditingId(null);
     setNewAt(toDatetimeLocal(Date.now()));
+    setClearArmed(false);
     void refresh();
   }, [open, profile.systemPrompt]);
 
@@ -391,9 +393,30 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                 ))}
               </ul>
             )}
-            <Button variant="outline" onClick={onClearChat}>
-              只清屏幕
-            </Button>
+            {!clearArmed ? (
+              <Button variant="outline" onClick={() => setClearArmed(true)}>
+                只清屏幕
+              </Button>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <p className="text-sm text-subtle">
+                  让她忘掉最近还没记住的对话？已经记住的事和故事线不受影响。
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => {
+                      onClearChat();
+                      setClearArmed(false);
+                    }}
+                  >
+                    确定清空
+                  </Button>
+                  <Button variant="outline" onClick={() => setClearArmed(false)}>
+                    取消
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       ) : tab === "portrait" ? (

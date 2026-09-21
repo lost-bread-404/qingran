@@ -198,6 +198,60 @@ export async function resetMind(): Promise<void> {
   );
 }
 
+export async function getRoomClearedAt(): Promise<number> {
+  const db = await getSql();
+  const rows = await db.query<{ room_cleared_at: number | null }>(
+    "select room_cleared_at from qingran_profile where id = 1",
+  );
+  return asInt(rows[0]?.room_cleared_at, 0);
+}
+
+export async function forgetUnarchivedMessages(at: number): Promise<number> {
+  const db = await getSql();
+  const rows = await db.query<{ n: number }>(
+    `with u as (
+       update qingran_messages
+       set forgotten_at = $1
+       where archived_at is null and forgotten_at is null
+       returning id
+     ) select count(*)::int as n from u`,
+    [at],
+  );
+  return asInt(rows[0]?.n);
+}
+
+export async function forgetAllMessages(at: number): Promise<number> {
+  const db = await getSql();
+  const rows = await db.query<{ n: number }>(
+    `with u as (
+       update qingran_messages
+       set forgotten_at = coalesce(forgotten_at, $1)
+       where forgotten_at is null
+       returning id
+     ) select count(*)::int as n from u`,
+    [at],
+  );
+  return asInt(rows[0]?.n);
+}
+
+export async function setRoomClearedAt(at: number): Promise<void> {
+  const db = await getSql();
+  await db.query(
+    `insert into qingran_profile (id, data, room_cleared_at, updated_at)
+     values (1, '{}'::jsonb, $1, now())
+     on conflict (id) do update set room_cleared_at = excluded.room_cleared_at, updated_at = now()`,
+    [at],
+  );
+}
+
+/** Hide recent unarchived turns from the screen and from Qingran; keep rows for analysis. */
+export async function clearRecentConversation(): Promise<void> {
+  const ts = now();
+  await setRoomClearedAt(ts);
+  await forgetUnarchivedMessages(ts);
+  await resetMind();
+}
+
 function rowMessage(r: Record<string, unknown>): StoredMessage {
   return {
     id: String(r.id),
@@ -216,6 +270,7 @@ export async function listRecentMessages(limit = 240): Promise<StoredMessage[]> 
   const rows = await db.query<Record<string, unknown>>(
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
+     where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
      order by created_at desc, id desc
      limit $1`,
     [limit],
@@ -232,6 +287,7 @@ export async function listHistoryWindow(
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
      where ($1::text is null or id <> $1)
+       and created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
      order by created_at desc, id desc
      limit $2`,
     [excludeId, limit],
@@ -266,6 +322,7 @@ export async function lastMessage(): Promise<StoredMessage | null> {
   const rows = await db.query<Record<string, unknown>>(
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
+     where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
      order by created_at desc, id desc
      limit 1`,
   );
@@ -278,6 +335,7 @@ export async function lastMessageBefore(createdAt: number): Promise<StoredMessag
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
      where created_at < $1
+       and created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
      order by created_at desc, id desc
      limit 1`,
     [createdAt],
@@ -351,6 +409,7 @@ export async function unarchivedOverflow(limit: number): Promise<StoredMessage[]
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
      where archived_at is null
+       and forgotten_at is null
        and id not in (
          select id from qingran_messages
          order by created_at desc, id desc
@@ -368,7 +427,7 @@ export async function unarchivedForSession(sessionId: string): Promise<StoredMes
   const rows = await db.query<Record<string, unknown>>(
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
-     where session_id = $1 and archived_at is null
+     where session_id = $1 and archived_at is null and forgotten_at is null
      order by created_at asc, id asc`,
     [sessionId],
   );
@@ -380,7 +439,7 @@ export async function unarchivedForDay(day: string): Promise<StoredMessage[]> {
   const rows = await db.query<Record<string, unknown>>(
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
-     where local_day = $1 and archived_at is null
+     where local_day = $1 and archived_at is null and forgotten_at is null
      order by created_at asc, id asc`,
     [day],
   );
@@ -402,7 +461,7 @@ export async function messagesOnDay(day: string): Promise<StoredMessage[]> {
   const rows = await db.query<Record<string, unknown>>(
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
-     where local_day = $1
+     where local_day = $1 and forgotten_at is null
      order by created_at asc, id asc`,
     [day],
   );
@@ -1361,10 +1420,83 @@ export async function skipOldReflect(turnSeq: number): Promise<void> {
   const db = await getSql();
   await db.query(
     `update brain_jobs set status = 'done', locked_until = null, updated_at = $2
-     where type = 'reflect' and status in ('pending','running')
+     where type = 'reflect' and status = 'pending'
        and coalesce((payload->>'turnSeq')::bigint, 0) < $1`,
     [turnSeq, now()],
   );
+}
+
+export const REFLECT_DEDUPE_KEY = "reflect";
+
+export async function upsertReflectJob(turnSeq: number): Promise<void> {
+  const db = await getSql();
+  const ts = now();
+  await db.query(
+    `insert into brain_jobs (id, type, dedupe_key, payload, status, attempts, run_after, created_at, updated_at)
+     values ($1, 'reflect', $2, $3::jsonb, 'pending', 0, $4, $4, $4)
+     on conflict (dedupe_key) do update set
+       payload = jsonb_build_object(
+         'turnSeq', greatest(
+           coalesce((brain_jobs.payload->>'turnSeq')::bigint, 0),
+           (excluded.payload->>'turnSeq')::bigint
+         )
+       ),
+       status = case when brain_jobs.status = 'running' then 'running' else 'pending' end,
+       run_after = case when brain_jobs.status = 'running' then brain_jobs.run_after else excluded.run_after end,
+       attempts = case when brain_jobs.status = 'running' then brain_jobs.attempts else 0 end,
+       last_error = case when brain_jobs.status = 'running' then brain_jobs.last_error else null end,
+       locked_until = case when brain_jobs.status = 'running' then brain_jobs.locked_until else null end,
+       updated_at = excluded.updated_at`,
+    [newId(), REFLECT_DEDUPE_KEY, JSON.stringify({ turnSeq }), ts],
+  );
+}
+
+export async function reflectFollowUpSeq(jobId: string, ranSeq: number): Promise<number | null> {
+  const db = await getSql();
+  const rows = await db.query<{ seq: string | number | null }>(
+    `select payload->>'turnSeq' as seq from brain_jobs where id = $1`,
+    [jobId],
+  );
+  const latest = Number(rows[0]?.seq ?? 0);
+  return Number.isFinite(latest) && latest > ranSeq ? latest : null;
+}
+
+export async function reopenReflectFollowUp(jobId: string): Promise<void> {
+  const db = await getSql();
+  await db.query(
+    `update brain_jobs
+     set status = 'pending', attempts = 0, run_after = $2, locked_until = null, last_error = null, updated_at = $2
+     where id = $1`,
+    [jobId, now()],
+  );
+}
+
+/** Atomically done-or-reopen so a concurrent upsertReflectJob cannot lose a follow-up. */
+export async function finishReflectJob(id: string, ranSeq: number): Promise<"pending" | "done"> {
+  const db = await getSql();
+  const ts = now();
+  const rows = await db.query<{ status: string }>(
+    `update brain_jobs
+     set status = case
+           when coalesce((payload->>'turnSeq')::bigint, 0) > $2 then 'pending'
+           else 'done'
+         end,
+         attempts = case
+           when coalesce((payload->>'turnSeq')::bigint, 0) > $2 then 0
+           else attempts
+         end,
+         last_error = case
+           when coalesce((payload->>'turnSeq')::bigint, 0) > $2 then null
+           else last_error
+         end,
+         locked_until = null,
+         run_after = $3,
+         updated_at = $3
+     where id = $1
+     returning status`,
+    [id, ranSeq, ts],
+  );
+  return rows[0]?.status === "pending" ? "pending" : "done";
 }
 
 export async function newerReflectExists(turnSeq: number): Promise<boolean> {

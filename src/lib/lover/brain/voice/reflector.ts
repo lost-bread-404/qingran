@@ -1,5 +1,5 @@
 import { QR_VOICE_READS_DIARY, REFLECT_WINDOW } from "../config.ts";
-import { callModel } from "../llm.ts";
+import { callModel, classifyReflectFailure } from "../llm.ts";
 import { validateMind } from "../mind-parse.ts";
 import {
   getMeta,
@@ -257,7 +257,7 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
   });
   if (!result.ok || !result.json) {
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
-    await fillReflectTurn(turnSeq, false, result.ms, "timeout-or-parse");
+    await fillReflectTurn(turnSeq, false, result.ms, classifyReflectFailure(result));
     await patchTurnTraceReflector({ turnSeq, mind: null, model: result.model, ms: result.ms });
     return null;
   }

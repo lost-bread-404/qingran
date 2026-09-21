@@ -19,6 +19,9 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.match(src, />高级</);
   assert.match(src, /引擎自检/);
   assert.match(src, /hearingConnectionTest/);
+  assert.match(src, /让她忘掉最近还没记住的对话？已经记住的事和故事线不受影响。/);
+  assert.match(src, /clearArmed/);
+  assert.match(src, /确定清空/);
   assert.doesNotMatch(src, /定向录制/);
   assert.doesNotMatch(src, /hearingNbest/);
 });
@@ -87,6 +90,7 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /historyForQingran/);
   assert.match(src, /kind: opts\?\.skipQingran \? "unheard" : "say"/);
   assert.match(src, /replyTo: userMsg.id/);
+  assert.match(src, /replyId: reply.id/);
   assert.match(src, /patchHearingReplyId/);
   assert.match(src, /flagQingranReply/);
   assert.match(src, /result.noiseOnly/);
@@ -314,7 +318,7 @@ test("hold-to-talk teardown releases the mic; call hangup does too; deafen does 
 
 test("idle hide/show does not write the audio session or grab the mic", () => {
   const src = readFileSync(new URL("../../../components/lover/voice-room.tsx", import.meta.url), "utf8");
-  const bg = src.slice(src.indexOf("onBackground:"), src.indexOf("window.addEventListener(\"beforeunload\""));
+  const bg = src.slice(src.indexOf("onBackground:"), src.indexOf("async function sweepOverflow"));
   assert.match(bg, /callActiveRef\.current/);
   assert.match(bg, /stopPlayback/);
   assert.doesNotMatch(bg, /acquireMic/);

@@ -45,6 +45,7 @@ export const BACKUP_TABLES: TableSpec[] = [
       ["created_at", "int"],
       ["kind", "text"],
       ["archived_at", "int"],
+      ["forgotten_at", "int"],
       ["session_id", "text"],
       ["local_day", "text"],
       ["edited_at", "int"],
@@ -762,6 +763,7 @@ export function convertV1(
     return {
       ...m,
       archived_at: null,
+      forgotten_at: null,
       session_id,
       local_day: localDay(m.created_at, tz),
     };

@@ -76,7 +76,7 @@ export const ROUTES: Record<
   { cls: ModelClass; effort?: Effort; timeoutMs: number; maxOutput: number }
 > = {
   voice: { cls: "REALTIME", timeoutMs: 28_000, maxOutput: 550 },
-  reflect: { cls: "FAST_THINKER", timeoutMs: 8_000, maxOutput: 4_000 },
+  reflect: { cls: "FAST_THINKER", timeoutMs: 240_000, maxOutput: 4_000 },
   archive: { cls: "WORKHORSE", timeoutMs: 30_000, maxOutput: 6_000 },
   dusk: { cls: "ANALYST", timeoutMs: 60_000, maxOutput: 8_000 },
   portrait: { cls: "ANALYST", timeoutMs: 60_000, maxOutput: 6_000 },

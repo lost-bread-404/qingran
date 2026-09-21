@@ -59,15 +59,14 @@ export async function loadHotContext(input: {
   };
   const userExisting = await getMessage(input.userMsgId);
   markFirst();
-  const user =
-    userExisting ??
-    (await upsertMessage({
-      id: input.userMsgId,
-      role: "user",
-      text: input.text,
-      createdAt: input.userCreatedAt || input.nowMs,
-      timeZone: input.timeZone,
-    }));
+  const user = await upsertMessage({
+    id: input.userMsgId,
+    role: "user",
+    text: userExisting?.text || input.text,
+    createdAt: userExisting?.createdAt || input.userCreatedAt || input.nowMs,
+    kind: userExisting?.kind,
+    timeZone: input.timeZone,
+  });
 
   const [history, mind, portrait, meta] = await Promise.all([
     listHistoryWindow(input.userMsgId, HISTORY_WINDOW),

@@ -57,6 +57,9 @@ export type CallModelResult = {
   effort: Effort;
   ms: number;
   logId?: number | null;
+  failKind?: "timeout" | "parse_error" | "http_error" | "error";
+  httpStatus?: number | null;
+  responseSnippet?: string | null;
   usage?: {
     tokensIn: number | null;
     tokensCached: number | null;
@@ -149,7 +152,30 @@ function inputCharsOf(input: CallModelInput): number {
   return input.system.length + userPartsOf(input).reduce((s, p) => s + p.length, 0);
 }
 
+function responseSnippet(raw: unknown, err?: unknown): string {
+  const text =
+    typeof raw === "string"
+      ? raw
+      : raw != null
+        ? JSON.stringify(raw)
+        : err instanceof Error
+          ? err.message
+          : String(err ?? "");
+  return text.replace(/\s+/g, " ").slice(0, 200);
+}
+
 export const SPEND_HOLD_ERR = "spend-paused";
+
+export function classifyReflectFailure(result: CallModelResult): string {
+  if (result.failKind === "timeout") return "timeout";
+  if (result.failKind === "http_error") {
+    const status = result.httpStatus ?? "";
+    const body = (result.responseSnippet ?? "").slice(0, 200);
+    return `http_error ${status} ${body}`.trim();
+  }
+  if (!result.json) return "parse_error";
+  return result.failKind === "error" ? "error" : "parse_error";
+}
 
 export async function callModel(route: Route, input: CallModelInput): Promise<CallModelResult> {
   const started = Date.now();
@@ -267,7 +293,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       ms,
       inputChars: inputCharsOf(input),
       raw: text.slice(0, 4000),
-      note: res.ok ? null : `http ${res.status}`,
+      note: res.ok ? null : `http_error ${res.status} ${responseSnippet(raw)}`,
       outputText: skipOutput ? null : text,
       tokensIn: usage.tokensIn ?? settled.tokensIn ?? null,
       tokensCached: usage.tokensCached,
@@ -275,7 +301,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       tokensReasoning: usage.tokensReasoning,
       costUsd: settled.usd,
       costUsdEst: settled.usdEst,
-      error: res.ok ? null : `http ${res.status}`,
+      error: res.ok ? null : `http_error ${res.status} ${responseSnippet(raw)}`,
     });
     await maybeWriteRawLog(logId, { system: input.system, user: userPartsOf(input) });
     await recordLlmSpend({
@@ -288,7 +314,18 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       logId,
       turnSeq: input.turnSeq,
     });
-    if (!res.ok) return { ...fail("http"), ms, raw, logId };
+    if (!res.ok) {
+      const snippet = responseSnippet(raw);
+      return {
+        ...fail("http"),
+        ms,
+        raw,
+        logId,
+        failKind: "http_error",
+        httpStatus: res.status,
+        responseSnippet: snippet,
+      };
+    }
     return {
       ok: true,
       text,
@@ -307,6 +344,8 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     }
     const ms = Date.now() - started;
     const timedOut = err instanceof Error && /timeout|aborted/i.test(err.message);
+    const snippet = responseSnippet(null, err);
+    const failKind = timedOut ? "timeout" : "http_error";
     const logId = await appendBrainLog({
       ...baseLog,
       step: `${route}:${resolved.model}`,
@@ -314,9 +353,16 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       ms,
       inputChars: inputCharsOf(input),
       raw: "",
-      note: timedOut ? "timeout" : "error",
-      error: timedOut ? "timeout" : "error",
+      note: failKind,
+      error: timedOut ? "timeout" : `http_error 0 ${snippet}`,
     });
-    return { ...fail(timedOut ? "timeout" : "error"), ms, logId };
+    return {
+      ...fail(timedOut ? "timeout" : "error"),
+      ms,
+      logId,
+      failKind,
+      httpStatus: timedOut ? null : 0,
+      responseSnippet: snippet,
+    };
   }
 }

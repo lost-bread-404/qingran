@@ -37,6 +37,7 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
     }>`
       select id, role, body, created_at, kind
       from qingran_messages
+      where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
       order by created_at desc,
         case when role = 'user' then 1 else 0 end desc,
         id desc
@@ -158,7 +159,9 @@ export const restoreRoomBackup = createServerFn({ method: "POST" })
 
 export const clearRoomMessages = createServerFn({ method: "POST" }).handler(
   async () => {
-    return { ok: true as const, skipped: true as const };
+    const { clearRecentConversation } = await import("./brain/store");
+    await clearRecentConversation();
+    return { ok: true as const };
   },
 );
 

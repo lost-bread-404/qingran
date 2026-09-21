@@ -7,6 +7,7 @@ import {
   listPortrait,
   patchMeta,
   resetMind,
+  forgetAllMessages,
   upsertNote,
   upsertPortrait,
 } from "./store.ts";
@@ -71,6 +72,7 @@ export async function importStorySeed(data: StorySeed = loadStorySeed()): Promis
   await db.query("delete from mem_history");
   await db.query("delete from qr_portrait");
   await resetMind();
+  await forgetAllMessages(ts);
 
   for (const row of data.portrait) {
     const portrait: PortraitRow = {

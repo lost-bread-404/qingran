@@ -31,6 +31,7 @@ export type TalkClientInput = {
   text: string;
   userMsgId: string;
   userCreatedAt: number;
+  replyId: string;
   profile: Profile;
   nowMs?: number;
   timeZone?: string;

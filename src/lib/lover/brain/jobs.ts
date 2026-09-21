@@ -12,11 +12,11 @@ import {
   deferJob,
   deferPendingUntil,
   finishJob,
+  finishReflectJob,
   insertJob,
-  newerReflectExists,
   peekNextJob,
   restoreClaim,
-  skipOldReflect,
+  upsertReflectJob,
 } from "./store.ts";
 import { newId } from "../storage.ts";
 import type { BrainJob, JobType } from "./types.ts";
@@ -46,24 +46,18 @@ export async function enqueue(
     createdAt: ts,
     updatedAt: ts,
   };
-  const inserted = await insertJob(job, force);
-  if (inserted && type === "reflect") {
-    const turnSeq = Number(payload.turnSeq ?? 0);
-    if (turnSeq) await skipOldReflect(turnSeq);
-  }
+  const inserted = type === "reflect" && !force
+    ? (await upsertReflectJob(Number(payload.turnSeq ?? 0)), true)
+    : await insertJob(job, force);
   return inserted;
 }
 
 async function runOne(job: BrainJob): Promise<void> {
   if (job.type === "reflect") {
     const turnSeq = Number(job.payload.turnSeq ?? 0);
-    if (await newerReflectExists(turnSeq)) {
-      await finishJob(job.id, "done");
-      return;
-    }
     const { runReflector } = await import("./voice/reflector");
     await runReflector(turnSeq, job.id);
-    await finishJob(job.id, "done");
+    await finishReflectJob(job.id, turnSeq);
     return;
   }
   if (job.type === "archive") {
@@ -113,7 +107,10 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
       await deferJob(peek.id, hold.resumeAt ?? now() + 3_600_000, `spend:${hold.level}`);
       continue;
     }
-    if (!canStartJob(peek.type, remaining)) break;
+    if (!canStartJob(peek.type, remaining)) {
+      await deferJob(peek.id, now() + Math.max(remaining, 1_000), "wait-budget");
+      continue;
+    }
     const job = await claimJob(now(), timeoutFor(peek.type) + LOCK_SLACK_MS, peek.id);
     if (!job) continue;
     try {
@@ -142,4 +139,4 @@ export async function runJobsNow(budgetMs = LONG_DRAIN_MS): Promise<number> {
   return drainJobs(budgetMs);
 }
 
-export { skipOldReflect };
+export { upsertReflectJob };
