@@ -11,10 +11,10 @@ test("stripSpeechTags turns pause tags into line breaks", () => {
   assert.equal(stripSpeechTags("过来。[pause]我在。"), "过来。\n我在。");
 });
 
-test("spokenForTts uses pause instead of extra periods for newlines", () => {
+test("spokenForTts flattens newlines instead of inserting pauses", () => {
   const spoken = spokenForTts("她把杯子放下。\n\n过来。");
-  assert.match(spoken, /\[pause\]/);
-  assert.doesNotMatch(spoken, /。。/);
+  assert.equal(spoken, "她把杯子放下。 过来。");
+  assert.doesNotMatch(spoken, /\[pause\]/);
 });
 
 test("spokenForTts keeps speech tags", () => {

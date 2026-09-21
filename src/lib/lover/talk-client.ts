@@ -1,4 +1,5 @@
 import type { Profile } from "./types";
+import { xaiFailHint } from "./xai-error";
 import { onUnauthorized } from "@/lib/auth-lite/on-unauthorized";
 
 export type TalkStreamEvent =
@@ -6,8 +7,25 @@ export type TalkStreamEvent =
   | { t: "text_end"; speech: string }
   | { t: "audio"; i: number; b: string; m: string; replace?: boolean }
   | { t: "timing"; k: string; ms: number }
-  | { t: "done"; speech: string; replyId?: string }
-  | { t: "err"; m: string; code?: string };
+  | {
+      t: "done";
+      speech: string;
+      replyId?: string;
+      status?: number | null;
+      finishReason?: string | null;
+      ms?: number;
+      chars?: number;
+    }
+  | {
+      t: "err";
+      m: string;
+      code?: string;
+      status?: number | null;
+      finishReason?: string | null;
+      ms?: number;
+      chars?: number;
+      tts?: boolean;
+    };
 
 export type TalkClientInput = {
   text: string;
@@ -35,7 +53,8 @@ export async function streamTalk(
       onEvent({ t: "err", m: "请求太频繁了，稍等一下。", code: "rate" });
       return;
     }
-    onEvent({ t: "err", m: "这会儿连不上。" });
+    const body = await res.text().catch(() => "");
+    onEvent({ t: "err", m: xaiFailHint(res.status, body) });
     return;
   }
 

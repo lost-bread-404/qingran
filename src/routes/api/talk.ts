@@ -15,6 +15,8 @@ import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
 import { lockedProfile, type Profile } from "@/lib/lover/types";
 import { runTalkStream, type TalkStreamEvent } from "@/lib/lover/stream-talk";
+import { logTalkTurn, talkFailFromResult } from "@/lib/lover/talk-fail";
+import { recordTurnTrace } from "@/lib/lover/brain/turn-trace";
 
 const SSE_PAD = 2048;
 
@@ -71,6 +73,7 @@ export const Route = createFileRoute("/api/talk")({
               }
               controller.enqueue(encoder.encode(frame));
             };
+            const started = Date.now();
             try {
               assertModelConfig();
             } catch (err) {
@@ -102,22 +105,26 @@ export const Route = createFileRoute("/api/talk")({
               let failed = false;
               let ttftMs: number | null = null;
               let firstAudioMs: number | null = null;
+              let interrupted = false;
               const tVoice = Date.now();
-              const streamResult = await runTalkStream({ text, messages: ctx.messages, replyId, softVoice: profile.softVoice }, (event) => {
-                if (event.t === "text_end") speech = event.speech || speech;
-                if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;
-                if (event.t === "timing" && event.k === "first_audio_ms") firstAudioMs = event.ms;
-                if (event.t === "err") {
-                  failed = true;
+              const streamResult = await runTalkStream(
+                { text, messages: ctx.messages, replyId, voiceSpeed: profile.voiceSpeed },
+                (event) => {
+                  if (event.t === "text_end") speech = event.speech || speech;
+                  if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;
+                  if (event.t === "timing" && event.k === "first_audio_ms") firstAudioMs = event.ms;
+                  if (event.t === "err") {
+                    failed = true;
+                    send(event);
+                    return;
+                  }
+                  if (event.t === "done") {
+                    speech = event.speech || speech;
+                    return;
+                  }
                   send(event);
-                  return;
-                }
-                if (event.t === "done") {
-                  speech = event.speech || speech;
-                  return;
-                }
-                send(event);
-              });
+                },
+              );
               ttftMs = streamResult.ttftMs ?? ttftMs;
               firstAudioMs = streamResult.firstAudioMs ?? firstAudioMs;
               const totalMs = Date.now() - tVoice;
@@ -132,7 +139,17 @@ export const Route = createFileRoute("/api/talk")({
                   timeZone,
                 });
               }
-              if (!failed) send({ t: "done", speech, replyId });
+              if (!failed) {
+                send({
+                  t: "done",
+                  speech,
+                  replyId,
+                  status: streamResult.status,
+                  finishReason: streamResult.finishReason,
+                  ms: streamResult.ms,
+                  chars: streamResult.chars,
+                });
+              }
 
               const usage = parseUsage(streamResult.usage);
               await recordVoiceTurn({
@@ -150,13 +167,54 @@ export const Route = createFileRoute("/api/talk")({
                 localDay: localDay(userCreatedAt, timeZone),
                 ttsChars: streamResult.ttsChars,
               });
+              const selectedIds = [...ctx.pickedIds, ...ctx.queryIds];
+              await recordTurnTrace({
+                turnId: replyId,
+                userMsgId,
+                turnSeq: userCreatedAt,
+                retrieve: {
+                  selected: selectedIds,
+                  fallback: ctx.fallbackIds,
+                  queryIds: ctx.queryIds,
+                  queryScores: ctx.queryScores,
+                  jump: ctx.jump,
+                  reasons: selectedIds.map((id) =>
+                    ctx.pickedIds.includes(id) ? "mind" : ctx.jump ? "fallback" : "keyword",
+                  ),
+                },
+                live: {
+                  notes: ctx.tail,
+                  historyCount: ctx.historyIds.length,
+                  promptHash: ctx.charterHash,
+                  model: streamResult.model,
+                  ms: totalMs,
+                },
+                reply: {
+                  text: display,
+                  finishReason: streamResult.finishReason,
+                  interrupted,
+                },
+              });
 
               await enqueue("reflect", `reflect:${userCreatedAt}`, { turnSeq: userCreatedAt });
               await enqueueArchiveIfNeeded(userCreatedAt);
               await enqueuePeriodicIfDue(nowMs, timeZone);
               await drainJobs(DRAIN_BUDGET_MS);
-            } catch {
-              send({ t: "err", m: "线路有点不稳，稍后再说。" });
+            } catch (err) {
+              const outcome = talkFailFromResult({
+                kind: "exception",
+                threw: err,
+                ms: Date.now() - started,
+              });
+              logTalkTurn(outcome.log);
+              send({
+                t: "err",
+                m: outcome.message ?? "线路有点不稳",
+                status: outcome.log.status,
+                finishReason: outcome.log.finishReason,
+                ms: outcome.log.ms,
+                chars: outcome.log.chars,
+              });
             } finally {
               controller.close();
             }

@@ -2,20 +2,23 @@ import { BookOpen, Settings, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { CallButton } from "@/components/lover/call-button";
+import { ConfirmTurn } from "@/components/lover/confirm-turn";
+import { FlagReply } from "@/components/lover/flag-reply";
 import { MicButton } from "@/components/lover/mic-button";
 import { SettingsDrawer } from "@/components/lover/settings-drawer";
-import { Transcript } from "@/components/lover/transcript";
+import { Transcript, type TranscriptHandle } from "@/components/lover/transcript";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useCall } from "@/hooks/use-call";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { base64ToBytes, concatBytes } from "@/lib/lover/audio";
-import { dropIncompleteReplies } from "@/lib/lover/pair-messages";
+import { addManualMemory, mergeFacts, replaceMemories, updateMemory } from "@/lib/lover/memory";
+import { dropIncompleteReplies, historyForQingran, skipsQingran } from "@/lib/lover/pair-messages";
+import { planInterruptQingran } from "@/lib/lover/interrupt";
 import {
   enqueuePlayback,
   getPlaybackElement,
-  isPlaybackUnlocked,
   kickAudio,
   playMp3Bytes,
   resumeAudio,
@@ -29,18 +32,49 @@ import {
   clearRoomMessages,
   deleteRoomMessages,
   loadRoom,
+  markRoomMessagesScanned,
+  restoreRoomBackup,
+  saveRoomMemories,
   saveRoomProfile,
   updateRoomMessage,
 } from "@/lib/lover/room";
-import { speakAsLover } from "@/lib/lover/server";
+import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
+import { buildHearingContext, extractContextKeyterms, lastDialogueTurns, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
+import { extractTfIdfTerms } from "@/lib/lover/hearing/keyterms";
+import { detectAudioRoute } from "@/lib/lover/hearing/route";
+import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
 import { newId } from "@/lib/lover/storage";
+import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import { warmBrain } from "@/lib/lover/brain/warm-client";
+import { classifyTalkException, TALK_FAIL, talkExceptionHint } from "@/lib/lover/talk-fail";
+import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { engineLineFromHeard } from "@/lib/lover/hearing/select";
+import { formatCallAudioLog, installAudioTrace, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
+  confirmHearingClip,
+  flagQingranReply,
+  getHearingClipLabel,
+  getHearingTurnAudio,
+  hearingLabeledCount,
+  patchHearingFinalText,
+  patchHearingReplyId,
+  patchHearingTurn,
+  unlabelHearingByTurn,
+} from "@/lib/lover/hearing/store";
+import { markTurnInterruptedFn } from "@/lib/lover/brain/turn-trace";
+import { clipSaveBanner, UNRECOGNIZED_TEXT, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
+import { micActionForConfirmPanel, planOpenConfirmPanel, shouldAutoSpeakReply } from "@/lib/lover/hearing/confirm-call";
+import { planConfirmSave, sliceAfterMessage } from "@/lib/lover/hearing/confirm-resend";
+import type { AcousticTags, TagKey } from "@/lib/lover/hearing/tags";
+import { POST_QINGRAN_MS } from "@/lib/lover/vad";
+import {
+  CONTEXT_WINDOW,
   DEFAULT_PROFILE,
   lockedProfile,
   type ChatMessage,
+  type Memory,
   type Profile,
   type SessionStatus,
 } from "@/lib/lover/types";
@@ -59,6 +93,7 @@ function lastUserSay(messages: ChatMessage[]): ChatMessage | null {
 export function VoiceRoom() {
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [memories, setMemories] = useState<Memory[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [draft, setDraft] = useState("");
@@ -67,37 +102,92 @@ export function VoiceRoom() {
   const [banner, setBanner] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const busyRef = useRef(false);
   const turnRef = useRef(0);
+  const memoriesRef = useRef<Memory[]>([]);
   const profileRef = useRef(profile);
   const chatRef = useRef<ChatMessage[]>([]);
   const settingsOpenRef = useRef(false);
   const holdingRef = useRef(false);
   const finishingHoldRef = useRef(false);
+  const rememberLockRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const pendingIdsRef = useRef(new Set<string>());
   const inflightRef = useRef<{ id: string; createdAt: number; text: string } | null>(null);
+  const speakingIdRef = useRef<string | null>(null);
   const callActiveRef = useRef(false);
   const hearRef = useRef<() => void>(() => undefined);
   const deafenRef = useRef<() => void>(() => undefined);
-  const reviveRef = useRef<(gesture?: boolean) => void>(() => undefined);
   const spokenCacheRef = useRef(new Map<string, { bytes: Uint8Array<ArrayBuffer>; mimeType: string }>());
+  const transcriptRef = useRef<TranscriptHandle>(null);
   const viewport = useVisualViewportHeight();
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmAudioUrl, setConfirmAudioUrl] = useState<string | null>(null);
+  const [labeledCount, setLabeledCount] = useState(0);
+  const confirmWasOpenRef = useRef(false);
+  const confirmOpenRef = useRef(false);
+  const skipAutoPlayRef = useRef(false);
+  const [undoConfirmId, setUndoConfirmId] = useState<string | null>(null);
+  const undoTimerRef = useRef(0);
+  const [audioLog, setAudioLog] = useState("");
+  const [confirmPredicted, setConfirmPredicted] = useState<AcousticTags | null>(null);
+  const [confirmGoldTags, setConfirmGoldTags] = useState<Partial<AcousticTags> | null>(null);
+  const [confirmNoise, setConfirmNoise] = useState(false);
+  const [confirmMismatch, setConfirmMismatch] = useState(false);
+  const [confirmNote, setConfirmNote] = useState("");
+  const [confirmDraft, setConfirmDraft] = useState("");
+  const [confirmStt, setConfirmStt] = useState("");
+  const [flagTarget, setFlagTarget] = useState<{
+    messageId: string;
+    replyTo?: string;
+    trigger: string;
+    reply: string;
+    rating: "up" | "down";
+  } | null>(null);
+  const [flagBusy, setFlagBusy] = useState(false);
+  const [flagError, setFlagError] = useState<string | null>(null);
+
+  useEffect(() => {
+    warmBrain();
+  }, []);
 
   useEffect(() => {
     profileRef.current = profile;
-  }, [profile]);
+    const contextTurns = chatRef.current
+      .filter((m) => m.kind !== "steer" && m.kind !== "setting" && !skipsQingran(m))
+      .map((m) => ({ role: m.role, text: m.text }));
+    const context = buildHearingContext(contextTurns);
+    const extraKeyterms = mergeKeyterms(
+      extractTfIdfTerms(
+        [{ text: profile.systemPrompt }, ...memoriesRef.current.map((m) => ({ text: m.text }))],
+        50,
+      ),
+      extractContextKeyterms(context, 50),
+    );
+    setHearingSession({
+      provider: profile.hearingProvider,
+      capture: profile.debugHearing,
+      debugHearing: profile.debugHearing,
+      nbest: profile.hearingNbest,
+      mode: callActiveRef.current ? "call" : "text",
+      context,
+      extraKeyterms,
+      contextBefore: lastDialogueTurns(contextTurns),
+      systemPrompt: profile.systemPrompt,
+    });
+  }, [profile, messages.length, memories]);
+  useEffect(() => {
+    memoriesRef.current = memories;
+  }, [memories]);
   useEffect(() => {
     chatRef.current = messages;
   }, [messages]);
   useEffect(() => {
     settingsOpenRef.current = settingsOpen;
   }, [settingsOpen]);
-
-  useEffect(() => {
-    warmBrain();
-  }, []);
 
   useEffect(() => {
     const lock = () => {
@@ -124,6 +214,7 @@ export function VoiceRoom() {
         if (cancelled) return;
         setProfile(lockedProfile(room.profile));
         setMessages(room.messages);
+        setMemories(room.memories);
         setHydrated(true);
       })
       .catch(() => {
@@ -136,12 +227,45 @@ export function VoiceRoom() {
   }, []);
 
   useEffect(() => {
+    if (!hydrated || !profile.debugHearing) return;
+    void hearingLabeledCount({ data: {} }).then((result) => {
+      if (result.ok) setLabeledCount(result.count);
+    });
+  }, [hydrated, profile.debugHearing]);
+
+  useEffect(() => {
+    if (!profile.debugHearing) return;
+    setAudioLog(formatCallAudioLog());
+    return subscribeCallAudioLog(() => setAudioLog(formatCallAudioLog()));
+  }, [profile.debugHearing]);
+
+  useEffect(() => {
+    installAudioTrace();
+    return () => {
+      if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!hydrated) return;
     const timer = window.setTimeout(() => {
       void saveRoomProfile({ data: lockedProfile(profile) });
     }, 400);
     return () => window.clearTimeout(timer);
   }, [hydrated, profile]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const timer = window.setTimeout(() => {
+      void saveRoomMemories({ data: memories });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, memories]);
+
+  useEffect(() => {
+    if (!hydrated || !profile.autoRemember) return;
+    void sweepOverflow();
+  }, [hydrated, messages.length, profile.autoRemember, profile.memoryCursor]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -170,46 +294,82 @@ export function VoiceRoom() {
         },
       });
     };
-    const wake = () => {
-      if (document.visibilityState === "hidden") {
+    const stopLife = listenAppLifecycle({
+      onBackground: () => {
         persistInflight();
-        return;
-      }
-      void kickAudio();
-      reviveRef.current();
-    };
-    const onHide = () => persistInflight();
-    const onGesture = () => {
-      void kickAudio();
-      reviveRef.current(true);
-    };
-    document.addEventListener("visibilitychange", wake);
-    window.addEventListener("pageshow", wake);
-    window.addEventListener("focus", wake);
-    window.addEventListener("pagehide", onHide);
-    window.addEventListener("beforeunload", onHide);
-    document.addEventListener("pointerdown", onGesture, { capture: true });
-    document.addEventListener("touchstart", onGesture, { capture: true });
+        if (callActiveRef.current) return;
+        stopPlayback();
+        turnRef.current += 1;
+        busyRef.current = false;
+        setStatus((s) => (s === "speaking" || s === "thinking" ? "idle" : s));
+      },
+    });
+    window.addEventListener("beforeunload", persistInflight);
     return () => {
-      document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("pageshow", wake);
-      window.removeEventListener("focus", wake);
-      window.removeEventListener("pagehide", onHide);
-      window.removeEventListener("beforeunload", onHide);
-      document.removeEventListener("pointerdown", onGesture, { capture: true } as EventListenerOptions);
-      document.removeEventListener("touchstart", onGesture, { capture: true } as EventListenerOptions);
+      stopLife();
+      window.removeEventListener("beforeunload", persistInflight);
     };
   }, []);
+
+  async function sweepOverflow() {
+    if (rememberLockRef.current || !profileRef.current.autoRemember) return;
+    rememberLockRef.current = true;
+    try {
+      while (profileRef.current.autoRemember) {
+        const chat = chatRef.current;
+        const overflowAt = Math.max(0, chat.length - CONTEXT_WINDOW);
+        if (overflowAt === 0) break;
+        const overflow = chat.slice(0, overflowAt).filter((m) => !m.scanned);
+        if (overflow.length < 10) break;
+        const batch = overflow.slice(0, 24);
+        const result = await rememberOverflow({
+          data: {
+            overflow: batch,
+            lookahead: chat.slice(overflowAt, overflowAt + 10),
+            memories: memoriesRef.current,
+          },
+        });
+        if (!result.consumedIds.length) break;
+        const marked = new Set(result.consumedIds);
+        const nextChat = chatRef.current.map((m) =>
+          marked.has(m.id) ? { ...m, scanned: true } : m,
+        );
+        chatRef.current = nextChat;
+        setMessages(nextChat);
+        void markRoomMessagesScanned({ data: { ids: result.consumedIds } });
+        const cursor = result.consumedIds[result.consumedIds.length - 1];
+        if (cursor) {
+          const nextProfile = lockedProfile({ ...profileRef.current, memoryCursor: cursor });
+          profileRef.current = nextProfile;
+          setProfile(nextProfile);
+        }
+        if (result.fact) {
+          const nextMem = mergeFacts(
+            memoriesRef.current,
+            [result.fact],
+            result.at || Date.now(),
+          );
+          memoriesRef.current = nextMem;
+          setMemories(nextMem);
+        }
+      }
+    } finally {
+      rememberLockRef.current = false;
+    }
+  }
 
   function resumeCallListen(turn: number) {
     if (!callActiveRef.current) return;
     window.setTimeout(() => {
-      if (callActiveRef.current && turn === turnRef.current) hearRef.current();
-    }, 420);
+      if (!callActiveRef.current || turn !== turnRef.current) return;
+      if (confirmOpenRef.current) return;
+      hearRef.current();
+    }, POST_QINGRAN_MS);
   }
 
   const playFull = useCallback(async (id: string, speech: string, turn: number) => {
     if (profileRef.current.muted) return;
+    speakingIdRef.current = id;
     stopPlayback();
     setStatus("speaking");
     void unlockPlayback();
@@ -222,7 +382,7 @@ export function VoiceRoom() {
     }
     if (!clip) {
       const spoken = await speakAsLover({
-        data: { text: speech, softVoice: profileRef.current.softVoice },
+        data: { text: speech, speed: profileRef.current.voiceSpeed },
       });
       if (!spoken.ok || turn !== turnRef.current) return;
       clip = { bytes: base64ToBytes(spoken.audioBase64), mimeType: spoken.mimeType };
@@ -230,14 +390,15 @@ export function VoiceRoom() {
     }
     const ok = await playMp3Bytes(clip.bytes, clip.mimeType);
     if (turn !== turnRef.current) return;
+    if (speakingIdRef.current === id) speakingIdRef.current = null;
     if (!ok) setBanner("声音被浏览器拦住了，点喇叭再听。");
     setStatus((s) => (s === "speaking" ? "idle" : s));
     resumeCallListen(turn);
   }, []);
 
-  const toggleSoftVoice = () => {
-    const next = !profileRef.current.softVoice;
-    const profile = lockedProfile({ ...profileRef.current, softVoice: next });
+  const cycleVoiceSpeed = () => {
+    const next = nextVoiceRate(profileRef.current.voiceSpeed);
+    const profile = lockedProfile({ ...profileRef.current, voiceSpeed: next.speed });
     profileRef.current = profile;
     setProfile(profile);
     spokenCacheRef.current.clear();
@@ -253,48 +414,101 @@ export function VoiceRoom() {
     void playFull(id, speech, turn);
   };
 
+  useEffect(() => {
+    void detectAudioRoute().then((route) => setHearingSession({ audioRoute: route }));
+  }, [hydrated]);
+
   const sendTurn = useCallback(
     async (
       sayRaw: string,
-      opts?: { existingUser?: ChatMessage },
+      opts?: {
+        history?: ChatMessage[];
+        existingUser?: ChatMessage;
+        voiceTurnId?: string;
+        skipQingran?: boolean;
+        endpointFired?: number;
+        sttDoneAt?: number;
+        predictedTags?: AcousticTags;
+        engine?: string;
+      },
     ) => {
-      const say = sayRaw.trim();
-      if (!say) return;
+      const tagged = sayRaw.trim();
+      if (!tagged) return;
+      const say = stripHearingMarkup(tagged).trim() || tagged;
+      const at = Date.now();
+      const sttDoneAt = opts?.sttDoneAt ?? at;
+      const hearMs =
+        opts?.endpointFired && sttDoneAt >= opts.endpointFired ? sttDoneAt - opts.endpointFired : undefined;
+      const userMsg: ChatMessage = opts?.existingUser ?? {
+        id: newId(),
+        role: "user",
+        text: say,
+        createdAt: at,
+        kind: opts?.skipQingran ? "unheard" : "say",
+        voiceTurnId: opts?.voiceTurnId,
+        predictedTags: opts?.predictedTags,
+        hearingGold: opts?.voiceTurnId ? "unconfirmed" : undefined,
+        hearingTiming:
+          hearMs != null || opts?.engine
+            ? { hearMs, engine: opts?.engine }
+            : undefined,
+      };
+      if (opts?.existingUser && (hearMs != null || opts?.engine)) {
+        userMsg.hearingTiming = { ...userMsg.hearingTiming, hearMs, engine: opts.engine ?? userMsg.hearingTiming?.engine };
+      }
+      if (opts?.skipQingran) {
+        setBanner(null);
+        setMessages((prev) => [...prev, userMsg]);
+        void appendRoomMessage({ data: userMsg });
+        if (opts.voiceTurnId) {
+          void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: "" } });
+        }
+        return;
+      }
       if (!opts?.existingUser && busyRef.current) return;
       const turn = ++turnRef.current;
       busyRef.current = true;
+      skipAutoPlayRef.current = false;
       stopPlayback();
       if (callActiveRef.current) deafenRef.current();
       setBanner(null);
       setEditingId(null);
       voice.setError(null);
 
-      const at = Date.now();
-      const userMsg: ChatMessage = opts?.existingUser ?? {
-        id: newId(),
-        role: "user",
-        text: say,
-        createdAt: at,
-        kind: "say",
-      };
+      const sourceHistory = opts?.history ?? chatRef.current;
+      const history = historyForQingran(sourceHistory);
       const reply: ChatMessage = {
         id: newId(),
         role: "assistant",
         text: "",
         createdAt: (userMsg.createdAt || at) + 1,
+        replyTo: userMsg.id,
       };
       if (opts?.existingUser) {
-        const idx = chatRef.current.findIndex((m) => m.id === userMsg.id);
-        const history = idx >= 0 ? chatRef.current.slice(0, idx) : chatRef.current;
-        setMessages([...history, userMsg, reply]);
+        setMessages((prev) => {
+          const idx = prev.findIndex((m) => m.id === userMsg.id);
+          if (idx < 0) return [...(opts.history ?? sourceHistory), userMsg, reply];
+          return [...prev.slice(0, idx), userMsg, reply];
+        });
       } else {
         setMessages((prev) => [...dropIncompleteReplies(prev, pendingIdsRef.current), userMsg, reply]);
         void appendRoomMessage({ data: userMsg });
       }
       pendingIdsRef.current.add(reply.id);
       inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text: "" };
+      speakingIdRef.current = reply.id;
       setStatus("thinking");
       void kickAudio();
+      if (opts?.voiceTurnId) {
+        void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: tagged } });
+        void patchHearingReplyId({ data: { turnId: opts.voiceTurnId, replyMessageId: reply.id } });
+      }
+      const stampTiming = (partial: { grokMs?: number; ttsMs?: number }) => {
+        if (!profileRef.current.debugHearing) return;
+        const next = { ...userMsg.hearingTiming, ...partial };
+        userMsg.hearingTiming = next;
+        setMessages((prev) => prev.map((m) => (m.id === userMsg.id ? { ...m, hearingTiming: next } : m)));
+      };
 
       let full = "";
       let gotAudio = false;
@@ -303,38 +517,46 @@ export function VoiceRoom() {
       let persistAt = 0;
       let paintHandle = 0;
       let latestDisplay = "";
-      let replyId = reply.id;
-      const persistReply = (text: string, id = replyId) => {
+      let grokDone = 0;
+      let ttsFirst = 0;
+      const hearingTurnId = getHearingSession().lastTurnId;
+      const persistReply = (text: string) => {
         const display = stripSpeechTags(text);
-        inflightRef.current = { id, createdAt: reply.createdAt, text };
+        inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
         if (!display) return;
-        void appendRoomMessage({ data: { ...reply, id, text: display } });
+        void appendRoomMessage({ data: { ...reply, text: display } });
       };
       const flushPaint = () => {
         paintHandle = 0;
         const display = latestDisplay;
         setMessages((prev) =>
-          prev.map((m) => (m.id === replyId || m.id === reply.id ? { ...m, id: replyId, text: display } : m)),
+          prev.map((m) => (m.id === reply.id ? { ...m, text: display } : m)),
         );
       };
       const paintText = (text: string, force = false) => {
         const display = stripSpeechTags(text);
-        inflightRef.current = { id: replyId, createdAt: reply.createdAt, text };
+        inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
         latestDisplay = display;
         if (force) {
           if (paintHandle) cancelAnimationFrame(paintHandle);
           paintHandle = 0;
           flushPaint();
+          persistReply(text);
           return;
         }
         if (!paintHandle) paintHandle = requestAnimationFrame(flushPaint);
         const now = Date.now();
-        if (now - persistAt > 400) persistAt = now;
+        if (now - persistAt > 400) {
+          persistAt = now;
+          persistReply(text);
+        }
       };
       try {
+        const ac = new AbortController();
+        abortRef.current = ac;
         await streamTalk(
           {
-            text: say,
+            text: tagged,
             userMsgId: userMsg.id,
             userCreatedAt: userMsg.createdAt || at,
             profile: lockedProfile(profileRef.current),
@@ -342,60 +564,60 @@ export function VoiceRoom() {
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
           },
           (event) => {
-            if (event.t === "timing") {
-              if (import.meta.env.DEV) console.info("[talk]", event.k, event.ms);
-              return;
-            }
+            if (turn !== turnRef.current) return;
             if (event.t === "text") {
+              if (userMsg.hearingTiming?.grokMs == null) stampTiming({ grokMs: Date.now() - sttDoneAt });
               full += event.d;
               paintText(full);
               return;
             }
             if (event.t === "text_end") {
               full = event.speech || full;
+              grokDone = Date.now();
               paintText(full, true);
               void kickAudio();
               return;
             }
             if (event.t === "done") {
               full = event.speech || full;
-              if (event.replyId) {
-                pendingIdsRef.current.delete(reply.id);
-                pendingIdsRef.current.delete(event.replyId);
-                replyId = event.replyId;
-              }
               paintText(full, true);
-              persistReply(full, replyId);
+              persistReply(full);
               pendingIdsRef.current.delete(reply.id);
-              pendingIdsRef.current.delete(replyId);
-              if (inflightRef.current?.id === reply.id || inflightRef.current?.id === replyId) {
-                inflightRef.current = null;
-              }
+              if (inflightRef.current?.id === reply.id) inflightRef.current = null;
               const display = stripSpeechTags(full);
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === reply.id || m.id === replyId ? { ...reply, id: replyId, text: display } : m,
-                ),
-              );
+              const talkTrace = {
+                status: event.status ?? null,
+                finishReason: event.finishReason ?? null,
+                ms: event.ms,
+                chars: event.chars,
+              };
+              const finalMsg = { ...reply, text: display, talkTrace };
+              setMessages((prev) => prev.map((m) => (m.id === reply.id ? finalMsg : m)));
+              if (!display.trim()) setBanner(TALK_FAIL.empty);
               if (turn === turnRef.current) sealPlayback();
               if (turn !== turnRef.current) return;
               if (clips.length && streamAudioCovers(clips, display)) {
-                spokenCacheRef.current.set(replyId, {
+                spokenCacheRef.current.set(reply.id, {
                   bytes: concatBytes(clips),
                   mimeType: clipMime,
                 });
               } else {
-                spokenCacheRef.current.delete(replyId);
                 spokenCacheRef.current.delete(reply.id);
-                if (display && !profileRef.current.muted) {
-                  void playFull(replyId, full, turn);
+                if (display && shouldAutoSpeakReply({
+                  muted: profileRef.current.muted,
+                  skipAutoPlay: skipAutoPlayRef.current,
+                })) {
+                  void playFull(reply.id, full, turn);
                 }
               }
               return;
             }
             if (turn !== turnRef.current) return;
             if (event.t === "audio") {
-              if (profileRef.current.muted) return;
+              if (!shouldAutoSpeakReply({
+                muted: profileRef.current.muted,
+                skipAutoPlay: skipAutoPlayRef.current,
+              })) return;
               if (event.replace) {
                 stopPlayback();
                 clips.length = 0;
@@ -403,33 +625,66 @@ export function VoiceRoom() {
                 void resumeAudio();
               }
               gotAudio = true;
+              if (!ttsFirst) {
+                ttsFirst = Date.now();
+                if (userMsg.hearingTiming?.ttsMs == null) stampTiming({ ttsMs: ttsFirst - sttDoneAt });
+              }
               setStatus("speaking");
               const bytes = base64ToBytes(event.b);
               clips.push(bytes);
               clipMime = event.m;
               enqueuePlayback(bytes, event.m);
             } else if (event.t === "err") {
-              persistReply(full, replyId);
-              pendingIdsRef.current.delete(reply.id);
-              pendingIdsRef.current.delete(replyId);
-              sealPlayback();
+              persistReply(full);
               setBanner(
                 event.code === "spend_breaker"
                   ? "今日（或本月）费用异常，已暂停。可在设置中确认后继续。"
                   : event.m,
               );
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === reply.id
+                    ? {
+                        ...m,
+                        talkTrace: {
+                          status: event.status ?? null,
+                          finishReason: event.finishReason ?? null,
+                          ms: event.ms,
+                          chars: event.chars,
+                        },
+                      }
+                    : m,
+                ),
+              );
+              if (event.tts) {
+                skipAutoPlayRef.current = true;
+                return;
+              }
+              pendingIdsRef.current.delete(reply.id);
+              sealPlayback();
               setStatus("error");
             }
           },
+          ac.signal,
         );
       } catch (err) {
-        persistReply(full);
+        if (turn === turnRef.current) persistReply(full);
         pendingIdsRef.current.delete(reply.id);
         if (turn !== turnRef.current) return;
         if ((err as { name?: string }).name === "AbortError") return;
-        setBanner("线路有点不稳，稍后再说。");
+        setBanner(talkExceptionHint(classifyTalkException(err).kind));
         setStatus("error");
       } finally {
+        if (hearingTurnId) {
+          void patchHearingTurn({
+            data: {
+              id: hearingTurnId,
+              grok_done: grokDone || undefined,
+              tts_first_audio: ttsFirst || undefined,
+              cold_start_ms: getHearingSession().coldStartMs ?? undefined,
+            },
+          });
+        }
         pendingIdsRef.current.delete(reply.id);
         if (turn === turnRef.current) {
           busyRef.current = false;
@@ -451,8 +706,16 @@ export function VoiceRoom() {
 
   const call = useCall({
     prompt: profile.systemPrompt,
-    onUtterance: async (text) => {
-      await sendTurn(text);
+    onUtterance: async (heard: HeardUtterance) => {
+      if (heard.saveError) setBanner(clipSaveBanner(heard.saveError));
+      await sendTurn(heard.text, {
+        voiceTurnId: voiceTurnIdForMessage(heard),
+        skipQingran: heard.skipQingran,
+        endpointFired: heard.endpointFired,
+        sttDoneAt: heard.sttDoneAt,
+        predictedTags: heard.predictedTags,
+        engine: engineLineFromHeard(heard),
+      });
     },
   });
 
@@ -460,22 +723,89 @@ export function VoiceRoom() {
     callActiveRef.current = call.active;
     hearRef.current = call.hear;
     deafenRef.current = call.deafen;
-    reviveRef.current = (gesture?: boolean) => {
-      void call.revive(gesture ? { gesture: true } : undefined);
+    setHearingSession({ mode: call.active ? "call" : "text" });
+    if (call.active) {
+      void detectAudioRoute().then((route) => setHearingSession({ audioRoute: route }));
+    }
+  }, [call.active, call.hear, call.deafen]);
+
+  useEffect(() => {
+    const open = Boolean(confirmId);
+    confirmOpenRef.current = open;
+    const action = micActionForConfirmPanel({
+      panelOpen: open,
+      wasOpen: confirmWasOpenRef.current,
+      callActive: call.active,
+      qingranSpeaking: status === "speaking" || status === "thinking",
+    });
+    confirmWasOpenRef.current = open;
+    if (action === "deafen") call.deafen();
+    else if (action === "hear") call.hear();
+  }, [confirmId, call.active, call.deafen, call.hear, status]);
+
+  useEffect(() => {
+    if (!confirmId) {
+      setConfirmAudioUrl((url) => {
+        if (url) URL.revokeObjectURL(url);
+        return null;
+      });
+      return;
+    }
+    const msg = chatRef.current.find((m) => m.id === confirmId);
+    if (!msg?.voiceTurnId) return;
+    let revoked = false;
+    let url: string | null = null;
+    setConfirmPredicted(msg.predictedTags ?? null);
+    setConfirmGoldTags(null);
+    setConfirmNoise(false);
+    setConfirmMismatch(false);
+    setConfirmNote("");
+    setConfirmDraft(msg.text);
+    setConfirmStt(msg.text);
+    void getHearingTurnAudio({ data: { turnId: msg.voiceTurnId } }).then((result) => {
+      if (!result.ok || revoked) return;
+      const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
+      url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
+      setConfirmAudioUrl(url);
+    });
+    void getHearingClipLabel({ data: { turnId: msg.voiceTurnId } }).then((result) => {
+      if (!result.ok || revoked) return;
+      if (result.predictedTags) setConfirmPredicted(result.predictedTags);
+      setConfirmGoldTags(result.goldTags);
+      setConfirmNoise(Boolean(result.noiseOnly));
+      setConfirmMismatch(Boolean(result.literalMismatch));
+      setConfirmNote(result.toneNote ?? "");
+      if (result.xaiText) setConfirmStt(result.xaiText);
+      if (result.goldText) setConfirmDraft(result.goldText);
+      else if (result.xaiText && msg.text === UNRECOGNIZED_TEXT) setConfirmDraft(result.xaiText);
+    });
+    return () => {
+      revoked = true;
+      if (url) URL.revokeObjectURL(url);
     };
-  }, [call.active, call.hear, call.deafen, call.revive]);
+  }, [confirmId]);
 
   const finishHold = useCallback(async () => {
     if (finishingHoldRef.current) return;
     finishingHoldRef.current = true;
     try {
       stopPlayback();
-      const text = await voice.stop();
+      const heard = await voice.stop();
       stopPlayback();
       const el = getPlaybackElement();
       el.muted = false;
       setStatus("idle");
-      if (text) void sendTurn(text);
+      if (heard.saveError) setBanner(clipSaveBanner(heard.saveError));
+      if (heard.text) {
+        void sendTurn(heard.text, {
+          voiceTurnId: voiceTurnIdForMessage(heard),
+          skipQingran: heard.skipQingran,
+          endpointFired: heard.endpointFired,
+          sttDoneAt: heard.sttDoneAt,
+          predictedTags: heard.predictedTags,
+          engine: engineLineFromHeard(heard),
+        });
+      }
     } finally {
       finishingHoldRef.current = false;
     }
@@ -523,34 +853,11 @@ export function VoiceRoom() {
       return;
     }
     if (voice.status === "recording") voice.cancel();
-    if (!isPlaybackUnlocked()) await unlockPlayback();
     stopPlayback();
     setComposerOpen(false);
     setEditingId(null);
     setBanner(null);
     await call.start();
-  }
-
-  function bargeIn() {
-    if (!call.active) return;
-    if (status !== "speaking" && status !== "thinking") return;
-    stopPlayback();
-    turnRef.current += 1;
-    busyRef.current = false;
-    const cur = inflightRef.current;
-    const display = cur ? stripSpeechTags(cur.text) : "";
-    if (cur && display) {
-      void appendRoomMessage({
-        data: {
-          id: cur.id,
-          role: "assistant",
-          text: display,
-          createdAt: cur.createdAt,
-        },
-      });
-    }
-    setStatus("idle");
-    call.hear();
   }
 
   async function submitComposer() {
@@ -572,20 +879,185 @@ export function VoiceRoom() {
       if (call.active) call.hear();
       return;
     }
+    const updated: ChatMessage = { ...current, text };
+    setEditingId(null);
+    await replayFrom(updated);
+  }
+
+  async function replayFrom(updated: ChatMessage) {
     abortRef.current?.abort();
     stopPlayback();
     busyRef.current = true;
-    const idx = chatRef.current.findIndex((m) => m.id === current.id);
-    if (idx < 0) return;
-    const updated: ChatMessage = { ...current, text };
-    const removed = chatRef.current.slice(idx + 1);
-    setMessages([...chatRef.current.slice(0, idx), updated]);
-    setEditingId(null);
-    void updateRoomMessage({ data: updated });
-    if (removed.length) {
-      void deleteRoomMessages({ data: { ids: removed.map((m) => m.id) } });
+    const sliced = sliceAfterMessage(chatRef.current, updated.id);
+    if (!sliced) {
+      busyRef.current = false;
+      return;
     }
-    await sendTurn(text, { existingUser: updated });
+    setMessages([...sliced.history, updated]);
+    void updateRoomMessage({ data: updated });
+    if (sliced.removed.length) {
+      void deleteRoomMessages({ data: { ids: sliced.removed.map((m) => m.id) } });
+    }
+    await sendTurn(updated.text, {
+      history: sliced.history,
+      existingUser: updated,
+      voiceTurnId: updated.voiceTurnId,
+    });
+  }
+
+  async function saveConfirm(input: {
+    goldText: string;
+    source: "confirmed" | "edited";
+    noiseOnly: boolean;
+    literalMismatch: boolean;
+    toneNote: string;
+    goldTags: Partial<AcousticTags>;
+    tagsTouched: TagKey[];
+  }) {
+    const msg = chatRef.current.find((m) => m.id === confirmId);
+    if (!msg?.voiceTurnId) {
+      confirmOpenRef.current = false;
+      setConfirmId(null);
+      return;
+    }
+    setConfirmBusy(true);
+    setConfirmError(null);
+    try {
+      const result = await confirmHearingClip({
+        data: {
+          turnId: msg.voiceTurnId,
+          goldText: input.goldText,
+          goldSource: input.source,
+          noiseOnly: input.noiseOnly,
+          literalMismatch: input.literalMismatch,
+          toneNote: input.toneNote,
+          goldTags: input.goldTags,
+          tagsTouched: input.tagsTouched,
+        },
+      });
+      if (!result.ok) {
+        setConfirmError(result.error);
+        return;
+      }
+      if (msg.hearingGold !== "confirmed") setLabeledCount((n) => n + 1);
+      const plan = planConfirmSave(chatRef.current, msg, {
+        goldText: input.goldText,
+        noiseOnly: input.noiseOnly,
+        events: input.goldTags.events,
+      });
+      const updated: ChatMessage = { ...plan.updated, hearingGold: "confirmed" };
+      confirmOpenRef.current = false;
+      setConfirmId(null);
+      if (plan.shouldResend) {
+        void replayFrom(updated);
+      } else {
+        if (plan.removed.length) {
+          abortRef.current?.abort();
+          abortRef.current = null;
+          turnRef.current += 1;
+          busyRef.current = false;
+          stopPlayback();
+          setStatus("idle");
+          inflightRef.current = null;
+          speakingIdRef.current = null;
+          void deleteRoomMessages({ data: { ids: plan.removed.map((m) => m.id) } });
+        }
+        void updateRoomMessage({ data: updated });
+        setMessages((prev) => {
+          const drop = new Set(plan.removed.map((m) => m.id));
+          return prev.filter((m) => !drop.has(m.id)).map((m) => (m.id === msg.id ? updated : m));
+        });
+      }
+    } catch (err) {
+      setConfirmError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setConfirmBusy(false);
+    }
+  }
+
+  async function saveConfirmQuick(id: string) {
+    const msg = chatRef.current.find((m) => m.id === id);
+    if (!msg?.voiceTurnId) return;
+    setBanner(null);
+    try {
+      const result = await confirmHearingClip({
+        data: {
+          turnId: msg.voiceTurnId,
+          goldText: msg.text,
+          goldSource: "confirmed",
+        },
+      });
+      if (!result.ok) {
+        setBanner(result.error);
+        return;
+      }
+      if (msg.hearingGold !== "confirmed") setLabeledCount((n) => n + 1);
+      const updated: ChatMessage = { ...msg, hearingGold: "confirmed" };
+      void updateRoomMessage({ data: updated });
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
+      armUndo(id);
+    } catch (err) {
+      setBanner(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function armUndo(id: string) {
+    setUndoConfirmId(id);
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = window.setTimeout(() => {
+      setUndoConfirmId((cur) => (cur === id ? null : cur));
+      undoTimerRef.current = 0;
+    }, 5000);
+  }
+
+  async function undoConfirm(id: string) {
+    const msg = chatRef.current.find((m) => m.id === id);
+    if (!msg?.voiceTurnId) return;
+    try {
+      const result = await unlabelHearingByTurn({ data: { turnId: msg.voiceTurnId } });
+      if (!result.ok) {
+        setBanner(result.error);
+        return;
+      }
+      if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = 0;
+      setUndoConfirmId(null);
+      if (msg.hearingGold === "confirmed") setLabeledCount((n) => Math.max(0, n - 1));
+      const updated: ChatMessage = { ...msg, hearingGold: "unconfirmed" };
+      void updateRoomMessage({ data: updated });
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
+    } catch (err) {
+      setBanner(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function interruptQingran() {
+    const plan = planInterruptQingran({
+      speakingOrThinking: status === "speaking" || status === "thinking",
+      callActive: call.active,
+    });
+    if (!plan) return;
+    turnRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (plan.stopPlayback) stopPlayback();
+    busyRef.current = false;
+    setStatus("idle");
+    const id = speakingIdRef.current ?? inflightRef.current?.id;
+    const target =
+      (id ? chatRef.current.find((m) => m.id === id) : undefined) ??
+      [...chatRef.current].reverse().find((m) => m.role === "assistant");
+    if (plan.markInterrupted && target?.role === "assistant") {
+      pendingIdsRef.current.delete(target.id);
+      const updated: ChatMessage = { ...target, interrupted: true };
+      chatRef.current = chatRef.current.map((m) => (m.id === updated.id ? updated : m));
+      setMessages(chatRef.current);
+      void updateRoomMessage({ data: updated });
+      void markTurnInterruptedFn({ data: { turnId: target.id } });
+    }
+    inflightRef.current = null;
+    speakingIdRef.current = null;
+    if (plan.hear) call.hear();
   }
 
   const recording = voice.status === "recording";
@@ -600,9 +1072,11 @@ export function VoiceRoom() {
         : status === "thinking"
           ? "她在想"
           : status === "speaking"
-            ? "清然在说 · 点灯可打断"
+            ? "清然在说"
             : "你说，说完停两秒"
-    : "";
+    : status === "thinking"
+      ? "正在想"
+      : "";
 
   return (
     <div
@@ -610,24 +1084,51 @@ export function VoiceRoom() {
       style={{ top: viewport.offsetTop, height: viewport.height }}
     >
       <div className="mx-auto flex h-full min-h-0 w-full max-w-lg flex-col overflow-hidden">
-        <header className="relative z-10 flex shrink-0 items-center justify-between bg-bg/80 px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm">
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "lamp-orb size-10 rounded-full",
-                status === "idle" && !recording && !call.active && "lamp-breathe",
-              )}
-              aria-hidden
-              onClick={bargeIn}
-            />
-            <div>
+        <header
+          className="relative z-10 flex shrink-0 items-center justify-between bg-bg/80 px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm"
+          onClick={() => transcriptRef.current?.pageUp()}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <button
+              type="button"
+              aria-label={status === "speaking" || status === "thinking" ? "打断清然" : "清然"}
+              className="grid size-11 shrink-0 place-items-center"
+              onClick={(e) => {
+                e.stopPropagation();
+                interruptQingran();
+              }}
+            >
+              <div
+                className={cn(
+                  "lamp-orb size-10 rounded-full",
+                  status === "idle" && !recording && !call.active && "lamp-breathe",
+                )}
+                aria-hidden
+              />
+            </button>
+            <button
+              type="button"
+              aria-label="往上看更早的对话"
+              className="min-w-0 flex-1 text-left"
+            >
               <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
               <p className="text-xs text-subtle">
-                {call.active ? "通话中" : "在"}
+                {profile.debugHearing
+                  ? `已标 ${labeledCount} / 200`
+                  : call.active
+                    ? "通话中"
+                    : "在"}
               </p>
-            </div>
+              {profile.debugHearing && audioLog ? (
+                <p className="max-w-[14rem] truncate text-[10px] text-subtle/80">{audioLog}</p>
+              ) : null}
+            </button>
           </div>
-          <div className="flex items-center gap-1">
+          <div
+            className="flex items-center gap-1"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <Button variant="ghost" size="icon" aria-label="日记" asChild>
               <Link to="/diary">
                 <BookOpen className="size-5" />
@@ -636,12 +1137,14 @@ export function VoiceRoom() {
             <Button
               variant="ghost"
               size="sm"
-              aria-pressed={profile.softVoice}
-              aria-label={profile.softVoice ? "恢复平常语速" : "让她说得轻缓"}
-              className={cn("text-xs", profile.softVoice && "text-live")}
-              onClick={toggleSoftVoice}
+              aria-label={`语速 ${snapVoiceRate(profile.voiceSpeed).label}，点一下换一档`}
+              className={cn(
+                "text-xs",
+                snapVoiceRate(profile.voiceSpeed).id !== "normal" && "text-live",
+              )}
+              onClick={cycleVoiceSpeed}
             >
-              轻缓
+              {snapVoiceRate(profile.voiceSpeed).label}
             </Button>
             <Button
               variant="ghost"
@@ -704,6 +1207,7 @@ export function VoiceRoom() {
         ) : (
           <>
             <Transcript
+              ref={transcriptRef}
               messages={messages}
               partnerName="清然"
               statusLine={statusLine}
@@ -711,6 +1215,7 @@ export function VoiceRoom() {
               editableId={editable?.id ?? null}
               editingId={editingId}
               editDraft={editDraft}
+              debugHearing={profile.debugHearing}
               onPlay={(id, text) => {
                 void unlockPlayback();
                 void playFull(id, text, turnRef.current);
@@ -734,6 +1239,29 @@ export function VoiceRoom() {
                 if (call.active) call.hear();
               }}
               onEditSave={() => void saveEdit()}
+              onConfirmStart={(id) => {
+                const plan = planOpenConfirmPanel();
+                skipAutoPlayRef.current = plan.skipAutoPlay;
+                confirmOpenRef.current = true;
+                if (plan.stopPlayback) stopPlayback();
+                setConfirmError(null);
+                setConfirmId(id);
+              }}
+              onConfirmQuick={(id) => void saveConfirmQuick(id)}
+              onUndoConfirm={(id) => void undoConfirm(id)}
+              undoConfirmId={undoConfirmId}
+              onFlagReply={(assistantId, replyToId, rating) => {
+                const reply = chatRef.current.find((m) => m.id === assistantId);
+                const trigger = replyToId ? chatRef.current.find((m) => m.id === replyToId) : undefined;
+                setFlagError(null);
+                setFlagTarget({
+                  messageId: assistantId,
+                  replyTo: replyToId,
+                  trigger: trigger?.text ?? "",
+                  reply: reply?.text ?? "",
+                  rating: rating === "up" ? "up" : "down",
+                });
+              }}
             />
 
             {editingId ? null : (
@@ -743,6 +1271,12 @@ export function VoiceRoom() {
                   {banner || voice.error || call.error}
                 </p>
               )}
+              {call.active || recording ? (
+                <VolumeMeter
+                  level={call.active ? call.level : voice.level}
+                  threshold={call.active ? call.threshold : voice.threshold}
+                />
+              ) : null}
               <div className="flex flex-col items-center gap-3">
                 {call.active ? (
                   <CallButton active onClick={() => void toggleCall()} />
@@ -766,10 +1300,10 @@ export function VoiceRoom() {
                 <p className="min-h-4 max-w-xs text-center text-xs text-subtle">
                   {call.active
                     ? status === "speaking"
-                      ? "点灯打断 · 点按钮挂断"
+                      ? "点按钮挂断"
                       : call.phase === "speaking-you"
                         ? "说完停两秒再发给她"
-                        : call.error || "通话中"
+                        : "通话中"
                     : recording
                       ? voice.interim.trim() || "松开发送"
                       : transcribing
@@ -790,6 +1324,63 @@ export function VoiceRoom() {
             )}
           </>
         )}
+
+        <ConfirmTurn
+          open={Boolean(confirmId)}
+          sttText={confirmStt}
+          initialDraft={confirmDraft}
+          audioUrl={confirmAudioUrl}
+          busy={confirmBusy}
+          error={confirmError}
+          initialPredicted={confirmPredicted}
+          initialGoldTags={confirmGoldTags}
+          initialNoise={confirmNoise}
+          initialLiteralMismatch={confirmMismatch}
+          initialToneNote={confirmNote}
+          onClose={() => {
+            confirmOpenRef.current = false;
+            setConfirmId(null);
+            setConfirmError(null);
+          }}
+          onConfirm={(input) => void saveConfirm(input)}
+        />
+
+        <FlagReply
+          open={Boolean(flagTarget)}
+          triggerText={flagTarget?.trigger}
+          replyText={flagTarget?.reply}
+          busy={flagBusy}
+          error={flagError}
+          rating={flagTarget?.rating ?? "down"}
+          onClose={() => {
+            setFlagTarget(null);
+            setFlagError(null);
+          }}
+          onSave={async (note) => {
+            if (!flagTarget) return;
+            setFlagBusy(true);
+            setFlagError(null);
+            try {
+              const result = await flagQingranReply({
+                data: {
+                  messageId: flagTarget.messageId,
+                  replyToMessageId: flagTarget.replyTo,
+                  note,
+                  rating: flagTarget.rating,
+                },
+              });
+              if (!result.ok) {
+                setFlagError(result.error);
+                return;
+              }
+              setFlagTarget(null);
+            } catch (err) {
+              setFlagError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setFlagBusy(false);
+            }
+          }}
+        />
 
         <SettingsDrawer
           open={settingsOpen}
@@ -815,4 +1406,24 @@ function streamAudioCovers(chunks: Array<Uint8Array>, display: string) {
   if (chars < 4) return sec >= 0.35;
   return sec >= Math.max(1, chars / 6.5);
 }
+
+function VolumeMeter({ level, threshold }: { level: number; threshold: number }) {
+  return (
+    <div
+      className="relative mb-3 h-1.5 w-full max-w-[12rem] overflow-hidden rounded-full bg-surface-2"
+      aria-label="音量"
+    >
+      <div
+        className="h-full rounded-full bg-accent transition-[width] duration-75"
+        style={{ width: `${Math.min(100, Math.max(0, level * 100))}%` }}
+      />
+      <div
+        className="absolute top-0 h-full w-0.5 bg-live"
+        style={{ left: `${Math.min(100, Math.max(0, threshold * 100))}%` }}
+        aria-label="阈值"
+      />
+    </div>
+  );
+}
+
 

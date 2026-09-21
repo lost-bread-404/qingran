@@ -226,8 +226,8 @@ async function createSql(): Promise<Sql> {
  * Get the shared, **server-only** SQL client. Neon when `DATABASE_URL` is set,
  * otherwise the local PGLite fallback. Memoized — safe to call per request.
  *
- * Schema comes from `migrations/*.sql`, auto-applied before the first query on
- * both backends — define tables there, never inline in server functions.
+ * Schema comes from `migrations/*.sql`. PGLite applies them on first query;
+ * Neon is migrated at build time by `scripts/migrate.mjs`.
  */
 export function getSql(): Promise<Sql> {
   if (testSql) return Promise.resolve(testSql);
@@ -258,7 +258,8 @@ export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite
  *
  * - **PGLite** (preview / no `DATABASE_URL`): open the in-memory DB and apply
  *   `migrations/*.sql`. Idempotent — concurrent callers share one promise.
- * - **Neon**: no-op (pool is created lazily on first query).
+ * - **Neon**: no-op (pool is created lazily on first query; schema is applied
+ *   at build time by `npm run db:migrate`).
  *
  * Vite `configureServer` awaits this at dev startup; production imports of this
  * module kick it off immediately (see bottom of file).

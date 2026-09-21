@@ -25,6 +25,7 @@ test("whitelist: login, cron, static assets", () => {
 test("protected paths are not public", () => {
   assert.equal(isPublicPath("GET", "/"), false);
   assert.equal(isPublicPath("GET", "/diary"), false);
+  assert.equal(isPublicPath("GET", "/lab"), false);
   assert.equal(isPublicPath("POST", "/api/talk"), false);
   assert.equal(isPublicPath("GET", "/api/warm"), false);
   assert.equal(isPublicPath("POST", "/_serverFn/abc"), false);
@@ -36,6 +37,7 @@ test("classifyRequest: cookie / html / api", () => {
   assert.equal(classifyRequest("GET", "/", "text/html", true), "next");
   assert.equal(classifyRequest("GET", "/", "text/html", false), "redirect");
   assert.equal(classifyRequest("GET", "/diary", "text/html,application/xhtml+xml", false), "redirect");
+  assert.equal(classifyRequest("GET", "/lab", "text/html,application/xhtml+xml", false), "redirect");
   assert.equal(classifyRequest("POST", "/api/talk", "application/json", false), "unauthorized");
   assert.equal(classifyRequest("GET", "/api/warm", "*/*", false), "unauthorized");
   assert.equal(classifyRequest("POST", "/_serverFn/x", "application/json", false), "unauthorized");
@@ -46,6 +48,7 @@ test("classifyRequest: cookie / html / api", () => {
 
 test("safeNext blocks open redirects", () => {
   assert.equal(safeNext("/diary"), "/diary");
+  assert.equal(safeNext("/lab"), "/lab");
   assert.equal(safeNext("/diary?x=1"), "/diary?x=1");
   assert.equal(safeNext("/"), "/");
   assert.equal(safeNext(null), "/");

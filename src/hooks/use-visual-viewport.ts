@@ -52,6 +52,8 @@ export function useVisualViewport() {
   return pad;
 }
 
+export type CaretField = HTMLTextAreaElement | HTMLInputElement;
+
 const CARET_STYLE_KEYS = [
   "box-sizing",
   "width",
@@ -74,8 +76,22 @@ const CARET_STYLE_KEYS = [
   "border-width",
 ] as const;
 
-export function keepCaretVisible(el: HTMLTextAreaElement | null) {
+export function keepCaretVisible(el: CaretField | null) {
   if (!el) return;
+  let caretTop = 0;
+  if (el instanceof HTMLTextAreaElement) caretTop = scrollCaretInside(el);
+  revealAboveKeyboard(el, caretTop);
+}
+
+function selectionEndOf(el: CaretField) {
+  try {
+    return el.selectionEnd ?? el.value.length;
+  } catch {
+    return el.value.length;
+  }
+}
+
+function scrollCaretInside(el: HTMLTextAreaElement) {
   const computed = getComputedStyle(el);
   const probe = document.createElement("div");
   for (const key of CARET_STYLE_KEYS) {
@@ -90,7 +106,7 @@ export function keepCaretVisible(el: HTMLTextAreaElement | null) {
   probe.style.wordWrap = "break-word";
   probe.style.overflow = "hidden";
   probe.style.width = `${el.clientWidth}px`;
-  probe.textContent = el.value.slice(0, el.selectionEnd);
+  probe.textContent = el.value.slice(0, selectionEndOf(el));
   const marker = document.createElement("span");
   marker.textContent = "\u200b";
   probe.appendChild(marker);
@@ -101,4 +117,43 @@ export function keepCaretVisible(el: HTMLTextAreaElement | null) {
   const pad = Math.min(64, Math.max(28, view * 0.28));
   if (caretTop < el.scrollTop + pad) el.scrollTop = Math.max(0, caretTop - pad);
   else if (caretTop > el.scrollTop + view - pad) el.scrollTop = caretTop - view + pad;
+  return caretTop;
+}
+
+function revealAboveKeyboard(el: CaretField, caretTop: number) {
+  const vv = window.visualViewport;
+  const floor = (vv ? vv.offsetTop + vv.height : window.innerHeight) - 12;
+  const ceiling = vv ? vv.offsetTop + 8 : 8;
+  const rect = el.getBoundingClientRect();
+  const viewH = floor - ceiling;
+  let top = rect.top;
+  let bottom = rect.bottom;
+  if (el instanceof HTMLTextAreaElement && rect.height > viewH) {
+    const computed = getComputedStyle(el);
+    const line = parseFloat(computed.lineHeight);
+    const padTop = parseFloat(computed.paddingTop) || 0;
+    const borderTop = parseFloat(computed.borderTopWidth) || 0;
+    const caretY = rect.top + borderTop + padTop + caretTop - el.scrollTop;
+    const lineH = Number.isFinite(line) && line > 0 ? line : 22;
+    top = caretY;
+    bottom = caretY + lineH;
+  }
+  let delta = 0;
+  if (bottom > floor) delta = bottom - floor;
+  else if (top < ceiling) delta = top - ceiling;
+  if (Math.abs(delta) < 1) return;
+  scrollOverflowAncestor(el, delta);
+}
+
+function scrollOverflowAncestor(el: HTMLElement, delta: number) {
+  let node: HTMLElement | null = el.parentElement;
+  while (node && node !== document.body) {
+    const style = getComputedStyle(node);
+    const oy = style.overflowY;
+    if ((oy === "auto" || oy === "scroll" || oy === "overlay") && node.scrollHeight > node.clientHeight + 1) {
+      node.scrollTop += delta;
+      return;
+    }
+    node = node.parentElement;
+  }
 }

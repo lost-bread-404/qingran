@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  canBeginUtterance,
+  DEBUG_START_FLOOR_MIN,
+  DEBUG_START_FLOOR_MULT,
   holdThreshold,
   isHoldVoiced,
   isSpeechStart,
+  MIN_SPEECH_MS,
   nextFloor,
+  POST_QINGRAN_MS,
   shouldEndUtterance,
+  START_FLOOR_MIN,
+  START_FLOOR_MULT,
   startThreshold,
 } from "./vad.ts";
 
@@ -30,11 +37,20 @@ test("quiet coquettish cues can still start a turn", () => {
   assert.equal(isSpeechStart(0.009, floor, 0.1, 0.28), true);
 });
 
-test("hold uses the floor so room noise is not treated as speech", () => {
-  const floor = 0.018;
-  assert.equal(isHoldVoiced(0.02, floor), false);
-  assert.equal(isHoldVoiced(0.04, floor), true);
-  assert.ok(holdThreshold(floor) > floor);
+test("debug VAD numbers are documented vs production", () => {
+  assert.equal(START_FLOOR_MIN, 0.01);
+  assert.equal(START_FLOOR_MULT, 1.95);
+  assert.equal(DEBUG_START_FLOOR_MIN, 0.003);
+  assert.equal(DEBUG_START_FLOOR_MULT, 1.25);
+  const floor = 0.008;
+  assert.equal(startThreshold(floor, false), Math.max(0.01, floor * 1.95));
+  assert.equal(startThreshold(floor, true), Math.max(0.003, floor * 1.25));
+});
+
+test("debug hold never drops below max(0.005, floor*1.4)", () => {
+  assert.equal(holdThreshold(0.008, true), Math.max(0.005, 0.008 * 1.4));
+  assert.equal(holdThreshold(0.002, true), 0.005);
+  assert.equal(holdThreshold(0.02, true), Math.max(0.005, 0.02 * 1.4));
 });
 
 test("silence after two seconds ends the turn", () => {
@@ -119,4 +135,16 @@ test("a long turn is not force-ended while you are still talking", () => {
     }),
     false,
   );
+});
+
+test("annotation mode waits MIN_SPEECH_MS of continuous speech before recording", () => {
+  assert.equal(MIN_SPEECH_MS, 220);
+  assert.equal(canBeginUtterance({ rising: true, heldMs: 100, requireHold: true }), false);
+  assert.equal(canBeginUtterance({ rising: true, heldMs: 220, requireHold: true }), true);
+  assert.equal(canBeginUtterance({ rising: true, heldMs: 0, requireHold: false }), true);
+  assert.equal(canBeginUtterance({ rising: false, heldMs: 500, requireHold: true }), false);
+});
+
+test("Qingran tail guard is 300ms", () => {
+  assert.equal(POST_QINGRAN_MS, 300);
 });

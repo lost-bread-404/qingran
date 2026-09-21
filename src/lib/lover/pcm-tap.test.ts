@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { downsample, encodeWavPcm16, wavFromTap } from "./pcm-tap.ts";
+import {
+  beginCaptureSamples,
+  createSampleRing,
+  downsample,
+  encodeWavPcm16,
+  PRE_ROLL_SEC,
+  peakTimedRms,
+  pushSampleRing,
+  pushTimedRms,
+  snapshotSampleRing,
+  clearSampleRing,
+  wavFromTap,
+} from "./pcm-tap.ts";
 
 test("downsample 48k to 16k keeps about a third of the samples", () => {
   const input = new Float32Array(4800);
@@ -30,4 +42,43 @@ test("wavFromTap ignores clips that are too short", () => {
   const samples = new Float32Array(100);
   assert.equal(wavFromTap(samples, 16000), null);
   assert.ok(wavFromTap(new Float32Array(4000), 16000));
+});
+
+test("pre-roll ring keeps about 1.5s and prepends it at start", () => {
+  assert.equal(PRE_ROLL_SEC, 1.5);
+  const rate = 16_000;
+  const capacity = Math.round(rate * PRE_ROLL_SEC);
+  const ring = createSampleRing();
+  for (let i = 0; i < 20; i += 1) {
+    const chunk = new Float32Array(rate / 10);
+    chunk.fill(i === 19 ? 0.4 : 0.01 * i);
+    pushSampleRing(ring, chunk, capacity);
+  }
+  const snap = snapshotSampleRing(ring);
+  assert.ok(snap.length <= capacity);
+  assert.ok(snap.length >= capacity - rate / 10);
+  assert.ok(Math.abs((snap[snap.length - 1] ?? 0) - 0.4) < 1e-5);
+  clearSampleRing(ring);
+  assert.equal(snapshotSampleRing(ring).length, 0);
+});
+
+test("audio written during deafen is at the start of the capture after hear", () => {
+  const rate = 16_000;
+  const capacity = Math.round(rate * PRE_ROLL_SEC);
+  const ring = createSampleRing();
+  const duringDeafen = new Float32Array(rate);
+  duringDeafen.fill(0.73);
+  pushSampleRing(ring, duringDeafen, capacity);
+  const afterHear = new Float32Array(rate / 5);
+  afterHear.fill(0.12);
+  pushSampleRing(ring, afterHear, capacity);
+  const speech = new Float32Array(800);
+  speech.fill(0.31);
+  const captured = beginCaptureSamples(ring, [speech]);
+  assert.ok(captured.length > duringDeafen.length);
+  assert.ok(Math.abs((captured[0] ?? 0) - 0.73) < 1e-5);
+  const lastPre = captured[captured.length - speech.length - 1] ?? 0;
+  assert.ok(Math.abs(lastPre - 0.12) < 1e-5);
+  assert.ok(Math.abs((captured[captured.length - 1] ?? 0) - 0.31) < 1e-5);
+  assert.equal(peakTimedRms(pushTimedRms([], { t: 100, rms: 0.02 }, 1500)), 0.02);
 });

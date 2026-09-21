@@ -3,6 +3,8 @@ import { applyAvailabilityFallback, checkModelAvailability, resolveRoute, VOICE_
 import { spokenForTts } from "./speech-tags";
 import { shouldFlushSpoken, ttsRequestBody, ttsSpeed } from "./tts";
 import type { VoiceChatMessage } from "./brain/types";
+import { TALK_FAIL, logTalkTurn, takeTalkDelta, talkFailFromResult } from "./talk-fail.ts";
+import { recordTtsSpend } from "./brain/spend/check";
 
 const MAX_INPUT = 2000;
 const PCM_MIME = `audio/pcm;rate=${VOICE_IO.sampleRate}`;
@@ -12,14 +14,31 @@ export type TalkStreamEvent =
   | { t: "text_end"; speech: string }
   | { t: "audio"; i: number; b: string; m: string; replace?: boolean }
   | { t: "timing"; k: string; ms: number }
-  | { t: "done"; speech: string; replyId?: string }
-  | { t: "err"; m: string; code?: string };
+  | {
+      t: "done";
+      speech: string;
+      replyId?: string;
+      status?: number | null;
+      finishReason?: string | null;
+      ms?: number;
+      chars?: number;
+    }
+  | {
+      t: "err";
+      m: string;
+      code?: string;
+      status?: number | null;
+      finishReason?: string | null;
+      ms?: number;
+      chars?: number;
+      tts?: boolean;
+    };
 
 export type TalkStreamInput = {
   text: string;
   messages: VoiceChatMessage[];
   replyId?: string;
-  softVoice?: boolean;
+  voiceSpeed?: number;
 };
 
 type Emit = (event: TalkStreamEvent) => void;
@@ -36,10 +55,24 @@ export type TalkStreamResult = {
   firstAudioMs: number | null;
   model: string;
   ttsChars: number;
+  status: number | null;
+  finishReason: string | null;
+  ms: number;
+  chars: number;
 };
 
 export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<TalkStreamResult> {
-  const empty: TalkStreamResult = { usage: null, ttftMs: null, firstAudioMs: null, model: "", ttsChars: 0 };
+  const empty: TalkStreamResult = {
+    usage: null,
+    ttftMs: null,
+    firstAudioMs: null,
+    model: "",
+    ttsChars: 0,
+    status: null,
+    finishReason: null,
+    ms: 0,
+    chars: 0,
+  };
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) {
     emit({ t: "err", m: "这会儿连不上。" });
@@ -52,7 +85,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     return empty;
   }
 
-  const speed = ttsSpeed(Boolean(data.softVoice));
+  const speed = ttsSpeed(data.voiceSpeed ?? 1);
   void checkModelAvailability(apiKey);
   const route = applyAvailabilityFallback(resolveRoute("voice"));
   const t0 = Date.now();
@@ -61,7 +94,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   let ttftMs: number | null = null;
   let firstAudioMs: number | null = null;
   let usage: TalkStreamResult["usage"] = null;
-  // 从一开始就包一层，流式阶段的第一段音频也能计时
+  let status: number | null = null;
+  let finishReason: string | null = null;
   const timedEmit: Emit = (event) => {
     if (event.t === "audio" && !firstAudioSent) {
       firstAudioMs = Date.now() - t0;
@@ -71,6 +105,20 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     emit(event);
   };
   const tts = new LiveTts(apiKey, timedEmit, speed);
+
+  const fail = (message: string, log: ReturnType<typeof talkFailFromResult>["log"], ttsOnly = false) => {
+    logTalkTurn(log);
+    if (!ttsOnly) tts.abort();
+    emit({
+      t: "err",
+      m: message,
+      status: log.status,
+      finishReason: log.finishReason,
+      ms: log.ms,
+      chars: log.chars,
+      tts: ttsOnly || undefined,
+    });
+  };
 
   const res = await fetch("https://api.x.ai/v1/chat/completions", {
     method: "POST",
@@ -86,13 +134,31 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       stream_options: { include_usage: true },
       messages: data.messages,
     }),
-    signal: AbortSignal.timeout(route.timeoutMs),
+    signal: AbortSignal.timeout(28_000),
   });
+  status = res.status;
 
-  if (!res.ok || !res.body) {
-    tts.abort();
-    emit({ t: "err", m: `想你的时候卡住了（${res.status}）。` });
-    return { ...empty, model: route.model };
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    const outcome = talkFailFromResult({
+      kind: "http",
+      status: res.status,
+      body,
+      ms: Date.now() - t0,
+    });
+    fail(outcome.message ?? TALK_FAIL.network, outcome.log);
+    return { ...empty, model: route.model, status, ms: Date.now() - t0 };
+  }
+  if (!res.body) {
+    const outcome = talkFailFromResult({
+      kind: "ok",
+      status: res.status,
+      finishReason: null,
+      speech: "",
+      ms: Date.now() - t0,
+    });
+    fail(outcome.message ?? TALK_FAIL.empty, outcome.log);
+    return { ...empty, model: route.model, status, ms: Date.now() - t0 };
   }
 
   let full = "";
@@ -113,30 +179,29 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       if (!trimmed.startsWith("data:")) continue;
       const payload = trimmed.slice(5).trim();
       if (!payload || payload === "[DONE]") continue;
-      let token = "";
       try {
         const json = JSON.parse(payload) as {
-          choices?: { delta?: { content?: string } }[];
           usage?: TalkStreamResult["usage"];
         };
         if (json.usage) usage = json.usage;
-        token = json.choices?.[0]?.delta?.content ?? "";
+        const { token, finishReason: nextReason } = takeTalkDelta(json);
+        if (nextReason) finishReason = nextReason;
+        if (!token) continue;
+        if (!ttftSent) {
+          ttftMs = Date.now() - t0;
+          emit({ t: "timing", k: "ttft_ms", ms: ttftMs });
+          ttftSent = true;
+        }
+        full += token;
+        pending += token;
+        emit({ t: "text", d: token });
+        if (shouldFlushSpoken(pending, firstSpoken)) {
+          tts.push(pending);
+          pending = "";
+          firstSpoken = false;
+        }
       } catch {
         continue;
-      }
-      if (!token) continue;
-      if (!ttftSent) {
-        ttftMs = Date.now() - t0;
-        emit({ t: "timing", k: "ttft_ms", ms: ttftMs });
-        ttftSent = true;
-      }
-      full += token;
-      pending += token;
-      emit({ t: "text", d: token });
-      if (shouldFlushSpoken(pending, firstSpoken)) {
-        tts.push(pending);
-        pending = "";
-        firstSpoken = false;
       }
     }
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -145,11 +210,28 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   if (pending.trim()) tts.push(pending);
   const speech = full.trim();
   emit({ t: "text_end", speech });
-  if (!speech) {
-    tts.abort();
-    emit({ t: "err", m: "她好像走神了，再说一次。" });
-    return { usage, ttftMs, firstAudioMs, model: route.model, ttsChars: tts.chars };
+  const outcome = talkFailFromResult({
+    kind: "ok",
+    status: status ?? 200,
+    finishReason,
+    speech,
+    ms: Date.now() - t0,
+  });
+  if (outcome.message) {
+    fail(outcome.message, outcome.log);
+    return {
+      usage,
+      ttftMs,
+      firstAudioMs,
+      model: route.model,
+      ttsChars: tts.chars,
+      status,
+      finishReason,
+      ms: Date.now() - t0,
+      chars: speech.length,
+    };
   }
+  logTalkTurn(outcome.log);
 
   await tts.finish();
 
@@ -159,11 +241,31 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     if (clip?.b) {
       timedEmit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
       ttsChars = spokenForTts(speech).length;
+    } else {
+      fail(TALK_FAIL.tts, { ...outcome.log, chars: speech.length }, true);
     }
   }
 
-  emit({ t: "done", speech, replyId: data.replyId });
-  return { usage, ttftMs, firstAudioMs, model: route.model, ttsChars };
+  emit({
+    t: "done",
+    speech,
+    replyId: data.replyId,
+    status,
+    finishReason,
+    ms: Date.now() - t0,
+    chars: speech.length,
+  });
+  return {
+    usage,
+    ttftMs,
+    firstAudioMs,
+    model: route.model,
+    ttsChars,
+    status,
+    finishReason,
+    ms: Date.now() - t0,
+    chars: speech.length,
+  };
 }
 
 class LiveTts {
@@ -309,6 +411,7 @@ class LiveTts {
     if (this.closed) return;
     this.closed = true;
     this.resolveDone();
+    if (this.chars) void recordTtsSpend(this.chars);
     try {
       this.socket?.close();
     } catch {
@@ -332,6 +435,7 @@ async function speakRest(apiKey: string, text: string, speed: number): Promise<{
       signal: AbortSignal.timeout(40_000),
     });
     if (!res.ok) return null;
+    void recordTtsSpend(spoken.length);
     const buf = Buffer.from(await res.arrayBuffer());
     return {
       b: buf.toString("base64"),

@@ -1,53 +1,8 @@
-import { classifyCue, cuesFromProsody, glueCueParts, markForFrames, voicedIslands, type CueWord, type ProsodyFrame } from "./prosody.ts";
+import { classifyCue, cuesFromProsody, glueCueParts, hasCueEnergy, hasVoicedPitch, markForFrames, utteranceToneMark, voicedIslands, type CueWord, type ProsodyFrame, type ToneThresholds } from "./prosody.ts";
 import { islandVoiced, listenVocal } from "./vocal-event.ts";
+import { STT_KEYTERMS, VOCAL_CUES } from "./hearing/config.ts";
 
-export const STT_KEYTERMS = [
-  "嗯",
-  "啊",
-  "呜",
-  "哈",
-  "哼",
-  "嗷",
-  "哦",
-  "唉",
-  "嘛",
-  "呀",
-  "啦",
-  "呢",
-  "吧",
-  "喵",
-  "嗯嗯",
-  "嗯嗯嗯",
-  "啊啊",
-  "呜呜",
-  "哈哈",
-  "喵喵",
-  "清然",
-  "Rosie",
-  "姐姐",
-  "小猫",
-  "林泽",
-];
-
-const ABO_TERMS = [
-  "ABO",
-  "Alpha",
-  "Omega",
-  "Beta",
-  "alpha",
-  "omega",
-  "beta",
-  "信息素",
-  "标记",
-  "腺体",
-  "发情",
-  "发情期",
-  "热潮",
-  "结合热",
-  "安抚",
-  "信香",
-  "分化",
-];
+export { STT_KEYTERMS, VOCAL_CUES };
 
 const CUE_CHARS = "嗯唔呜啊哦噢喔额呃唉哎诶欸哼哈嘿哇呀哟呦切啧嘶嘛呢吧啦咯嘞嘤喵嗷呼嘻嗨嘘咿欧咕唧呐欸喔哇";
 const FILLER = new RegExp(`[${CUE_CHARS}]`);
@@ -225,9 +180,6 @@ export function needsPunctuationHelp(text: string): boolean {
 export function extractKeyterms(prompt: string): string[] {
   const found = new Set<string>();
   const text = prompt ?? "";
-  if (/ABO|信息素|alpha|omega|beta|腺体|发情|热潮/i.test(text)) {
-    for (const term of ABO_TERMS) found.add(term);
-  }
   for (const match of text.match(/[A-Z][a-zA-Z]{2,}/g) ?? []) found.add(match);
   for (const match of text.match(/[“「『"]([^“」』"]{2,12})[”」』"]/g) ?? []) {
     const inner = match.replace(/[“”「」『』"]/g, "").trim();
@@ -240,10 +192,8 @@ export function extractKeyterms(prompt: string): string[] {
   return [...found].filter((term) => term.length >= 2 && term.length <= 16).slice(0, 32);
 }
 
-export function sttKeyterms(prompt?: string): string[] {
-  const extra = prompt ? extractKeyterms(prompt) : [];
-  const all = [...extra, ...STT_KEYTERMS];
-  return [...new Set(all)].slice(0, 80);
+export function sttKeyterms(_prompt?: string): string[] {
+  return [...STT_KEYTERMS];
 }
 
 export function isMostlyFiller(text: string): boolean {
@@ -363,6 +313,100 @@ function shouldKeepOnlyCues(text: string): boolean {
   return [...leftover].every((ch) => FILLER.test(ch));
 }
 
+export const HALLUCINATION_MIN_SEC = 1.2;
+export const HALLUCINATION_PEAK_RMS = 0.02;
+export const HALLUCINATION_SENTENCE_CHARS = 6;
+
+export type HallucinationReason = "apple_empty" | "short_quiet";
+
+function xaiLooksLikeSentence(xaiText: string): boolean {
+  const core = stripMarks(xaiText);
+  if (!core || isMostlyFiller(xaiText)) return false;
+  return core.length > HALLUCINATION_SENTENCE_CHARS;
+}
+
+function xaiHasSubstance(xaiText: string): boolean {
+  const core = stripMarks(xaiText);
+  if (!core) return false;
+  return !isMostlyFiller(xaiText);
+}
+
+function isQuietClip(audio: { durationSec: number; peakRms: number }): boolean {
+  return audio.durationSec < HALLUCINATION_MIN_SEC || audio.peakRms < HALLUCINATION_PEAK_RMS;
+}
+
+function liveTextIsEmptyOrFiller(liveText?: string): boolean {
+  const t = (liveText ?? "").trim();
+  return !t || isMostlyFiller(t);
+}
+
+export function isVocalCueText(text: string): boolean {
+  const core = stripMarks(text);
+  if (!core) return false;
+  const terms = [...VOCAL_CUES].sort((a, b) => b.length - a.length);
+  let i = 0;
+  while (i < core.length) {
+    const hit = terms.find((term) => core.startsWith(term, i));
+    if (!hit) return false;
+    i += hit.length;
+  }
+  return true;
+}
+
+export function hallucinationReason(input: {
+  durationSec: number;
+  peakRms: number;
+  xaiText: string;
+  liveText?: string;
+  holdToTalk?: boolean;
+}): HallucinationReason | null {
+  if (input.holdToTalk) return null;
+  if (!liveTextIsEmptyOrFiller(input.liveText)) return null;
+  if (isVocalCueText(input.xaiText)) return null;
+  if (!xaiHasSubstance(input.xaiText)) return null;
+  if (xaiLooksLikeSentence(input.xaiText) && isQuietClip(input)) return "short_quiet";
+  return "apple_empty";
+}
+
+export function isHallucinationSuspect(input: {
+  durationSec: number;
+  peakRms: number;
+  xaiText: string;
+  liveText?: string;
+  holdToTalk?: boolean;
+}): boolean {
+  return hallucinationReason(input) != null;
+}
+
+export function hallucinationFallback(xaiText: string, browser = ""): string {
+  return salvageCues(`${browser} ${xaiText}`) || "";
+}
+
+export type HallucinationScrub = {
+  text: string;
+  suspect: boolean;
+  reason?: HallucinationReason | "prefer_apple_quiet";
+};
+
+export function scrubHallucination(
+  xaiText: string,
+  audio: { durationSec: number; peakRms: number },
+  browser = "",
+  opts?: { holdToTalk?: boolean },
+): HallucinationScrub {
+  const reason = hallucinationReason({
+    ...audio,
+    xaiText,
+    liveText: browser,
+    holdToTalk: opts?.holdToTalk,
+  });
+  if (reason) return { text: "", suspect: true, reason };
+  if (xaiLooksLikeSentence(xaiText) && isQuietClip(audio) && !liveTextIsEmptyOrFiller(browser)) {
+    return { text: browser, suspect: false, reason: "prefer_apple_quiet" };
+  }
+  return { text: xaiText, suspect: false };
+}
+
 export function pickTranscript(server: string, browser: string): string {
   const mixed = `${browser} ${server}`.trim();
   if (isMostlyFiller(mixed)) return punctuateSpeech(mixed);
@@ -398,24 +442,50 @@ export function pickTranscript(server: string, browser: string): string {
   return salvaged ? punctuateSpeech(salvaged) : "";
 }
 
-export function recoverCues(stt: string, frames?: ProsodyFrame[]): string {
+export function recoverCues(stt: string, frames?: ProsodyFrame[], th?: ToneThresholds): string {
   const existing = stripHehe(stt.trim());
   if (!frames?.length) return existing;
-  const islands = voicedIslands(frames);
   const heard = listenVocal(frames);
   const fixed = rewriteMisheardCues(existing, frames);
 
-  if (fixed) return fixed;
+  if (fixed && !isMostlyFiller(fixed)) {
+    return shapeSajiaoTail(applyTonePunctuation(fixed, frames, th), frames);
+  }
+
+  if (fixed && isMostlyFiller(fixed)) {
+    const mark = utteranceToneMark(frames, th);
+    const stripped = fixed.replace(/[，。！？…～~!?]+$/g, "");
+    if (!stripped) return fixed;
+    if (!mark) return stripped;
+    return `${stripped}${mark === "？" || mark === "！" ? "～" : mark}`;
+  }
 
   if (heard.kind === "laugh") return heard.text;
   if (heard.kind === "cry") return heard.text;
   if (heard.kind === "pant") return heard.text;
   if (heard.kind === "hum") return heard.text;
 
+  if (hasCueEnergy(frames) && hasVoicedPitch(frames)) return cuesFromProsody(frames);
+  const islands = voicedIslands(frames);
   const voiced = islands.filter(islandVoiced);
   if (!voiced.length) return "";
   if (voiced.length === islands.length) return cuesFromProsody(frames);
   return "";
+}
+
+export function applyTonePunctuation(
+  text: string,
+  frames?: ProsodyFrame[],
+  th?: ToneThresholds,
+): string {
+  if (!text || !frames?.length) return text;
+  if (isMostlyFiller(text)) return shapeCueProsody(text, undefined, frames);
+  const mark = utteranceToneMark(frames, th);
+  if (!mark) return text;
+  const stripped = text.replace(/[，。！？…～~!?]+$/g, "");
+  if (!stripped) return text;
+  if (/[吗么呢]$/.test(stripped) && mark !== "？") return `${stripped}？`;
+  return `${stripped}${mark}`;
 }
 
 function stripHehe(text: string) {
@@ -459,8 +529,16 @@ export function finishHeard(
   browser: string,
   _words: CueWord[] | undefined,
   frames: ProsodyFrame[] | undefined,
+  audio?: { durationSec: number; peakRms: number },
+  opts?: { holdToTalk?: boolean },
 ): string {
-  const picked = pickTranscript(stripHehe(server), stripHehe(browser));
+  let xai = stripHehe(server);
+  if (audio) {
+    const scrubbed = scrubHallucination(xai, audio, browser, opts);
+    if (scrubbed.suspect) return "";
+    xai = scrubbed.text;
+  }
+  const picked = pickTranscript(xai, stripHehe(browser));
   return recoverCues(picked, frames);
 }
 

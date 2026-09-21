@@ -1,11 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
+import { decodeStoredBody, encodeStoredMessage } from "./message-markup";
 import {
   applyMemoryCursor,
   lockedProfile,
   type ChatMessage,
   type Memory,
-  type MessageKind,
   type Profile,
 } from "./types";
 import { sortConversation } from "./pair-messages";
@@ -96,9 +96,10 @@ export const appendRoomMessage = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const sql = await getSql();
     const kind = data.kind === "steer" || data.kind === "setting" ? data.kind : "say";
+    const body = encodeStoredMessage(data).slice(0, 4000);
     await sql`
       insert into qingran_messages (id, role, body, created_at, kind)
-      values (${data.id}, ${data.role}, ${data.text.slice(0, 4000)}, ${data.createdAt}, ${kind})
+      values (${data.id}, ${data.role}, ${body}, ${data.createdAt}, ${kind})
       on conflict (id) do update
         set body = excluded.body, kind = excluded.kind
     `;
@@ -121,6 +122,40 @@ export const saveRoomMemories = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+export const restoreRoomBackup = createServerFn({ method: "POST" })
+  .validator((input: { profile: Profile; memories: Memory[]; messages: ChatMessage[] }) => input)
+  .handler(async ({ data }) => {
+    const sql = await getSql();
+    const profile = lockedProfile(data.profile);
+    await sql`
+      insert into qingran_profile (id, data, updated_at)
+      values (1, ${JSON.stringify(profile)}::jsonb, now())
+      on conflict (id) do update
+        set data = excluded.data, updated_at = now()
+    `;
+    const memories = data.memories.slice(-80);
+    for (const m of memories) {
+      await sql`
+        insert into qingran_memories (id, body, created_at, updated_at)
+        values (${m.id}, ${m.text.slice(0, 240)}, ${m.createdAt}, ${m.updatedAt})
+        on conflict (id) do update set
+          body = excluded.body, updated_at = excluded.updated_at
+      `;
+    }
+    const messages = data.messages.slice(-240);
+    for (const msg of messages) {
+      const kind = msg.kind === "steer" || msg.kind === "setting" ? msg.kind : "say";
+      await sql`
+        insert into qingran_messages (id, role, body, created_at, kind)
+        values (${msg.id}, ${msg.role}, ${encodeStoredMessage(msg).slice(0, 4000)}, ${msg.createdAt}, ${kind})
+        on conflict (id) do update
+          set body = excluded.body, kind = excluded.kind
+      `;
+    }
+    return { ok: true as const };
+  });
+
+
 export const clearRoomMessages = createServerFn({ method: "POST" }).handler(
   async () => {
     return { ok: true as const, skipped: true as const };
@@ -132,7 +167,7 @@ export const updateRoomMessage = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const kind = data.kind === "steer" || data.kind === "setting" ? data.kind : "say";
     const { updateMessageText } = await import("./brain/store");
-    await updateMessageText(data.id, data.text, kind);
+    await updateMessageText(data.id, encodeStoredMessage(data), kind);
     return { ok: true as const };
   });
 
@@ -166,28 +201,19 @@ function decodeStoredMessage(row: {
   created_at: number;
   kind?: string;
 }): ChatMessage {
-  let text = row.body;
-  let scanned = false;
-  let kind: MessageKind | undefined =
-    row.kind === "steer" || row.kind === "setting" || row.kind === "say" ? row.kind : undefined;
-  if (text.startsWith("⟦已扫⟧")) {
-    scanned = true;
-    text = text.slice(4);
-  }
-  if (text.startsWith("⟦走向⟧")) {
-    kind = "steer";
-    text = text.slice(4);
-  } else if (text.startsWith("⟦设定⟧")) {
-    kind = "setting";
-    text = text.slice(4);
-  }
+  const decoded = decodeStoredBody(row.body, row.kind);
   return {
     id: row.id,
     role: row.role === "assistant" ? "assistant" : "user",
-    text,
+    text: decoded.text,
     createdAt: Number(row.created_at),
-    kind,
-    scanned: scanned || undefined,
+    kind: decoded.kind,
+    scanned: decoded.scanned || undefined,
+    voiceTurnId: decoded.voiceTurnId,
+    hearingGold: decoded.hearingGold,
+    replyTo: decoded.replyTo,
+    predictedTags: decoded.predictedTags,
+    interrupted: decoded.interrupted || undefined,
   };
 }
 

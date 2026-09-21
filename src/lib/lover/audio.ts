@@ -1,3 +1,15 @@
+import {
+  getAudioSession,
+  micStreamHearing,
+  micStreamUsable,
+  claimListenSession,
+  yieldAudioSession,
+  resumeAudioContext,
+  watchAudioContext,
+  closeAudioContext,
+} from "@/lib/lover/audio-session";
+import { logCallAudio } from "@/lib/lover/call-audio-log";
+
 export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -75,6 +87,20 @@ export function micAudioConstraints(): MediaTrackConstraints {
 }
 
 let sharedMic: MediaStream | null = null;
+let micGen = 0;
+const micListeners = new Set<(event: "mute" | "unmute" | "ended") => void>();
+
+export function onMicEvent(listener: (event: "mute" | "unmute" | "ended") => void) {
+  micListeners.add(listener);
+  return () => {
+    micListeners.delete(listener);
+  };
+}
+
+function emitMicEvent(event: "mute" | "unmute" | "ended") {
+  logCallAudio(`track ${event}`);
+  for (const listener of micListeners) listener(event);
+}
 
 export function isAppleTouch() {
   if (typeof navigator === "undefined") return false;
@@ -89,6 +115,7 @@ export function usesBrowserStt(): boolean {
 
 export function stopRecognition(rec: SpeechRecognitionLike | null): Promise<void> {
   if (!rec) return Promise.resolve();
+  logCallAudio("rec.stop");
   return new Promise((resolve) => {
     let settled = false;
     const done = () => {
@@ -108,37 +135,130 @@ export function stopRecognition(rec: SpeechRecognitionLike | null): Promise<void
 }
 
 export function micUsable(stream: MediaStream | null) {
-  return Boolean(stream?.getAudioTracks().some((track) => track.readyState === "live"));
+  return micStreamUsable(stream);
+}
+
+export function micHearing(stream: MediaStream | null) {
+  return micStreamHearing(stream);
 }
 
 export function currentMic(): MediaStream | null {
   return micUsable(sharedMic) ? sharedMic : null;
 }
 
-export async function acquireMic(): Promise<MediaStream> {
-  if (micUsable(sharedMic) && sharedMic) {
+function bindTrackWatchers(stream: MediaStream) {
+  for (const track of stream.getAudioTracks()) {
+    track.addEventListener("mute", () => emitMicEvent("mute"));
+    track.addEventListener("unmute", () => {
+      if (sharedMic) setMicEnabled(sharedMic, true);
+      emitMicEvent("unmute");
+    });
+    track.addEventListener("ended", () => emitMicEvent("ended"));
+  }
+}
+
+async function requestMic(): Promise<MediaStream> {
+  const tryGet = (audio: boolean | MediaTrackConstraints) =>
+    navigator.mediaDevices.getUserMedia({ audio });
+  try {
+    return await tryGet(micAudioConstraints());
+  } catch (err) {
+    const name = (err as { name?: string }).name;
+    if (
+      name === "OverconstrainedError" ||
+      name === "ConstraintNotSatisfiedError" ||
+      name === "NotReadableError"
+    ) {
+      return await tryGet(true);
+    }
+    throw err;
+  }
+}
+
+function dropMic(stream: MediaStream | null) {
+  stream?.getTracks().forEach((track) => {
+    try {
+      track.stop();
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
+export function micFailHint(err: unknown) {
+  const name = (err as { name?: string } | null)?.name ?? "";
+  if (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError") {
+    return "点电话重新接通";
+  }
+  if (name === "AbortError") return "点电话重新接通";
+  return "点电话重新接通";
+}
+
+let acquireChain: Promise<unknown> = Promise.resolve();
+
+function beginMicRequest(): Promise<MediaStream> {
+  const gen = ++micGen;
+  logCallAudio("acquireMic");
+  if (sharedMic) {
+    dropMic(sharedMic);
+    sharedMic = null;
+  }
+  claimListenSession();
+  return requestMic().then((stream) => {
+    if (gen !== micGen) {
+      dropMic(stream);
+      throw new DOMException("superseded", "AbortError");
+    }
+    sharedMic = stream;
+    bindTrackWatchers(stream);
+    setMicEnabled(stream, true);
+    claimListenSession();
+    return stream;
+  });
+}
+
+export async function acquireMic(opts?: { force?: boolean }): Promise<MediaStream> {
+  const run = acquireChain.then(
+    () => acquireMicInner(opts),
+    () => acquireMicInner(opts),
+  );
+  acquireChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function acquireMicInner(_opts?: { force?: boolean }): Promise<MediaStream> {
+  if (sharedMic && micUsable(sharedMic)) {
     setMicEnabled(sharedMic, true);
     return sharedMic;
   }
-  sharedMic = await navigator.mediaDevices.getUserMedia({ audio: micAudioConstraints() });
-  for (const track of sharedMic.getAudioTracks()) {
-    track.addEventListener("mute", () => {
-      /* iOS mutes on background; unmute restores it */
-    });
-    track.addEventListener("unmute", () => {
-      if (sharedMic) setMicEnabled(sharedMic, true);
-    });
-  }
-  return sharedMic;
+  return beginMicRequest();
+}
+
+export function acquireMicFromGesture(): Promise<MediaStream> {
+  const pending = beginMicRequest();
+  acquireChain = pending.then(
+    () => undefined,
+    () => undefined,
+  );
+  return pending;
 }
 
 export function pauseMic() {
+  logCallAudio("pauseMic");
   setMicEnabled(sharedMic, false);
 }
 
 export function releaseMic() {
-  sharedMic?.getTracks().forEach((track) => track.stop());
+  const had = Boolean(sharedMic);
+  const sessionType = getAudioSession()?.type;
+  logCallAudio(`releaseMic had=${had ? "1" : "0"} session=${sessionType || "∅"}`);
+  micGen += 1;
+  dropMic(sharedMic);
   sharedMic = null;
+  if (had || sessionType === "play-and-record") yieldAudioSession();
 }
 
 export async function getMicStream(): Promise<MediaStream> {
@@ -150,6 +270,32 @@ export function setMicEnabled(stream: MediaStream | null, enabled: boolean) {
     track.enabled = enabled;
   });
 }
+
+export function createAudioContext(): AudioContext | null {
+  const Ctor =
+    window.AudioContext ||
+    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return null;
+  const next = new Ctor();
+  watchAudioContext(next);
+  try {
+    void next.resume();
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
+export async function resumeOrReplaceContext(ctx: AudioContext | null): Promise<AudioContext | null> {
+  if (ctx && (ctx.state as string) !== "closed") {
+    const ok = await resumeAudioContext(ctx);
+    if (ok) return ctx;
+    closeAudioContext(ctx);
+  }
+  return createAudioContext();
+}
+
+export { getAudioSession, claimListenSession, yieldAudioSession, resumeAudioContext, watchAudioContext, closeAudioContext };
 
 export function tapHaptic(kind: "start" | "end") {
   try {
@@ -172,6 +318,7 @@ export type SpeechRecognitionLike = {
   onresult: ((ev: SpeechResultEvent) => void) | null;
   onerror: ((ev: { error: string }) => void) | null;
   onend: (() => void) | null;
+  onstart: (() => void) | null;
 };
 
 type SpeechResultEvent = {

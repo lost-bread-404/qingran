@@ -4,6 +4,8 @@ import {
   browserSttReady,
   extractKeyterms,
   finishHeard,
+  hallucinationReason,
+  isHallucinationSuspect,
   needsPunctuationHelp,
   pickTranscript,
   punctuateSpeech,
@@ -11,7 +13,11 @@ import {
   refineCueWords,
   restoreSpeechText,
   shapeCueProsody,
+  scrubHallucination,
+  sttKeyterms,
+  STT_KEYTERMS,
   stripMarks,
+  isVocalCueText,
 } from "./stt-text.ts";
 import { classifyCue, cuesFromProsody, voicedIslands, type ProsodyFrame } from "./prosody.ts";
 
@@ -83,12 +89,90 @@ test("needsPunctuationHelp catches long unpunctuated speech", () => {
   assert.equal(needsPunctuationHelp("今天天气很好。我想出去走走。你呢？"), false);
 });
 
-test("extractKeyterms picks names and ABO words from the prompt", () => {
+test("extractKeyterms picks names from the prompt without dumping an ABO lexicon", () => {
   const prompt = `清然叫 Rosie 小猫。林泽住在隔壁。这是 ABO 世界观，omega 会释放信息素。`;
   const terms = extractKeyterms(prompt);
   assert.ok(terms.includes("Rosie"));
-  assert.ok(terms.includes("信息素"));
-  assert.ok(terms.includes("Omega") || terms.includes("omega"));
+  assert.equal(terms.includes("信息素"), false);
+  assert.equal(terms.includes("腺体"), false);
+  assert.equal(terms.includes("发情期"), false);
+  assert.equal(terms.includes("结合热"), false);
+});
+
+test("sttKeyterms ignores prompt extraction and only uses the fixed list", () => {
+  const prompt = `清然叫 Rosie 小猫。林泽是一个中国的演员。这是 ABO 世界观，omega 会释放信息素。`;
+  const terms = sttKeyterms(prompt);
+  assert.deepEqual(terms, [...STT_KEYTERMS]);
+  assert.equal(terms.includes("信息素"), false);
+  assert.equal(terms.includes("林泽"), false);
+  assert.equal(terms.includes("嗯嗯嗯"), false);
+  assert.ok(terms.includes("姐姐"));
+  assert.ok(terms.includes("清然"));
+  assert.ok(terms.includes("小猫"));
+  assert.ok(terms.includes("Rosie"));
+  assert.ok(terms.includes("嗯"));
+});
+
+test("short quiet clip with a long xAI sentence is short_quiet", () => {
+  const xai = "林泽是一个中国的演员";
+  assert.equal(isHallucinationSuspect({ durationSec: 0.6, peakRms: 0.002, xaiText: xai }), true);
+  assert.equal(hallucinationReason({ durationSec: 0.6, peakRms: 0.002, xaiText: xai }), "short_quiet");
+  assert.equal(isHallucinationSuspect({ durationSec: 2.0, peakRms: 0.08, xaiText: xai }), true);
+  assert.equal(hallucinationReason({ durationSec: 2.0, peakRms: 0.08, xaiText: xai }), "apple_empty");
+  assert.equal(isHallucinationSuspect({ durationSec: 0.4, peakRms: 0.002, xaiText: "嗯" }), false);
+  const scrubbed = scrubHallucination("我喜欢你林泽是一个中国的演员", { durationSec: 0.5, peakRms: 0.001 }, "嗯");
+  assert.equal(scrubbed.suspect, true);
+  assert.equal(scrubbed.reason, "short_quiet");
+  assert.equal(scrubbed.text, "");
+  assert.equal(
+    finishHeard("林泽是一个中国的演员", "", undefined, undefined, { durationSec: 0.4, peakRms: 0.001 }),
+    "",
+  );
+});
+
+test("Apple-empty vocal cues are not hallucination; 谢谢观看 still is", () => {
+  const audio = { durationSec: 2.0, peakRms: 0.08 };
+  assert.equal(isVocalCueText("嗷呜～"), true);
+  assert.equal(isVocalCueText("喵呜喵呜"), true);
+  assert.equal(isVocalCueText("嗯嗯啊"), true);
+  assert.equal(isVocalCueText("谢谢观看"), false);
+  assert.equal(hallucinationReason({ ...audio, xaiText: "嗷呜～", liveText: "" }), null);
+  assert.equal(scrubHallucination("嗷呜～", audio, "").suspect, false);
+  assert.match(finishHeard("嗷呜～", "", undefined, undefined, audio), /嗷呜/);
+  assert.equal(hallucinationReason({ ...audio, xaiText: "谢谢观看", liveText: "" }), "apple_empty");
+});
+
+test("quiet real sentence with matching Apple text is kept", () => {
+  const sentence = "今天有点累想早点睡";
+  const audio = { durationSec: 0.8, peakRms: 0.008 };
+  assert.equal(isHallucinationSuspect({ ...audio, xaiText: sentence, liveText: sentence }), false);
+  const scrubbed = scrubHallucination(sentence, audio, sentence);
+  assert.equal(scrubbed.suspect, false);
+  assert.equal(scrubbed.reason, "prefer_apple_quiet");
+  assert.equal(stripMarks(scrubbed.text), stripMarks(sentence));
+  assert.equal(stripMarks(finishHeard(sentence, sentence, undefined, undefined, audio)), stripMarks(sentence));
+});
+
+test("quiet clip with empty Apple and a long xAI sentence is short_quiet", () => {
+  const xai = "我喜欢你我的宝贝";
+  const audio = { durationSec: 0.5, peakRms: 0.001 };
+  assert.equal(isHallucinationSuspect({ ...audio, xaiText: xai, liveText: "" }), true);
+  const scrubbed = scrubHallucination(xai, audio, "");
+  assert.equal(scrubbed.suspect, true);
+  assert.equal(scrubbed.reason, "short_quiet");
+  assert.equal(finishHeard(xai, "", undefined, undefined, audio), "");
+});
+
+test("quiet clip prefers Apple's real sentence over xAI", () => {
+  const audio = { durationSec: 0.7, peakRms: 0.01 };
+  const xai = "林泽是一个中国的演员";
+  const apple = "今天有点累";
+  assert.equal(isHallucinationSuspect({ ...audio, xaiText: xai, liveText: apple }), false);
+  const scrubbed = scrubHallucination(xai, audio, apple);
+  assert.equal(scrubbed.suspect, false);
+  assert.equal(scrubbed.reason, "prefer_apple_quiet");
+  assert.equal(stripMarks(scrubbed.text), "今天有点累");
+  assert.equal(stripMarks(finishHeard(xai, apple, undefined, undefined, audio)), "今天有点累");
 });
 
 test("cue punctuation stays as heard", () => {
@@ -387,7 +471,7 @@ test("算了 hummed as 嗯 is not kept as 算了", () => {
   assert.doesNotMatch(heard, /算了/);
 });
 
-test("short 嗯 is passed through without 语气 marks", () => {
+test("short rising 嗯 gets a lengthening mark", () => {
   const ng = Array.from({ length: 10 }, (_, i) =>
     frame({
       t: i * 0.04,
@@ -398,8 +482,8 @@ test("short 嗯 is passed through without 语气 marks", () => {
       bright: 0.12,
     }),
   );
-  assert.equal(finishHeard("嗯", "", undefined, ng), "嗯");
-  assert.equal(finishHeard("嗯嗯", "", undefined, ng), "嗯嗯");
+  assert.equal(finishHeard("嗯", "", undefined, ng), "嗯～");
+  assert.equal(finishHeard("嗯嗯", "", undefined, ng), "嗯嗯～");
 });
 
 test("STT 嗯嗯嗯 is not rewritten with commas", () => {
@@ -420,7 +504,9 @@ test("STT 嗯嗯嗯 is not rewritten with commas", () => {
     }
     frames.push(hush(t0 + 0.4));
   }
-  assert.equal(finishHeard("嗯嗯嗯", "", undefined, frames), "嗯嗯嗯");
+  const heard = finishHeard("嗯嗯嗯", "", undefined, frames);
+  assert.doesNotMatch(heard, /，/);
+  assert.equal(stripMarks(heard), "嗯嗯嗯");
 });
 
 test("browser STT with real words can skip the server", () => {
@@ -429,6 +515,48 @@ test("browser STT with real words can skip the server", () => {
   assert.equal(browserSttReady("嗯"), false);
   assert.equal(browserSttReady("嗯嗯～"), false);
   assert.equal(browserSttReady(""), false);
+});
+
+test("hold-to-talk keeps xAI when Apple is empty", () => {
+  const xai = "谢谢观看";
+  const audio = { durationSec: 1.8, peakRms: 0.06 };
+  assert.equal(isHallucinationSuspect({ ...audio, xaiText: xai, liveText: "", holdToTalk: true }), false);
+  const scrubbed = scrubHallucination(xai, audio, "", { holdToTalk: true });
+  assert.equal(scrubbed.suspect, false);
+  assert.equal(stripMarks(scrubbed.text), "谢谢观看");
+  assert.equal(stripMarks(finishHeard(xai, "", undefined, undefined, audio, { holdToTalk: true })), "谢谢观看");
+});
+
+test("empty STT with energy and F0 becomes a punctuated particle, not unrecognized", () => {
+  const moan = Array.from({ length: 16 }, (_, i) =>
+    frame({
+      t: i * 0.04,
+      rms: 0.05,
+      hz: 180 + i * 6,
+      clarity: 0.88,
+      centroid: 700,
+      bright: 0.2,
+    }),
+  );
+  const heard = recoverCues("", moan);
+  assert.match(heard, /[嗯啊呜]/);
+  assert.match(heard, /[～…]/);
+  assert.doesNotMatch(heard, /未识别/);
+});
+
+test("recoverCues adds question mark on a clearly rising sentence", () => {
+  const rise = Array.from({ length: 18 }, (_, i) =>
+    frame({
+      t: i * 0.04,
+      rms: 0.05,
+      hz: 160 + i * 8,
+      clarity: 0.9,
+      centroid: 800,
+      bright: 0.22,
+    }),
+  );
+  const heard = recoverCues("在吗", rise);
+  assert.match(heard, /？$/);
 });
 
 

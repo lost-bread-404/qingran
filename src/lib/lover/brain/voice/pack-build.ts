@@ -3,6 +3,8 @@ import { formatClock } from "../time.ts";
 import { formatMindAge } from "../usage.ts";
 import type { Mind, Note, PortraitRow, StoredMessage, VoiceChatMessage } from "../types.ts";
 import { QINGRAN_STANCE_ONE_LINE } from "./prompts.ts";
+import { hearingTagGuide } from "../../prompt.ts";
+import { modelFacingText } from "../../message-markup.ts";
 
 function mindIsEmpty(mind: Mind): boolean {
   return (
@@ -144,13 +146,13 @@ export function buildVoiceMessages(opts: {
   tail: string;
   userText: string;
 }): VoiceChatMessage[] {
-  const charter = opts.charter.trim() || "你就是清然。正在和 Rosie 语音通话。";
+  const charter = (opts.charter.trim() || "你就是清然。正在和 Rosie 语音通话。") + "\n\n" + hearingTagGuide();
   const long =
     opts.longterm ??
     renderVoiceLongterm(opts.selfSummary ?? "", opts.bondSummary ?? "", opts.portrait ?? []);
   const history = opts.history.slice(-HISTORY_WINDOW).map((m) => ({
     role: m.role as "user" | "assistant",
-    content: m.text,
+    content: modelFacingText(m.text),
   }));
   return [
     { role: "system", content: charter },

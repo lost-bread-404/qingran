@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LabRouteImport } from './routes/lab'
 import { Route as DiaryRouteImport } from './routes/diary'
 import { Route as ApiTalkRouteImport } from './routes/api/talk'
 import { Route as ApiWarmRouteImport } from './routes/api/warm'
@@ -18,6 +19,11 @@ import { Route as ApiCronBrainRouteImport } from './routes/api/cron/brain'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LabRoute = LabRouteImport.update({
+  id: '/lab',
+  path: '/lab',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DiaryRoute = DiaryRouteImport.update({
@@ -43,6 +49,7 @@ const ApiCronBrainRoute = ApiCronBrainRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/lab': typeof LabRoute
   '/diary': typeof DiaryRoute
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/lab': typeof LabRoute
   '/diary': typeof DiaryRoute
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/lab': typeof LabRoute
   '/diary': typeof DiaryRoute
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
@@ -65,15 +74,16 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/diary' | '/api/talk' | '/api/warm' | '/api/cron/brain'
+  fullPaths: '/' | '/lab' | '/diary' | '/api/talk' | '/api/warm' | '/api/cron/brain'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/diary' | '/api/talk' | '/api/warm' | '/api/cron/brain'
+  to: '/' | '/lab' | '/diary' | '/api/talk' | '/api/warm' | '/api/cron/brain'
   id:
-    '__root__' | '/' | '/diary' | '/api/talk' | '/api/warm' | '/api/cron/brain'
+    '__root__' | '/' | '/lab' | '/diary' | '/api/talk' | '/api/warm' | '/api/cron/brain'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LabRoute: typeof LabRoute
   DiaryRoute: typeof DiaryRoute
   ApiTalkRoute: typeof ApiTalkRoute
   ApiWarmRoute: typeof ApiWarmRoute
@@ -87,6 +97,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lab': {
+      id: '/lab'
+      path: '/lab'
+      fullPath: '/lab'
+      preLoaderRoute: typeof LabRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/diary': {
@@ -122,6 +139,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LabRoute: LabRoute,
   DiaryRoute: DiaryRoute,
   ApiTalkRoute: ApiTalkRoute,
   ApiWarmRoute: ApiWarmRoute,

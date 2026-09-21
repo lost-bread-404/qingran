@@ -1,10 +1,38 @@
 import { VOICE_IO } from "./brain/config.ts";
 
 export const TTS_SPEED_NORMAL = 1;
-export const TTS_SPEED_SOFT = 0.7;
+export const TTS_SPEED_SOFT = 0.92;
 
-export function ttsSpeed(soft: boolean) {
-  return soft ? TTS_SPEED_SOFT : TTS_SPEED_NORMAL;
+export const TTS_VOICE_RATES = [
+  { id: "normal", label: "1.0", speed: 1 },
+  { id: "soft", label: "0.92", speed: 0.92 },
+  { id: "slow", label: "0.85", speed: 0.85 },
+  { id: "brisk", label: "1.12", speed: 1.12 },
+] as const;
+
+export type VoiceRateId = (typeof TTS_VOICE_RATES)[number]["id"];
+
+export function snapVoiceRate(speed: number) {
+  let best: (typeof TTS_VOICE_RATES)[number] = TTS_VOICE_RATES[0];
+  let dist = Number.POSITIVE_INFINITY;
+  for (const rate of TTS_VOICE_RATES) {
+    const d = Math.abs(rate.speed - speed);
+    if (d < dist) {
+      dist = d;
+      best = rate;
+    }
+  }
+  return best;
+}
+
+export function nextVoiceRate(speed: number) {
+  const current = snapVoiceRate(speed);
+  const index = TTS_VOICE_RATES.findIndex((rate) => rate.id === current.id);
+  return TTS_VOICE_RATES[(index + 1) % TTS_VOICE_RATES.length]!;
+}
+
+export function ttsSpeed(speed: number) {
+  return snapVoiceRate(speed).speed;
 }
 
 export function ttsRequestBody(text: string, language = VOICE_IO.language, speed = TTS_SPEED_NORMAL) {

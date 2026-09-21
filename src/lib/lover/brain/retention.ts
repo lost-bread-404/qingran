@@ -5,6 +5,8 @@ import { logRawHours } from "./log-refs.ts";
 
 const BATCH = 500;
 
+/** turn_traces / turn_feedback are kept at least 90 days and are not trimmed here. */
+
 async function updateBatch(sql: string, params: unknown[]): Promise<number> {
   const db = await getSql();
   const rows = await db.query<{ n: number }>(`with u as (${sql}) select count(*)::int as n from u`, params);

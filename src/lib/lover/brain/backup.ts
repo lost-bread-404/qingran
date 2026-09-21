@@ -25,7 +25,7 @@ export type Json =
 export type BackupRow = { [key: string]: Json };
 export type BackupCursor = { table: string; after: string[] };
 
-type ColKind = "text" | "int" | "bool" | "json" | "text[]" | "num";
+type ColKind = "text" | "int" | "bool" | "json" | "text[]" | "num" | "real" | "real[]";
 
 export type TableSpec = {
   name: string;
@@ -633,7 +633,7 @@ function requiredOk(spec: TableSpec, row: BackupRow): boolean {
 
 function bindValue(kind: ColKind, value: unknown): unknown {
   if (value == null) return null;
-  if (kind === "text[]") {
+  if (kind === "text[]" || kind === "real[]") {
     const arr = Array.isArray(value) ? value.map(String) : [];
     return pgTextArray(arr);
   }
@@ -641,11 +641,7 @@ function bindValue(kind: ColKind, value: unknown): unknown {
     return typeof value === "string" ? value : JSON.stringify(value);
   }
   if (kind === "bool") return value === true || value === "t" || value === "true" || value === 1;
-  if (kind === "int") {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  }
-  if (kind === "num") {
+  if (kind === "int" || kind === "num" || kind === "real") {
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
   }

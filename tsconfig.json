@@ -17,6 +17,7 @@
     "allowJs": true,
     "checkJs": true,
     "noEmit": true,
+    "resolveJsonModule": true,
     "types": [
       "vite/client",
       "node"
@@ -31,6 +32,7 @@
   },
   "include": [
     "src",
-    "server"
+    "server",
+    "seed"
   ]
 }

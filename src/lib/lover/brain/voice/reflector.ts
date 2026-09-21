@@ -17,6 +17,7 @@ import {
 import { formatClock, localDay } from "../time.ts";
 import { now } from "../clock.ts";
 import { fillReflectTurn } from "../observability.ts";
+import { patchTurnTraceReflector } from "../turn-trace.ts";
 import { rememberBlock, rememberCharter, type ReflectRefs } from "../log-refs.ts";
 import { resolveTz } from "../tz.ts";
 import type { Finding, IndexItem, Mind, PortraitRow, StoredMessage, Theme } from "../types.ts";
@@ -257,6 +258,7 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
   if (!result.ok || !result.json) {
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
     await fillReflectTurn(turnSeq, false, result.ms, "timeout-or-parse");
+    await patchTurnTraceReflector({ turnSeq, mind: null, model: result.model, ms: result.ms });
     return null;
   }
   const allowed = new Set([...coreIndex, ...relatedIndex].map((i) => i.id));
@@ -267,6 +269,12 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
   }
   await fillReflectTurn(turnSeq, saved, result.ms, saved ? null : "stale");
+  await patchTurnTraceReflector({
+    turnSeq,
+    mind: saved ? next : null,
+    model: result.model,
+    ms: result.ms,
+  });
   return saved ? next : old;
 }
 

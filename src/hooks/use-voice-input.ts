@@ -1,19 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  acquireMic,
+  acquireMicFromGesture,
   getSpeechRecognitionCtor,
   isAppleTouch,
-  pauseMic,
+  releaseMic,
   pickRecorderMime,
   startRecorder,
   stopRecognition,
   usesBrowserStt,
   type SpeechRecognitionLike,
 } from "@/lib/lover/audio";
+import { closeAudioContext, watchAudioContext } from "@/lib/lover/audio-session";
+import { logCallAudio } from "@/lib/lover/call-audio-log";
 import { hearUtterance } from "@/lib/lover/hear";
-import { attachPcmTap, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
+import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
+import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { warmupHearing } from "@/lib/lover/hearing/store";
+import { attachPcmTap, peakRms, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
+import { holdThreshold, nextFloor } from "@/lib/lover/vad";
+import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
 
 export type VoiceInputStatus = "idle" | "recording" | "transcribing";
 
@@ -26,6 +33,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
   const [status, setStatus] = useState<VoiceInputStatus>("idle");
   const [interim, setInterim] = useState("");
   const [level, setLevel] = useState(0);
+  const [threshold, setThreshold] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [micReady, setMicReady] = useState<boolean | null>(null);
 
@@ -43,6 +51,9 @@ export function useVoiceInput({ lang, prompt }: Options) {
   const framesRef = useRef<ProsodyFrame[]>([]);
   const analyseRef = useRef<{ ctx: AudioContext; source: MediaStreamAudioSourceNode } | null>(null);
   const pcmTapRef = useRef<PcmTap | null>(null);
+  const noiseFloorRef = useRef(0.008);
+  const triggerFloorRef = useRef(0.008);
+  const speechStartWallRef = useRef(0);
 
   const speechSupported = usesBrowserStt();
   const recorderSupported =
@@ -60,14 +71,17 @@ export function useVoiceInput({ lang, prompt }: Options) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
     setLevel(0);
+    setThreshold(0);
     try {
       recorderRef.current?.state === "recording" && recorderRef.current.stop();
     } catch {
       /* ignore */
     }
     recorderRef.current = null;
-    pauseMic();
+    releaseMic();
+    mediaRef.current = null;
     try {
+      if (recRef.current) logCallAudio("rec.abort");
       recRef.current?.abort();
     } catch {
       /* ignore */
@@ -79,9 +93,9 @@ export function useVoiceInput({ lang, prompt }: Options) {
       /* ignore */
     }
     pcmTapRef.current = null;
+    closeAudioContext(analyseRef.current?.ctx ?? null, "hold");
     try {
       analyseRef.current?.source.disconnect();
-      void analyseRef.current?.ctx.close();
     } catch {
       /* ignore */
     }
@@ -92,12 +106,14 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
   const startPulse = useCallback(async (stream: MediaStream) => {
     framesRef.current = [];
+    noiseFloorRef.current = 0.008;
     const t0 = performance.now();
     const Ctor =
       window.AudioContext ||
       (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctor) return;
     const ctx = new Ctor();
+    watchAudioContext(ctx, "hold");
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
@@ -114,7 +130,11 @@ export function useVoiceInput({ lang, prompt }: Options) {
     const tick = () => {
       const frame = sampleProsody(analyser, ctx.sampleRate, (performance.now() - t0) / 1000, true);
       framesRef.current.push(frame);
+      noiseFloorRef.current = nextFloor(noiseFloorRef.current, frame.rms, true);
+      const debugVad = getHearingSession().debugHearing;
+      const cut = holdThreshold(noiseFloorRef.current, debugVad);
       setLevel(Math.min(1, frame.rms * 8));
+      setThreshold(Math.min(1, cut * 8));
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
@@ -137,7 +157,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
     try {
       if (recorderSupported) {
-        const stream = await acquireMic();
+        const stream = await acquireMicFromGesture();
         if (session !== sessionRef.current) return;
         mediaRef.current = stream;
         setMicReady(true);
@@ -194,9 +214,11 @@ export function useVoiceInput({ lang, prompt }: Options) {
         }
       };
       rec.onend = () => {
+        logCallAudio("rec.onend");
         if (recordingRef.current && session === sessionRef.current && !isAppleTouch()) {
           try {
             rec.start();
+            logCallAudio("rec.start (onend)");
           } catch {
             /* Chrome restarts noisily */
           }
@@ -205,18 +227,27 @@ export function useVoiceInput({ lang, prompt }: Options) {
       recRef.current = rec;
       try {
         rec.start();
+        logCallAudio("rec.start");
       } catch {
         /* already started */
       }
     }
 
     recordingRef.current = true;
+    speechStartWallRef.current = Date.now();
+    triggerFloorRef.current = noiseFloorRef.current;
     setStatus("recording");
+    if (getHearingSession().provider === "selfhost") {
+      void warmupHearing({ data: { provider: "selfhost" } }).then((result) => {
+        if (result.cold) setHearingSession({ coldStartMs: result.latency_ms });
+      });
+    }
   }, [lang, recorderSupported, speechSupported, startPulse]);
 
-  const stop = useCallback(async (): Promise<string> => {
-    if (stopLockRef.current) return "";
-    if (!recordingRef.current && status !== "recording") return "";
+  const stop = useCallback(async (): Promise<HeardUtterance> => {
+    const empty: HeardUtterance = { text: "", turnId: "", skipQingran: false };
+    if (stopLockRef.current) return empty;
+    if (!recordingRef.current && status !== "recording") return empty;
     stopLockRef.current = true;
     recordingRef.current = false;
     setStatus("transcribing");
@@ -227,32 +258,71 @@ export function useVoiceInput({ lang, prompt }: Options) {
     const liveText = (finalTextRef.current || interimRef.current).trim();
     const frames = framesRef.current.slice();
     const samples = (await pcmTapRef.current?.stop()) ?? new Float32Array(0);
-    const wav = wavFromTap(samples, analyseRef.current?.ctx.sampleRate ?? 48000);
+    const sampleRate = analyseRef.current?.ctx.sampleRate ?? 48000;
+    const wav = wavFromTap(samples, sampleRate);
     const fallback = wav ? null : await collectRecording(session);
     teardownMedia();
 
-    const heard = await hearUtterance({
-      wav,
-      fallback,
-      liveText,
-      frames,
-      prompt: promptRef.current,
-    });
+    let heard: HeardUtterance = empty;
+    try {
+      heard = await hearUtterance({
+        wav,
+        fallback,
+        liveText,
+        frames,
+        prompt: promptRef.current,
+        speech_start: speechStartWallRef.current || Date.now() - 1500,
+        endpoint_fired: Date.now(),
+        peakRms: peakRms(samples, sampleRate) || frames.reduce((max, frame) => Math.max(max, frame.rms), 0),
+        vadFloor: triggerFloorRef.current,
+        holdToTalk: true,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      setStatus("idle");
+      stopLockRef.current = false;
+      if (isQuotaHint(message)) setError(QUOTA_HINT);
+      else if (getHearingSession().debugHearing) setError(message || "识别失败。");
+      else setError("我没听清，再说一遍。");
+      return empty;
+    }
 
     setInterim("");
     interimRef.current = "";
     finalTextRef.current = "";
     stopLockRef.current = false;
 
-    if (!heard) {
+    if (heard.saveError) setError(clipSaveBanner(heard.saveError));
+    if (!heard.text) {
       setStatus("idle");
-      setError("我没听清，再说一遍。");
-      return "";
+      if (!getHearingSession().debugHearing) setError("我没听清，再说一遍。");
+      return heard;
     }
 
+    if (!heard.saveError) setError(null);
     setStatus("idle");
     return heard;
-  }, [lang, status, teardownMedia]);
+  }, [status, teardownMedia]);
+
+  const stopRaw = useCallback(async () => {
+    if (stopLockRef.current) return null;
+    if (!recordingRef.current && status !== "recording") return null;
+    stopLockRef.current = true;
+    recordingRef.current = false;
+    setStatus("idle");
+    const session = sessionRef.current;
+    await stopRecognition(recRef.current);
+    const liveText = (finalTextRef.current || interimRef.current).trim();
+    const samples = (await pcmTapRef.current?.stop()) ?? new Float32Array(0);
+    const wav = wavFromTap(samples, analyseRef.current?.ctx.sampleRate ?? 48000, 0);
+    const fallback = wav ? null : await collectRecording(session);
+    teardownMedia();
+    setInterim("");
+    interimRef.current = "";
+    finalTextRef.current = "";
+    stopLockRef.current = false;
+    return { wav, fallback, liveText };
+  }, [status, teardownMedia]);
 
   const cancel = useCallback(() => {
     stopLockRef.current = false;
@@ -291,6 +361,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
     status,
     interim,
     level,
+    threshold,
     error,
     setError,
     micReady,
@@ -298,6 +369,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
     recorderSupported,
     start,
     stop,
+    stopRaw,
     cancel,
   };
 }

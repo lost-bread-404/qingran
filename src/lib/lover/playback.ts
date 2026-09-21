@@ -1,12 +1,21 @@
+import { closeAudioContext, pageIsHidden, resumeAudioContext, setAudioSessionKind, watchAudioContext } from "@/lib/lover/audio-session";
+
 const SILENCE =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
 const PCM_RATE = 24_000;
+/** Restored to 0.42 from tag pre-low-latency. Raised to 0.68 in 5cbea61
+ *  after dropping sentence-sliced TTS so the first PCM chunk had a longer
+ *  start buffer; full-reply TTS no longer needs that extra preroll. */
 const START_SEC = 0.42;
-const HOLD_SEC = 0.3;
+const HOLD_SEC = 0.32;
 const SLICE_SEC = 0.18;
+export const VOICE_GAIN = 0.5;
 
 let ctx: AudioContext | null = null;
+let masterIn: AudioNode | null = null;
+let masterGain: GainNode | null = null;
+let masterCtx: AudioContext | null = null;
 let unlocked = false;
 let playGen = 0;
 let nextStart = 0;
@@ -20,14 +29,102 @@ const sampleQueue: Float32Array[] = [];
 let idleWaiters: Array<() => void> = [];
 let master: GainNode | null = null;
 
+function audioCtor() {
+  return (
+    window.AudioContext ||
+    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  );
+}
+
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
-  const Ctor =
-    window.AudioContext ||
-    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  const Ctor = audioCtor();
   if (!Ctor) return null;
-  if (ctx && ctx.state === "closed") ctx = null;
-  if (!ctx) ctx = new Ctor();
+  if (ctx && (ctx.state as string) === "closed") ctx = null;
+  if (!ctx) {
+    if (pageIsHidden() && !holdPlaying && !isSpeaking()) return null;
+    ctx = new Ctor();
+    watchAudioContext(ctx, "playback");
+  }
+  return ctx;
+}
+
+function applyVoiceGain(node: GainNode, audioCtx: AudioContext) {
+  try {
+    node.gain.cancelScheduledValues(audioCtx.currentTime);
+    node.gain.setValueAtTime(VOICE_GAIN, audioCtx.currentTime);
+  } catch {
+    node.gain.value = VOICE_GAIN;
+  }
+}
+
+function getOutput(audioCtx: AudioContext): AudioNode {
+  if (masterIn && masterGain && masterCtx === audioCtx) return masterIn;
+  const gain = audioCtx.createGain();
+  applyVoiceGain(gain, audioCtx);
+  const dest = audioCtx.createMediaStreamDestination();
+  gain.connect(dest);
+  masterIn = gain;
+  masterGain = gain;
+  masterCtx = audioCtx;
+  voiceDest = dest;
+  armVoiceElement(audioCtx);
+  return gain;
+}
+
+let voiceDest: MediaStreamAudioDestinationNode | null = null;
+
+function armVoiceElement(audioCtx: AudioContext) {
+  if (pageIsHidden()) return;
+  const el = getPlaybackElement();
+  try {
+    el.muted = false;
+    el.volume = 1;
+    el.autoplay = true;
+    if (voiceDest && el.srcObject !== voiceDest.stream) {
+      el.srcObject = voiceDest.stream;
+    }
+    playElementOnce(el);
+  } catch {
+    try {
+      masterGain?.connect(audioCtx.destination);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function playElementOnce(el: HTMLAudioElement) {
+  if (pageIsHidden()) return;
+  if (el.dataset.qingranOn === "1") return;
+  el.dataset.qingranOn = "1";
+  void el.play().catch(() => {
+    el.dataset.qingranOn = "";
+  });
+}
+
+function releaseElement(el: HTMLAudioElement | null) {
+  if (!el) return;
+  try {
+    el.dataset.qingranOn = "";
+    el.pause();
+  } catch {
+    /* ignore */
+  }
+}
+
+function replaceCtx() {
+  stopGraphKeepalive();
+  closeAudioContext(ctx, "playback");
+  ctx = null;
+  masterIn = null;
+  masterGain = null;
+  masterCtx = null;
+  voiceDest = null;
+  const Ctor = typeof window === "undefined" ? null : audioCtor();
+  if (!Ctor) return null;
+  ctx = new Ctor();
+  watchAudioContext(ctx, "playback");
   return ctx;
 }
 
@@ -38,6 +135,7 @@ export function getPlaybackElement(): HTMLAudioElement {
   el.id = "qingran-voice";
   el.setAttribute("playsinline", "true");
   el.setAttribute("webkit-playsinline", "true");
+  el.autoplay = true;
   el.preload = "auto";
   el.style.display = "none";
   document.body.appendChild(el);
@@ -118,25 +216,42 @@ function resetStream() {
   resetMaster();
 }
 
-export async function unlockPlayback() {
-  const el = getPlaybackElement();
-  const audioCtx = getCtx();
+function prepSpeak() {
   try {
-    if (audioCtx?.state === "suspended") await audioCtx.resume();
+    const audioCtx = getCtx();
+    if (audioCtx) armVoiceElement(audioCtx);
   } catch {
     /* ignore */
   }
+}
+
+export async function unlockPlayback() {
+  if (pageIsHidden() && !holdPlaying && !isSpeaking()) return;
+  const audioCtx = getCtx();
   try {
-    el.muted = false;
-    el.volume = 1;
+    if (audioCtx) await audioCtx.resume();
+  } catch {
+    /* ignore */
+  }
+  if (audioCtx) getOutput(audioCtx);
+  if (unlocked) return;
+  const el = document.createElement("audio");
+  el.setAttribute("playsinline", "true");
+  el.muted = true;
+  el.volume = 0;
+  try {
     el.src = SILENCE;
     const play = el.play();
     if (play) await play;
   } catch {
     /* ignore */
   } finally {
-    clearElement(el);
-    el.muted = false;
+    try {
+      el.pause();
+      el.src = "";
+    } catch {
+      /* ignore */
+    }
     unlocked = true;
   }
 }
@@ -145,46 +260,242 @@ export function stopPlayback() {
   playGen += 1;
   resetStream();
   wakeIdle();
-  const el = getPlaybackElement();
-  clearElement(el);
-  el.muted = false;
 }
 
-export async function resumeAudio() {
-  const audioCtx = getCtx();
+let holdPlaying = false;
+let graphKeepalive: AudioBufferSourceNode | null = null;
+let graphKeepaliveCtx: AudioContext | null = null;
+
+function startGraphKeepalive(audioCtx: AudioContext) {
+  if (graphKeepalive && graphKeepaliveCtx === audioCtx) return;
+  stopGraphKeepalive();
+  const frames = Math.max(audioCtx.sampleRate, Math.floor(audioCtx.sampleRate * 2));
+  const buffer = audioCtx.createBuffer(1, frames, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  const amp = 1 / 32768;
+  for (let i = 0; i < data.length; i += 1) data[i] = i & 1 ? amp : -amp;
+  const src = audioCtx.createBufferSource();
+  src.buffer = buffer;
+  src.loop = true;
+  src.connect(getOutput(audioCtx));
+  src.onended = () => {
+    if (graphKeepalive === src) {
+      graphKeepalive = null;
+      graphKeepaliveCtx = null;
+    }
+    if (holdPlaying && !pageIsHidden()) {
+      const next = getCtx();
+      if (next) startGraphKeepalive(next);
+    }
+  };
+  src.start();
+  graphKeepalive = src;
+  graphKeepaliveCtx = audioCtx;
+}
+
+function stopGraphKeepalive() {
+  const src = graphKeepalive;
+  graphKeepalive = null;
+  graphKeepaliveCtx = null;
+  if (!src) return;
+  src.onended = null;
   try {
-    if (audioCtx?.state === "suspended") await audioCtx.resume();
+    src.stop();
   } catch {
     /* ignore */
   }
-  if (!audioCtx || audioCtx.state === "closed") return;
-  if (audioCtx.state === "running") {
+  try {
+    src.disconnect();
+  } catch {
+    /* ignore */
+  }
+}
+
+function claimMediaSession() {
+  const session = navigator.mediaSession;
+  if (!session) return;
+  try {
+    session.metadata = new MediaMetadata({
+      title: "清然",
+      artist: "通话中",
+    });
+    session.playbackState = "playing";
     try {
-      getPlaybackElement().muted = false;
+      session.setActionHandler("pause", () => undefined);
+      session.setActionHandler("stop", () => undefined);
+    } catch {
+      /* older WebKit */
+    }
+  } catch {
+    /* older WebKit */
+  }
+}
+
+function releaseMediaSession() {
+  const session = navigator.mediaSession;
+  if (!session) return;
+  try {
+    session.playbackState = "none";
+    session.metadata = null;
+  } catch {
+    /* ignore */
+  }
+}
+
+
+let holdUrl: string | null = null;
+
+function getHoldElement(): HTMLAudioElement {
+  const existing = document.getElementById("qingran-hold") as HTMLAudioElement | null;
+  if (existing) return existing;
+  const el = document.createElement("audio");
+  el.id = "qingran-hold";
+  el.setAttribute("playsinline", "true");
+  el.setAttribute("webkit-playsinline", "true");
+  el.preload = "auto";
+  el.loop = true;
+  el.style.display = "none";
+  document.body.appendChild(el);
+  return el;
+}
+
+function quietLoopUrl() {
+  if (holdUrl) return holdUrl;
+  const rate = 8000;
+  const seconds = 12;
+  const n = rate * seconds;
+  const dataSize = n * 2;
+  const buf = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buf);
+  const write = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i += 1) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  write(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, dataSize, true);
+  for (let i = 0; i < n; i += 1) {
+    view.setInt16(44 + i * 2, i & 1 ? 1 : -1, true);
+  }
+  holdUrl = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  return holdUrl;
+}
+
+function playHoldOnce() {
+  if (pageIsHidden()) return;
+  const el = getHoldElement();
+  try {
+    el.loop = true;
+    el.muted = false;
+    if (el.volume !== 0.01) el.volume = 0.01;
+    if (!el.src) el.src = quietLoopUrl();
+    playElementOnce(el);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function startCallHold() {
+  holdPlaying = true;
+  setAudioSessionKind("listen");
+  claimMediaSession();
+  playHoldOnce();
+  const audioCtx = getCtx();
+  if (audioCtx) {
+    startGraphKeepalive(audioCtx);
+    armVoiceElement(audioCtx);
+  }
+}
+
+export function stopCallHold() {
+  holdPlaying = false;
+  releaseMediaSession();
+  stopGraphKeepalive();
+  try {
+    releaseElement(document.getElementById("qingran-hold") as HTMLAudioElement | null);
+    releaseElement(document.getElementById("qingran-voice") as HTMLAudioElement | null);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isCallHoldPlaying() {
+  return holdPlaying;
+}
+
+export function keepPlaybackAlive() {
+  if (!holdPlaying) return;
+  if (pageIsHidden()) return;
+  const audioCtx = getCtx();
+  if (audioCtx && audioContextNeedsResumeLocal(audioCtx.state)) {
+    try {
+      void audioCtx.resume();
     } catch {
       /* ignore */
     }
-    return;
+  }
+  playHoldOnce();
+  if (audioCtx) {
+    startGraphKeepalive(audioCtx);
+    try {
+      armVoiceElement(audioCtx);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function isSpeaking() {
+  return liveSources.size > 0 || inFlight > 0 || (startedClock && !ended) || sampleQueue.length > 0;
+}
+
+
+export async function resumeAudio() {
+  if (pageIsHidden() && !holdPlaying && !isSpeaking()) return;
+  let audioCtx = getCtx();
+  if (!audioCtx) return;
+  let ok = false;
+  try {
+    ok = await resumeAudioContext(audioCtx);
+  } catch {
+    ok = false;
+  }
+  if (!ok) {
+    if (isSpeaking()) return;
+    killSources();
+    audioCtx = replaceCtx();
+    if (audioCtx) {
+      try {
+        ok = await resumeAudioContext(audioCtx);
+      } catch {
+        ok = audioCtx.state === "running";
+      }
+    }
   }
   try {
-    if (audioCtx.state === "suspended") await audioCtx.resume();
+    const el = getPlaybackElement();
+    el.muted = false;
+    el.volume = VOICE_GAIN;
   } catch {
     /* ignore */
   }
+  if (!audioCtx || audioCtx.state !== "running") return;
   try {
     const frames = Math.max(1, Math.floor(audioCtx.sampleRate * 0.04));
     const buffer = audioCtx.createBuffer(1, frames, audioCtx.sampleRate);
     const src = audioCtx.createBufferSource();
     src.buffer = buffer;
-    src.connect(audioCtx.destination);
+    src.connect(getOutput(audioCtx));
     src.start();
-  } catch {
-    /* ignore */
-  }
-  try {
-    const el = getPlaybackElement();
-    el.muted = false;
-    el.volume = 1;
   } catch {
     /* ignore */
   }
@@ -198,6 +509,7 @@ export async function kickAudio() {
 }
 
 export function enqueuePlayback(bytes: Uint8Array<ArrayBuffer>, mimeType: string) {
+  prepSpeak();
   inFlight += 1;
   if (isRawPcm(bytes, mimeType)) {
     try {
@@ -306,9 +618,11 @@ function flushScheduled(gen: number) {
   const audioCtx = getCtx();
   if (!audioCtx || gen !== playGen) return;
   if (audioCtx.state !== "running") {
-    void audioCtx.resume().then(() => {
-      if (gen === playGen) flushScheduled(gen);
-    });
+    if (!pageIsHidden()) {
+      void audioCtx.resume().then(() => {
+        if (gen === playGen) flushScheduled(gen);
+      });
+    }
     return;
   }
   if (!startedClock) {
@@ -349,13 +663,18 @@ function softenTail(gen: number) {
   scheduleBuffer(silence, audioCtx, gen);
 }
 
+function audioContextNeedsResumeLocal(state: AudioContextState) {
+  const value = state as string;
+  return value === "suspended" || value === "interrupted";
+}
+
 function scheduleBuffer(buffer: AudioBuffer, audioCtx: AudioContext, gen: number) {
   if (gen !== playGen) return;
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
   src.connect(ensureMaster(audioCtx));
   const now = audioCtx.currentTime;
-  if (nextStart < now + 0.005) nextStart = now + 0.005;
+  if (nextStart < now + 0.02) nextStart = now + 0.02;
   src.start(nextStart);
   nextStart += buffer.duration;
   liveSources.add(src);
@@ -369,7 +688,7 @@ async function decodeBytes(bytes: Uint8Array<ArrayBuffer>): Promise<AudioBuffer 
   const audioCtx = getCtx();
   if (!audioCtx) return null;
   try {
-    if (audioCtx.state === "suspended") await audioCtx.resume();
+    if (!pageIsHidden()) await audioCtx.resume();
     const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
     return await audioCtx.decodeAudioData(copy);
   } catch {
@@ -399,6 +718,7 @@ export async function playMp3Bytes(
   bytes: Uint8Array<ArrayBuffer>,
   mimeType: string,
 ): Promise<boolean> {
+  prepSpeak();
   const gen = playGen;
   inFlight += 1;
   try {

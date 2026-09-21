@@ -1,15 +1,22 @@
+import { DEFAULT_HEARING_PROVIDER, isHearingProvider, type HearingProviderId } from "./hearing/config.ts";
+import type { AcousticTags } from "./hearing/tags.ts";
+
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
-export type MessageKind = "say" | "steer" | "setting";
+export type MessageKind = "say" | "steer" | "setting" | "unheard";
 
 export const CONTEXT_WINDOW = 40;
 
 export type Profile = {
   systemPrompt: string;
   muted: boolean;
-  softVoice: boolean;
+  voiceSpeed: number;
   autoRemember: boolean;
   memoryCursor: string;
+  hearingProvider: HearingProviderId;
+  captureAudio: boolean;
+  debugHearing: boolean;
+  hearingNbest: boolean;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -21,6 +28,23 @@ export type ChatMessage = {
   createdAt: number;
   kind?: MessageKind;
   scanned?: boolean;
+  voiceTurnId?: string;
+  replyTo?: string;
+  predictedTags?: AcousticTags;
+  hearingGold?: "unconfirmed" | "confirmed";
+  hearingTiming?: {
+    hearMs?: number;
+    grokMs?: number;
+    ttsMs?: number;
+    engine?: string;
+  };
+  interrupted?: boolean;
+  talkTrace?: {
+    status?: number | null;
+    finishReason?: string | null;
+    ms?: number;
+    chars?: number;
+  };
 };
 
 export type Memory = {
@@ -44,9 +68,13 @@ export const DEFAULT_SYSTEM_PROMPT = `你就是清然。正在和 Rosie 语音�
 export const DEFAULT_PROFILE: Profile = {
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   muted: false,
-  softVoice: false,
+  voiceSpeed: 1,
   autoRemember: true,
   memoryCursor: "",
+  hearingProvider: DEFAULT_HEARING_PROVIDER,
+  captureAudio: true,
+  debugHearing: true,
+  hearingNbest: false,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -59,9 +87,14 @@ type LooseProfile = Partial<Profile> & {
   story?: string;
   identity?: string;
   muted?: boolean;
+  voiceSpeed?: number;
   softVoice?: boolean;
   autoRemember?: boolean;
   memoryCursor?: string;
+  hearingProvider?: string;
+  captureAudio?: boolean;
+  debugHearing?: boolean;
+  hearingNbest?: boolean;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -69,9 +102,15 @@ export function lockedProfile(input?: unknown): Profile {
   return {
     systemPrompt: pickSystemPrompt(raw).slice(0, 16_000),
     muted: Boolean(raw.muted),
-    softVoice: Boolean(raw.softVoice),
+    voiceSpeed: pickVoiceSpeed(raw),
     autoRemember: raw.autoRemember !== false,
     memoryCursor: typeof raw.memoryCursor === "string" ? raw.memoryCursor : "",
+    hearingProvider: isHearingProvider(raw.hearingProvider)
+      ? raw.hearingProvider
+      : DEFAULT_HEARING_PROVIDER,
+    debugHearing: raw.debugHearing !== false,
+    captureAudio: raw.debugHearing !== false,
+    hearingNbest: Boolean(raw.hearingNbest),
   };
 }
 
@@ -80,6 +119,14 @@ export function applyMemoryCursor(messages: ChatMessage[], cursor: string): Chat
   const idx = messages.findIndex((m) => m.id === cursor);
   if (idx < 0) return messages;
   return messages.map((m, i) => (i <= idx && !m.scanned ? { ...m, scanned: true } : m));
+}
+
+function pickVoiceSpeed(raw: LooseProfile) {
+  if (typeof raw.voiceSpeed === "number" && Number.isFinite(raw.voiceSpeed)) {
+    return Math.min(1.5, Math.max(0.7, raw.voiceSpeed));
+  }
+  if (raw.softVoice) return 0.92;
+  return 1;
 }
 
 function pickSystemPrompt(input?: LooseProfile | null): string {

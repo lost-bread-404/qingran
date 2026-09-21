@@ -61,6 +61,39 @@ export function updateMemory(
   );
 }
 
+export function mergeFacts(existing: Memory[], facts: string[], at = Date.now()): Memory[] {
+  const next = [...existing];
+  const cleaned = facts
+    .map((f) => f.replace(/\s+/g, " ").trim())
+    .filter((f) => f.length >= 12)
+    .slice(0, 1)
+    .map((f) => (f.length > 80 ? `${f.slice(0, 79)}…` : f));
+  for (const fact of cleaned) {
+    const idx = next.findIndex((m) => similar(m.text, fact));
+    if (idx >= 0) {
+      const prev = next[idx]!;
+      const keep = prev.text.length >= fact.length ? prev.text : fact;
+      next[idx] = { ...prev, text: keep, updatedAt: Date.now() };
+    } else {
+      next.push({ id: newId(), text: fact, createdAt: at, updatedAt: Date.now() });
+    }
+  }
+  return next.slice(-80);
+}
+
+export function replaceMemories(facts: Array<{ text: string; createdAt?: number }>): Memory[] {
+  const ts = Date.now();
+  return facts
+    .map((fact) => fact.text.replace(/\s+/g, " ").trim())
+    .filter((text) => text.length >= 2)
+    .slice(0, 80)
+    .map((text, i) => {
+      const clipped = text.length > 160 ? `${text.slice(0, 159)}…` : text;
+      const createdAt = facts[i]?.createdAt && facts[i]!.createdAt! > 0 ? facts[i]!.createdAt! : ts;
+      return { id: newId(), text: clipped, createdAt, updatedAt: ts };
+    });
+}
+
 export function toDatetimeLocal(ms: number) {
   const d = new Date(Number.isFinite(ms) && ms > 0 ? ms : Date.now());
   const pad = (n: number) => String(n).padStart(2, "0");

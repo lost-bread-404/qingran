@@ -66,6 +66,7 @@ export function renderLoginPage(opts: {
       color: #0c0b0a;
       font-size: 1rem;
       font-weight: 500;
+      cursor: pointer;
     }
   </style>
 </head>
