@@ -123,6 +123,10 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
         await deferPendingUntil(now() + 10 * 60_000, "spend-rate");
         break;
       }
+      if (job.type === "reflect") {
+        const turnSeq = Number(job.payload.turnSeq ?? 0);
+        if ((await finishReflectJob(job.id, turnSeq)) === "pending") continue;
+      }
       if (job.attempts < JOB_MAX_ATTEMPTS) {
         const delay = retryDelayMs(job.attempts);
         await finishJob(job.id, "pending", { runAfter: now() + delay, error: message });
