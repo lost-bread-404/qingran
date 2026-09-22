@@ -23,6 +23,8 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.match(src, /clearArmed/);
   assert.match(src, /确定清空/);
   assert.match(src, /logFailFirstLine/);
+  assert.match(src, /row\.note \|\| row\.error/);
+  assert.doesNotMatch(src, /row\.error \|\| row\.note/);
   assert.match(src, /logFinishReason/);
   assert.match(src, /\.slice\(0, 1000\)/);
   assert.match(src, />finish_reason</);

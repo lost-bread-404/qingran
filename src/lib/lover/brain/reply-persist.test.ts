@@ -40,7 +40,7 @@ function note(partial: Partial<Note> & Pick<Note, "id" | "text">): Note {
 test("talk uses client replyId; persistReply does not write; user ids match", () => {
   const talk = readFileSync(new URL("../../../routes/api/talk.ts", import.meta.url), "utf8");
   assert.match(talk, /replyId\?: string/);
-  assert.match(talk, /const replyId = String\(body\.replyId \|\| ""\)\.trim\(\) \|\| newId\(\)/);
+  assert.match(talk, /replyId = String\(body\.replyId \|\| ""\)\.trim\(\) \|\| newId\(\)/);
   assert.doesNotMatch(talk, /const replyId = newId\(\)/);
   const client = readFileSync(new URL("../talk-client.ts", import.meta.url), "utf8");
   assert.match(client, /replyId: string/);

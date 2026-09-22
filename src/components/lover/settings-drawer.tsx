@@ -663,7 +663,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
 }
 
 function logFailFirstLine(row: BrainLogRow): string {
-  const src = (row.error || row.note || "").trim();
+  const src = (row.note || row.error || "").trim();
   if (!src) return "";
   return src.split(/\r?\n/, 1)[0] ?? "";
 }

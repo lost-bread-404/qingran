@@ -83,6 +83,14 @@ test("takeTalkDelta reads token and finish_reason from SSE json", () => {
     token: "",
     finishReason: "content_filter",
   });
+  assert.deepEqual(
+    takeTalkDelta({ choices: [{ delta: { content: [{ type: "text", text: "在" }] }, finish_reason: null }] }),
+    { token: "在", finishReason: null },
+  );
+  assert.deepEqual(takeTalkDelta({ choices: [{ message: { content: "好" }, finish_reason: "stop" }] }), {
+    token: "好",
+    finishReason: "stop",
+  });
 });
 
 test("stream-talk logs each turn and maps timeout, empty, filter, HTTP, TTS", () => {

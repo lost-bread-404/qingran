@@ -1,6 +1,6 @@
 import { parseUsage, type TokenUsage } from "../usage.ts";
-import { runTalkStream, type TalkStreamEvent, type TalkStreamResult } from "../../stream-talk.ts";
-import { isRetryableEmptyTalk, TALK_FAIL } from "../../talk-fail.ts";
+import { runTalkStream, type TalkStreamEvent, type TalkStreamInput, type TalkStreamResult } from "../../stream-talk.ts";
+import { classifyTalkException, isRetryableEmptyTalk, TALK_FAIL, talkExceptionHint } from "../../talk-fail.ts";
 import {
   VOICE_STRIPS,
   voiceMessagesForStrip,
@@ -19,6 +19,11 @@ export type VoiceFallbackInput = {
   replyId?: string;
   voiceSpeed?: number;
 };
+
+export type VoiceStreamFn = (
+  data: TalkStreamInput,
+  emit: (event: TalkStreamEvent) => void,
+) => Promise<TalkStreamResult>;
 
 export type VoiceFallbackResult = {
   result: TalkStreamResult;
@@ -69,9 +74,23 @@ function toAttempt(
   };
 }
 
+const emptyStreamResult = (): TalkStreamResult => ({
+  usage: null,
+  ttftMs: null,
+  firstAudioMs: null,
+  model: "",
+  ttsChars: 0,
+  status: null,
+  finishReason: null,
+  ms: 0,
+  chars: 0,
+  otherEvents: "",
+});
+
 export async function runVoiceWithFallback(
   data: VoiceFallbackInput,
   emit: (event: TalkStreamEvent) => void,
+  stream: VoiceStreamFn = runTalkStream,
 ): Promise<VoiceFallbackResult> {
   const attempts: VoiceAttemptNote[] = [];
   let last: TalkStreamResult | null = null;
@@ -86,31 +105,51 @@ export async function runVoiceWithFallback(
     lastMessages = messages;
     failMessage = null;
     speech = "";
-    const result = await runTalkStream(
-      {
-        text: data.text,
-        messages,
-        replyId: data.replyId,
-        voiceSpeed: data.voiceSpeed,
-        failOnEmpty: !lastTry,
-      },
-      (event) => {
-        if (event.t === "text_end") speech = event.speech || speech;
-        if (event.t === "done") speech = event.speech || speech;
-        if (event.t === "err") failMessage = event.m;
-        emit(event);
-      },
-    );
+    let heldErr: Extract<TalkStreamEvent, { t: "err" }> | null = null;
+    let result: TalkStreamResult;
+    try {
+      result = await stream(
+        {
+          text: data.text,
+          messages,
+          replyId: data.replyId,
+          voiceSpeed: data.voiceSpeed,
+          failOnEmpty: !lastTry,
+        },
+        (event) => {
+          if (event.t === "text_end") speech = event.speech || speech;
+          if (event.t === "done") speech = event.speech || speech;
+          if (event.t === "err") {
+            if (event.tts) {
+              emit(event);
+              return;
+            }
+            failMessage = event.m;
+            heldErr = event;
+            return;
+          }
+          emit(event);
+        },
+      );
+    } catch (err) {
+      const ex = classifyTalkException(err);
+      failMessage = talkExceptionHint(ex.kind);
+      result = {
+        ...emptyStreamResult(),
+        otherEvents: `${ex.name}: ${ex.message}`.slice(0, 500),
+      };
+      heldErr = { t: "err", m: failMessage };
+    }
     last = result;
-    const trimmed = speech.trim();
-    attempts.push(toAttempt(result, strip, trimmed, failMessage));
-    if (trimmed && !failMessage) {
+    const spoken = speech.trim();
+    attempts.push(toAttempt(result, strip, spoken, failMessage));
+    if (spoken && !failMessage) {
       return {
         result,
         attempts,
         usedStrip: strip,
         failed: false,
-        speech: trimmed,
+        speech: spoken,
         failMessage: null,
         usage: sumUsage(attempts),
         messages,
@@ -119,15 +158,16 @@ export async function runVoiceWithFallback(
     const retry = isRetryableEmptyTalk({
       status: result.status,
       finishReason: result.finishReason,
-      speech: trimmed,
+      speech: spoken,
     });
     if (!retry || lastTry) {
+      if (heldErr) emit(heldErr);
       return {
         result,
         attempts,
         usedStrip: strip,
         failed: true,
-        speech: trimmed,
+        speech: spoken,
         failMessage: failMessage ?? TALK_FAIL.empty,
         usage: sumUsage(attempts),
         messages,

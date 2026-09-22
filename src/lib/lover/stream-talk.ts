@@ -3,7 +3,15 @@ import { applyAvailabilityFallback, checkModelAvailability, resolveRoute, VOICE_
 import { spokenForTts } from "./speech-tags";
 import { shouldFlushSpoken, ttsRequestBody, ttsSpeed } from "./tts";
 import type { VoiceChatMessage } from "./brain/types";
-import { TALK_FAIL, describeNonTextTalkEvent, isRetryableEmptyTalk, logTalkTurn, takeTalkDelta, talkFailFromResult } from "./talk-fail.ts";
+import {
+  TALK_FAIL,
+  classifyTalkException,
+  describeNonTextTalkEvent,
+  isRetryableEmptyTalk,
+  logTalkTurn,
+  takeTalkDelta,
+  talkFailFromResult,
+} from "./talk-fail.ts";
 import { recordTtsSpend } from "./brain/spend/check";
 
 const MAX_INPUT = 2000;
@@ -63,8 +71,8 @@ export type TalkStreamResult = {
   otherEvents: string;
 };
 
-export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<TalkStreamResult> {
-  const empty: TalkStreamResult = {
+function emptyResult(partial: Partial<TalkStreamResult> = {}): TalkStreamResult {
+  return {
     usage: null,
     ttftMs: null,
     firstAudioMs: null,
@@ -75,17 +83,21 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     ms: 0,
     chars: 0,
     otherEvents: "",
+    ...partial,
   };
+}
+
+export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<TalkStreamResult> {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) {
     emit({ t: "err", m: "这会儿连不上。" });
-    return empty;
+    return emptyResult({ otherEvents: "no XAI_API_KEY" });
   }
 
   const say = data.text.trim().slice(0, MAX_INPUT);
   if (!say) {
     emit({ t: "err", m: "先说一句。" });
-    return empty;
+    return emptyResult({ otherEvents: "empty user text" });
   }
 
   const speed = ttsSpeed(data.voiceSpeed ?? 1);
@@ -100,7 +112,13 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   let status: number | null = null;
   let finishReason: string | null = null;
   const otherParts: string[] = [];
-  const takeOtherEvents = () => otherParts.join("\n").slice(0, 500);
+  let sseBytes = 0;
+  let sseChunks = 0;
+  const takeOtherEvents = () => {
+    const joined = otherParts.join("\n").slice(0, 500);
+    if (joined) return joined;
+    return `no_nontext_events sse_bytes=${sseBytes} sse_chunks=${sseChunks} finish_reason=${finishReason ?? "-"}`;
+  };
   const timedEmit: Emit = (event) => {
     if (event.t === "audio" && !firstAudioSent) {
       firstAudioMs = Date.now() - t0;
@@ -109,11 +127,15 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     }
     emit(event);
   };
-  const tts = new LiveTts(apiKey, timedEmit, speed);
+  const live: { tts: LiveTts | null } = { tts: null };
+  const ensureTts = () => {
+    live.tts ??= new LiveTts(apiKey, timedEmit, speed);
+    return live.tts;
+  };
 
   const fail = (message: string, log: ReturnType<typeof talkFailFromResult>["log"], ttsOnly = false) => {
     logTalkTurn(log);
-    if (!ttsOnly) tts.abort();
+    if (!ttsOnly) live.tts?.abort();
     emit({
       t: "err",
       m: message,
@@ -125,22 +147,34 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     });
   };
 
-  const res = await fetch("https://api.x.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
+  let res: Response;
+  try {
+    res = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: route.model,
+        temperature: 0.85,
+        max_tokens: route.maxOutput,
+        stream: true,
+        stream_options: { include_usage: true },
+        messages: data.messages,
+      }),
+      signal: AbortSignal.timeout(28_000),
+    });
+  } catch (err) {
+    const outcome = talkFailFromResult({ kind: "exception", threw: err, ms: Date.now() - t0 });
+    fail(outcome.message ?? TALK_FAIL.network, outcome.log);
+    const ex = classifyTalkException(err);
+    return emptyResult({
       model: route.model,
-      temperature: 0.85,
-      max_tokens: route.maxOutput,
-      stream: true,
-      stream_options: { include_usage: true },
-      messages: data.messages,
-    }),
-    signal: AbortSignal.timeout(28_000),
-  });
+      ms: Date.now() - t0,
+      otherEvents: `${ex.name}: ${ex.message}`.slice(0, 500),
+    });
+  }
   status = res.status;
 
   if (!res.ok) {
@@ -152,7 +186,12 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       ms: Date.now() - t0,
     });
     fail(outcome.message ?? TALK_FAIL.network, outcome.log);
-    return { ...empty, model: route.model, status, ms: Date.now() - t0, otherEvents: body.slice(0, 500) };
+    return emptyResult({
+      model: route.model,
+      status,
+      ms: Date.now() - t0,
+      otherEvents: body.slice(0, 500),
+    });
   }
   if (!res.body) {
     const outcome = talkFailFromResult({
@@ -163,12 +202,17 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       ms: Date.now() - t0,
     });
     if (data.failOnEmpty && isRetryableEmptyTalk({ status: res.status, finishReason: null, speech: "" })) {
-      tts.abort();
+      live.tts?.abort();
       logTalkTurn(outcome.log);
-      return { ...empty, model: route.model, status, ms: Date.now() - t0 };
+      return emptyResult({
+        model: route.model,
+        status,
+        ms: Date.now() - t0,
+        otherEvents: "empty body",
+      });
     }
     fail(outcome.message ?? TALK_FAIL.empty, outcome.log);
-    return { ...empty, model: route.model, status, ms: Date.now() - t0 };
+    return emptyResult({ model: route.model, status, ms: Date.now() - t0, otherEvents: "empty body" });
   }
 
   let full = "";
@@ -178,48 +222,79 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   const decoder = new TextDecoder();
   let buf = "";
 
+  const ingestToken = (token: string) => {
+    if (!token) return;
+    if (!ttftSent) {
+      ttftMs = Date.now() - t0;
+      emit({ t: "timing", k: "ttft_ms", ms: ttftMs });
+      ttftSent = true;
+    }
+    full += token;
+    pending += token;
+    emit({ t: "text", d: token });
+    if (shouldFlushSpoken(pending, firstSpoken)) {
+      ensureTts().push(pending);
+      pending = "";
+      firstSpoken = false;
+    }
+  };
+
+  const handleJson = (json: unknown) => {
+    const obj = json as { usage?: TalkStreamResult["usage"] };
+    if (obj.usage) usage = obj.usage;
+    const { token, finishReason: nextReason } = takeTalkDelta(json);
+    if (nextReason) finishReason = nextReason;
+    const described = describeNonTextTalkEvent(json);
+    if (described) otherParts.push(described);
+    if (token) ingestToken(token);
+  };
+
+  const handleLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    if (trimmed.startsWith(":")) return;
+    sseChunks += 1;
+    let payload = trimmed;
+    if (trimmed.startsWith("data:")) payload = trimmed.slice(5).trim();
+    if (!payload || payload === "[DONE]") return;
+    try {
+      handleJson(JSON.parse(payload));
+    } catch {
+      otherParts.push(payload.slice(0, 200));
+    }
+  };
+
+  const drainBuf = (final: boolean) => {
+    const lines = buf.split("\n");
+    buf = final ? "" : (lines.pop() ?? "");
+    for (const line of lines) handleLine(line);
+    if (final && buf.trim()) {
+      const leftover = buf.trim();
+      buf = "";
+      if (leftover.startsWith("{") || leftover.startsWith("[")) {
+        try {
+          handleJson(JSON.parse(leftover));
+          return;
+        } catch {
+          /* fall through as SSE lines */
+        }
+      }
+      leftover.split("\n").forEach(handleLine);
+    }
+  };
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+    sseBytes += value.byteLength;
     buf += decoder.decode(value, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop() ?? "";
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) continue;
-      const payload = trimmed.slice(5).trim();
-      if (!payload || payload === "[DONE]") continue;
-      try {
-        const json = JSON.parse(payload) as {
-          usage?: TalkStreamResult["usage"];
-        };
-        if (json.usage) usage = json.usage;
-        const { token, finishReason: nextReason } = takeTalkDelta(json);
-        if (nextReason) finishReason = nextReason;
-        const described = describeNonTextTalkEvent(json);
-        if (described) otherParts.push(described);
-        if (!token) continue;
-        if (!ttftSent) {
-          ttftMs = Date.now() - t0;
-          emit({ t: "timing", k: "ttft_ms", ms: ttftMs });
-          ttftSent = true;
-        }
-        full += token;
-        pending += token;
-        emit({ t: "text", d: token });
-        if (shouldFlushSpoken(pending, firstSpoken)) {
-          tts.push(pending);
-          pending = "";
-          firstSpoken = false;
-        }
-      } catch {
-        continue;
-      }
-    }
+    drainBuf(false);
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
+  buf += decoder.decode();
+  drainBuf(true);
 
-  if (pending.trim()) tts.push(pending);
+  if (pending.trim()) ensureTts().push(pending);
   const speech = full.trim();
   const outcome = talkFailFromResult({
     kind: "ok",
@@ -231,7 +306,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   const otherEvents = takeOtherEvents();
   if (outcome.message) {
     if (data.failOnEmpty && isRetryableEmptyTalk({ status: status ?? 200, finishReason, speech })) {
-      tts.abort();
+      live.tts?.abort();
       logTalkTurn(outcome.log);
       return {
         usage,
@@ -253,7 +328,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       ttftMs,
       firstAudioMs,
       model: route.model,
-      ttsChars: tts.chars,
+      ttsChars: live.tts?.chars ?? 0,
       status,
       finishReason,
       ms: Date.now() - t0,
@@ -264,10 +339,10 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   emit({ t: "text_end", speech });
   logTalkTurn(outcome.log);
 
-  await tts.finish();
+  if (live.tts) await live.tts.finish();
 
-  let ttsChars = tts.chars;
-  if (!tts.complete) {
+  let ttsChars = live.tts?.chars ?? 0;
+  if (!live.tts?.complete) {
     const clip = await speakRest(apiKey, speech, speed);
     if (clip?.b) {
       timedEmit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
@@ -314,11 +389,14 @@ class LiveTts {
   private resolveDone = () => undefined as void;
   private rejectDone = (_err: Error) => undefined as void;
 
-  constructor(
-    private apiKey: string,
-    private emit: Emit,
-    private speed = 1,
-  ) {
+  private apiKey: string;
+  private emit: Emit;
+  private speed: number;
+
+  constructor(apiKey: string, emit: Emit, speed = 1) {
+    this.apiKey = apiKey;
+    this.emit = emit;
+    this.speed = speed;
     this.waitDone = new Promise<void>((resolve, reject) => {
       this.resolveDone = resolve;
       this.rejectDone = reject;

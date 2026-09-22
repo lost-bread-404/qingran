@@ -76,6 +76,12 @@ export const Route = createFileRoute("/api/talk")({
               controller.enqueue(encoder.encode(frame));
             };
             const started = Date.now();
+            let packed: Awaited<ReturnType<typeof loadHotContext>> | null = null;
+            let replyId = "";
+            let userMsgId = "";
+            let userCreatedAt = 0;
+            let speech = "";
+            let tVoice = started;
             try {
               assertModelConfig();
             } catch (err) {
@@ -88,11 +94,11 @@ export const Route = createFileRoute("/api/talk")({
               const text = String(body.text ?? "");
               const profile = lockedProfile(body.profile);
               const nowMs = Number(body.nowMs) || Date.now();
-              const userMsgId = String(body.userMsgId || newId());
-              const userCreatedAt = Number(body.userCreatedAt) || nowMs;
-              const replyId = String(body.replyId || "").trim() || newId();
+              userMsgId = String(body.userMsgId || newId());
+              userCreatedAt = Number(body.userCreatedAt) || nowMs;
+              replyId = String(body.replyId || "").trim() || newId();
 
-              const ctx = await loadHotContext({
+              packed = await loadHotContext({
                 text,
                 userMsgId,
                 userCreatedAt,
@@ -100,22 +106,20 @@ export const Route = createFileRoute("/api/talk")({
                 nowMs,
                 timeZone,
               });
+              const ctx = packed;
               send({ t: "timing", k: "pack_ms", ms: ctx.packMs });
               send({ t: "timing", k: "db_first_ms", ms: ctx.dbFirstMs });
 
-              let speech = "";
-              let failed = false;
               let ttftMs: number | null = null;
               let firstAudioMs: number | null = null;
               let interrupted = false;
-              const tVoice = Date.now();
+              tVoice = Date.now();
               const fallback = await runVoiceWithFallback(
                 { text, parts: ctx.parts, replyId, voiceSpeed: profile.voiceSpeed },
                 (event) => {
                   if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;
                   if (event.t === "timing" && event.k === "first_audio_ms") firstAudioMs = event.ms;
                   if (event.t === "err") {
-                    failed = true;
                     send(event);
                     return;
                   }
@@ -125,7 +129,7 @@ export const Route = createFileRoute("/api/talk")({
               );
               const streamResult = fallback.result;
               speech = fallback.speech;
-              failed = fallback.failed || failed;
+              const failed = fallback.failed;
               ttftMs = streamResult.ttftMs ?? ttftMs;
               firstAudioMs = streamResult.firstAudioMs ?? firstAudioMs;
               const totalMs = Date.now() - tVoice;
@@ -224,6 +228,31 @@ export const Route = createFileRoute("/api/talk")({
                 ms: outcome.log.ms,
                 chars: outcome.log.chars,
               });
+              if (packed) {
+                const note = [
+                  outcome.message ?? "线路有点不稳",
+                  outcome.log.errorName ? `${outcome.log.errorName}: ${outcome.log.errorMessage}` : null,
+                  `ms=${outcome.log.ms}`,
+                ]
+                  .filter(Boolean)
+                  .join("\n");
+                await recordVoiceTurn({
+                  ctx: packed,
+                  replyId: replyId || newId(),
+                  display: speech.trim(),
+                  failed: true,
+                  model: null,
+                  usage: {},
+                  totalMs: Date.now() - tVoice,
+                  ttftMs: null,
+                  firstAudioMs: null,
+                  userCreatedAt: userCreatedAt || started,
+                  userMsgId: userMsgId || newId(),
+                  localDay: localDay(userCreatedAt || started, timeZone),
+                  finishReason: null,
+                  note,
+                }).catch((logErr) => console.error(logErr));
+              }
             } finally {
               controller.close();
             }

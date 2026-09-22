@@ -62,15 +62,38 @@ export function talkBlockedHint(finishReason: string): string {
   return `这一轮被 xAI 拦下了（finish_reason=${finishReason}）`;
 }
 
+export function contentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string") {
+        return (part as { text: string }).text;
+      }
+      return "";
+    })
+    .join("");
+}
+
 export function takeTalkDelta(json: unknown): { token: string; finishReason: string | null } {
   if (!json || typeof json !== "object") return { token: "", finishReason: null };
   const choice = (json as {
-    choices?: { delta?: { content?: string }; finish_reason?: string | null }[];
+    choices?: {
+      delta?: { content?: unknown; text?: unknown };
+      message?: { content?: unknown };
+      text?: unknown;
+      finish_reason?: string | null;
+    }[];
   }).choices?.[0];
-  const token = choice?.delta?.content ?? "";
+  const token =
+    contentToText(choice?.delta?.content) ||
+    contentToText(choice?.delta?.text) ||
+    contentToText(choice?.message?.content) ||
+    contentToText(choice?.text);
   const finish = choice?.finish_reason;
   return {
-    token: typeof token === "string" ? token : "",
+    token,
     finishReason: typeof finish === "string" && finish ? finish : null,
   };
 }
@@ -175,4 +198,8 @@ export function formatTalkTrace(trace: {
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+export function firstLine(text: string | null | undefined): string {
+  return (text ?? "").trim().split(/\r?\n/, 1)[0] ?? "";
 }

@@ -44,6 +44,7 @@ test("formatVoiceLogNote records which strip succeeded and the char split", () =
   assert.match(note, /chars system=10 mind=20 notes=30 history=40 user=5/);
   assert.match(note, /try1 未裁剪 empty/);
   assert.match(note, /try2 去掉了 mind ok/);
+  assert.match(note, /events=\(none\)/);
   assert.deepEqual(parseVoiceInputCharsLine(note), chars);
 });
 

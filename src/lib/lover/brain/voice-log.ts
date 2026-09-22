@@ -4,6 +4,7 @@ import { recordLlmSpend, recordTtsSpend } from "./spend/check.ts";
 import { parseUsage, settleLlmCost, type TokenUsage } from "./usage.ts";
 import { codeVersion, maybeWriteRawLog } from "./log-refs.ts";
 import type { HotContext } from "./voice/pack.ts";
+import { firstLine } from "../talk-fail.ts";
 
 export async function recordVoiceTurn(opts: {
   ctx: HotContext;
@@ -30,15 +31,16 @@ export async function recordVoiceTurn(opts: {
   const inputText = opts.ctx.messages.map((m) => m.content).join("\n");
   const settled = settleLlmCost(model, usage, inputText, opts.display);
   const outputRef = opts.display ? `message:${opts.replyId}` : null;
+  const note =
+    opts.note ??
+    (opts.finishReason ? `finish_reason=${opts.finishReason}` : null);
   const logId = await appendBrainLog({
     step: `voice:${model}`,
     ok: !opts.failed && Boolean(opts.display),
     ms: opts.totalMs,
     inputChars: inputText.length,
-    raw: opts.display.slice(0, 4000),
-    note:
-      opts.note ??
-      (opts.finishReason ? `finish_reason=${opts.finishReason}` : null),
+    raw: (opts.display || note || "").slice(0, 4000),
+    note,
     route: "voice",
     model: opts.model,
     turnSeq: opts.userCreatedAt,
@@ -51,7 +53,7 @@ export async function recordVoiceTurn(opts: {
     tokensReasoning: usage.tokensReasoning,
     costUsd: settled.usd,
     costUsdEst: settled.usdEst,
-    error: opts.failed ? "stream-error" : null,
+    error: opts.failed ? firstLine(note) || "stream-error" : null,
     codeVersion: codeVersion(),
     refs: opts.ctx.refs,
     outputRef,

@@ -65,7 +65,7 @@ export function formatVoiceLogNote(opts: {
     .filter(Boolean)
     .join("\n")
     .slice(0, 500);
-  if (events) lines.push(`events=${events}`);
+  lines.push(events ? `events=${events}` : "events=(none)");
   lines.push(formatVoiceInputCharsLine(opts.chars));
   if (n > 1) {
     for (let i = 0; i < n; i++) lines.push(tryLine(i, opts.attempts[i]!));
