@@ -1,10 +1,10 @@
 import { HISTORY_WINDOW, PORTRAIT_MAX_CHARS, SESSION_GAP_MS } from "../config.ts";
+import { defaultPrompt } from "../prompts/catalog.ts";
+import { fillTemplate, templateHas } from "../prompts/fill.ts";
 import { formatClock } from "../time.ts";
 import { formatMindAge } from "../usage.ts";
 import type { Mind, Note, PortraitRow, StoredMessage, VoiceChatMessage } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
-import { QINGRAN_STANCE_ONE_LINE } from "./prompts.ts";
-import { hearingTagGuide } from "../../prompt.ts";
 import { modelFacingText } from "../../message-markup.ts";
 
 function mindIsEmpty(mind: Mind): boolean {
@@ -61,6 +61,10 @@ export type VoicePackParts = {
   nowMs: number;
   mindStale: boolean;
   jump: boolean;
+  voiceTemplate?: string;
+  selfSummary?: string;
+  bondSummary?: string;
+  portrait?: PortraitRow[];
 };
 
 export type VoiceInputChars = {
@@ -71,18 +75,43 @@ export type VoiceInputChars = {
   user: number;
 };
 
-export function systemCharter(charter: string): string {
-  return (charter.trim() || "你就是清然。正在和 Rosie 语音通话。") + "\n\n" + hearingTagGuide();
+const FALLBACK_CHARTER = "你就是清然。正在和 Rosie 语音通话。";
+
+export function systemCharter(charter: string, template = defaultPrompt("voice")): string {
+  return fillTemplate(template, {
+    system_prompt: charter.trim() || FALLBACK_CHARTER,
+  }).trim();
+}
+
+function historyText(history: StoredMessage[]): string {
+  return history
+    .map((m) => `${m.role === "user" ? "Rosie" : "清然"}：${modelFacingText(m.text)}`)
+    .join("\n");
+}
+
+function voiceVars(parts: VoicePackParts, tail: string): Record<string, string> {
+  const portrait = parts.portrait ? portraitBlock(parts.portrait) : "";
+  return {
+    system_prompt: parts.charter.trim() || FALLBACK_CHARTER,
+    self: parts.selfSummary ?? "",
+    bond: parts.bondSummary ?? "",
+    portrait,
+    memories: formatMemories(parts.notes, parts.timeZone),
+    history: historyText(parts.history),
+    clock: parts.clockText,
+    tail,
+  };
 }
 
 export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip): VoiceChatMessage[] {
+  const template = parts.voiceTemplate ?? defaultPrompt("voice");
   if (strip === "thin") {
     const history = parts.history.slice(-VOICE_THIN_HISTORY).map((m) => ({
       role: m.role as "user" | "assistant",
       content: modelFacingText(m.text),
     }));
     return [
-      { role: "system", content: systemCharter(parts.charter) },
+      { role: "system", content: systemCharter(parts.charter, template) },
       ...history,
       { role: "user", content: parts.userText },
     ];
@@ -105,11 +134,14 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
     history: parts.history,
     tail,
     userText: parts.userText,
+    voiceTemplate: template,
+    vars: voiceVars({ ...parts, mind, notes }, tail),
   });
 }
 
 export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
-  const system = systemCharter(parts.charter).length;
+  const template = parts.voiceTemplate ?? defaultPrompt("voice");
+  const system = systemCharter(parts.charter, template).length;
   const tailMind = buildTail({
     clock: parts.clockText,
     mind: parts.mind,
@@ -235,7 +267,6 @@ ${jumpRoad}要跟进：${threads}
 ${inner}【可以用的记忆】
 ${formatMemories(opts.notes, opts.timeZone)}
 
-${QINGRAN_STANCE_ONE_LINE}
 说话要有逻辑：观点有依据，前后一致。`;
 
   if (opts.careHint) {
@@ -259,7 +290,6 @@ ${jumpRoad}
 【可以用的记忆】
 ${formatMemories(opts.notes, opts.timeZone)}
 
-${QINGRAN_STANCE_ONE_LINE}
 说话要有逻辑：观点有依据，前后一致。`;
   }
   return tail;
@@ -274,20 +304,33 @@ export function buildVoiceMessages(opts: {
   history: StoredMessage[];
   tail: string;
   userText: string;
+  voiceTemplate?: string;
+  vars?: Record<string, string>;
 }): VoiceChatMessage[] {
-  const charter = systemCharter(opts.charter);
+  const template = opts.voiceTemplate ?? defaultPrompt("voice");
   const long =
     opts.longterm ??
     renderVoiceLongterm(opts.selfSummary ?? "", opts.bondSummary ?? "", opts.portrait ?? []);
+  const vars: Record<string, string> = {
+    system_prompt: opts.charter.trim() || FALLBACK_CHARTER,
+    self: opts.selfSummary ?? "",
+    bond: opts.bondSummary ?? "",
+    portrait: opts.portrait ? portraitBlock(opts.portrait) : "",
+    history: historyText(opts.history),
+    tail: opts.tail,
+    ...opts.vars,
+  };
+  const charter = fillTemplate(template, vars).trim();
   const history = opts.history.slice(-HISTORY_WINDOW).map((m) => ({
     role: m.role as "user" | "assistant",
     content: modelFacingText(m.text),
   }));
-  return [
-    { role: "system", content: charter },
-    { role: "system", content: long },
-    ...history,
-    { role: "system", content: opts.tail },
-    { role: "user", content: opts.userText },
-  ];
+  const msgs: VoiceChatMessage[] = [{ role: "system", content: charter }];
+  const inlineLong = templateHas(template, "self") || templateHas(template, "bond") || templateHas(template, "portrait");
+  if (!inlineLong) msgs.push({ role: "system", content: long });
+  if (!templateHas(template, "history")) msgs.push(...history);
+  const inlineTail = templateHas(template, "tail") || templateHas(template, "memories") || templateHas(template, "clock");
+  if (!inlineTail) msgs.push({ role: "system", content: opts.tail });
+  msgs.push({ role: "user", content: opts.userText });
+  return msgs;
 }

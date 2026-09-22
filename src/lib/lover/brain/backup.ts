@@ -464,6 +464,26 @@ export const BACKUP_TABLES: TableSpec[] = [
       ["tokens_out", "int"],
     ],
   },
+  {
+    name: "qr_prompts",
+    pk: ["key"],
+    columns: [
+      ["key", "text"],
+      ["body", "text"],
+      ["updated_at", "int"],
+    ],
+  },
+  {
+    name: "qr_prompt_versions",
+    pk: ["hash"],
+    columns: [
+      ["hash", "text"],
+      ["key", "text"],
+      ["body", "text"],
+      ["first_seen", "int"],
+      ["last_seen", "int"],
+    ],
+  },
 ];
 
 export const IMPORT_ORDER = [

@@ -10,7 +10,7 @@ import {
 } from "../store.ts";
 import { computeAllFindings, seriesFromDayFactors } from "./stats.ts";
 import { listDayFactors } from "../store.ts";
-import { DIARY_ANALYST_SYSTEM } from "./prompts.ts";
+import { loadPrompt } from "../prompts/store.ts";
 import { daysInclusive } from "../time.ts";
 
 const TOOLS: ToolDef[] = [
@@ -165,10 +165,11 @@ async function defineAdhocFactor(args: Record<string, unknown>): Promise<unknown
     status: "active",
     limit: 400,
   });
+  const assignPrompt = await loadPrompt("assign");
   const result = await callModel("assign", {
-    system: `${DIARY_ANALYST_SYSTEM}
-按给定判定标准，给每一天标 1、0 或 null（未知）。不要猜，不要入库。`,
-    input: `特征：${name}
+    system: assignPrompt.body,
+    input: `按给定判定标准，给每一天标 1、0 或 null（未知）。不要猜，不要入库。
+特征：${name}
 定义：${definition}
 日期：${daysInclusive(fromDay, toDay).join(", ")}
 
@@ -178,6 +179,8 @@ ${days.map((d) => `${d.day}|${d.summary}|e=${d.energy}|m=${d.mood}|did=${JSON.st
 【笔记】
 ${notes.map((n) => `${n.localDay}|${n.text}`).join("\n").slice(0, 4000)}`,
     schema: ADHOC_SCHEMA,
+    promptKey: assignPrompt.key,
+    promptHash: assignPrompt.hash,
   });
   const items = Array.isArray((result.json as { days?: unknown })?.days)
     ? ((result.json as { days: Array<{ day?: string; value?: unknown }> }).days ?? [])
@@ -252,13 +255,15 @@ export async function askDiary(question: string): Promise<{ text: string; ok: bo
   const hold = await checkSpend("ask");
   if (!hold.allow) return { text: "今天的费用已到上限，问日记明天再用。", ok: false };
   const previous: unknown[] = [];
+  const askPrompt = await loadPrompt("ask");
   for (let i = 0; i < 8; i++) {
     const result = await callModel("ask", {
-      system: `${DIARY_ANALYST_SYSTEM}
-回答必须附证据（日期或 note id）；数字必须来自 tool 结果；不确定时说明数据不足。`,
+      system: askPrompt.body,
       input: question,
       tools: TOOLS,
       previous,
+      promptKey: askPrompt.key,
+      promptHash: askPrompt.hash,
     });
     if (result.toolCalls.length) {
       for (const call of result.toolCalls) {
@@ -284,15 +289,17 @@ export async function askDiary(question: string): Promise<{ text: string; ok: bo
   const notes = await listNotes({ q: question, fromRosie: true, lens: "diary", status: "active", limit: 20 });
   const days = await listDays("2000-01-01", "2100-01-01");
   const fallback = await callModel("ask", {
-    system: `${DIARY_ANALYST_SYSTEM}
-没有 function calling。只用下面检索到的材料回答。没有数字就说数据不足。`,
-    input: `问题：${question}
+    system: askPrompt.body,
+    input: `没有 function calling。只用下面检索到的材料回答。没有数字就说数据不足。
+问题：${question}
 
 笔记：
 ${notes.map((n) => `${n.localDay} ${n.id} ${n.text}`).join("\n")}
 
 最近 day logs：
 ${days.slice(-14).map((d) => `${d.day} e=${d.energy} m=${d.mood} ${d.summary}`).join("\n")}`,
+    promptKey: askPrompt.key,
+    promptHash: askPrompt.hash,
   });
   return { text: fallback.text.trim() || "数据不足，我还没法回答这个。", ok: fallback.ok };
 }

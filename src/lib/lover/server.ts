@@ -16,6 +16,7 @@ import { isQuotaHint, readXaiFail } from "./xai-error";
 import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./hearing/config";
 import { recordSttSpend, recordTtsSpend } from "./brain/spend/check";
 import { VOICE_IO } from "./brain/config";
+import { loadPrompt } from "./brain/prompts/store.ts";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
 
@@ -49,6 +50,7 @@ export const rememberTurn = createServerFn({ method: "POST" })
     if (!apiKey) return { ok: true as const, ...empty };
 
     try {
+      const loaded = await loadPrompt("remember");
       const res = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -63,7 +65,7 @@ export const rememberTurn = createServerFn({ method: "POST" })
           messages: [
             {
               role: "user",
-              content: buildRememberPrompt(data.stretch, data.memories),
+              content: buildRememberPrompt(data.stretch, data.memories, loaded.body),
             },
           ],
         }),
@@ -92,6 +94,7 @@ export const rememberOverflow = createServerFn({ method: "POST" })
       return { consumedIds: overflow.map((m) => m.id), fact: "" };
     }
     try {
+      const loaded = await loadPrompt("overflow");
       const res = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -110,6 +113,7 @@ export const rememberOverflow = createServerFn({ method: "POST" })
                 overflow,
                 data.lookahead.slice(0, 10),
                 data.memories,
+                loaded.body,
               ),
             },
           ],
@@ -140,6 +144,7 @@ export const consolidateMemories = createServerFn({ method: "POST" })
     if (!apiKey) return { ok: false as const, facts: [] as Array<{ text: string; createdAt?: number }> };
     try {
       const clock = formatClock(data.nowMs || Date.now(), data.timeZone || "UTC");
+      const loaded = await loadPrompt("consolidate");
       const res = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -151,7 +156,7 @@ export const consolidateMemories = createServerFn({ method: "POST" })
           temperature: 0.2,
           max_tokens: 700,
           response_format: { type: "json_object" },
-          messages: [{ role: "user", content: buildConsolidatePrompt(memories, clock, data.timeZone || "UTC") }],
+          messages: [{ role: "user", content: buildConsolidatePrompt(memories, clock, data.timeZone || "UTC", loaded.body) }],
         }),
         signal: AbortSignal.timeout(20_000),
       });

@@ -22,7 +22,9 @@ import { rememberBlock, rememberCharter, type ReflectRefs } from "../log-refs.ts
 import { resolveTz } from "../tz.ts";
 import type { Finding, IndexItem, Mind, PortraitRow, StoredMessage, Theme } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
-import { REFLECTOR_SYSTEM } from "./prompts.ts";
+import { defaultPrompt } from "../prompts/catalog.ts";
+import { fillTemplate } from "../prompts/fill.ts";
+import { loadPrompt } from "../prompts/store.ts";
 import {
   formatIndexLine,
   getCoreIndexItems,
@@ -108,7 +110,7 @@ function findingLine(
 }
 
 /** A = system（几乎不变），B = 第一段 user（日/记忆库变），C = 第二段 user（每轮变）。 */
-export function buildReflectorInput(parts: ReflectorParts): ReflectorPacked {
+export function buildReflectorInput(parts: ReflectorParts, template = defaultPrompt("reflect")): ReflectorPacked {
   const portrait = parts.portrait
     .filter((p) => p.status === "active")
     .slice()
@@ -117,10 +119,7 @@ export function buildReflectorInput(parts: ReflectorParts): ReflectorPacked {
   const findings = parts.findings.slice().sort((a, b) => a.id.localeCompare(b.id));
   const core = parts.coreIndex.slice().sort((a, b) => a.id.localeCompare(b.id));
 
-  const system = `${REFLECTOR_SYSTEM}
-
-【人设】
-${parts.charter}`;
+  const system = fillTemplate(template, { system_prompt: parts.charter }).trim();
 
   let stable = `【我自己】
 ${parts.selfSummary || "（还没有）"}
@@ -217,19 +216,23 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
   const convo = formatReflectConversation(history, tz);
   const clockText = formatClock(now(), tz);
 
-  const packed = buildReflectorInput({
-    charter: systemPrompt,
-    selfSummary: meta.selfSummary,
-    bondSummary: meta.bondSummary,
-    portrait,
-    themes: themesPacked,
-    findings: findingsPacked,
-    coreIndex,
-    clock: clockText,
-    relatedIndex,
-    oldMind: old,
-    conversation: convo,
-  });
+  const loaded = await loadPrompt("reflect");
+  const packed = buildReflectorInput(
+    {
+      charter: systemPrompt,
+      selfSummary: meta.selfSummary,
+      bondSummary: meta.bondSummary,
+      portrait,
+      themes: themesPacked,
+      findings: findingsPacked,
+      coreIndex,
+      clock: clockText,
+      relatedIndex,
+      oldMind: old,
+      conversation: convo,
+    },
+    loaded.body,
+  );
 
   const [charterHash, blockBHash] = await Promise.all([
     rememberCharter(systemPrompt),
@@ -254,6 +257,8 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     turnSeq,
     refs,
     outputRef: `mind:${turnSeq}`,
+    promptKey: loaded.key,
+    promptHash: loaded.hash,
   });
   if (!result.ok || !result.json) {
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });

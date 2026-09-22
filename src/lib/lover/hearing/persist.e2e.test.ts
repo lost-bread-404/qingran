@@ -691,3 +691,18 @@ test("0020 turn_feedback tags migration is additive", async () => {
   assert.doesNotMatch(sql, /\bdelete\b/i);
 });
 
+test("0021 prompts migration is additive", async () => {
+  const sql = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations/0021_prompts.sql"),
+    "utf8",
+  );
+  assert.match(sql, /qr_prompts/);
+  assert.match(sql, /qr_prompt_versions/);
+  assert.match(sql, /prompt_key/);
+  assert.match(sql, /prompt_hash/);
+  assert.doesNotMatch(sql, /drop column/i);
+  assert.doesNotMatch(sql, /alter column/i);
+  assert.doesNotMatch(sql, /\bupdate\b/i);
+  assert.doesNotMatch(sql, /\bdelete\b/i);
+});
+

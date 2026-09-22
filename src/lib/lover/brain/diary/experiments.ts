@@ -4,6 +4,7 @@ import { listDayFactors, listExperiments, listFactors, upsertExperiment } from "
 import { daysInclusive, shiftDay } from "../time.ts";
 import type { Experiment } from "../types.ts";
 import { newId } from "../../storage.ts";
+import { loadPrompt } from "../prompts/store.ts";
 
 const SCHEMA = {
   name: "experiments",
@@ -33,11 +34,14 @@ const SCHEMA = {
 export async function proposeExperiments(reportData: unknown, jobId?: string): Promise<void> {
   const existing = await listExperiments();
   if (existing.some((e) => e.status === "proposed" || e.status === "active")) return;
+  const loaded = await loadPrompt("experiments");
   const result = await callModel("report", {
-    system: "根据最高分的 antecedent findings 提出最多 3 个小实验。hypothesis 和 action 要具体、可执行。outcome 和 compliance factor 必须来自 findings。",
+    system: loaded.body,
     input: JSON.stringify(reportData).slice(0, 12_000),
     schema: SCHEMA,
     jobId,
+    promptKey: loaded.key,
+    promptHash: loaded.hash,
   });
   const items = Array.isArray((result.json as { items?: unknown })?.items)
     ? ((result.json as { items: Array<Record<string, string>> }).items ?? [])

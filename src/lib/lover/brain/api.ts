@@ -399,7 +399,13 @@ export const brainGetCallLog = createServerFn({ method: "POST" })
       route: row.route ? String(row.route) : null,
       turn_seq: row.turn_seq == null ? null : Number(row.turn_seq),
     });
-    return { ...row, rebuilt: asJson(rebuilt) };
+    const output = row.output_text ? String(row.output_text) : row.raw ? String(row.raw) : "";
+    return {
+      ...row,
+      rebuilt: asJson(rebuilt),
+      assembled: rebuilt?.messages ?? null,
+      output,
+    };
   });
 
 export const brainRebuildPrompt = createServerFn({ method: "POST" })
@@ -452,3 +458,27 @@ export const brainExportLogs = createServerFn({ method: "POST" })
   });
 
 export { buildReportData, convertV1 };
+
+export const brainListPrompts = createServerFn({ method: "GET" }).handler(async () => {
+  const { listPrompts } = await import("./prompts/store.ts");
+  return listPrompts();
+});
+
+export const brainSavePrompt = createServerFn({ method: "POST" })
+  .validator((input: { key: string; body: string }) => input)
+  .handler(async ({ data }) => {
+    const { isPromptKey } = await import("./prompts/catalog.ts");
+    const { savePrompt } = await import("./prompts/store.ts");
+    if (!isPromptKey(data.key)) throw new Error("unknown-prompt");
+    return savePrompt(data.key, data.body);
+  });
+
+export const brainRestorePrompt = createServerFn({ method: "POST" })
+  .validator((input: { key: string }) => input)
+  .handler(async ({ data }) => {
+    const { isPromptKey } = await import("./prompts/catalog.ts");
+    const { restorePrompt } = await import("./prompts/store.ts");
+    if (!isPromptKey(data.key)) throw new Error("unknown-prompt");
+    return restorePrompt(data.key);
+  });
+

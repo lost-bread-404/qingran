@@ -20,7 +20,7 @@ import {
   upsertNote,
 } from "./store.ts";
 import type { Note, StoredMessage } from "./types.ts";
-import { ARCHIVIST_SYSTEM } from "./voice/prompts.ts";
+import { loadPrompt } from "./prompts/store.ts";
 import { getMemoryIndex } from "./voice/retrieve.ts";
 
 const SCHEMA = {
@@ -116,12 +116,15 @@ export async function runArchivist(ids: string[], jobId?: string): Promise<void>
     batchMessageIds: pending.map((m) => m.id),
     candidateNoteIds: candidates.map((n) => n.id),
   };
+  const loaded = await loadPrompt("archive");
   const result = await callModel("archive", {
-    system: ARCHIVIST_SYSTEM,
+    system: loaded.body,
     input,
     schema: SCHEMA,
     jobId,
     refs,
+    promptKey: loaded.key,
+    promptHash: loaded.hash,
   });
   if (!result.ok) throw new Error("archivist-llm-failed");
   const rawOps = Array.isArray((result.json as { ops?: unknown })?.ops)

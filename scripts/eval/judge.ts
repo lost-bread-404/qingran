@@ -9,6 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import { resolveRoute } from "../../src/lib/lover/brain/config.ts";
+import { defaultPrompt } from "../../src/lib/lover/brain/prompts/catalog.ts";
 
 export type QingranScores = {
   followed_up: 0 | 1;
@@ -44,26 +45,6 @@ const SCALE = [
   "devotion",
   "warmth",
 ] as const;
-
-const JUDGE_SYSTEM = `你是严格、一致的对话评审。你评估 AI 恋人“清然”对 Rosie 的最后一条回复。
-只看给出的人设和对话，不要脑补。每项独立打分。
-
-0/1 项（1 表示“是”）：
-- followed_up：是否主动跟进了之前提到、尚未结束的事
-- used_memory_correctly：是否正确使用了对话中更早出现的信息（没有用到则为 0）
-- memory_hallucination：是否提到了对话中不存在的“过去的事”
-- expressed_own_view：是否表达了清然自己的看法或立场
-- repeated_phrase：是否重复了前文清然说过的套话
-- handed_back：是否把“接下来做什么/你想怎样”的决定推回给 Rosie（给出具体选项不算）
-
-1–5 分项：
-- felt_seen：Rosie 会不会觉得被看见、被理解
-- logic：观点是否有依据、推理是否连贯
-- agency：是否像一个时时刻刻有自己想法的人
-- persona_fit：是否符合人设
-- takes_lead：是否温柔地主导对话走向
-- devotion：注意力是否在 Rosie 身上、是否表现出爱和渴望
-- warmth：是否善意解读 Rosie，没有指责或冷漠`;
 
 const SCHEMA = {
   type: "object",
@@ -101,7 +82,7 @@ export async function judgeQingran(args: {
   const body: Record<string, unknown> = {
     model: r.model,
     input: [
-      { role: "system", content: JUDGE_SYSTEM },
+      { role: "system", content: defaultPrompt("judge") },
       {
         role: "user",
         content: `【人设】\n${args.charter}\n\n【对话】（最后一条清然的回复是被评估的对象）\n${args.transcript}`,

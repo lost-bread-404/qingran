@@ -344,6 +344,8 @@ export function BrainSystemArchive() {
             {
               route: call.route,
               model: call.model,
+              prompt_key: call.prompt_key,
+              prompt_hash: call.prompt_hash,
               system: call.input_system,
               user: call.input_user,
               output: call.output_text ?? call.raw,

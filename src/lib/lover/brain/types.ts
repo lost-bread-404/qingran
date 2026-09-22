@@ -253,6 +253,11 @@ export type BrainLogRow = {
   costUsd?: number | null;
   error?: string | null;
   trimmed?: boolean;
+  promptKey?: string | null;
+  promptHash?: string | null;
+  outputText?: string | null;
+  inputSystem?: string | null;
+  inputUser?: string | null;
 };
 
 export type StoredMessage = {

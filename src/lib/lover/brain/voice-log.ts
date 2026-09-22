@@ -59,6 +59,8 @@ export async function recordVoiceTurn(opts: {
     codeVersion: codeVersion(),
     refs: opts.ctx.refs,
     outputRef,
+    promptKey: opts.ctx.promptKey,
+    promptHash: opts.ctx.promptHash,
   });
   await maybeWriteRawLog(logId, { messages: opts.ctx.messages });
   await recordLlmSpend({

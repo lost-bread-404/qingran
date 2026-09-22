@@ -23,7 +23,7 @@ import {
 } from "../store.ts";
 import { isoWeek, isoWeekStart, shiftDay } from "../time.ts";
 import type { Factor, Theme } from "../types.ts";
-import { DIARY_ANALYST_SYSTEM } from "./prompts.ts";
+import { loadPrompt } from "../prompts/store.ts";
 import { recomputeStats } from "./recompute.ts";
 import { newId } from "../../storage.ts";
 import { getMemoryIndex } from "../voice/retrieve.ts";
@@ -168,8 +168,9 @@ async function assignBatch(noteIds: string[], themes: Theme[], jobId?: string) {
     if (n) notes.push(n);
   }
   if (!notes.length) return;
+  const assignPrompt = await loadPrompt("assign");
   const result = await callModel("assign", {
-    system: DIARY_ANALYST_SYSTEM,
+    system: assignPrompt.body,
     input: `把笔记归入主题，可属于多个或都不属于。
 
 【themes】
@@ -179,6 +180,8 @@ ${themes.map((t) => `${t.id}|${t.name}|${t.definition}`).join("\n")}
 ${notes.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n")}`,
     schema: ASSIGN_SCHEMA,
     jobId,
+    promptKey: assignPrompt.key,
+    promptHash: assignPrompt.hash,
   });
   const assignments = Array.isArray((result.json as { assignments?: unknown })?.assignments)
     ? ((result.json as { assignments: Array<{ note_id?: string; theme_ids?: string[] }> }).assignments ?? [])
@@ -226,8 +229,9 @@ export async function runSynth(
   const unassigned = await notesWithoutTheme(200);
   const counts = await themeMemberCounts();
   const weeks = await listThemeWeeks();
+  const synthPrompt = await loadPrompt("synth");
   const result = await callModel("synth", {
-    system: DIARY_ANALYST_SYSTEM,
+    system: synthPrompt.body,
     input: `维护主题。CREATE 需要至少 3 条笔记支持。user_feedback=rejected 的不能重建。
 
 【现有主题】
@@ -247,6 +251,8 @@ ${themes
 ${unassigned.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n").slice(0, 8000)}`,
     schema: THEME_OPS_SCHEMA,
     jobId,
+    promptKey: synthPrompt.key,
+    promptHash: synthPrompt.hash,
   });
 
   const rejectedNames = new Set(
@@ -344,8 +350,9 @@ ${unassigned.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n").slice(0, 8
     }
     const weekKeys = [...byWeek.keys()].sort().slice(-8);
     if (!weekKeys.length) continue;
+    const assignWeek = await loadPrompt("assign");
     const judged = await callModel("assign", {
-      system: DIARY_ANALYST_SYSTEM,
+      system: assignWeek.body,
       input: `判断这些周是否对该主题有具体行动（day log 的 did/wins）。没有信息为 null。
 
 主题：${theme.name} ${theme.definition}
@@ -361,6 +368,8 @@ ${days
   .slice(0, 6000)}`,
       schema: ACTION_SCHEMA,
       jobId,
+      promptKey: assignWeek.key,
+      promptHash: assignWeek.hash,
     });
     const items = Array.isArray((judged.json as { items?: unknown })?.items)
       ? ((judged.json as { items: Array<{ week?: string; action_taken?: number | null }> }).items ?? [])
@@ -384,8 +393,9 @@ ${days
   const factors = await listFactors(false);
   const findings = await listFindings();
   const recentDays = await listDays(shiftDay(end, -56), end);
+  const factorPrompt = await loadPrompt("synth");
   const factorResult = await callModel("synth", {
-    system: DIARY_ANALYST_SYSTEM,
+    system: factorPrompt.body,
     input: `发现新的 factors。同一轮最多新增 5 个。rejected 的不能重建。
 
 【factors】
@@ -401,6 +411,8 @@ ${recentDays
   .slice(0, 8000)}`,
     schema: FACTOR_OPS_SCHEMA,
     jobId,
+    promptKey: factorPrompt.key,
+    promptHash: factorPrompt.hash,
   });
   const fops = Array.isArray((factorResult.json as { ops?: unknown })?.ops)
     ? ((factorResult.json as { ops: Array<Record<string, unknown>> }).ops ?? [])
@@ -465,8 +477,9 @@ export async function runBackfill(factorId: string, jobId?: string): Promise<voi
   const allDays = await listDays("2000-01-01", "2100-01-01");
   for (let i = 0; i < allDays.length; i += 30) {
     const batch = allDays.slice(i, i + 30);
+    const backfillPrompt = await loadPrompt("backfill");
     const result = await callModel("backfill", {
-      system: DIARY_ANALYST_SYSTEM,
+      system: backfillPrompt.body,
       input: `按定义判定每天的 value（1/0/null）。
 
 factor: ${factor.name}
@@ -476,6 +489,8 @@ definition: ${factor.definition}
 ${batch.map((d) => `${d.day}|${d.summary}|energy=${d.energy}|mood=${d.mood}|did=${JSON.stringify(d.did)}|wins=${JSON.stringify(d.wins)}|body=${d.body ?? ""}`).join("\n")}`,
       schema: VALUE_SCHEMA,
       jobId,
+      promptKey: backfillPrompt.key,
+      promptHash: backfillPrompt.hash,
     });
     const rows = Array.isArray((result.json as { days?: unknown })?.days)
       ? ((result.json as { days: Array<{ day?: string; value?: unknown; evidence_ids?: string[] }> }).days ?? [])

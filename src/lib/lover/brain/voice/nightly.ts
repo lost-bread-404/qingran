@@ -4,6 +4,7 @@ import { callModel } from "../llm.ts";
 import {
   dormantOldPortrait,
   getMeta,
+  getProfilePrompt,
   listNotes,
   listPortrait,
   patchMeta,
@@ -11,7 +12,8 @@ import {
 } from "../store.ts";
 import { clipChars } from "../time.ts";
 import { newId } from "../../storage.ts";
-import { QINGRAN_STANCE } from "./prompts.ts";
+import { fillTemplate } from "../prompts/fill.ts";
+import { loadPrompt } from "../prompts/store.ts";
 
 const SCHEMA = {
   name: "portrait_self_bond",
@@ -50,9 +52,11 @@ export async function updatePortraitSelfBond(day: string, jobId?: string): Promi
   const oldPortrait = await listPortrait();
   const meta = await getMeta();
   const qingranNotes = relevant.filter((n) => n.subject === "qingran");
+  const loaded = await loadPrompt("portrait");
+  const charter = await getProfilePrompt();
 
   const result = await callModel("portrait", {
-    system: `你是清然。下面的情感基调就是你写「我眼中的她」时的立场。portrait 是清然带着爱写下的理解，善意解读，不写成对她的指责或缺点清单。\n\n${QINGRAN_STANCE}`,
+    system: fillTemplate(loaded.body, { system_prompt: charter }),
     input: `输出 portrait_ops（按自由 topic upsert，evidence_ids 必须是存在的笔记 id）、self_summary（≤300字，第一人称，只依据清然笔记和旧 summary，不编造重大经历）、bond_summary（≤200字：称呼、梗、共同时刻、未兑现约定）。
 
 【旧的我眼中的她】
@@ -71,6 +75,8 @@ ${qingranNotes.map((n) => `${n.id}|${n.text}`).join("\n") || "（没有）"}
 ${relevant.map((n) => `${n.id}|${n.subject}|${n.text}`).join("\n") || "（没有）"}`,
     schema: SCHEMA,
     jobId,
+    promptKey: loaded.key,
+    promptHash: loaded.hash,
   });
 
   const parsed = (result.json && typeof result.json === "object" ? result.json : {}) as {

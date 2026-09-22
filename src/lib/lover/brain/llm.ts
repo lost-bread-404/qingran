@@ -58,6 +58,8 @@ export type CallModelInput = {
   refs?: unknown;
   outputRef?: string | null;
   keepOutputText?: boolean;
+  promptKey?: string | null;
+  promptHash?: string | null;
 };
 
 export type CallModelResult = {
@@ -221,6 +223,8 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     codeVersion: codeVersion(),
     refs: input.refs ?? null,
     outputRef: input.outputRef ?? null,
+    promptKey: input.promptKey ?? null,
+    promptHash: input.promptHash ?? null,
     inputSystem: high ? null : input.system,
     inputUser: high ? null : joinedUser(input),
   };
@@ -277,6 +281,8 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     codeVersion: codeVersion(),
     refs: input.refs ?? null,
     outputRef: input.outputRef ?? null,
+    promptKey: input.promptKey ?? null,
+    promptHash: input.promptHash ?? null,
     inputSystem: high ? null : input.system,
     inputUser: high ? null : joinedUser(input),
   };

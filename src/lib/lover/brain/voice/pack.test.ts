@@ -57,7 +57,7 @@ test("voice messages keep charter first and tail last before user", () => {
   assert.equal(msgs.at(-1)!.content, "今晚不想动");
 });
 
-test("empty mind omits inner block but keeps stance lines", () => {
+test("empty mind omits inner block but keeps the logic line", () => {
   const tail = buildTail({
     clock: "星期二 21:00",
     mind: EMPTY_MIND,
@@ -66,7 +66,7 @@ test("empty mind omits inner block but keeps stance lines", () => {
     careHint: false,
   });
   assert.doesNotMatch(tail, /你此刻的内心/);
-  assert.match(tail, /你深爱她/);
+  assert.doesNotMatch(tail, /你深爱她/);
   assert.match(tail, /说话要有逻辑/);
   assert.match(tail, /小猫/);
 });

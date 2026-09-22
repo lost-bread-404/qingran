@@ -12,11 +12,15 @@ import { slowEngineHint } from "@/lib/lover/hearing/select";
 import { formatHearingTimingSummary, parseHearingTimingLine } from "@/lib/lover/hearing/timing-format";
 import { formatCallAudioLogLines, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
+  brainGetCallLog,
   brainGetLongLayer,
   brainListNotes,
+  brainListPrompts,
   brainResetMind,
+  brainRestorePrompt,
   brainSaveLongLayer,
   brainSaveNote,
+  brainSavePrompt,
   brainGetDbSize,
   brainListVoiceModels,
 } from "@/lib/lover/brain/api";
@@ -29,7 +33,25 @@ import { DEFAULT_SYSTEM_PROMPT, VOICE_EFFORT_OPTIONS, isVoiceEffort, type Profil
 import { SILENCE_MS_OPTIONS, type SilenceMs } from "@/lib/lover/vad";
 import { cn } from "@/lib/utils";
 
-type Tab = "prompt" | "notes" | "portrait" | "mind" | "log" | "hearing";
+type Tab = "prompt" | "prompts" | "notes" | "portrait" | "mind" | "log" | "hearing";
+
+type PromptItem = {
+  key: string;
+  name: string;
+  blurb: string;
+  placeholders: Array<{ token: string; meaning: string }>;
+  defaultText: string;
+  body: string;
+  hash: string;
+  custom: boolean;
+  updatedAt: number | null;
+};
+
+type CallDetail = {
+  messages: Array<{ role: string; content: string }>;
+  warnings: string[];
+  output: string;
+};
 
 type VoiceModelStat = {
   model: string;
@@ -127,6 +149,11 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [voiceModels, setVoiceModels] = useState<VoiceModelOption[] | null>(null);
   const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
   const [silenceMs, setSilenceMs] = useState<SilenceMs>(profile.silenceMs);
+  const [promptItems, setPromptItems] = useState<PromptItem[]>([]);
+  const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({});
+  const [promptBusy, setPromptBusy] = useState<string | null>(null);
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const [callById, setCallById] = useState<Record<number, CallDetail | "loading">>({});
   const viewport = useVisualViewportHeight(open);
 
   useEffect(() => {
@@ -139,6 +166,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setSilenceMs(profile.silenceMs);
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setTab("prompt");
+    setPromptItems([]);
+    setPromptDrafts({});
+    setPromptError(null);
+    setCallById({});
     void hearingEnvStatus().then((result) => setProviderReady(result.providers)).catch(() => undefined);
     setEditingId(null);
     setNewAt(toDatetimeLocal(Date.now()));
@@ -162,6 +193,29 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       keepCaretVisible(active);
     }
   }, [open, viewport.height, viewport.offsetTop]);
+
+  useEffect(() => {
+    if (!open || tab !== "prompts") return;
+    let cancelled = false;
+    void brainListPrompts()
+      .then((items) => {
+        if (cancelled) return;
+        setPromptItems(items as PromptItem[]);
+        setPromptDrafts((prev) => {
+          const next = { ...prev };
+          for (const it of items as PromptItem[]) {
+            if (next[it.key] == null) next[it.key] = it.body;
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setPromptError("指令列表没读出来。");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tab]);
 
   async function refresh() {
     const [noteRes, layer] = await Promise.all([
@@ -205,6 +259,73 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     const nextProvider = ready === false ? fallback : hearingProvider;
     persistProfile({ hearingProvider: nextProvider });
     onOpenChange(false);
+  }
+
+  async function savePromptItem(key: string) {
+    const body = promptDrafts[key] ?? "";
+    setPromptBusy(key);
+    setPromptError(null);
+    try {
+      const saved = (await brainSavePrompt({ data: { key, body } })) as PromptItem;
+      setPromptItems((rows) => rows.map((row) => (row.key === key ? { ...row, ...saved, name: row.name, blurb: row.blurb, placeholders: row.placeholders, defaultText: row.defaultText } : row)));
+      setPromptDrafts((d) => ({ ...d, [key]: saved.body }));
+    } catch {
+      setPromptError("没记下。");
+    } finally {
+      setPromptBusy(null);
+    }
+  }
+
+  async function restorePromptItem(key: string) {
+    setPromptBusy(key);
+    setPromptError(null);
+    try {
+      const restored = (await brainRestorePrompt({ data: { key } })) as PromptItem;
+      setPromptItems((rows) =>
+        rows.map((row) =>
+          row.key === key
+            ? { ...row, ...restored, name: row.name, blurb: row.blurb, placeholders: row.placeholders, defaultText: row.defaultText }
+            : row,
+        ),
+      );
+      setPromptDrafts((d) => ({ ...d, [key]: restored.body }));
+    } catch {
+      setPromptError("没恢复成默认。");
+    } finally {
+      setPromptBusy(null);
+    }
+  }
+
+  function loadCall(row: BrainLogRow) {
+    if (callById[row.id] && callById[row.id] !== "loading") return;
+    setCallById((m) => (m[row.id] ? m : { ...m, [row.id]: "loading" }));
+    void brainGetCallLog({ data: { id: row.id } })
+      .then((rec) => {
+        const obj = rec && typeof rec === "object" ? (rec as Record<string, unknown>) : null;
+        const rebuilt = obj?.rebuilt && typeof obj.rebuilt === "object" ? (obj.rebuilt as { messages?: Array<{ role: string; content: string }>; warnings?: string[] }) : null;
+        const assembled = Array.isArray(obj?.assembled)
+          ? (obj.assembled as Array<{ role: string; content: string }>)
+          : rebuilt?.messages;
+        const output =
+          (typeof obj?.output === "string" && obj.output) ||
+          (typeof obj?.output_text === "string" && obj.output_text) ||
+          (typeof obj?.raw === "string" && obj.raw) ||
+          "";
+        setCallById((m) => ({
+          ...m,
+          [row.id]: {
+            messages: assembled ?? [],
+            warnings: rebuilt?.warnings ?? [],
+            output,
+          },
+        }));
+      })
+      .catch(() => {
+        setCallById((m) => ({
+          ...m,
+          [row.id]: { messages: [], warnings: ["读不出这次发给模型的全文"], output: "" },
+        }));
+      });
   }
 
   async function saveLong() {
@@ -292,6 +413,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
 
   const tabs: Array<[Tab, string]> = [
     ["prompt", "人设"],
+    ["prompts", "指令"],
     ["notes", "笔记"],
     ["portrait", "画像"],
     ["mind", "内心"],
@@ -364,7 +486,77 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
             className="min-h-0 flex-1 resize-none font-mono leading-relaxed"
             placeholder="写给模型的 system prompt"
           />
-          <p className="mt-2 text-xs text-subtle">笔记会另外附上，不用写进这段。</p>
+          <p className="mt-2 text-xs text-subtle">笔记会另外附上，不用写进这段。其他步骤的指令在「指令」页。</p>
+        </div>
+      ) : tab === "prompts" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
+          <div className="mx-auto flex w-full max-w-md flex-col gap-3">
+            <p className="text-xs text-subtle">
+              每个步骤发给模型的指令。人设只用「人设」那一份，这里用 {"{system_prompt}"} 引用。记下之后下一轮立刻生效。
+            </p>
+            {promptError ? <p className="text-sm text-live">{promptError}</p> : null}
+            {promptItems.length === 0 ? (
+              <p className="text-sm text-subtle">正在读指令…</p>
+            ) : (
+              promptItems.map((item) => {
+                const draftBody = promptDrafts[item.key] ?? item.body;
+                const dirty = draftBody !== item.body;
+                const canRestore = item.custom || item.updatedAt != null;
+                return (
+                  <details key={item.key} className="rounded-md bg-surface-2 px-3 py-2">
+                    <summary className="cursor-pointer">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm text-fg">{item.name}</span>
+                        {item.custom ? <span className="text-[11px] text-live">已改</span> : null}
+                      </div>
+                      <p className="mt-1 text-xs text-subtle">{item.blurb}</p>
+                    </summary>
+                    {item.placeholders.length ? (
+                      <ul className="mt-2 flex flex-col gap-1 text-[11px] text-subtle">
+                        {item.placeholders.map((p) => (
+                          <li key={p.token}>
+                            <span className="text-fg">{`{${p.token}}`}</span>
+                            {" · "}
+                            {p.meaning}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-[11px] text-subtle">这一步没有占位符。</p>
+                    )}
+                    <Textarea
+                      value={draftBody}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setPromptDrafts((d) => ({ ...d, [item.key]: value }));
+                        keepCaretVisible(e.currentTarget);
+                      }}
+                      onSelect={(e) => keepCaretVisible(e.currentTarget)}
+                      className="mt-2 min-h-40 resize-y font-mono text-xs leading-relaxed"
+                    />
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        type="button"
+                        size="pill"
+                        disabled={promptBusy === item.key || !dirty}
+                        onClick={() => void savePromptItem(item.key)}
+                      >
+                        {promptBusy === item.key ? "记下…" : "记下"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={promptBusy === item.key || !canRestore}
+                        onClick={() => void restorePromptItem(item.key)}
+                      >
+                        恢复默认
+                      </Button>
+                    </div>
+                  </details>
+                );
+              })
+            )}
+          </div>
         </div>
       ) : tab === "notes" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
@@ -821,7 +1013,13 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                 const timing = parseHearingTimingLine(row.note);
                 const engineHint = slowEngineHintFromNote(row.note);
                 return (
-                  <details key={row.id} className="rounded-md bg-surface-2 px-3 py-2 text-xs">
+                  <details
+                    key={row.id}
+                    className="rounded-md bg-surface-2 px-3 py-2 text-xs"
+                    onToggle={(e) => {
+                      if (e.currentTarget.open) loadCall(row);
+                    }}
+                  >
                     <summary className="cursor-pointer">
                       <div className="flex items-center justify-between gap-2">
                         <span className={row.ok ? "text-fg" : "text-live"}>{row.step}</span>
@@ -834,6 +1032,43 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                       {failLine ? <p className="mt-1 text-live">{failLine}</p> : null}
                     </summary>
                     <dl className="mt-2 flex flex-col gap-1.5 text-subtle">
+                      <div>
+                        <dt className="text-[10px] uppercase tracking-wide">prompt</dt>
+                        <dd className="mt-0.5 break-all">
+                          {row.promptKey || "—"}
+                          {row.promptHash ? ` · ${row.promptHash.slice(0, 12)}` : ""}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[10px] uppercase tracking-wide">发给模型</dt>
+                        <dd className="mt-0.5 whitespace-pre-wrap break-all">
+                          {callById[row.id] === "loading"
+                            ? "正在拼回这一次的全文…"
+                            : callById[row.id] && callById[row.id] !== "loading"
+                              ? (callById[row.id] as CallDetail).messages.length
+                                ? (callById[row.id] as CallDetail).messages
+                                    .map((m, i) => `【${m.role} ${i + 1}】\n${m.content}`)
+                                    .join("\n\n")
+                                : "这一次没有存下完整 prompt。"
+                              : "点开后会去拼。"}
+                        </dd>
+                      </div>
+                      {callById[row.id] && callById[row.id] !== "loading" && (callById[row.id] as CallDetail).warnings.length ? (
+                        <div>
+                          <dt className="text-[10px] uppercase tracking-wide">warnings</dt>
+                          <dd className="mt-0.5 whitespace-pre-wrap break-all text-live">
+                            {(callById[row.id] as CallDetail).warnings.join("\n")}
+                          </dd>
+                        </div>
+                      ) : null}
+                      <div>
+                        <dt className="text-[10px] uppercase tracking-wide">返回</dt>
+                        <dd className="mt-0.5 whitespace-pre-wrap break-all">
+                          {callById[row.id] && callById[row.id] !== "loading"
+                            ? (callById[row.id] as CallDetail).output || row.outputText || (row.raw ?? "").slice(0, 1000) || "—"
+                            : (row.outputText || (row.raw ?? "").slice(0, 1000) || "—")}
+                        </dd>
+                      </div>
                       <div>
                         <dt className="text-[10px] uppercase tracking-wide">note</dt>
                         <dd className="mt-0.5 whitespace-pre-wrap break-all">{row.note || "—"}</dd>

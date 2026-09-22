@@ -15,6 +15,7 @@ import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { pickHotNotes } from "./retrieve.ts";
 import { topicJump } from "./jump.ts";
+import { loadPrompt } from "../prompts/store.ts";
 import {
   buildTail,
   renderVoiceLongterm,
@@ -58,6 +59,8 @@ export type HotContext = {
   refs: VoiceRefs;
   parts: VoicePackParts;
   inputChars: VoiceInputChars;
+  promptKey: string;
+  promptHash: string;
 };
 
 export async function loadHotContext(input: {
@@ -123,6 +126,7 @@ export async function loadHotContext(input: {
 
   const longterm = renderVoiceLongterm(meta.selfSummary, meta.bondSummary, portrait);
   const charter = input.profile.systemPrompt;
+  const loaded = await loadPrompt("voice");
   const parts: VoicePackParts = {
     charter,
     longterm,
@@ -136,6 +140,10 @@ export async function loadHotContext(input: {
     nowMs: input.nowMs,
     mindStale,
     jump: jumped.jump,
+    voiceTemplate: loaded.body,
+    selfSummary: meta.selfSummary,
+    bondSummary: meta.bondSummary,
+    portrait,
   };
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(charter.trim() || "你就是清然。正在和 Rosie 语音通话。"),
@@ -190,5 +198,7 @@ export async function loadHotContext(input: {
     refs,
     parts,
     inputChars,
+    promptKey: loaded.key,
+    promptHash: loaded.hash,
   };
 }

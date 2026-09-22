@@ -1540,6 +1540,8 @@ export async function appendBrainLog(row: {
   codeVersion?: string | null;
   refs?: unknown;
   outputRef?: string | null;
+  promptKey?: string | null;
+  promptHash?: string | null;
 }): Promise<number | null> {
   try {
     const db = await getSql();
@@ -1548,10 +1550,10 @@ export async function appendBrainLog(row: {
          job_id, step, ok, ms, input_chars, raw, note, at,
          route, model, effort, turn_seq, input_system, input_user, output_text,
          tokens_in, tokens_cached, tokens_out, tokens_reasoning, cost_usd, error, trimmed,
-         code_version, refs, output_ref, cost_usd_est
+         code_version, refs, output_ref, cost_usd_est, prompt_key, prompt_hash
        ) values (
          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,false,
-         $22,$23::jsonb,$24,$25
+         $22,$23::jsonb,$24,$25,$26,$27
        ) returning id`,
       [
         row.jobId ?? null,
@@ -1579,6 +1581,8 @@ export async function appendBrainLog(row: {
         row.refs == null ? null : JSON.stringify(row.refs),
         row.outputRef ?? null,
         row.costUsdEst ?? null,
+        row.promptKey ?? null,
+        row.promptHash ?? null,
       ],
     );
     return rows[0]?.id != null ? asInt(rows[0].id) : null;
@@ -1699,6 +1703,11 @@ export async function listBrainLog(limit = 50): Promise<BrainLogRow[]> {
     costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
     error: r.error ? String(r.error) : null,
     trimmed: asBool(r.trimmed),
+    promptKey: r.prompt_key ? String(r.prompt_key) : null,
+    promptHash: r.prompt_hash ? String(r.prompt_hash) : null,
+    outputText: r.output_text ? String(r.output_text) : null,
+    inputSystem: r.input_system ? String(r.input_system) : null,
+    inputUser: r.input_user ? String(r.input_user) : null,
   }));
 }
 

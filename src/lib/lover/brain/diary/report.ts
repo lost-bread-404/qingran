@@ -14,7 +14,7 @@ import {
 } from "../store.ts";
 import { daysInclusive, isoWeek, monthRange, shiftDay } from "../time.ts";
 import { proposeExperiments } from "./experiments.ts";
-import { NARRATIVE_RULES } from "./prompts.ts";
+import { loadPrompt } from "../prompts/store.ts";
 import { narrativeNumbersOk } from "./report-check.ts";
 import { safetyFlag, sayDoByTag, stuckLoops } from "./stats.ts";
 
@@ -75,10 +75,13 @@ export async function buildReportData(month: string) {
 
 export async function writeNarrative(data: unknown, jobId?: string): Promise<string> {
   for (let i = 0; i < 3; i++) {
+    const reportPrompt = await loadPrompt("report");
     const result = await callModel("report", {
-      system: NARRATIVE_RULES,
+      system: reportPrompt.body,
       input: JSON.stringify(data).slice(0, 20_000),
       jobId,
+      promptKey: reportPrompt.key,
+      promptHash: reportPrompt.hash,
     });
     const text = result.text.replace(/\s+/g, " ").trim().slice(0, 800);
     if (text && narrativeNumbersOk(text, data)) return text;

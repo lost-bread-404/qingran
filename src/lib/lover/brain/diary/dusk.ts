@@ -17,7 +17,7 @@ import { resolveTz } from "../tz.ts";
 import type { DayLog } from "../types.ts";
 import { archiveDaySync } from "../archivist.ts";
 import { updatePortraitSelfBond } from "../voice/nightly.ts";
-import { DUSK_DAY_SYSTEM } from "./prompts.ts";
+import { loadPrompt } from "../prompts/store.ts";
 import { applyIntentionOps, type IntentionOp } from "./intentions.ts";
 import { recomputeStats } from "./recompute.ts";
 import { writeDailyDigest } from "./digest.ts";
@@ -209,8 +209,9 @@ export async function runDusk(
     .join("\n")
     .slice(0, 3000);
 
+  const duskPrompt = await loadPrompt("dusk");
   const dayResult = await callModel("dusk", {
-    system: DUSK_DAY_SYSTEM,
+    system: duskPrompt.body,
     input: `按下面材料整理这一天。
 
 【进行中的 intentions】
@@ -225,6 +226,8 @@ ${rosieText || "（没有）"}
 日期 ${day}`,
     schema: DAY_SCHEMA,
     jobId,
+    promptKey: duskPrompt.key,
+    promptHash: duskPrompt.hash,
   });
 
   const parsed = (dayResult.json && typeof dayResult.json === "object" ? dayResult.json : {}) as Record<
@@ -259,7 +262,7 @@ ${rosieText || "（没有）"}
 
   const factors = await listFactors(true);
   const factorResult = await callModel("dusk", {
-    system: DUSK_DAY_SYSTEM,
+    system: duskPrompt.body,
     input: `根据这一天的材料，判定每个 factor 的 value：1、0 或 null（未知）。不要猜。
 
 【factors】
@@ -274,6 +277,8 @@ ${notes.map((n) => n.text).join("\n")}
 日期 ${day}`,
     schema: FACTOR_SCHEMA,
     jobId,
+    promptKey: duskPrompt.key,
+    promptHash: duskPrompt.hash,
   });
   const judged = Array.isArray((factorResult.json as { factors?: unknown })?.factors)
     ? ((factorResult.json as { factors: Array<{ id?: string; value?: unknown; evidence_ids?: string[] }> }).factors ?? [])

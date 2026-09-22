@@ -7,8 +7,9 @@ import { EMPTY_MIND, type IndexItem, type Mind, type Note, type StoredMessage } 
 import { noteAsIndex } from "./voice/retrieve.ts";
 import { buildTail, buildVoiceMessages } from "./voice/pack-build.ts";
 import { buildArchivistInput } from "./archivist.ts";
-import { ARCHIVIST_SYSTEM } from "./voice/prompts.ts";
 import { buildReflectorInput, formatReflectConversation } from "./voice/reflector.ts";
+import { defaultPrompt } from "./prompts/catalog.ts";
+import { getPromptVersion } from "./prompts/store.ts";
 
 export type RebuildResult = {
   messages: Array<{ role: string; content: string }>;
@@ -32,27 +33,28 @@ function warnCode(code: string | null | undefined, warnings: string[]) {
   }
 }
 
-async function loadLog(opts: { turnSeq?: number; logId?: number; route?: string }): Promise<{
+type LoadedLog = {
   id: number;
   route: string | null;
   at: number;
   codeVersion: string | null;
   refs: Record<string, unknown> | null;
   outputRef: string | null;
-} | null> {
+  promptKey: string | null;
+  promptHash: string | null;
+  inputSystem: string | null;
+  inputUser: string | null;
+  outputText: string | null;
+  raw: string | null;
+};
+
+async function loadLog(opts: { turnSeq?: number; logId?: number; route?: string }): Promise<LoadedLog | null> {
   const db = await getSql();
   if (opts.logId) {
     const rows = await db.query<Record<string, unknown>>(`select * from brain_log where id = $1`, [opts.logId]);
     const r = rows[0];
     if (!r) return null;
-    return {
-      id: Number(r.id),
-      route: r.route ? String(r.route) : null,
-      at: Number(r.at) || 0,
-      codeVersion: r.code_version ? String(r.code_version) : null,
-      refs: asObj(typeof r.refs === "string" ? JSON.parse(String(r.refs)) : r.refs),
-      outputRef: r.output_ref ? String(r.output_ref) : null,
-    };
+    return mapLog(r);
   }
   if (opts.turnSeq != null) {
     const route = opts.route ?? "voice";
@@ -62,16 +64,42 @@ async function loadLog(opts: { turnSeq?: number; logId?: number; route?: string 
     );
     const r = rows[0];
     if (!r) return null;
-    return {
-      id: Number(r.id),
-      route: r.route ? String(r.route) : null,
-      at: Number(r.at) || 0,
-      codeVersion: r.code_version ? String(r.code_version) : null,
-      refs: asObj(typeof r.refs === "string" ? JSON.parse(String(r.refs)) : r.refs),
-      outputRef: r.output_ref ? String(r.output_ref) : null,
-    };
+    return mapLog(r);
   }
   return null;
+}
+
+function mapLog(r: Record<string, unknown>): LoadedLog {
+  return {
+    id: Number(r.id),
+    route: r.route ? String(r.route) : null,
+    at: Number(r.at) || 0,
+    codeVersion: r.code_version ? String(r.code_version) : null,
+    refs: asObj(typeof r.refs === "string" ? JSON.parse(String(r.refs)) : r.refs),
+    outputRef: r.output_ref ? String(r.output_ref) : null,
+    promptKey: r.prompt_key ? String(r.prompt_key) : null,
+    promptHash: r.prompt_hash ? String(r.prompt_hash) : null,
+    inputSystem: r.input_system ? String(r.input_system) : null,
+    inputUser: r.input_user ? String(r.input_user) : null,
+    outputText: r.output_text ? String(r.output_text) : null,
+    raw: r.raw ? String(r.raw) : null,
+  };
+}
+
+function storedPromptMessages(log: LoadedLog): RebuildResult | null {
+  const messages: Array<{ role: string; content: string }> = [];
+  if (log.inputSystem) messages.push({ role: "system", content: log.inputSystem });
+  if (log.inputUser) messages.push({ role: "user", content: log.inputUser });
+  if (!messages.length) return null;
+  return { messages, warnings: [] };
+}
+
+async function promptBody(hash: string | null, fallbackKey: "voice" | "reflect" | "archive"): Promise<string> {
+  if (hash) {
+    const body = await getPromptVersion(hash);
+    if (body) return body;
+  }
+  return defaultPrompt(fallbackKey);
 }
 
 async function loadTurn(turnSeq: number): Promise<Record<string, unknown> | null> {
@@ -181,12 +209,14 @@ export async function rebuildVoiceMessages(turnSeq: number): Promise<RebuildResu
     stale: Boolean(refs.mindStale),
     jump: Boolean(refs.jump),
   });
+  const voiceBody = await promptBody(log?.promptHash ?? null, "voice");
   const messages = buildVoiceMessages({
     charter: charter ?? "",
     longterm: block?.text ?? "",
     history,
     tail,
     userText: user?.text ?? "",
+    voiceTemplate: voiceBody,
   });
   return { messages, warnings };
 }
@@ -208,19 +238,22 @@ export async function rebuildReflectorInput(turnSeq: number): Promise<RebuildRes
   const oldMind = refs.oldMindTurnSeq ? await loadMindAt(refs.oldMindTurnSeq) : EMPTY_MIND;
   if (refs.oldMindTurnSeq && !oldMind) warnings.push("内心记录缺失");
   const tz = resolveTz(refs.timeZone);
-  const packed = buildReflectorInput({
-    charter: charter ?? "",
-    selfSummary: "",
-    bondSummary: "",
-    portrait: [],
-    themes: [],
-    findings: [],
-    coreIndex: [],
-    clock: refs.clockText,
-    relatedIndex,
-    oldMind: oldMind ?? EMPTY_MIND,
-    conversation: formatReflectConversation(recent, tz),
-  });
+  const packed = buildReflectorInput(
+    {
+      charter: charter ?? "",
+      selfSummary: "",
+      bondSummary: "",
+      portrait: [],
+      themes: [],
+      findings: [],
+      coreIndex: [],
+      clock: refs.clockText,
+      relatedIndex,
+      oldMind: oldMind ?? EMPTY_MIND,
+      conversation: formatReflectConversation(recent, tz),
+    },
+    await promptBody(log.promptHash, "reflect"),
+  );
   if (block?.text != null) packed.stable = block.text;
   return {
     messages: [
@@ -243,7 +276,7 @@ export async function rebuildArchiveInput(logId: number): Promise<RebuildResult>
   const candidates = await notesInOrder(refs.candidateNoteIds ?? [], t, warnings);
   return {
     messages: [
-      { role: "system", content: ARCHIVIST_SYSTEM },
+      { role: "system", content: await promptBody(log.promptHash, "archive") },
       { role: "user", content: buildArchivistInput(pending, candidates) },
     ],
     warnings,
@@ -259,5 +292,10 @@ export async function rebuildFromLog(row: {
   if (route === "voice" && row.turn_seq != null) return rebuildVoiceMessages(Number(row.turn_seq));
   if (route === "reflect" && row.turn_seq != null) return rebuildReflectorInput(Number(row.turn_seq));
   if (route === "archive" && row.id != null) return rebuildArchiveInput(Number(row.id));
+  if (row.id != null) {
+    const log = await loadLog({ logId: Number(row.id) });
+    if (!log) return null;
+    return storedPromptMessages(log);
+  }
   return null;
 }

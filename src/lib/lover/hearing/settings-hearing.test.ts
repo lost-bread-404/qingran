@@ -67,6 +67,24 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.doesNotMatch(src, /hearingNbest/);
 });
 
+test("settings prompts tab edits catalog steps and log expand shows assembled prompt", () => {
+  const src = readFileSync(new URL("../../../components/lover/settings-drawer.tsx", import.meta.url), "utf8");
+  assert.match(src, /\["prompts", "指令"\]/);
+  assert.match(src, /brainListPrompts/);
+  assert.match(src, /brainSavePrompt/);
+  assert.match(src, /brainRestorePrompt/);
+  assert.match(src, /恢复默认/);
+  assert.match(src, /\{system_prompt\}/);
+  assert.match(src, /brainGetCallLog/);
+  assert.match(src, /发给模型/);
+  assert.match(src, /loadCall/);
+  const api = readFileSync(new URL("../brain/api.ts", import.meta.url), "utf8");
+  assert.match(api, /brainListPrompts/);
+  assert.match(api, /brainSavePrompt/);
+  assert.match(api, /brainRestorePrompt/);
+  assert.match(api, /assembled/);
+});
+
 test("transcript pencil opens confirm in debug; bubble text is not a hidden confirm entry", () => {
   const src = readFileSync(new URL("../../../components/lover/transcript.tsx", import.meta.url), "utf8");
   assert.match(src, /onConfirmQuick/);
