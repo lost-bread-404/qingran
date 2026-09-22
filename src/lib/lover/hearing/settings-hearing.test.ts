@@ -99,20 +99,22 @@ test("confirm panel keeps 噪音 and optional note, drops acoustic chips", () =>
   assert.match(src, /source: !goldText \|\| goldText !== sttText\.trim\(\) \? "edited" : "confirmed"/);
 });
 
-test("transcript has 👎 below the reply, 24pt from play, both 44pt", () => {
+test("transcript has 差在哪 below the reply, 44pt targets, no thumbs-down", () => {
   const src = readFileSync(new URL("../../../components/lover/transcript.tsx", import.meta.url), "utf8");
   assert.match(src, /onConfirmQuick/);
   assert.match(src, /aria-label="确认正确"/);
   assert.match(src, /aria-label="打开标注"/);
-  assert.match(src, /aria-label="这条回复不好"/);
+  assert.match(src, /aria-label="差在哪"/);
   assert.match(src, /aria-label="这条回复好"/);
-  assert.match(src, /ThumbsDown/);
+  assert.doesNotMatch(src, /aria-label="这条回复不好"/);
+  assert.doesNotMatch(src, /ThumbsDown/);
   assert.match(src, /ThumbsUp/);
   assert.match(src, /aria-label="播放这句话"/);
-  const play = src.slice(src.indexOf('aria-label="播放这句话"'), src.indexOf('aria-label="这条回复不好"'));
-  const flag = src.slice(src.indexOf('aria-label="这条回复不好"'), src.indexOf("thinking ?"));
+  const play = src.slice(src.indexOf('aria-label="播放这句话"'), src.indexOf('aria-label="这条回复好"'));
+  const flag = src.slice(src.indexOf('aria-label="这条回复好"'), src.indexOf("thinking ?"));
   assert.match(play, /grid size-11/);
   assert.match(flag, /grid size-11/);
+  assert.match(flag, /min-h-11/);
   assert.match(src, /flex-col gap-6 self-start/);
   assert.match(src, /talkTrace/);
   assert.match(src, /formatTalkTrace/);
@@ -134,6 +136,10 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /replyId: reply.id/);
   assert.match(src, /patchHearingReplyId/);
   assert.match(src, /flagQingranReply/);
+  assert.match(src, /saveReplyFlag/);
+  assert.match(src, /rating: "up"/);
+  assert.match(src, /rating: "down"/);
+  assert.match(src, /tags: input.tags/);
   assert.match(src, /result.noiseOnly/);
   assert.match(src, /result.literalMismatch/);
   assert.match(src, /result.toneNote/);
@@ -199,6 +205,11 @@ test("lab scorecard keeps punctuation accuracy and drops tag stats", () => {
   assert.doesNotMatch(src, /formatEngineMix/);
   assert.match(src, /👎 列表/);
   assert.match(src, /exportReplyFlags/);
+  assert.match(src, /countReplyDownTags/);
+  assert.match(src, /按标签筛选/);
+  assert.match(src, /feedbackTag/);
+  assert.match(src, /row\.tags/);
+  assert.match(src, /这个标签还没有反馈/);
 });
 
 test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance", () => {
@@ -361,6 +372,12 @@ test("flag sheet can cancel without recording", () => {
   assert.match(cancelBtn, /取消/);
   assert.match(cancelBtn, /onClick=\{onClose\}/);
   assert.doesNotMatch(cancelBtn, /onSave/);
+  assert.match(src, /REPLY_DOWN_TAGS/);
+  assert.match(src, /差在哪/);
+  assert.match(src, /一行备注，可选/);
+  assert.match(src, /onSave\(\{ note: note.trim\(\), tags \}\)/);
+  assert.match(src, /tags.length === 0/);
+  assert.doesNotMatch(src, /rating\?:/);
 });
 
 test("hold-to-talk teardown releases the mic; call hangup does too; deafen does not", () => {

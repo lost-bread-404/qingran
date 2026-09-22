@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../../db.ts";
 import { gitCommitSha } from "../hearing/eval-meta.ts";
-import { listNotesByIds } from "./store.ts";
+import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
+import { listNotesByIds, fromPgArray, pgTextArray } from "./store.ts";
 import type { Mind } from "./types.ts";
 
 export const TRACE_FIELD_LIMIT = 100 * 1024;
@@ -277,6 +278,7 @@ export type TurnFeedbackRow = {
   messageId: string;
   rating: "up" | "down";
   note: string;
+  tags: ReplyDownTag[];
   createdAt: string;
   trace: TurnTraceRow | null;
 };
@@ -287,19 +289,20 @@ export async function insertTurnFeedback(input: {
   messageId: string;
   rating: "up" | "down";
   note: string;
+  tags?: readonly string[];
 }): Promise<void> {
   const db = await getSql();
   await db.query(
-    `insert into turn_feedback (id, turn_id, message_id, rating, note)
-     values ($1,$2,$3,$4,$5)`,
-    [input.id, input.turnId ?? null, input.messageId, input.rating, input.note],
+    `insert into turn_feedback (id, turn_id, message_id, rating, note, tags)
+     values ($1,$2,$3,$4,$5,$6::text[])`,
+    [input.id, input.turnId ?? null, input.messageId, input.rating, input.note, pgTextArray(clampReplyDownTags(input.tags))],
   );
 }
 
 export async function listTurnFeedback(limit = 200): Promise<TurnFeedbackRow[]> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
-    `select f.id, f.turn_id, f.message_id, f.rating, f.note,
+    `select f.id, f.turn_id, f.message_id, f.rating, f.note, f.tags,
             f.created_at::text as created_at,
             t.user_msg_id, t.turn_seq, t.created_at::text as trace_created_at,
             t.retrieve, t.reflector, t.live, t.reply, t.commit_sha, t.truncated
@@ -315,6 +318,7 @@ export async function listTurnFeedback(limit = 200): Promise<TurnFeedbackRow[]> 
     messageId: String(r.message_id),
     rating: r.rating === "up" ? "up" : "down",
     note: String(r.note ?? ""),
+    tags: clampReplyDownTags(fromPgArray(r.tags)),
     createdAt: String(r.created_at ?? ""),
     trace: r.retrieve != null || r.reflector != null || r.live != null || r.reply != null || r.turn_id
       ? {

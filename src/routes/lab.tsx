@@ -37,6 +37,7 @@ import { CONFUSION_MIN_COUNT } from "@/lib/lover/hearing/confusions";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
 import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/score";
 import type { AcousticTags } from "@/lib/lover/hearing/tags";
+import { countReplyDownTags, type ReplyDownTag } from "@/lib/lover/reply-feedback";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/lab")({ component: HearingLabPage });
@@ -143,6 +144,11 @@ function HearingLabPage() {
   const [importBusy, setImportBusy] = useState(false);
   const [feedbackRows, setFeedbackRows] = useState<TurnFeedbackRow[]>([]);
   const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null);
+  const [feedbackTag, setFeedbackTag] = useState<ReplyDownTag | null>(null);
+  const tagCounts = countReplyDownTags(feedbackRows);
+  const shownFeedback = feedbackTag
+    ? feedbackRows.filter((row) => row.tags.includes(feedbackTag))
+    : feedbackRows;
 
   async function loadFlags(secret = password) {
     try {
@@ -342,7 +348,9 @@ function HearingLabPage() {
                 : "读取数据库…"
               : labTab === "memory"
                 ? `${storyNotes.length} 条笔记 · ${storyPortrait.length} 条画像`
-                : `${feedbackRows.length} 条 👍/👎`}
+                : feedbackTag
+                  ? `${shownFeedback.length} 条 · ${feedbackTag}`
+                  : `${feedbackRows.length} 条反馈`}
             {score?.dbSource && labTab === "hearing" ? ` · ${score.dbSource}` : ""}
           </p>
         </div>
@@ -671,6 +679,7 @@ function HearingLabPage() {
                     <p className="text-xs text-subtle">{row.createdAt}</p>
                     <p className="mt-1 text-sm">你 {row.triggerText || "（空）"}</p>
                     <p className="text-sm text-muted">清然 {row.replyText || "（空）"}</p>
+                    {row.tags.length ? <p className="mt-1 text-xs text-subtle">{row.tags.join(" · ")}</p> : null}
                     {row.note ? <p className="mt-1 text-sm">备注 {row.note}</p> : null}
                   </li>
                 ))}
@@ -825,13 +834,44 @@ function HearingLabPage() {
           ) : (
             <>
               <section>
-                <p className="mb-2 font-display text-lg">👍 / 👎</p>
+                <p className="mb-2 font-display text-lg">反馈</p>
                 <p className="mb-3 text-xs text-subtle">
-                  {feedbackRows.length ? `${feedbackRows.length} 条。点开看这一轮检索、内心和回复。` : "还没有反馈。"}
+                  {feedbackRows.length
+                    ? "按标签筛选。点开看这一轮检索、内心和回复。"
+                    : "还没有反馈。"}
                 </p>
                 {feedbackRows.length ? (
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      aria-pressed={feedbackTag == null}
+                      onClick={() => setFeedbackTag(null)}
+                      className={cn(
+                        "min-h-11 rounded-md px-3 text-sm",
+                        feedbackTag == null ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                      )}
+                    >
+                      全部 {feedbackRows.length}
+                    </button>
+                    {tagCounts.map(({ tag, n }) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        aria-pressed={feedbackTag === tag}
+                        onClick={() => setFeedbackTag(feedbackTag === tag ? null : tag)}
+                        className={cn(
+                          "min-h-11 rounded-md px-3 text-sm",
+                          feedbackTag === tag ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                        )}
+                      >
+                        {tag} {n}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {shownFeedback.length ? (
                   <ul className="flex flex-col gap-3">
-                    {feedbackRows.map((row) => {
+                    {shownFeedback.map((row) => {
                       const open = feedbackOpen === row.id;
                       const replyText =
                         row.trace && row.trace.reply && typeof row.trace.reply === "object"
@@ -856,7 +896,12 @@ function HearingLabPage() {
                             onClick={() => setFeedbackOpen(open ? null : row.id)}
                           >
                             <p className="text-xs text-subtle">
-                              {row.rating === "up" ? "👍" : "👎"} · {row.createdAt}
+                              {row.rating === "up"
+                                ? "👍"
+                                : row.tags.length
+                                  ? row.tags.join(" · ")
+                                  : "差"}{" "}
+                              · {row.createdAt}
                               {row.turnId ? ` · ${row.turnId.slice(0, 8)}` : ""}
                             </p>
                             {row.note ? <p className="mt-1 text-sm">{row.note}</p> : null}
@@ -891,6 +936,8 @@ function HearingLabPage() {
                       );
                     })}
                   </ul>
+                ) : feedbackRows.length ? (
+                  <p className="text-sm text-subtle">这个标签还没有反馈。</p>
                 ) : null}
                 <div className="mt-3">
                   <Button

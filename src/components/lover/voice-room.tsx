@@ -145,7 +145,6 @@ export function VoiceRoom() {
     replyTo?: string;
     trigger: string;
     reply: string;
-    rating: "up" | "down";
   } | null>(null);
   const [flagBusy, setFlagBusy] = useState(false);
   const [flagError, setFlagError] = useState<string | null>(null);
@@ -1019,6 +1018,42 @@ export function VoiceRoom() {
     }
   }
 
+  async function saveReplyFlag(input: {
+    messageId: string;
+    replyTo?: string;
+    note: string;
+    rating: "up" | "down";
+    tags: string[];
+  }): Promise<boolean> {
+    setFlagBusy(true);
+    setFlagError(null);
+    try {
+      const result = await flagQingranReply({
+        data: {
+          messageId: input.messageId,
+          replyToMessageId: input.replyTo,
+          note: input.note,
+          rating: input.rating,
+          tags: input.tags,
+        },
+      });
+      if (!result.ok) {
+        if (input.rating === "up") setBanner(result.error);
+        else setFlagError(result.error);
+        return false;
+      }
+      if (input.rating === "down") setFlagTarget(null);
+      return true;
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      if (input.rating === "up") setBanner(text);
+      else setFlagError(text);
+      return false;
+    } finally {
+      setFlagBusy(false);
+    }
+  }
+
   function interruptQingran() {
     const plan = planInterruptQingran({
       speakingOrThinking: status === "speaking" || status === "thinking",
@@ -1239,6 +1274,17 @@ export function VoiceRoom() {
               onUndoConfirm={(id) => void undoConfirm(id)}
               undoConfirmId={undoConfirmId}
               onFlagReply={(assistantId, replyToId, rating) => {
+                if (rating === "up") {
+                  if (flagBusy) return;
+                  void saveReplyFlag({
+                    messageId: assistantId,
+                    replyTo: replyToId,
+                    note: "",
+                    rating: "up",
+                    tags: [],
+                  });
+                  return;
+                }
                 const reply = chatRef.current.find((m) => m.id === assistantId);
                 const trigger = replyToId ? chatRef.current.find((m) => m.id === replyToId) : undefined;
                 setFlagError(null);
@@ -1247,7 +1293,6 @@ export function VoiceRoom() {
                   replyTo: replyToId,
                   trigger: trigger?.text ?? "",
                   reply: reply?.text ?? "",
-                  rating: rating === "up" ? "up" : "down",
                 });
               }}
             />
@@ -1339,34 +1384,19 @@ export function VoiceRoom() {
           replyText={flagTarget?.reply}
           busy={flagBusy}
           error={flagError}
-          rating={flagTarget?.rating ?? "down"}
           onClose={() => {
             setFlagTarget(null);
             setFlagError(null);
           }}
-          onSave={async (note) => {
+          onSave={async ({ note, tags }) => {
             if (!flagTarget) return;
-            setFlagBusy(true);
-            setFlagError(null);
-            try {
-              const result = await flagQingranReply({
-                data: {
-                  messageId: flagTarget.messageId,
-                  replyToMessageId: flagTarget.replyTo,
-                  note,
-                  rating: flagTarget.rating,
-                },
-              });
-              if (!result.ok) {
-                setFlagError(result.error);
-                return;
-              }
-              setFlagTarget(null);
-            } catch (err) {
-              setFlagError(err instanceof Error ? err.message : String(err));
-            } finally {
-              setFlagBusy(false);
-            }
+            await saveReplyFlag({
+              messageId: flagTarget.messageId,
+              replyTo: flagTarget.replyTo,
+              note,
+              rating: "down",
+              tags,
+            });
           }}
         />
 

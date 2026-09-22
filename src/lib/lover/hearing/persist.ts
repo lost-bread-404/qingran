@@ -24,6 +24,8 @@ import {
   type TagKey,
 } from "./tags.ts";
 import { mergeKeyterms } from "./context.ts";
+import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
+import { fromPgArray, pgTextArray } from "../brain/store.ts";
 
 export type Sql = {
   <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
@@ -647,6 +649,7 @@ export type ReplyFlagRow = {
   messageId: string;
   replyToMessageId: string | null;
   note: string;
+  tags: ReplyDownTag[];
   createdAt: string;
   commitSha: string | null;
   promptHash: string | null;
@@ -665,13 +668,14 @@ export async function insertReplyFlag(
     promptHash?: string | null;
     rating?: "up" | "down";
     turnId?: string | null;
+    tags?: readonly string[];
   },
 ) {
   await sql.query(
     `insert into qingran_reply_flags (
-      id, message_id, reply_to_message_id, note, commit_sha, prompt_hash, rating, turn_id
+      id, message_id, reply_to_message_id, note, commit_sha, prompt_hash, rating, turn_id, tags
     )
-    values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9::text[])`,
     [
       input.id,
       input.messageId,
@@ -681,6 +685,7 @@ export async function insertReplyFlag(
       input.promptHash ?? null,
       input.rating ?? "down",
       input.turnId ?? null,
+      pgTextArray(clampReplyDownTags(input.tags)),
     ],
   );
 }
@@ -691,13 +696,14 @@ export async function listReplyFlagRows(sql: Sql): Promise<ReplyFlagRow[]> {
     message_id: string;
     reply_to_message_id: string | null;
     note: string | null;
+    tags: unknown;
     created_at: string;
     commit_sha: string | null;
     prompt_hash: string | null;
     trigger_text: string | null;
     reply_text: string | null;
   }>(
-    `select f.id, f.message_id, f.reply_to_message_id, f.note,
+    `select f.id, f.message_id, f.reply_to_message_id, f.note, f.tags,
             f.created_at::text as created_at, f.commit_sha, f.prompt_hash,
             t.body as trigger_text, r.body as reply_text
      from qingran_reply_flags f
@@ -712,6 +718,7 @@ export async function listReplyFlagRows(sql: Sql): Promise<ReplyFlagRow[]> {
     messageId: row.message_id,
     replyToMessageId: row.reply_to_message_id,
     note: row.note ?? "",
+    tags: clampReplyDownTags(fromPgArray(row.tags)),
     createdAt: row.created_at,
     commitSha: row.commit_sha,
     promptHash: row.prompt_hash,
@@ -731,6 +738,7 @@ export function exportReplyFlagDataset(rows: ReplyFlagRow[]) {
       triggerText: row.triggerText,
       replyText: row.replyText,
       note: row.note,
+      tags: row.tags,
       createdAt: row.createdAt,
       commitSha: row.commitSha,
       promptHash: row.promptHash,

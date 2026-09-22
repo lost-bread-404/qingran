@@ -611,6 +611,7 @@ export const flagQingranReply = createServerFn({ method: "POST" })
       replyToMessageId?: string | null;
       note: string;
       rating?: "up" | "down";
+      tags?: string[];
     }) => input,
   )
   .handler(async ({ data }) => {
@@ -623,6 +624,8 @@ export const flagQingranReply = createServerFn({ method: "POST" })
       const stored = typeof raw === "string" ? (safeJson(raw) as { systemPrompt?: string } | null) : raw;
       const rating = data.rating === "up" ? "up" : "down";
       const id = newId();
+      const { clampReplyDownTags } = await import("../reply-feedback.ts");
+      const tags = rating === "up" ? [] : clampReplyDownTags(data.tags);
       await insertReplyFlag(sql, {
         id,
         messageId: data.messageId,
@@ -632,6 +635,7 @@ export const flagQingranReply = createServerFn({ method: "POST" })
         promptHash: hashQingranPrompt(stored?.systemPrompt || ""),
         rating,
         turnId: data.messageId,
+        tags,
       });
       const { insertTurnFeedback } = await import("../brain/turn-trace.ts");
       await insertTurnFeedback({
@@ -640,6 +644,7 @@ export const flagQingranReply = createServerFn({ method: "POST" })
         messageId: data.messageId,
         rating,
         note: data.note.trim().slice(0, 200),
+        tags,
       });
       return { ok: true as const };
     } catch (err) {

@@ -263,16 +263,19 @@ test("PGLite e2e: predicted tags, tags_touched gold, ✓ keeps tags, reply flags
     note: "答非所问",
     commitSha: "abc123",
     promptHash: "deadbeefcafe",
+    tags: ["没懂我", "空话", "胡说"],
   });
   const flags = await listReplyFlagRows(sql);
   assert.equal(flags.length, 1);
   assert.equal(flags[0]?.triggerText, "在吗");
   assert.equal(flags[0]?.replyText, "嗯，在。");
   assert.equal(flags[0]?.note, "答非所问");
+  assert.deepEqual(flags[0]?.tags, ["没懂我", "空话"]);
   const exported = exportReplyFlagDataset(flags);
   assert.equal(exported.kind, "qingran-prompt-eval");
   assert.equal(exported.flags[0]?.triggerText, "在吗");
   assert.equal(exported.flags[0]?.promptHash, "deadbeefcafe");
+  assert.deepEqual(exported.flags[0]?.tags, ["没懂我", "空话"]);
 });
 
 test("PGLite e2e: empty gold is labeled no-speech, not a fallback to STT", async () => {
@@ -672,5 +675,19 @@ test("0015 confusions migration is additive", async () => {
   assert.match(sql, /stt_corrections/);
   assert.doesNotMatch(sql, /drop column/i);
   assert.doesNotMatch(sql, /alter column/i);
+});
+
+test("0020 turn_feedback tags migration is additive", async () => {
+  const sql = await readFile(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../../migrations/0020_turn_feedback_tags.sql"),
+    "utf8",
+  );
+  assert.match(sql, /alter table turn_feedback/);
+  assert.match(sql, /add column if not exists tags text\[\]/);
+  assert.match(sql, /qingran_reply_flags/);
+  assert.doesNotMatch(sql, /drop column/i);
+  assert.doesNotMatch(sql, /alter column/i);
+  assert.doesNotMatch(sql, /\bupdate\b/i);
+  assert.doesNotMatch(sql, /\bdelete\b/i);
 });
 

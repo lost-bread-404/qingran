@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Pencil, ThumbsDown, ThumbsUp, Volume2 } from "lucide-react";
+import { Check, ChevronDown, Pencil, ThumbsUp, Volume2 } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -222,11 +222,11 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                     </button>
                     <button
                       type="button"
-                      aria-label="这条回复不好"
+                      aria-label="差在哪"
                       onClick={() => onFlagReply(pair.assistant!.id, pair.user?.id ?? pair.assistant!.replyTo, "down")}
-                      className="grid size-11 place-items-center text-subtle transition-colors duration-150 hover:text-fg"
+                      className="min-h-11 rounded-md px-3 text-sm text-subtle transition-colors duration-150 hover:text-fg"
                     >
-                      <ThumbsDown className="size-4" />
+                      差在哪
                     </button>
                   </div>
                 ) : null}
