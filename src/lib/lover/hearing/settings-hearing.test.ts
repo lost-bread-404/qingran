@@ -22,6 +22,11 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.match(src, /让她忘掉最近还没记住的对话？已经记住的事和故事线不受影响。/);
   assert.match(src, /clearArmed/);
   assert.match(src, /确定清空/);
+  assert.match(src, /logFailFirstLine/);
+  assert.match(src, /logFinishReason/);
+  assert.match(src, /\.slice\(0, 1000\)/);
+  assert.match(src, />finish_reason</);
+  assert.match(src, />input_chars</);
   assert.doesNotMatch(src, /定向录制/);
   assert.doesNotMatch(src, /hearingNbest/);
 });

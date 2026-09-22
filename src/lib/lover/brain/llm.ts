@@ -13,7 +13,20 @@ import { checkSpend, recordLlmSpend } from "./spend/check.ts";
 import { jobRateHit, SPEND_RATE_ERR } from "./spend/rate.ts";
 import { codeVersion, HIGH_FREQ_ROUTES, maybeWriteRawLog, xaiStoreEnabled } from "./log-refs.ts";
 
-export { extractJson };
+export function finishReasonFromApi(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const choice = Array.isArray(o.choices) ? (o.choices[0] as Record<string, unknown> | undefined) : undefined;
+  if (typeof choice?.finish_reason === "string" && choice.finish_reason) return choice.finish_reason;
+  if (typeof o.finish_reason === "string" && o.finish_reason) return o.finish_reason;
+  const inc =
+    o.incomplete_details && typeof o.incomplete_details === "object"
+      ? (o.incomplete_details as { reason?: unknown }).reason
+      : undefined;
+  if (typeof inc === "string" && inc) return inc;
+  if (typeof o.status === "string" && o.status) return o.status;
+  return null;
+}
 
 export type JsonSchema = {
   name: string;
@@ -286,6 +299,8 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     const usageRaw = (raw && typeof raw === "object" ? (raw as { usage?: unknown }).usage : null) ?? null;
     const usage = parseUsage(usageRaw);
     const settled = settleLlmCost(resolved.model, usage, input.system + joinedUser(input), text);
+    const finish = finishReasonFromApi(raw);
+    const failNote = res.ok ? null : `http_error ${res.status} ${responseSnippet(raw)}`;
     const logId = await appendBrainLog({
       ...baseLog,
       step: `${route}:${resolved.model}`,
@@ -293,7 +308,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       ms,
       inputChars: inputCharsOf(input),
       raw: text.slice(0, 4000),
-      note: res.ok ? null : `http_error ${res.status} ${responseSnippet(raw)}`,
+      note: failNote ?? (finish ? `finish_reason=${finish}` : null),
       outputText: skipOutput ? null : text,
       tokensIn: usage.tokensIn ?? settled.tokensIn ?? null,
       tokensCached: usage.tokensCached,
@@ -301,7 +316,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       tokensReasoning: usage.tokensReasoning,
       costUsd: settled.usd,
       costUsdEst: settled.usdEst,
-      error: res.ok ? null : `http_error ${res.status} ${responseSnippet(raw)}`,
+      error: failNote,
     });
     await maybeWriteRawLog(logId, { system: input.system, user: userPartsOf(input) });
     await recordLlmSpend({

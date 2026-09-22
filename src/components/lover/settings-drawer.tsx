@@ -619,21 +619,80 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
             {log.length === 0 ? (
               <p className="text-sm text-subtle">还没有调用记录。</p>
             ) : (
-              log.map((row) => (
-                <div key={row.id} className="rounded-md bg-surface-2 px-3 py-2 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={row.ok ? "text-fg" : "text-live"}>{row.step}</span>
-                    <span className="text-subtle">{row.ms != null ? `${row.ms}ms` : ""}</span>
-                  </div>
-                  {row.note ? <p className="mt-1 text-subtle">{row.note}</p> : null}
-                </div>
-              ))
+              log.map((row) => {
+                const failLine = row.ok ? "" : logFailFirstLine(row);
+                return (
+                  <details key={row.id} className="rounded-md bg-surface-2 px-3 py-2 text-xs">
+                    <summary className="cursor-pointer">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={row.ok ? "text-fg" : "text-live"}>{row.step}</span>
+                        <span className="text-subtle">{row.ms != null ? `${row.ms}ms` : ""}</span>
+                      </div>
+                      {failLine ? <p className="mt-1 text-live">{failLine}</p> : null}
+                    </summary>
+                    <dl className="mt-2 flex flex-col gap-1.5 text-subtle">
+                      <div>
+                        <dt className="text-[10px] uppercase tracking-wide">note</dt>
+                        <dd className="mt-0.5 whitespace-pre-wrap break-all">{row.note || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-[10px] uppercase tracking-wide">raw</dt>
+                        <dd className="mt-0.5 whitespace-pre-wrap break-all">
+                          {(row.raw ?? "").slice(0, 1000) || "—"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[10px] uppercase tracking-wide">finish_reason</dt>
+                        <dd className="mt-0.5 break-all">{logFinishReason(row) || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-[10px] uppercase tracking-wide">input_chars</dt>
+                        <dd className="mt-0.5">{row.inputChars ?? "—"}</dd>
+                      </div>
+                    </dl>
+                  </details>
+                );
+              })
             )}
           </div>
         </div>
       )}
     </div>
   );
+}
+
+function logFailFirstLine(row: BrainLogRow): string {
+  const src = (row.error || row.note || "").trim();
+  if (!src) return "";
+  return src.split(/\r?\n/, 1)[0] ?? "";
+}
+
+function logFinishReason(row: BrainLogRow): string {
+  const blob = `${row.note ?? ""}\n${row.error ?? ""}`;
+  const tagged = blob.match(/finish_reason[=:]([^\s]+)/i);
+  if (tagged?.[1]) return tagged[1];
+  const raw = row.raw?.trim();
+  if (raw && (raw.startsWith("{") || raw.startsWith("["))) {
+    try {
+      const j = JSON.parse(raw) as Record<string, unknown>;
+      const choice = Array.isArray(j.choices) ? (j.choices[0] as Record<string, unknown> | undefined) : undefined;
+      const inc =
+        j.incomplete_details && typeof j.incomplete_details === "object"
+          ? (j.incomplete_details as { reason?: unknown }).reason
+          : undefined;
+      const v =
+        (typeof j.finish_reason === "string" && j.finish_reason) ||
+        (typeof j.finishReason === "string" && j.finishReason) ||
+        (typeof choice?.finish_reason === "string" && choice.finish_reason) ||
+        (typeof inc === "string" && inc) ||
+        (typeof j.status === "string" && j.status) ||
+        "";
+      return v;
+    } catch {
+      return "";
+    }
+  }
+  return "";
 }
 
 function MindRow({ label, value }: { label: string; value: string }) {

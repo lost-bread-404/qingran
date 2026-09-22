@@ -19,6 +19,7 @@ export async function recordVoiceTurn(opts: {
   userMsgId: string;
   localDay: string;
   ttsChars?: number;
+  finishReason?: string | null;
 }): Promise<number | null> {
   const usage: TokenUsage =
     opts.usage && typeof opts.usage === "object" && "tokensIn" in (opts.usage as object)
@@ -34,6 +35,7 @@ export async function recordVoiceTurn(opts: {
     ms: opts.totalMs,
     inputChars: inputText.length,
     raw: opts.display.slice(0, 4000),
+    note: opts.finishReason ? `finish_reason=${opts.finishReason}` : null,
     route: "voice",
     model: opts.model,
     turnSeq: opts.userCreatedAt,

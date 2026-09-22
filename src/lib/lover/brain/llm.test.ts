@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { extractJson } from "./text.ts";
-import { classifyReflectFailure, type CallModelResult } from "./llm.ts";
+import { classifyReflectFailure, finishReasonFromApi, type CallModelResult } from "./llm.ts";
 
 test("extractJson handles fences, wrappers, and arrays", () => {
   assert.equal(extractJson('{"a":1}'), '{"a":1}');
@@ -34,4 +34,11 @@ test("classifyReflectFailure splits timeout, http_error, parse_error", () => {
   );
   assert.equal(classifyReflectFailure({ ...base, failKind: "parse_error" }), "parse_error");
   assert.equal(classifyReflectFailure(base), "parse_error");
+});
+
+test("finishReasonFromApi reads chat, responses status, and incomplete reason", () => {
+  assert.equal(finishReasonFromApi({ choices: [{ finish_reason: "stop" }] }), "stop");
+  assert.equal(finishReasonFromApi({ status: "completed" }), "completed");
+  assert.equal(finishReasonFromApi({ incomplete_details: { reason: "max_output_tokens" } }), "max_output_tokens");
+  assert.equal(finishReasonFromApi(null), null);
 });

@@ -168,6 +168,7 @@ export const Route = createFileRoute("/api/talk")({
                 userMsgId,
                 localDay: localDay(userCreatedAt, timeZone),
                 ttsChars: streamResult.ttsChars,
+                finishReason: streamResult.finishReason,
               });
               const selectedIds = [...ctx.pickedIds, ...ctx.queryIds];
               await recordTurnTrace({
