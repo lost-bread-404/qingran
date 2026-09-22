@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { now } from "./clock.ts";
 import { enqueue, runJobsNow } from "./jobs.ts";
-import { LONG_DRAIN_MS } from "./config.ts";
+import { LONG_DRAIN_MS, listVoiceCatalog } from "./config.ts";
 import { runInBackground } from "./wait-until.ts";
 import {
   bumpNotesVersion,
@@ -35,6 +35,7 @@ import {
   upsertNote,
   upsertPortrait,
   listJobStatus,
+  voiceModelStatsLast7d,
 } from "./store.ts";
 import type { JobType, Lens, Note, Subject } from "./types.ts";
 import { askDiary } from "./diary/ask.ts";
@@ -216,6 +217,23 @@ export const brainSaveNote = createServerFn({ method: "POST" })
     await bumpNotesVersion();
     return { ok: true as const, note };
   });
+
+export const brainListVoiceModels = createServerFn({ method: "GET" }).handler(async () => {
+  const [models, stats] = await Promise.all([
+    listVoiceCatalog(process.env.XAI_API_KEY),
+    voiceModelStatsLast7d().catch(() => []),
+  ]);
+  const byModel = new Map(stats.map((row) => [row.model, row]));
+  return {
+    models: models.map((model) => ({
+      id: model.id,
+      blurb: model.blurb,
+      supportsEffort: model.supportsEffort,
+      stats: byModel.get(model.id) ?? null,
+    })),
+    stats,
+  };
+});
 
 export const brainGetLongLayer = createServerFn({ method: "GET" }).handler(async () => {
   const [portrait, meta, mind, log] = await Promise.all([

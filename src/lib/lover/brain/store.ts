@@ -1612,6 +1612,69 @@ export async function patchBrainLog(
   }
 }
 
+export type VoiceModelStats = {
+  model: string;
+  n: number;
+  avgMs: number | null;
+  avgTtftMs: number | null;
+  emptyRate: number | null;
+};
+
+function meanNums(values: number[]): number | null {
+  if (!values.length) return null;
+  return values.reduce((sum, n) => sum + n, 0) / values.length;
+}
+
+function parseLogTtftMs(note: string | null): number | null {
+  if (!note) return null;
+  const m = note.match(/ttft_ms=(\d+)/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function isEmptyVoiceLog(row: { ok: boolean; note: string | null; error: string | null }): boolean {
+  if (row.ok) return false;
+  return /空回复|\bempty\b/.test(`${row.note ?? ""}\n${row.error ?? ""}`);
+}
+
+export async function voiceModelStatsLast7d(): Promise<VoiceModelStats[]> {
+  const db = await getSql();
+  const since = now() - 7 * 86_400_000;
+  const rows = await db.query<{
+    model: string | null;
+    ms: unknown;
+    ok: unknown;
+    note: string | null;
+    error: string | null;
+  }>(`select model, ms, ok, note, error from brain_log where route = $1 and at >= $2`, ["voice", since]);
+  const by = new Map<string, { n: number; ms: number[]; ttft: number[]; empty: number }>();
+  for (const row of rows) {
+    const model = (row.model ?? "").trim();
+    if (!model) continue;
+    let g = by.get(model);
+    if (!g) {
+      g = { n: 0, ms: [], ttft: [], empty: 0 };
+      by.set(model, g);
+    }
+    g.n += 1;
+    const ms = asIntOrNull(row.ms);
+    if (ms != null) g.ms.push(ms);
+    const ttft = parseLogTtftMs(row.note);
+    if (ttft != null) g.ttft.push(ttft);
+    if (isEmptyVoiceLog({ ok: asBool(row.ok), note: row.note, error: row.error })) g.empty += 1;
+  }
+  return [...by.entries()]
+    .map(([model, g]) => ({
+      model,
+      n: g.n,
+      avgMs: meanNums(g.ms),
+      avgTtftMs: meanNums(g.ttft),
+      emptyRate: g.n ? g.empty / g.n : null,
+    }))
+    .sort((a, b) => b.n - a.n || a.model.localeCompare(b.model));
+}
+
 export async function listBrainLog(limit = 50): Promise<BrainLogRow[]> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>("select * from brain_log order by at desc, id desc limit $1", [limit]);

@@ -1,5 +1,13 @@
 # 模型更换记录
 
+## 2026-09-22 Voice：设置「回复模型」改为从 xAI `/v1/models` 拉列表
+
+- **原因**：不再写死三个选项。设置 → 高级「回复模型」显示当前可用聊天模型，选择后下一句立刻生效。
+- **列表**：服务端 `GET https://api.x.ai/v1/models`，缓存 1 小时；只留聊天类，排除 grok-build / imagine / voice 等。已知模型说明写在 `VOICE_MODEL_BLURBS`，新模型显示「暂无说明」。
+- **实测**：每个选项旁显示该模型近 7 天 `brain_log`（voice 路由）：平均耗时、首字耗时、空回复率、调用次数；没用过显示「未使用」。
+- **思考强度**：支持推理的模型额外可选 low / medium / high，默认 low。
+- **兜底**：所选模型报错或空回复时，仍用 `grok-4.20-0309-non-reasoning` 重试一次（`brain_log` 记 `model_fallback`）。
+
 ## 2026-09-22 Voice：REALTIME `grok-4.20-0309-non-reasoning` → `grok-4.3` effort=low
 
 - **原因**：实时回复改走有思考的 4.3，设置 → 听力 → 高级可切 `grok-4.3 low` / `grok-4.3 medium` / `grok-4.20-0309-non-reasoning`，下一句立刻生效。

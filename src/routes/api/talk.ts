@@ -114,7 +114,7 @@ export const Route = createFileRoute("/api/talk")({
               let firstAudioMs: number | null = null;
               let interrupted = false;
               tVoice = Date.now();
-              const primary = resolveVoiceChat(profile.voiceChat);
+              const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
               const safety = voiceSafetyPick();
               const fallback = await runVoiceWithFallback(
                 { text, parts: ctx.parts, replyId, voiceSpeed: profile.voiceSpeed, primary, safety },

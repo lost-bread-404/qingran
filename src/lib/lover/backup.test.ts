@@ -110,3 +110,16 @@ test("round-trips interrupted assistant replies", () => {
 test("backup filename is a dated json", () => {
   assert.match(backupFilename(Date.UTC(2026, 8, 16)), /^qingran-backup-\d{8}\.json$/);
 });
+
+test("migrates legacy voiceChat into voiceModel and voiceEffort", () => {
+  assert.equal(lockedProfile({ voiceChat: "4.3-low" }).voiceModel, "grok-4.3");
+  assert.equal(lockedProfile({ voiceChat: "4.3-low" }).voiceEffort, "low");
+  assert.equal(lockedProfile({ voiceChat: "4.3-medium" }).voiceModel, "grok-4.3");
+  assert.equal(lockedProfile({ voiceChat: "4.3-medium" }).voiceEffort, "medium");
+  assert.equal(lockedProfile({ voiceChat: "4.20" }).voiceModel, "grok-4.20-0309-non-reasoning");
+  assert.equal(lockedProfile({ voiceChat: "4.20" }).voiceEffort, null);
+  assert.equal(lockedProfile({ voiceModel: "grok-4.5", voiceEffort: "high" }).voiceModel, "grok-4.5");
+  assert.equal(lockedProfile({ voiceModel: "grok-4.5", voiceEffort: "high" }).voiceEffort, "high");
+  assert.equal(lockedProfile().voiceModel, "grok-4.3");
+  assert.equal(lockedProfile().voiceEffort, "low");
+});

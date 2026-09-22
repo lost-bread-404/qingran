@@ -5,19 +5,16 @@ import { isSilenceMs, SILENCE_MS, type SilenceMs } from "./vad.ts";
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "steer" | "setting" | "unheard";
-export type VoiceChatId = "4.3-low" | "4.3-medium" | "4.20";
+export type VoiceEffort = "low" | "medium" | "high" | null;
 
 export const CONTEXT_WINDOW = 40;
 
-export const VOICE_CHAT_OPTIONS: { id: VoiceChatId; label: string }[] = [
-  { id: "4.3-low", label: "grok-4.3 low" },
-  { id: "4.3-medium", label: "grok-4.3 medium" },
-  { id: "4.20", label: "grok-4.20-0309-non-reasoning" },
-];
-export const DEFAULT_VOICE_CHAT: VoiceChatId = "4.3-low";
+export const DEFAULT_VOICE_MODEL = "grok-4.3";
+export const DEFAULT_VOICE_EFFORT: VoiceEffort = "low";
+export const VOICE_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
 
-export function isVoiceChatId(value: unknown): value is VoiceChatId {
-  return value === "4.3-low" || value === "4.3-medium" || value === "4.20";
+export function isVoiceEffort(value: unknown): value is Exclude<VoiceEffort, null> {
+  return value === "low" || value === "medium" || value === "high";
 }
 
 export type Profile = {
@@ -30,7 +27,8 @@ export type Profile = {
   captureAudio: boolean;
   debugHearing: boolean;
   hearingNbest: boolean;
-  voiceChat: VoiceChatId;
+  voiceModel: string;
+  voiceEffort: VoiceEffort;
   silenceMs: SilenceMs;
 };
 
@@ -96,7 +94,8 @@ export const DEFAULT_PROFILE: Profile = {
   captureAudio: true,
   debugHearing: true,
   hearingNbest: false,
-  voiceChat: DEFAULT_VOICE_CHAT,
+  voiceModel: DEFAULT_VOICE_MODEL,
+  voiceEffort: DEFAULT_VOICE_EFFORT,
   silenceMs: SILENCE_MS,
 };
 
@@ -119,6 +118,8 @@ type LooseProfile = Partial<Profile> & {
   debugHearing?: boolean;
   hearingNbest?: boolean;
   voiceChat?: string;
+  voiceModel?: string;
+  voiceEffort?: string | null;
   silenceMs?: number;
 };
 
@@ -136,7 +137,8 @@ export function lockedProfile(input?: unknown): Profile {
     debugHearing: raw.debugHearing !== false,
     captureAudio: raw.debugHearing !== false,
     hearingNbest: Boolean(raw.hearingNbest),
-    voiceChat: isVoiceChatId(raw.voiceChat) ? raw.voiceChat : DEFAULT_VOICE_CHAT,
+    voiceModel: pickVoiceModel(raw),
+    voiceEffort: pickVoiceEffort(raw),
     silenceMs: isSilenceMs(raw.silenceMs) ? raw.silenceMs : SILENCE_MS,
   };
 }
@@ -154,6 +156,24 @@ function pickVoiceSpeed(raw: LooseProfile) {
   }
   if (raw.softVoice) return 0.92;
   return 1;
+}
+
+function pickVoiceModel(raw: LooseProfile): string {
+  if (typeof raw.voiceModel === "string" && raw.voiceModel.trim()) return raw.voiceModel.trim().slice(0, 80);
+  if (raw.voiceChat === "4.20") return "grok-4.20-0309-non-reasoning";
+  if (raw.voiceChat === "4.3-medium" || raw.voiceChat === "4.3-low") return "grok-4.3";
+  return DEFAULT_VOICE_MODEL;
+}
+
+function pickVoiceEffort(raw: LooseProfile): VoiceEffort {
+  if (isVoiceEffort(raw.voiceEffort)) return raw.voiceEffort;
+  if (raw.voiceEffort === null) return null;
+  if (raw.voiceChat === "4.20") return null;
+  if (raw.voiceChat === "4.3-medium") return "medium";
+  if (typeof raw.voiceModel === "string" && /non-reasoning/i.test(raw.voiceModel) && !isVoiceEffort(raw.voiceEffort)) {
+    return null;
+  }
+  return DEFAULT_VOICE_EFFORT;
 }
 
 function pickSystemPrompt(input?: LooseProfile | null): string {

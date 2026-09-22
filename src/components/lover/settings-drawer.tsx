@@ -18,17 +18,74 @@ import {
   brainSaveLongLayer,
   brainSaveNote,
   brainGetDbSize,
+  brainListVoiceModels,
 } from "@/lib/lover/brain/api";
 import type { BrainLogRow, Mind, Note, PortraitRow, Subject } from "@/lib/lover/brain/types";
 import { parseVoiceInputCharsLine } from "@/lib/lover/brain/voice/pack-build";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/lover/memory";
 import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
-import { DEFAULT_SYSTEM_PROMPT, VOICE_CHAT_OPTIONS, type Profile, type VoiceChatId } from "@/lib/lover/types";
+import { DEFAULT_SYSTEM_PROMPT, VOICE_EFFORT_OPTIONS, isVoiceEffort, type Profile, type VoiceEffort } from "@/lib/lover/types";
 import { SILENCE_MS_OPTIONS, type SilenceMs } from "@/lib/lover/vad";
 import { cn } from "@/lib/utils";
 
 type Tab = "prompt" | "notes" | "portrait" | "mind" | "log" | "hearing";
+
+type VoiceModelStat = {
+  model: string;
+  n: number;
+  avgMs: number | null;
+  avgTtftMs: number | null;
+  emptyRate: number | null;
+};
+
+type VoiceModelOption = {
+  id: string;
+  blurb: string;
+  supportsEffort: boolean;
+  stats: VoiceModelStat | null;
+};
+
+function formatVoiceMs(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  return `${Math.round(ms)}ms`;
+}
+
+function formatEmptyRate(rate: number | null): string {
+  if (rate == null || !Number.isFinite(rate)) return "—";
+  const pct = rate * 100;
+  return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
+}
+
+function formatVoiceStats(stats: VoiceModelStat | null): string {
+  if (!stats || stats.n <= 0) return "未使用";
+  return `近7天 平均 ${formatVoiceMs(stats.avgMs)} · 首字 ${formatVoiceMs(stats.avgTtftMs)} · 空回复 ${formatEmptyRate(stats.emptyRate)} · ${stats.n} 次`;
+}
+
+function effortForModel(model: VoiceModelOption, current: VoiceEffort): VoiceEffort {
+  if (!model.supportsEffort) return null;
+  return isVoiceEffort(current) ? current : "low";
+}
+
+function withSelectedVoiceModel(
+  models: VoiceModelOption[],
+  stats: VoiceModelStat[],
+  selected: string,
+): VoiceModelOption[] {
+  const byStats = new Map(stats.map((row) => [row.model, row]));
+  const list = models.some((model) => model.id === selected)
+    ? models
+    : [
+        {
+          id: selected,
+          blurb: "暂无说明",
+          supportsEffort: !/non-reasoning/i.test(selected),
+          stats: null,
+        },
+        ...models,
+      ];
+  return list.map((model) => ({ ...model, stats: model.stats ?? byStats.get(model.id) ?? null }));
+}
 
 type Props = {
   open: boolean;
@@ -65,7 +122,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [newBody, setNewBody] = useState("");
   const [dbWarn, setDbWarn] = useState(false);
   const [clearArmed, setClearArmed] = useState(false);
-  const [voiceChat, setVoiceChat] = useState<VoiceChatId>(profile.voiceChat);
+  const [voiceModel, setVoiceModel] = useState(profile.voiceModel);
+  const [voiceEffort, setVoiceEffort] = useState<VoiceEffort>(profile.voiceEffort);
+  const [voiceModels, setVoiceModels] = useState<VoiceModelOption[] | null>(null);
+  const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
   const [silenceMs, setSilenceMs] = useState<SilenceMs>(profile.silenceMs);
   const viewport = useVisualViewportHeight(open);
 
@@ -74,7 +134,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setDraft(profile.systemPrompt);
     setHearingProvider(profile.hearingProvider);
     setDebugHearing(profile.debugHearing);
-    setVoiceChat(profile.voiceChat);
+    setVoiceModel(profile.voiceModel);
+    setVoiceEffort(profile.voiceEffort);
     setSilenceMs(profile.silenceMs);
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setTab("prompt");
@@ -83,6 +144,15 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setNewAt(toDatetimeLocal(Date.now()));
     setClearArmed(false);
     void refresh();
+    void brainListVoiceModels()
+      .then((res) => {
+        setVoiceModels(res.models);
+        setVoiceStats(res.stats ?? []);
+      })
+      .catch(() => {
+        setVoiceModels([]);
+        setVoiceStats([]);
+      });
   }, [open, profile.systemPrompt]);
 
   useEffect(() => {
@@ -109,19 +179,31 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       .catch(() => setDbWarn(false));
   }
 
+  function persistProfile(patch: Partial<Profile>) {
+    onSave({
+      ...profile,
+      systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
+      hearingProvider,
+      captureAudio: debugHearing,
+      debugHearing,
+      voiceModel,
+      voiceEffort,
+      silenceMs,
+      ...patch,
+    });
+  }
+
+  function persistVoice(nextModel: string, nextEffort: VoiceEffort) {
+    setVoiceModel(nextModel);
+    setVoiceEffort(nextEffort);
+    persistProfile({ voiceModel: nextModel, voiceEffort: nextEffort });
+  }
+
   function savePrompt() {
     const ready = providerReady?.[hearingProvider];
     const fallback = HEARING_PROVIDERS.find((id) => providerReady?.[id]) ?? "xai";
     const nextProvider = ready === false ? fallback : hearingProvider;
-    onSave({
-      ...profile,
-      systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
-      hearingProvider: nextProvider,
-      captureAudio: debugHearing,
-      debugHearing,
-      voiceChat,
-      silenceMs,
-    });
+    persistProfile({ hearingProvider: nextProvider });
     onOpenChange(false);
   }
 
@@ -541,32 +623,60 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
               <div className="mt-3 flex flex-col gap-4">
                 <div>
                   <p className="mb-2 text-sm">回复模型</p>
-                  <p className="mb-2 text-xs text-subtle">实时对话用。切换后下一句立刻生效。grok-4.3 失败或空回复会自动用 4.20 再试一次。</p>
+                  <p className="mb-2 text-xs text-subtle">
+                    实时对话用。切换后下一句立刻生效。报错或空回复会自动用 grok-4.20-0309-non-reasoning 再试一次。
+                  </p>
+                  {voiceModels == null ? (
+                    <p className="mb-2 text-xs text-subtle">正在拉取模型列表…</p>
+                  ) : null}
                   <div className="flex flex-col gap-2">
-                    {VOICE_CHAT_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => {
-                          setVoiceChat(opt.id);
-                          onSave({
-                            ...profile,
-                            systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
-                            hearingProvider,
-                            captureAudio: debugHearing,
-                            debugHearing,
-                            voiceChat: opt.id,
-                            silenceMs,
-                          });
-                        }}
-                        className={cn(
-                          "min-h-11 rounded-md px-3 py-3 text-left text-sm",
-                          voiceChat === opt.id ? "bg-accent text-accent-fg" : "bg-bg text-muted",
-                        )}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
+                    {withSelectedVoiceModel(voiceModels ?? [], voiceStats, voiceModel).map((opt) => {
+                      const selected = voiceModel === opt.id;
+                      return (
+                        <div
+                          key={opt.id}
+                          className={cn(
+                            "rounded-md px-3 py-3",
+                            selected ? "bg-accent text-accent-fg" : "bg-bg text-muted",
+                          )}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => persistVoice(opt.id, effortForModel(opt, voiceEffort))}
+                            className="min-h-11 w-full text-left text-sm"
+                          >
+                            <span className="block font-medium">{opt.id}</span>
+                            <span className={cn("mt-1 block text-xs", selected ? "opacity-90" : "text-subtle")}>
+                              {opt.blurb}
+                            </span>
+                            <span className={cn("mt-1 block text-[11px]", selected ? "opacity-80" : "text-subtle")}>
+                              {formatVoiceStats(opt.stats)}
+                            </span>
+                          </button>
+                          {opt.supportsEffort ? (
+                            <div className="mt-2 grid grid-cols-3 gap-1">
+                              {VOICE_EFFORT_OPTIONS.map((effort) => (
+                                <button
+                                  key={effort}
+                                  type="button"
+                                  onClick={() => persistVoice(opt.id, effort)}
+                                  className={cn(
+                                    "min-h-11 rounded-md px-2 text-xs",
+                                    selected && voiceEffort === effort
+                                      ? "bg-bg text-fg"
+                                      : selected
+                                        ? "bg-black/10"
+                                        : "bg-surface-2",
+                                  )}
+                                >
+                                  {effort}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
                 <div>
@@ -609,15 +719,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                         type="button"
                         onClick={() => {
                           setSilenceMs(ms);
-                          onSave({
-                            ...profile,
-                            systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
-                            hearingProvider,
-                            captureAudio: debugHearing,
-                            debugHearing,
-                            voiceChat,
-                            silenceMs: ms,
-                          });
+                          persistProfile({ silenceMs: ms });
                         }}
                         className={cn(
                           "min-h-11 rounded-md px-3 py-3 text-sm",

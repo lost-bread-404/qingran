@@ -44,6 +44,12 @@ export const MODEL_CAPS: Record<
     structuredOutput: true,
     contextTokens: 1_000_000,
   },
+  "grok-4.7": {
+    efforts: ["low", "medium", "high"],
+    functionCalling: true,
+    structuredOutput: true,
+    contextTokens: 500_000,
+  },
   "grok-4.20-0309-non-reasoning": {
     efforts: [null],
     functionCalling: true,
@@ -139,6 +145,7 @@ export const LOCK_SLACK_MS = 30_000;
 export const MODEL_PRICES: Record<string, { input: number; cached: number; output: number }> = {
   "grok-4.6": { input: 2, cached: 0.5, output: 6 },
   "grok-4.5": { input: 2, cached: 0.3, output: 6 },
+  "grok-4.7": { input: 2, cached: 0.3, output: 6 },
   "grok-4.3": { input: 1.25, cached: 0.2, output: 2.5 },
   "grok-4.20-0309-non-reasoning": { input: 1.25, cached: 0.2, output: 2.5 },
   "grok-4.20-0309-reasoning": { input: 1.25, cached: 0.2, output: 2.5 },
@@ -221,15 +228,91 @@ export type VoiceModelPick = {
   timeoutMs: number;
 };
 
-export function resolveVoiceChat(id?: string | null): VoiceModelPick {
+export const VOICE_EFFORTS = ["low", "medium", "high"] as const;
+export type VoiceUiEffort = (typeof VOICE_EFFORTS)[number];
+
+export const UNKNOWN_VOICE_MODEL_BLURB = "暂无说明";
+export const VOICE_MODELS_TTL_MS = 60 * 60 * 1000;
+
+/** Known chat models shown in Settings → Advanced. Unknown API models use UNKNOWN_VOICE_MODEL_BLURB. */
+export const VOICE_MODEL_BLURBS: Record<string, string> = {
+  "grok-4.20-0309-non-reasoning": "不思考、首字最快、便宜；理解最浅",
+  "grok-4.20-0309-reasoning": "同价，先想再答；上一代",
+  "grok-4.3": "同价，思考强度可调；Reflector 在用",
+  "grok-4.5": "更聪明，价格约 1.6–2.4 倍，默认思考强度高、较慢",
+  "grok-4.6": "官方称最聪明也最快，价格同 4.5",
+  "grok-4.7": "最新旗舰，价格同 4.5",
+};
+
+const VOICE_MODEL_ORDER = [
+  "grok-4.7",
+  "grok-4.6",
+  "grok-4.5",
+  "grok-4.3",
+  "grok-4.20-0309-reasoning",
+  "grok-4.20-0309-non-reasoning",
+];
+
+export function voiceModelBlurb(id: string): string {
+  return VOICE_MODEL_BLURBS[id] ?? UNKNOWN_VOICE_MODEL_BLURB;
+}
+
+export function isVoiceChatModelId(id: string): boolean {
+  const lower = id.trim().toLowerCase();
+  if (!lower) return false;
+  if (lower.includes("build") || lower.includes("imagine") || lower.includes("voice")) return false;
+  if (lower.includes("image") || lower.includes("tts") || lower.includes("stt")) return false;
+  if (lower.includes("embedding") || lower.includes("rerank") || lower.includes("moderation")) return false;
+  return true;
+}
+
+export function voiceEffortsFor(model: string): Effort[] {
+  const caps = MODEL_CAPS[model];
+  if (caps) return caps.efforts;
+  if (/non-reasoning/i.test(model)) return [null];
+  return ["low", "medium", "high"];
+}
+
+export function voiceSupportsUiEffort(model: string): boolean {
+  return voiceEffortsFor(model).some((e) => e === "low" || e === "medium" || e === "high");
+}
+
+export function clampVoiceEffort(model: string, effort?: string | null): Effort {
+  const allowed = voiceEffortsFor(model);
+  if (effort === "low" || effort === "medium" || effort === "high" || effort === "none" || effort === "xhigh" || effort === null) {
+    if (allowed.includes(effort)) return effort;
+  }
+  if (allowed.includes("low")) return "low";
+  return allowed[0] ?? null;
+}
+
+export function voiceTimeoutMs(effort: Effort): number {
+  if (effort === "high" || effort === "xhigh") return 120_000;
+  if (effort === "medium") return 90_000;
+  if (effort == null || effort === "none") return 28_000;
+  return 60_000;
+}
+
+function resolveLegacyVoiceChat(id?: string | null): VoiceModelPick | null {
   if (id === "4.3-medium") {
     return { model: MODEL_CLASSES.FAST_THINKER.model, effort: "medium", timeoutMs: 90_000 };
   }
   if (id === "4.20") {
     return { model: MODEL_CLASSES.REALTIME.model, effort: null, timeoutMs: 28_000 };
   }
-  const voice = resolveRoute("voice");
-  return { model: voice.model, effort: voice.effort ?? "low", timeoutMs: voice.timeoutMs };
+  if (id === "4.3-low") {
+    const voice = resolveRoute("voice");
+    return { model: voice.model, effort: voice.effort ?? "low", timeoutMs: voice.timeoutMs };
+  }
+  return null;
+}
+
+export function resolveVoiceChat(model?: string | null, effort?: string | null): VoiceModelPick {
+  const legacy = resolveLegacyVoiceChat(model);
+  if (legacy) return legacy;
+  const id = (model ?? "").trim() || MODEL_CLASSES.FAST_THINKER.model;
+  const nextEffort = clampVoiceEffort(id, effort);
+  return { model: id, effort: nextEffort, timeoutMs: voiceTimeoutMs(nextEffort) };
 }
 
 export function voiceSafetyPick(): VoiceModelPick {
@@ -335,4 +418,91 @@ export async function checkModelAvailability(apiKey: string | undefined): Promis
 
 export function resetAvailabilityForTests() {
   availability = { checked: false, unavailable: new Set() };
+}
+
+export type VoiceCatalogModel = {
+  id: string;
+  blurb: string;
+  efforts: Effort[];
+  supportsEffort: boolean;
+};
+
+type XaiModelRow = {
+  id?: string;
+  completion_text_token_price?: number;
+  image_price?: number;
+};
+
+type VoiceCatalogCache = { at: number; models: VoiceCatalogModel[] };
+
+let voiceCatalog: VoiceCatalogCache | null = null;
+let voiceCatalogInflight: Promise<VoiceCatalogModel[]> | null = null;
+
+function sortVoiceModelIds(ids: string[]): string[] {
+  const rank = (id: string) => {
+    const i = VOICE_MODEL_ORDER.indexOf(id);
+    return i >= 0 ? i : 1000;
+  };
+  return [...new Set(ids)].sort((a, b) => rank(a) - rank(b) || b.localeCompare(a));
+}
+
+function catalogFromIds(ids: string[]): VoiceCatalogModel[] {
+  return sortVoiceModelIds(ids).map((id) => {
+    const efforts = voiceEffortsFor(id);
+    return {
+      id,
+      blurb: voiceModelBlurb(id),
+      efforts,
+      supportsEffort: voiceSupportsUiEffort(id),
+    };
+  });
+}
+
+function fallbackVoiceCatalog(): VoiceCatalogModel[] {
+  return catalogFromIds(Object.keys(VOICE_MODEL_BLURBS));
+}
+
+function isChatModelRow(row: XaiModelRow): boolean {
+  const id = (row.id ?? "").trim();
+  if (!isVoiceChatModelId(id)) return false;
+  if (row.image_price != null && row.completion_text_token_price == null) return false;
+  return true;
+}
+
+export async function listVoiceCatalog(apiKey?: string): Promise<VoiceCatalogModel[]> {
+  if (voiceCatalog && Date.now() - voiceCatalog.at < VOICE_MODELS_TTL_MS) return voiceCatalog.models;
+  if (voiceCatalogInflight) return voiceCatalogInflight;
+  voiceCatalogInflight = (async () => {
+    const fallback = fallbackVoiceCatalog();
+    if (!apiKey) {
+      voiceCatalog = { at: Date.now(), models: fallback };
+      return fallback;
+    }
+    try {
+      const res = await fetch("https://api.x.ai/v1/models", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!res.ok) {
+        voiceCatalog = { at: Date.now(), models: fallback };
+        return fallback;
+      }
+      const body = (await res.json()) as { data?: XaiModelRow[] };
+      const ids = (body.data ?? []).filter(isChatModelRow).map((row) => String(row.id).trim());
+      const models = ids.length ? catalogFromIds(ids) : fallback;
+      voiceCatalog = { at: Date.now(), models };
+      return models;
+    } catch {
+      voiceCatalog = { at: Date.now(), models: fallback };
+      return fallback;
+    }
+  })().finally(() => {
+    voiceCatalogInflight = null;
+  });
+  return voiceCatalogInflight;
+}
+
+export function resetVoiceCatalogForTests() {
+  voiceCatalog = null;
+  voiceCatalogInflight = null;
 }
