@@ -46,3 +46,15 @@ test("remember overflow consolidate expose their placeholders", () => {
   assert.match(defaultPrompt("overflow"), /\{overflow\}/);
   assert.match(defaultPrompt("consolidate"), /\{clock\}/);
 });
+
+test("reflect archive portrait defaults close the memory loop", () => {
+  assert.match(defaultPrompt("reflect"), /宁可空着/);
+  assert.match(defaultPrompt("reflect"), /不要延续上一刻的计划/);
+  assert.match(defaultPrompt("reflect"), /必须用中文/);
+  assert.match(defaultPrompt("archive"), /清然承诺/);
+  assert.match(defaultPrompt("archive"), /同一承诺不重复记录/);
+  assert.match(defaultPrompt("portrait"), /稳定理解/);
+  assert.match(defaultPrompt("portrait"), /意思相近的主题合并/);
+  const voice = PROMPT_CATALOG.find((s) => s.key === "voice");
+  assert.ok(voice?.placeholders.some((p) => p.token === "mind"));
+});

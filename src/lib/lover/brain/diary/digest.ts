@@ -34,7 +34,7 @@ export type DailyDigestData = {
     self: string;
     bond: string;
     mindCount: number;
-    lastLeadPlan: string[];
+    lastInsight: string;
   };
   system: {
     jobs: Array<{ type: string; status: string; ms: number | null; error: string | null }>;
@@ -80,7 +80,7 @@ function md(data: DailyDigestData): string {
   lines.push(`## 清然`);
   if (data.qingran.self) lines.push(`自己：${data.qingran.self}`);
   if (data.qingran.bond) lines.push(`我们：${data.qingran.bond}`);
-  if (data.qingran.lastLeadPlan.length) lines.push(`带她：${data.qingran.lastLeadPlan.join(" → ")}`);
+  if (data.qingran.lastInsight) lines.push(`洞察：${data.qingran.lastInsight}`);
   lines.push("");
   lines.push(`## 系统`);
   const cost = Object.values(data.system.routes).reduce((s, r) => s + r.cost, 0);
@@ -208,10 +208,10 @@ export async function writeDailyDigest(day: string): Promise<void> {
     const b = Array.isArray(t.fallback_ids) ? t.fallback_ids.length : 0;
     return a + b;
   });
-  const lastLead =
+  const lastInsight =
     lastMind[0]?.data && typeof lastMind[0].data === "object"
-      ? ((lastMind[0].data as { lead_plan?: string[] }).lead_plan ?? [])
-      : [];
+      ? String((lastMind[0].data as { insight?: unknown }).insight ?? "").trim()
+      : "";
 
   const data: DailyDigestData = {
     day,
@@ -247,7 +247,7 @@ export async function writeDailyDigest(day: string): Promise<void> {
       self: meta.selfSummary,
       bond: meta.bondSummary,
       mindCount: Number(minds[0]?.n) || 0,
-      lastLeadPlan: Array.isArray(lastLead) ? lastLead : [],
+      lastInsight,
     },
     system: {
       jobs: jobs.map((j) => ({

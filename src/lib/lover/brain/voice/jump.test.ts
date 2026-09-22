@@ -16,14 +16,14 @@ test("topicJump cold-starts when mind is empty", () => {
   assert.equal(r.jump, false);
 });
 
-test("topicJump cold-starts when B is empty even if mind has other fields", () => {
-  const r = topicJump("今晚想吃火锅然后去看电影", mind({ my_feel: "心疼", my_view: "要睡" }));
+test("topicJump cold-starts when insight is empty even if mind has a turn", () => {
+  const r = topicJump("今晚想吃火锅然后去看电影", mind({ turn_seq: 1 }));
   assert.equal(r.score, 1);
   assert.equal(r.jump, false);
 });
 
 test("topicJump cold-starts when the utterance has fewer than 4 tokens", () => {
-  const r = topicJump("嗯", mind({ rosie_now: "她在写论文写不下去", threads: ["论文"], intent: "让她先睡" }));
+  const r = topicJump("嗯", mind({ insight: "她在写论文写不下去，其实是怕自己不够好" }));
   assert.equal(r.score, 1);
   assert.equal(r.jump, false);
 });
@@ -32,11 +32,7 @@ test("topicJump is true when this utterance barely overlaps the old mind", () =>
   const r = topicJump(
     "今晚想吃火锅然后去看那部新电影",
     mind({
-      rosie_now: "她论文还是一个字都没写",
-      undercurrent: "她其实是怕自己不够好",
-      threads: ["论文", "Citadel面试"],
-      lead_plan: ["今晚让她早点睡"],
-      intent: "把她拉去睡觉",
+      insight: "她论文还是一个字都没写，其实是怕自己不够好。Citadel 面试也压着她。",
     }),
   );
   assert.ok(r.score < 0.12, `score=${r.score}`);
@@ -47,11 +43,7 @@ test("topicJump is false when this utterance is still the same topic", () => {
   const r = topicJump(
     "论文还是一个字都没写，今晚先睡吧",
     mind({
-      rosie_now: "她论文还是一个字都没写",
-      undercurrent: "她其实是怕自己不够好",
-      threads: ["论文"],
-      lead_plan: ["今晚让她早点睡"],
-      intent: "把她拉去睡觉",
+      insight: "她论文还是一个字都没写，其实是怕自己不够好，今晚该先睡。",
     }),
   );
   assert.ok(r.score >= 0.12, `score=${r.score}`);

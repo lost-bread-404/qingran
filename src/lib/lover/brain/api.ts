@@ -236,6 +236,8 @@ export const brainListVoiceModels = createServerFn({ method: "GET" }).handler(as
 });
 
 export const brainGetLongLayer = createServerFn({ method: "GET" }).handler(async () => {
+  const { ensureMemoryHygiene } = await import("./memory-hygiene.ts");
+  await ensureMemoryHygiene();
   const [portrait, meta, mind, log] = await Promise.all([
     listPortrait(),
     getMeta(),
@@ -244,6 +246,27 @@ export const brainGetLongLayer = createServerFn({ method: "GET" }).handler(async
   ]);
   return { portrait, self: meta.selfSummary, bond: meta.bondSummary, mind, log };
 });
+
+export const brainListHygieneNotes = createServerFn({ method: "GET" }).handler(async () => {
+  const { listQingranSelfNotes } = await import("./memory-hygiene.ts");
+  const rows = await listQingranSelfNotes();
+  return rows.map((n) => ({
+    id: n.id,
+    text: n.text,
+    subject: n.subject,
+    localDay: n.localDay,
+  }));
+});
+
+export const brainDeleteHygieneNotes = createServerFn({ method: "POST" })
+  .validator((input: { ids: string[] }) => input)
+  .handler(async ({ data }) => {
+    const { deleteNotesByIds, listQingranSelfNotes } = await import("./memory-hygiene.ts");
+    const allowed = new Set((await listQingranSelfNotes()).map((n) => n.id));
+    const ids = data.ids.filter((id) => allowed.has(id));
+    const n = await deleteNotesByIds(ids);
+    return { ok: true as const, n };
+  });
 
 export const brainListLogs = createServerFn({ method: "POST" })
   .validator(

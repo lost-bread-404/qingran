@@ -127,16 +127,7 @@ async function mockReply(name: string, input: string): Promise<unknown> {
     const last = [...input.matchAll(/Rosie[^：:\n]*[：:]\s*(.+)/g)].pop()?.[1] ?? "";
     const ids = [...input.matchAll(/^([\w:-]+)\|/gm)].map((m) => m[1]).slice(0, 3);
     return {
-      rosie_now: `她刚说：${last.slice(0, 40)}`,
-      undercurrent: "她其实是怕自己不够好",
-      reading: [{ guess: "面试压力让她睡不着", conf: 0.6 }],
-      soft_spot: "嘴上说躺，其实一直惦记着论文",
-      my_feel: "心疼，想把她拉回来",
-      my_view: "熬夜换不来安全感，睡够了才打得好周五这一仗",
-      my_logic: "拖延和熬夜都跟面试焦虑有关 → 根在害怕被评价 → 先稳住睡眠，再陪她拆题",
-      lead_plan: ["今晚让她 1 点前睡", "明天陪她过一道最怕的题"],
-      intent: "温柔但坚定地让她放下手机",
-      threads: ["周五 Citadel 面试"],
+      insight: last ? "她把累说成懒，其实是怕自己不够好" : "",
       memory_ids: ids,
     };
   }
@@ -269,9 +260,7 @@ async function main() {
       show("slow path 执行的 job 数", ran);
       const mind = await S.getMind();
       show("Reflector 写入的 mind", {
-        rosie_now: mind.rosie_now,
-        lead_plan: mind.lead_plan,
-        intent: mind.intent,
+        insight: mind.insight,
         memory_ids: mind.memory_ids,
       });
       (result.turns as unknown[]).push({
@@ -283,11 +272,8 @@ async function main() {
         mindStale: ctx.mindStale,
       });
       if (i === 4) {
-        if (/\n这一句：/.test(tail?.content ?? "") || /她刚说：嘴里长溃疡/.test(tail?.content ?? "")) {
-          failures.push("1.5 cross-session tail still contains intent/rosie_now");
-        }
-        if (!/你上次的内心/.test(tail?.content ?? "")) {
-          failures.push("1.5 stale mind title missing");
+        if (/【内心】/.test(tail?.content ?? "")) {
+          failures.push("1.5 stale insight was injected");
         }
       }
     }

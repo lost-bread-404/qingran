@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { INDEX_CORE_MAX, INDEX_RELATED_MAX } from "../config.ts";
 import { EMPTY_MIND, type IndexItem, type Mind, type PortraitRow, type Theme } from "../types.ts";
-import { validateMind } from "../mind-parse.ts";
+import { coerceMind, validateMind } from "../mind-parse.ts";
 import { assembleRelatedIndex, resolveCoreIndex } from "./retrieve.ts";
 import { buildReflectorInput } from "./reflector.ts";
 
@@ -48,10 +48,7 @@ const theme = (id: string, name: string): Theme => ({
 function pack(over: Partial<Parameters<typeof buildReflectorInput>[0]> = {}) {
   const mind: Mind = {
     ...EMPTY_MIND,
-    rosie_now: "她有点累",
-    intent: "今晚让她早点睡",
-    lead_plan: ["先让她靠过来"],
-    threads: ["论文"],
+    insight: "她怕自己不够好",
   };
   return buildReflectorInput({
     charter: "你就是清然。",
@@ -72,45 +69,49 @@ function pack(over: Partial<Parameters<typeof buildReflectorInput>[0]> = {}) {
   });
 }
 
-test("validateMind fills missing fields from previous mind", () => {
-  const prev = {
-    ...EMPTY_MIND,
-    rosie_now: "她有点累",
-    lead_plan: ["先让她靠过来"],
-    intent: "把声音放轻",
-    memory_ids: ["old"],
-  };
+test("validateMind keeps insight and drops unknown memory ids", () => {
   const next = validateMind(
-    { intent: "今晚带她去洗澡", memory_ids: ["n1", "ghost"] },
-    prev,
+    { insight: "她其实一直在怕被丢掉", memory_ids: ["n1", "ghost"] },
+    { ...EMPTY_MIND, insight: "旧的" },
     new Set(["n1"]),
   );
-  assert.equal(next.rosie_now, "她有点累");
-  assert.deepEqual(next.lead_plan, ["先让她靠过来"]);
-  assert.equal(next.intent, "今晚带她去洗澡");
+  assert.equal(next.insight, "她其实一直在怕被丢掉");
   assert.deepEqual(next.memory_ids, ["n1"]);
-  assert.deepEqual(next.recent_intents, ["今晚带她去洗澡"]);
 });
 
-test("conf is clamped and lead_plan empty keeps old", () => {
+test("empty insight clears the mind instead of filling from previous", () => {
   const next = validateMind(
-    {
-      reading: [{ guess: "想被哄", conf: 4 }, { guess: "", conf: 0.2 }],
-      lead_plan: [],
-      rosie_now: "x".repeat(200),
-    },
-    { ...EMPTY_MIND, lead_plan: ["旧计划"] },
+    { insight: "  ", memory_ids: [] },
+    { ...EMPTY_MIND, insight: "旧洞察" },
     new Set(),
   );
-  assert.equal(next.reading[0]!.conf, 1);
-  assert.equal(next.reading.length, 1);
-  assert.deepEqual(next.lead_plan, ["旧计划"]);
-  assert.ok(next.rosie_now.length <= 80);
+  assert.equal(next.insight, "");
+  assert.deepEqual(next.memory_ids, []);
+});
+
+test("validateMind clips insight without ellipsis", () => {
+  const next = validateMind({ insight: "她其实一直在怕被丢掉。".repeat(200), memory_ids: [] }, EMPTY_MIND, new Set());
+  assert.ok(next.insight.length <= 1200);
+  assert.doesNotMatch(next.insight, /…/);
+});
+
+test("coerceMind keeps insight and drops leftover fields from old rows", () => {
+  const mind = coerceMind(
+    { insight: "深层", memory_ids: ["n1"], rosie_now: "表面", intent: "接话" },
+    3,
+    9,
+  );
+  assert.equal(mind.insight, "深层");
+  assert.deepEqual(mind.memory_ids, ["n1"]);
+  assert.equal(mind.turn_seq, 3);
+  assert.equal(mind.updated_at, 9);
+  assert.equal("rosie_now" in mind, false);
+  assert.equal("intent" in mind, false);
 });
 
 test("same day same notes: A and B byte-identical, C changes", () => {
-  const a = pack({ clock: "2026/9/14周一 23:10", conversation: "Rosie：第一句", oldMind: { ...EMPTY_MIND, intent: "a" } });
-  const b = pack({ clock: "2026/9/14周一 23:40", conversation: "Rosie：第二句", oldMind: { ...EMPTY_MIND, intent: "b" } });
+  const a = pack({ clock: "2026/9/14周一 23:10", conversation: "Rosie：第一句", oldMind: { ...EMPTY_MIND, insight: "a" } });
+  const b = pack({ clock: "2026/9/14周一 23:40", conversation: "Rosie：第二句", oldMind: { ...EMPTY_MIND, insight: "b" } });
   assert.equal(a.system, b.system);
   assert.equal(a.stable, b.stable);
   assert.notEqual(a.turn, b.turn);
@@ -120,13 +121,16 @@ test("A and B omit clock, old mind, and recent conversation", () => {
   const p = pack();
   for (const s of [p.system, p.stable]) {
     assert.equal(s.includes("2026/9/14周一 23:10"), false);
-    assert.equal(s.includes("今晚让她早点睡"), false);
+    assert.equal(s.includes("她怕自己不够好"), false);
     assert.equal(s.includes("Rosie：又到十一点了"), false);
     assert.equal(s.includes("turn_seq"), false);
   }
   assert.match(p.turn, /2026\/9\/14周一 23:10/);
-  assert.match(p.turn, /今晚让她早点睡/);
+  assert.match(p.turn, /她怕自己不够好/);
   assert.match(p.turn, /Rosie：又到十一点了/);
+  assert.match(p.turn, /没有深层洞察时 insight 必须是空字符串/);
+  assert.match(p.system, /不要延续上一刻的计划/);
+  assert.match(p.system, /宁可空着/);
 });
 
 test("portrait themes findings core index sort is deterministic", () => {

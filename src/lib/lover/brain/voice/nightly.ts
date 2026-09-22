@@ -12,6 +12,8 @@ import {
 } from "../store.ts";
 import { clipChars } from "../time.ts";
 import { newId } from "../../storage.ts";
+import { similar } from "../text.ts";
+import { isQingranBehaviorRecap, DROP_PORTRAIT_TOPICS } from "../memory-hygiene.ts";
 import { fillTemplate } from "../prompts/fill.ts";
 import { loadPrompt } from "../prompts/store.ts";
 
@@ -52,12 +54,14 @@ export async function updatePortraitSelfBond(day: string, jobId?: string): Promi
   const oldPortrait = await listPortrait();
   const meta = await getMeta();
   const qingranNotes = relevant.filter((n) => n.subject === "qingran");
+  const rosieNotes = relevant.filter((n) => n.subject === "rosie" || (n.subject === "us" && n.fromRosie));
   const loaded = await loadPrompt("portrait");
   const charter = await getProfilePrompt();
 
   const result = await callModel("portrait", {
     system: fillTemplate(loaded.body, { system_prompt: charter }),
     input: `输出 portrait_ops（按自由 topic upsert，evidence_ids 必须是存在的笔记 id）、self_summary（≤300字，第一人称，只依据清然笔记和旧 summary，不编造重大经历）、bond_summary（≤200字：称呼、梗、共同时刻、未兑现约定）。
+先对照旧主题，意思相近的合并，不要新开。只写 Rosie 的稳定理解。不要写清然最近做了什么。
 
 【旧的我眼中的她】
 ${oldPortrait.map((p) => `${p.id}|${p.topic}|${p.body}`).join("\n") || "（没有）"}
@@ -68,11 +72,11 @@ ${meta.selfSummary || "（没有）"}
 【旧的我们】
 ${meta.bondSummary || "（没有）"}
 
-【清然自己的笔记】
+【清然自己的笔记】（只用于 self_summary）
 ${qingranNotes.map((n) => `${n.id}|${n.text}`).join("\n") || "（没有）"}
 
-【当天笔记】
-${relevant.map((n) => `${n.id}|${n.subject}|${n.text}`).join("\n") || "（没有）"}`,
+【关于 Rosie 的笔记】
+${rosieNotes.map((n) => `${n.id}|${n.subject}|${n.text}`).join("\n") || "（没有）"}`,
     schema: SCHEMA,
     jobId,
     promptKey: loaded.key,
@@ -84,18 +88,23 @@ ${relevant.map((n) => `${n.id}|${n.subject}|${n.text}`).join("\n") || "（没有
     self_summary?: string;
     bond_summary?: string;
   };
-  const noteIds = new Set(relevant.map((n) => n.id));
+  const noteIds = new Set([...relevant.map((n) => n.id), ...rosieNotes.map((n) => n.id)]);
   const now = wallClock();
   const byTopic = new Map(oldPortrait.map((p) => [p.topic, p]));
   for (const op of parsed.portrait_ops ?? []) {
     const topic = clipChars(String(op.topic ?? ""), 40);
     const body = clipChars(String(op.body ?? ""), 80);
     if (!topic || !body) continue;
+    if (DROP_PORTRAIT_TOPICS.includes(topic)) continue;
+    if (isQingranBehaviorRecap(`${topic}${body}`)) continue;
     const evidence = (op.evidence_ids ?? []).filter((id) => noteIds.has(id));
-    const prev = byTopic.get(topic);
+    const prev =
+      byTopic.get(topic) ||
+      oldPortrait.find((p) => similar(p.topic, topic) || similar(p.body, body));
+    if (prev && DROP_PORTRAIT_TOPICS.includes(prev.topic)) continue;
     await upsertPortrait({
       id: prev?.id || `p:${newId()}`,
-      topic,
+      topic: prev?.topic || topic,
       body: clipChars(body, Math.min(80, PORTRAIT_MAX_CHARS)),
       status: "active",
       evidenceIds: evidence,

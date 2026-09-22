@@ -47,18 +47,9 @@ function makeNote(id: string, text: string, at: number): Note {
   };
 }
 
-function mindPayload(text: string, ids: string[]) {
+function mindPayload(_text: string, ids: string[]) {
   return {
-    rosie_now: `她刚说：${text.slice(0, 40)}`,
-    undercurrent: "她其实是怕自己不够好",
-    reading: [{ guess: "累了", conf: 0.6 }],
-    soft_spot: "嘴上说躺",
-    my_feel: "心疼",
-    my_view: "先睡",
-    my_logic: "焦虑 → 熬夜",
-    lead_plan: ["今晚让她早点睡"],
-    intent: "把她拉去睡觉",
-    threads: ["论文"],
+    insight: "她把累说成懒，其实是怕自己不够好",
     memory_ids: ids,
   };
 }

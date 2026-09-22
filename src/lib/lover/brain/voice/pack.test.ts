@@ -65,35 +65,35 @@ test("empty mind omits inner block but keeps the logic line", () => {
     timeZone: "UTC",
     careHint: false,
   });
-  assert.doesNotMatch(tail, /你此刻的内心/);
+  assert.doesNotMatch(tail, /【内心】/);
   assert.doesNotMatch(tail, /你深爱她/);
   assert.match(tail, /说话要有逻辑/);
   assert.match(tail, /小猫/);
 });
 
-test("lead_plan and intent survive truncation", () => {
-  const mind = {
-    ...EMPTY_MIND,
-    turn_seq: 1,
-    rosie_now: "x".repeat(80),
-    undercurrent: "y".repeat(60),
-    my_feel: "z".repeat(50),
-    my_view: "v".repeat(80),
-    my_logic: "l".repeat(100),
-    lead_plan: ["带她去床上躺一会儿"],
-    intent: "先把灯调暗，再把她揽过来",
-    reading: [{ guess: "r".repeat(80), conf: 0.4 }],
-    threads: ["论文", "晚饭", "睡眠", "面试"],
-  };
+test("mind with turn_seq but no insight is omitted", () => {
   const tail = buildTail({
     clock: "x",
-    mind,
+    mind: { ...EMPTY_MIND, turn_seq: 1 },
+    notes: [],
+    timeZone: "UTC",
+    careHint: false,
+  });
+  assert.doesNotMatch(tail, /【内心】/);
+});
+
+test("insight is injected in full without ellipsis", () => {
+  const insight = "她反复把累说成懒，其实是怕自己不够好。依据是这周三次同样的绕。把握大概七成。";
+  const tail = buildTail({
+    clock: "x",
+    mind: { ...EMPTY_MIND, turn_seq: 1, insight },
     notes: Array.from({ length: 6 }, (_, i) => ({ ...note, id: `n${i}`, text: "记忆".repeat(40) })),
     timeZone: "UTC",
     careHint: false,
   });
-  assert.match(tail, /带她去床上躺一会儿/);
-  assert.match(tail, /先把灯调暗/);
+  assert.match(tail, /【内心】/);
+  assert.match(tail, /她反复把累说成懒/);
+  assert.doesNotMatch(tail, /…/);
 });
 
 test("care checkin line is opt-in", () => {
@@ -103,17 +103,12 @@ test("care checkin line is opt-in", () => {
   assert.match(on, /今天过得怎么样/);
 });
 
-test("stale mind omits intent and rosie_now and explains the gap", () => {
+test("stale mind is not injected", () => {
   const mind = {
     ...EMPTY_MIND,
     turn_seq: 4,
     updated_at: Date.UTC(2026, 8, 15, 14, 0, 0),
-    rosie_now: "她刚说：嘴里长溃疡了好疼",
-    undercurrent: "她其实是怕自己不够好",
-    my_view: "熬夜换不来安全感",
-    lead_plan: ["今晚让她 1 点前睡"],
-    intent: "温柔但坚定地让她放下手机",
-    threads: ["周五 Citadel 面试"],
+    insight: "她刚说：嘴里长溃疡了好疼，其实是怕自己不够好",
   };
   const tail = buildTail({
     clock: "星期三 19:00",
@@ -123,13 +118,9 @@ test("stale mind omits intent and rosie_now and explains the gap", () => {
     careHint: false,
     nowMs: Date.UTC(2026, 8, 16, 19, 0, 0),
   });
-  assert.doesNotMatch(tail, /她刚说：嘴里长溃疡了好疼/);
-  assert.doesNotMatch(tail, /温柔但坚定地让她放下手机/);
-  assert.doesNotMatch(tail, /你此刻的内心/);
-  assert.match(tail, /你上次的内心/);
-  assert.match(tail, /小时前的想法|天前的想法/);
-  assert.match(tail, /先重新感受她现在的状态/);
-  assert.match(tail, /今晚让她 1 点前睡/);
+  assert.doesNotMatch(tail, /嘴里长溃疡/);
+  assert.doesNotMatch(tail, /【内心】/);
+  assert.doesNotMatch(tail, /你上次的内心/);
 });
 
 test("stale uses strict greater-than session gap", () => {
@@ -137,11 +128,7 @@ test("stale uses strict greater-than session gap", () => {
     ...EMPTY_MIND,
     turn_seq: 2,
     updated_at: 1,
-    undercurrent: "怕",
-    my_view: "要睡",
-    lead_plan: ["早点睡"],
-    intent: "拉她去睡觉",
-    rosie_now: "她刚说累",
+    insight: "她其实是怕",
   };
   const atGap = buildTail({
     clock: "x",
@@ -151,7 +138,7 @@ test("stale uses strict greater-than session gap", () => {
     careHint: false,
     nowMs: 1 + 30 * 60_000,
   });
-  assert.match(atGap, /你此刻的内心/);
+  assert.match(atGap, /【内心】/);
   const over = buildTail({
     clock: "x",
     mind,
@@ -160,21 +147,14 @@ test("stale uses strict greater-than session gap", () => {
     careHint: false,
     nowMs: 1 + 30 * 60_000 + 1,
   });
-  assert.match(over, /你上次的内心/);
+  assert.doesNotMatch(over, /【内心】/);
 });
 
-test("jump replaces the inner hint and flags the old road without dropping fields", () => {
+test("jump does not rewrite the insight block", () => {
   const jumped = {
     ...EMPTY_MIND,
     turn_seq: 3,
-    rosie_now: "她刚说论文写不下去",
-    undercurrent: "怕自己不够好",
-    my_feel: "心疼",
-    my_view: "先睡",
-    my_logic: "焦虑 → 熬夜",
-    lead_plan: ["今晚让她早点睡"],
-    intent: "把她拉去睡觉",
-    threads: ["论文"],
+    insight: "她把论文卡住说成懒，其实是怕自己不够好",
   };
   const tail = buildTail({
     clock: "星期二 21:00",
@@ -184,38 +164,8 @@ test("jump replaces the inner hint and flags the old road without dropping field
     careHint: false,
     jump: true,
   });
-  assert.match(tail, /你此刻的内心/);
-  assert.match(tail, /她刚跳到了新的话题/);
-  assert.match(tail, /先跟上她/);
-  assert.match(tail, /上面这条路可能不适用了/);
-  assert.match(tail, /今晚让她早点睡/);
-  assert.match(tail, /把她拉去睡觉/);
-  assert.match(tail, /她刚说论文写不下去/);
-  assert.doesNotMatch(tail, /如果她这句话改变了情况/);
-});
-
-test("jump does not rewrite the stale branch", () => {
-  const mind = {
-    ...EMPTY_MIND,
-    turn_seq: 4,
-    updated_at: Date.UTC(2026, 8, 15, 14, 0, 0),
-    rosie_now: "她刚说：嘴里长溃疡了好疼",
-    undercurrent: "她其实是怕自己不够好",
-    my_view: "熬夜换不来安全感",
-    lead_plan: ["今晚让她 1 点前睡"],
-    intent: "温柔但坚定地让她放下手机",
-    threads: ["周五 Citadel 面试"],
-  };
-  const tail = buildTail({
-    clock: "星期三 19:00",
-    mind,
-    notes: [],
-    timeZone: "UTC",
-    careHint: false,
-    nowMs: Date.UTC(2026, 8, 16, 19, 0, 0),
-    jump: true,
-  });
-  assert.match(tail, /你上次的内心/);
+  assert.match(tail, /【内心】/);
+  assert.match(tail, /怕自己不够好/);
   assert.doesNotMatch(tail, /刚跳到了新的话题/);
   assert.doesNotMatch(tail, /上面这条路可能不适用了/);
 });
@@ -224,13 +174,7 @@ function sampleParts(): VoicePackParts {
   const mind = {
     ...EMPTY_MIND,
     turn_seq: 1,
-    rosie_now: "她刚说累",
-    undercurrent: "怕自己不够好",
-    my_feel: "心疼",
-    my_view: "先睡",
-    my_logic: "累了就该停",
-    lead_plan: ["去躺一会儿"],
-    intent: "把她揽过来",
+    insight: "她把累说成懒，其实是怕自己不够好",
   };
   return {
     charter: "你就是清然。正在和 Rosie 语音通话。",
@@ -264,23 +208,23 @@ test("voiceMessagesForStrip drops mind then notes then thins history", () => {
       .map((m) => m.content)
       .join("\n");
 
-  assert.match(joined("none"), /你此刻的内心/);
+  assert.match(joined("none"), /【内心】/);
   assert.match(joined("none"), /小猫/);
   assert.match(joined("none"), /【我自己】/);
 
-  assert.doesNotMatch(joined("mind"), /你此刻的内心/);
+  assert.doesNotMatch(joined("mind"), /【内心】/);
   assert.match(joined("mind"), /小猫/);
   assert.match(joined("mind"), /【我自己】/);
 
   assert.doesNotMatch(joined("notes"), /小猫/);
-  assert.doesNotMatch(joined("notes"), /你此刻的内心/);
+  assert.doesNotMatch(joined("notes"), /【内心】/);
   assert.match(joined("notes"), /【我自己】/);
 
   const thin = voiceMessagesForStrip(parts, "thin");
   assert.equal(thin[0]!.role, "system");
   assert.match(thin[0]!.content, /你就是清然/);
   assert.doesNotMatch(joined("thin"), /【我自己】/);
-  assert.doesNotMatch(joined("thin"), /你此刻的内心/);
+  assert.doesNotMatch(joined("thin"), /【内心】/);
   assert.equal(thin.length, 1 + 8 + 1);
   assert.equal(thin[1]!.content, "msg4");
   assert.equal(thin.at(-1)!.content, "今晚不想动");

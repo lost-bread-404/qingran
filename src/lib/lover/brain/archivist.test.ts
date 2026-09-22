@@ -37,12 +37,12 @@ function note(partial: Partial<Note> & Pick<Note, "id" | "text">): Note {
 }
 
 test("all-assistant sources force from_rosie false", () => {
-  const batch = [msg({ id: "a1", role: "assistant", text: "我在准备解剖考试" })];
+  const batch = [msg({ id: "a1", role: "assistant", text: "今晚一点前我陪你把这章写完" })];
   const out = validateOps(
     [
       {
         op: "ADD",
-        text: "清然在准备解剖考试",
+        text: "清然承诺今晚一点前陪她写完这章",
         subject: "qingran",
         lens: ["bond"],
         from_rosie: true,
@@ -183,4 +183,56 @@ test("aliases are clamped to 6 x 12 and stored on the note", () => {
   assert.equal(out[0]!.note.aliases.length, 6);
   assert.ok(out[0]!.note.aliases.every((a) => a.length <= 12));
   assert.ok(out[0]!.note.aliases.includes("citadel"));
+});
+
+test("Qingran behavior recaps are dropped; concrete promises and Rosie facts are kept", () => {
+  const batch = [
+    msg({ id: "a1", role: "assistant", text: "今晚一点前我陪你把这章写完" }),
+    msg({ id: "u1", role: "user", text: "你陪着我才睡得着" }),
+    msg({ id: "a2", role: "assistant", text: "我答应整夜陪你" }),
+  ];
+  const out = validateOps(
+    [
+      {
+        op: "ADD",
+        text: "清然承诺今晚一点前陪她写完这章",
+        subject: "qingran",
+        lens: ["bond"],
+        from_rosie: false,
+        source_ids: ["a1"],
+      },
+      {
+        op: "ADD",
+        text: "清然重复承诺整夜陪伴她",
+        subject: "us",
+        lens: ["bond"],
+        from_rosie: false,
+        source_ids: ["a2"],
+      },
+      {
+        op: "ADD",
+        text: "清然在准备解剖考试",
+        subject: "qingran",
+        lens: ["bond"],
+        from_rosie: true,
+        source_ids: ["a1"],
+      },
+      {
+        op: "ADD",
+        text: "她说清然陪着时才睡得着",
+        subject: "us",
+        lens: ["bond"],
+        from_rosie: true,
+        source_ids: ["u1"],
+      },
+    ],
+    batch,
+    [],
+  );
+  assert.deepEqual(
+    out.map((x) => x.note.text).sort(),
+    ["她说清然陪着时才睡得着", "清然承诺今晚一点前陪她写完这章"].sort(),
+  );
+  const promise = out.find((x) => x.note.subject === "qingran");
+  assert.equal(promise?.note.fromRosie, false);
 });

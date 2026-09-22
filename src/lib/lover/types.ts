@@ -30,6 +30,7 @@ export type Profile = {
   voiceModel: string;
   voiceEffort: VoiceEffort;
   silenceMs: SilenceMs;
+  injectMind: boolean;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -97,6 +98,7 @@ export const DEFAULT_PROFILE: Profile = {
   voiceModel: DEFAULT_VOICE_MODEL,
   voiceEffort: DEFAULT_VOICE_EFFORT,
   silenceMs: SILENCE_MS,
+  injectMind: true,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -121,6 +123,7 @@ type LooseProfile = Partial<Profile> & {
   voiceModel?: string;
   voiceEffort?: string | null;
   silenceMs?: number;
+  injectMind?: boolean;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -140,6 +143,7 @@ export function lockedProfile(input?: unknown): Profile {
     voiceModel: pickVoiceModel(raw),
     voiceEffort: pickVoiceEffort(raw),
     silenceMs: isSilenceMs(raw.silenceMs) ? raw.silenceMs : SILENCE_MS,
+    injectMind: raw.injectMind !== false,
   };
 }
 

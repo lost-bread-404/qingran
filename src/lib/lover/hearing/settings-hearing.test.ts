@@ -65,6 +65,12 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.match(src, /\.slice\(0, 20\)/);
   assert.doesNotMatch(src, /定向录制/);
   assert.doesNotMatch(src, /hearingNbest/);
+  assert.match(src, /把内心写进回复/);
+  assert.match(src, />高级</);
+  assert.match(src, /确认删除这些笔记/);
+  assert.match(src, /brainListHygieneNotes/);
+  assert.match(src, /brainDeleteHygieneNotes/);
+  assert.match(src, /injectMind/);
 });
 
 test("settings prompts tab edits catalog steps and log expand shows assembled prompt", () => {

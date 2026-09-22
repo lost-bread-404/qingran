@@ -15,6 +15,8 @@ import {
   brainGetCallLog,
   brainGetDbSize,
   brainGetLongLayer,
+  brainListHygieneNotes,
+  brainDeleteHygieneNotes,
   brainListLogs,
   brainListNotes,
   brainListPrompts,
@@ -160,6 +162,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [voiceModels, setVoiceModels] = useState<VoiceModelOption[] | null>(null);
   const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
   const [silenceMs, setSilenceMs] = useState<SilenceMs>(profile.silenceMs);
+  const [injectMind, setInjectMind] = useState(profile.injectMind);
+  const [hygieneNotes, setHygieneNotes] = useState<Array<{ id: string; text: string; subject: string; localDay: string }>>([]);
   const [promptItems, setPromptItems] = useState<PromptItem[]>([]);
   const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({});
   const [promptBusy, setPromptBusy] = useState<string | null>(null);
@@ -179,6 +183,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setVoiceModel(profile.voiceModel);
     setVoiceEffort(profile.voiceEffort);
     setSilenceMs(profile.silenceMs);
+    setInjectMind(profile.injectMind);
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setTab("prompt");
     setPromptItems([]);
@@ -266,6 +271,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setPortrait(layer.portrait);
     setMind(layer.mind);
     setLog(layer.log);
+    void brainListHygieneNotes()
+      .then((rows) => setHygieneNotes(rows as Array<{ id: string; text: string; subject: string; localDay: string }>))
+      .catch(() => setHygieneNotes([]));
     void brainGetDbSize()
       .then((s) => {
         setDbWarn(Boolean(s.warn));
@@ -284,6 +292,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       voiceModel,
       voiceEffort,
       silenceMs,
+      injectMind,
       ...patch,
     });
   }
@@ -633,6 +642,33 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
             <BrainBackupPanel />
+            {hygieneNotes.length ? (
+              <div className="rounded-md bg-surface-2 px-3 py-3">
+                <p className="text-sm">这些笔记像是在记清然自己的行为，不是 Rosie 透露的事。</p>
+                <ul className="mt-2 flex flex-col gap-2">
+                  {hygieneNotes.map((row) => (
+                    <li key={row.id} className="text-sm leading-relaxed">
+                      <span className="text-subtle">{row.localDay} · {row.subject}</span>
+                      <span className="mt-0.5 block">{row.text}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-3 min-h-11"
+                  disabled={busy}
+                  onClick={() => {
+                    setBusy(true);
+                    void brainDeleteHygieneNotes({ data: { ids: hygieneNotes.map((row) => row.id) } })
+                      .then(() => refresh())
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  确认删除这些笔记
+                </Button>
+              </div>
+            ) : null}
             {dbWarn ? (
               <p className="text-sm text-live">数据库已用超过 70%，请到日记「系统档案」查看容量。</p>
             ) : null}
@@ -829,19 +865,26 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       ) : tab === "mind" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-            {mind ? (
-              <dl className="flex flex-col gap-3 text-sm">
-                <MindRow label="她现在" value={mind.rosie_now} />
-                <MindRow label="底下的东西" value={mind.undercurrent} />
-                <MindRow label="感受" value={mind.my_feel} />
-                <MindRow label="看法" value={mind.my_view} />
-                <MindRow label="思路" value={mind.my_logic} />
-                <MindRow label="要带她走的路" value={mind.lead_plan.join(" → ")} />
-                <MindRow label="这一句" value={mind.intent} />
-                <MindRow label="要跟进" value={mind.threads.join("；")} />
-              </dl>
+            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={injectMind}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setInjectMind(next);
+                  persistProfile({ injectMind: next });
+                }}
+              />
+              <span>
+                <span className="block text-sm">把内心写进回复</span>
+                <span className="block text-xs text-subtle">关掉就只靠对话历史、记忆和人设，方便对比。</span>
+              </span>
+            </label>
+            {mind?.insight ? (
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">{mind.insight}</p>
             ) : (
-              <p className="text-sm text-subtle">还没有内心。说几句之后会慢慢有。</p>
+              <p className="text-sm text-subtle">还没有深层洞察。没有真正看懂的东西时会空着。</p>
             )}
             <Button
               variant="outline"
@@ -884,6 +927,22 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
             <details className="rounded-md bg-surface-2 px-3 py-3">
               <summary className="cursor-pointer text-sm">高级</summary>
               <div className="mt-3 flex flex-col gap-4">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={injectMind}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setInjectMind(next);
+                      persistProfile({ injectMind: next });
+                    }}
+                  />
+                  <span>
+                    <span className="block text-sm">把内心写进回复</span>
+                    <span className="block text-xs text-subtle">关掉就只靠对话历史、记忆和人设，方便对比。</span>
+                  </span>
+                </label>
                 <div>
                   <p className="mb-2 text-sm">回复模型</p>
                   <p className="mb-2 text-xs text-subtle">
@@ -1275,16 +1334,6 @@ function logFinishReason(row: BrainLogRow): string {
     }
   }
   return "";
-}
-
-function MindRow({ label, value }: { label: string; value: string }) {
-  if (!value) return null;
-  return (
-    <div>
-      <dt className="text-xs text-subtle">{label}</dt>
-      <dd className="mt-1 leading-relaxed">{value}</dd>
-    </div>
-  );
 }
 
 function AudioTracePanel() {

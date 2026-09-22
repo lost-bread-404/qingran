@@ -2,6 +2,7 @@ import { newId } from "../storage.ts";
 import { now as wallClock } from "./clock.ts";
 import { similar } from "./text.ts";
 import { localDay } from "./time.ts";
+import { keepArchiveNote } from "./memory-hygiene.ts";
 import type { Lens, Note, StoredMessage, Subject } from "./types.ts";
 
 export type RawOp = {
@@ -54,6 +55,7 @@ export function validateOps(
     if (allAssistant) fromRosie = false;
     const subject: Subject =
       raw.subject === "qingran" || raw.subject === "us" || raw.subject === "rosie" ? raw.subject : "rosie";
+    if (!keepArchiveNote({ text, subject, fromRosie })) continue;
     const lens = asStrings(raw.lens, 2, 10).filter((x): x is Lens => x === "diary" || x === "bond");
     if (!lens.length) continue;
     const tags = asStrings(raw.tags, 6, 10);

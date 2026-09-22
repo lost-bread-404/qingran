@@ -197,28 +197,8 @@ export async function pickHotNotes(
     queryIds.push(hit.id);
     queryScores.push(hit.score);
   };
-  const pushMind = (id: string) => {
-    if (picked.length >= PICK_MAX || seen.has(id)) return;
-    picked.push(id);
-    seen.add(id);
-  };
 
   for (const hit of queryPart) pushQuery(hit);
-
-  if (picked.length < PICK_MAX) {
-    if (mindPart.length < N) {
-      for (const hit of queryHits.slice(M)) {
-        if (picked.length >= PICK_MAX) break;
-        pushQuery(hit);
-      }
-    }
-    if (queryPart.length < M) {
-      for (const id of mindActive.slice(N)) {
-        if (picked.length >= PICK_MAX) break;
-        pushMind(id);
-      }
-    }
-  }
 
   const fetched = (await listNotesByIds(picked)).filter((n) => n.status === "active");
   const byId = new Map(fetched.map((n) => [n.id, n]));

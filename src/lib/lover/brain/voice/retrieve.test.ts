@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import MiniSearch from "minisearch";
 import { formatIndexLine, tokenizeMemory } from "../text.ts";
-import { bumpNotesVersion, patchMeta, upsertNote } from "../store.ts";
+import { bumpNotesVersion, listIndexNotes, patchMeta, upsertNote } from "../store.ts";
 import type { Note } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { openIsolatedSql } from "../eval-db.ts";
@@ -236,6 +236,52 @@ test("archive without dusk does not change reflector block B", async () => {
       buildReflectorInput({ ...parts, coreIndex: second, clock: "later", conversation: "bye" }).stable,
     );
     assert.equal(hash2, hash1);
+  } finally {
+    setClock(null);
+    await iso.close();
+  }
+});
+
+test("pickHotNotes does not pad to 6 when query has no hits", async () => {
+  const iso = await openIsolatedSql();
+  try {
+    for (let i = 0; i < 8; i++) await upsertNote(note(`pad${i}`, `解剖课笔记${i}：神经元和突触`));
+    await upsertNote(note("only-mind", "她论文还是一个字都没写"));
+    await bumpNotesVersion();
+    resetRetrieveCache();
+    const picked = await pickHotNotes(["only-mind"], "", { jump: false });
+    assert.equal(picked.notes.length, 1);
+    assert.equal(picked.notes[0]!.id, "only-mind");
+    assert.equal(picked.queryIds.length, 0);
+  } finally {
+    await iso.close();
+  }
+});
+
+test("story seed notes do not get recency bonus", async () => {
+  const iso = await openIsolatedSql();
+  const ts = Date.UTC(2026, 8, 22, 16, 0, 0);
+  setClock(() => ts);
+  try {
+    await upsertNote({
+      ...note("story-n", "故事线：她第一次见清然是在实验室门口"),
+      sourceIds: ["story"],
+      happenedAt: ts,
+      lens: ["bond"],
+      weight: 3,
+    });
+    await upsertNote({
+      ...note("fresh-n", "今晚她说想吃五道口那家火锅"),
+      sourceIds: [],
+      happenedAt: ts,
+      lens: ["bond"],
+      weight: 3,
+    });
+    const items = await listIndexNotes();
+    const story = items.find((i) => i.id === "story-n");
+    const fresh = items.find((i) => i.id === "fresh-n");
+    assert.ok(story && fresh, "both notes should be indexed");
+    assert.ok(fresh!.score - story!.score > 1.5, `fresh=${fresh!.score} story=${story!.score}`);
   } finally {
     setClock(null);
     await iso.close();

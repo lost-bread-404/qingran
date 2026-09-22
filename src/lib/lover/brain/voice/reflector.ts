@@ -36,41 +36,9 @@ const MIND_SCHEMA = {
   schema: {
     type: "object",
     additionalProperties: false,
-    required: [
-      "rosie_now",
-      "undercurrent",
-      "reading",
-      "soft_spot",
-      "my_feel",
-      "my_view",
-      "my_logic",
-      "lead_plan",
-      "intent",
-      "threads",
-      "memory_ids",
-    ],
+    required: ["insight", "memory_ids"],
     properties: {
-      rosie_now: { type: "string" },
-      undercurrent: { type: "string" },
-      reading: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["guess", "conf"],
-          properties: {
-            guess: { type: "string" },
-            conf: { type: "number" },
-          },
-        },
-      },
-      soft_spot: { type: "string" },
-      my_feel: { type: "string" },
-      my_view: { type: "string" },
-      my_logic: { type: "string" },
-      lead_plan: { type: "array", items: { type: "string" } },
-      intent: { type: "string" },
-      threads: { type: "array", items: { type: "string" } },
+      insight: { type: "string" },
       memory_ids: { type: "array", items: { type: "string" } },
     },
   },
@@ -148,12 +116,12 @@ ${core.map(formatIndexLine).join("\n") || "（还没有）"}`;
 ${parts.relatedIndex.map(formatIndexLine).join("\n") || "（还没有）"}
 
 【上一刻的内心】
-${JSON.stringify(parts.oldMind, (k, v) => (k === "turn_seq" || k === "updated_at" ? undefined : v))}
+${parts.oldMind.insight || "（空）"}
 
 【最近对话】
 ${parts.conversation || "（还没有）"}
 
-请按 schema 输出内心。不要输出 recent_intents 和 turn_seq。从【记忆 index · 核心】和【记忆 index · 相关】中挑选 memory_ids，最多 6 个。`;
+只输出 insight 和 memory_ids。没有深层洞察时 insight 必须是空字符串。memory_ids 从【记忆 index · 核心】和【记忆 index · 相关】中挑，最多 6 个。`;
 
   return { system, stable, turn };
 }
@@ -177,7 +145,7 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     .filter((m) => m.role === "user")
     .slice(-4)
     .map((m) => m.text);
-  const query = [...rosieLast, ...(old.threads ?? []), ...(old.lead_plan ?? [])].filter(Boolean).join("\n");
+  const query = [...rosieLast, old.insight].filter(Boolean).join("\n");
   const relatedIndex = await getRelatedIndexItems(query, coreIds);
 
   const themesPacked: ReflectorParts["themes"] = [];

@@ -2,21 +2,12 @@ import { HISTORY_WINDOW, PORTRAIT_MAX_CHARS, SESSION_GAP_MS } from "../config.ts
 import { defaultPrompt } from "../prompts/catalog.ts";
 import { fillTemplate, templateHas } from "../prompts/fill.ts";
 import { formatClock } from "../time.ts";
-import { formatMindAge } from "../usage.ts";
 import type { Mind, Note, PortraitRow, StoredMessage, VoiceChatMessage } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { modelFacingText } from "../../message-markup.ts";
 
 function mindIsEmpty(mind: Mind): boolean {
-  return (
-    !mind.rosie_now &&
-    !mind.undercurrent &&
-    !mind.my_feel &&
-    !mind.my_view &&
-    !mind.my_logic &&
-    !mind.intent &&
-    mind.lead_plan.length === 0
-  );
+  return !mind.insight.trim();
 }
 
 function portraitBlock(rows: PortraitRow[]): string {
@@ -99,6 +90,7 @@ function voiceVars(parts: VoicePackParts, tail: string): Record<string, string> 
     memories: formatMemories(parts.notes, parts.timeZone),
     history: historyText(parts.history),
     clock: parts.clockText,
+    mind: mindIsEmpty(parts.mind) ? "" : parts.mind.insight.trim(),
     tail,
   };
 }
@@ -204,13 +196,6 @@ export function stripLabel(strip: VoiceStrip): string {
   return "未裁剪";
 }
 
-function readingLine(mind: Mind): string {
-  if (!mind.reading.length) return "";
-  return mind.reading
-    .map((r) => `${r.guess}（把握 ${Math.round(r.conf * 100)}%）`)
-    .join("；");
-}
-
 export function buildTail(opts: {
   clock: string;
   mind: Mind;
@@ -221,46 +206,17 @@ export function buildTail(opts: {
   stale?: boolean;
   jump?: boolean;
 }): string {
-  let reading = readingLine(opts.mind);
-  let threads = opts.mind.threads.join("；");
-  const core = {
-    lead: opts.mind.lead_plan.join(" → "),
-    intent: opts.mind.intent,
-  };
   const mindAge = (opts.nowMs ?? 0) - (opts.mind.updated_at ?? 0);
   const stale =
     opts.stale ??
     (!mindIsEmpty(opts.mind) && Boolean(opts.nowMs) && Boolean(opts.mind.updated_at) && mindAge > SESSION_GAP_MS);
-  const jump = Boolean(opts.jump) && !stale && !mindIsEmpty(opts.mind);
-  const innerHint = jump
-    ? "（这是你上一刻的想法，但她刚跳到了新的话题。以她这句话为准，先跟上她，再决定要不要把上面那条路走回来。）"
-    : "（这是你上一刻的想法；如果她这句话改变了情况，以这句话为准。说不说出来、怎么说，由你判断。）";
-  const jumpRoad = jump ? "上面这条路可能不适用了。\n" : "";
-
-  const inner = mindIsEmpty(opts.mind)
-    ? ""
-    : stale
-      ? `【你上次的内心】（这是 ${formatMindAge(mindAge)}前的想法，她现在的状态可能已经变了）
-底下的东西：${opts.mind.undercurrent}
-你的推断：${reading}
-你的看法：${opts.mind.my_view}
-你要带她走的路：${core.lead}
-要跟进：${threads}
-先重新感受她现在的状态，再决定怎么带她。
+  const insight = !mindIsEmpty(opts.mind) && !stale ? opts.mind.insight.trim() : "";
+  const inner = insight
+    ? `【内心】
+${insight}
 
 `
-      : `【你此刻的内心】${innerHint}
-她现在：${opts.mind.rosie_now}
-底下的东西：${opts.mind.undercurrent}
-你的推断：${reading}
-${opts.mind.soft_spot ? `心软的地方：${opts.mind.soft_spot}\n` : ""}你的感受：${opts.mind.my_feel}
-你的看法：${opts.mind.my_view}
-你的思路：${opts.mind.my_logic}
-你要带她走的路：${core.lead}
-这一句：${core.intent}
-${jumpRoad}要跟进：${threads}
-
-`;
+    : "";
 
   let tail = `现在是${opts.clock}。
 
@@ -271,26 +227,6 @@ ${formatMemories(opts.notes, opts.timeZone)}
 
   if (opts.careHint) {
     tail += "\n如果时机自然，可以像平常关心一样问问她今天过得怎么样、睡得如何。";
-  }
-
-  if (tail.length > 2400 && !mindIsEmpty(opts.mind) && !stale) {
-    reading = "";
-    threads = "";
-    tail = `现在是${opts.clock}。
-
-【你此刻的内心】${innerHint}
-她现在：${opts.mind.rosie_now}
-底下的东西：${opts.mind.undercurrent}
-你的感受：${opts.mind.my_feel}
-你的看法：${opts.mind.my_view}
-你的思路：${opts.mind.my_logic}
-你要带她走的路：${core.lead}
-这一句：${core.intent}
-${jumpRoad}
-【可以用的记忆】
-${formatMemories(opts.notes, opts.timeZone)}
-
-说话要有逻辑：观点有依据，前后一致。`;
   }
   return tail;
 }

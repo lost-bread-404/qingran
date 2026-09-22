@@ -28,7 +28,8 @@ import type {
   Subject,
   Theme,
 } from "./types.ts";
-import { EMPTY_META, EMPTY_MIND } from "./types.ts";
+import { EMPTY_META } from "./types.ts";
+import { coerceMind } from "./mind-parse.ts";
 
 export { similar };
 
@@ -161,13 +162,8 @@ export async function getMind(): Promise<Mind> {
   const rows = await db.query<{ data: unknown; turn_seq: unknown; updated_at: unknown }>(
     "select data, turn_seq, updated_at from qr_mind where id = 1",
   );
-  const data = asJson<Partial<Mind>>(rows[0]?.data, {});
-  return {
-    ...EMPTY_MIND,
-    ...data,
-    turn_seq: asInt(rows[0]?.turn_seq, data.turn_seq ?? 0),
-    updated_at: asInt(rows[0]?.updated_at, 0) || undefined,
-  };
+  const data = asJson<Record<string, unknown>>(rows[0]?.data, {});
+  return coerceMind(data, asInt(rows[0]?.turn_seq, 0), asInt(rows[0]?.updated_at, 0) || undefined);
 }
 
 export async function saveMind(mind: Mind, expectedTurn: number, meta?: { model?: string; ms?: number }): Promise<boolean> {
@@ -178,7 +174,7 @@ export async function saveMind(mind: Mind, expectedTurn: number, meta?: { model?
      set data = $1::jsonb, turn_seq = $2, updated_at = $3
      where id = 1 and turn_seq < $2
      returning id`,
-    [JSON.stringify(mind), expectedTurn, ts],
+    [JSON.stringify({ insight: mind.insight, memory_ids: mind.memory_ids }), expectedTurn, ts],
   );
   if (rows.length > 0) {
     try {
@@ -749,7 +745,9 @@ export async function listIndexNotes(): Promise<IndexItem[]> {
     const bond = n.lens.includes("bond");
     if (!bond && !(n.subject === "rosie" && n.weight >= 3)) continue;
     const ageDays = Math.max(0, (ts - n.happenedAt) / 86_400_000);
-    const score = n.weight + 2 * Math.exp(-ageDays / 14) + 0.5 * Math.min(n.recallCount, 4) + (bond ? 1 : 0);
+    const storySeed = n.sourceIds.includes("story");
+    const recency = storySeed ? 0 : 2 * Math.exp(-ageDays / 14);
+    const score = n.weight + recency + 0.5 * Math.min(n.recallCount, 4) + (bond ? 1 : 0);
     items.push({
       id: n.id, text: n.text, searchText: [n.text, ...n.tags, ...(n.aliases ?? [])].join(" "),
       subject: n.subject, lens: n.lens, weight: n.weight,

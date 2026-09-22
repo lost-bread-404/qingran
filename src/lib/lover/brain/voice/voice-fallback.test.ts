@@ -17,13 +17,7 @@ function parts(): VoicePackParts {
     mind: {
       ...EMPTY_MIND,
       turn_seq: 1,
-      rosie_now: "累",
-      undercurrent: "怕",
-      my_feel: "心疼",
-      my_view: "先睡",
-      my_logic: "停",
-      lead_plan: ["躺"],
-      intent: "揽过来",
+      insight: "她把累说成懒，其实是怕自己不够好",
     },
     notes: [],
     clockText: "星期二 21:00",
@@ -167,9 +161,9 @@ test("both models empty then strip mind on primary", async () => {
   assert.equal(out.usedStrip, "mind");
   assert.equal(out.attempts.length, 3);
   assert.deepEqual(models, ["primary-model", "safety-model", "primary-model"]);
-  assert.match(bodies[0]!, /你此刻的内心|她现在/);
-  assert.match(bodies[1]!, /你此刻的内心|她现在/);
-  assert.doesNotMatch(bodies[2]!, /你此刻的内心|她现在：/);
+  assert.match(bodies[0]!, /【内心】/);
+  assert.match(bodies[1]!, /【内心】/);
+  assert.doesNotMatch(bodies[2]!, /【内心】/);
   assert.equal(forwarded.some((e) => e.t === "err"), false);
 });
 

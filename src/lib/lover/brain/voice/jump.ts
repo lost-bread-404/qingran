@@ -3,10 +3,7 @@ import { tokenizeMemory } from "../text.ts";
 import type { Mind } from "../types.ts";
 
 function mindContextText(mind: Mind): string {
-  return [mind.rosie_now, mind.undercurrent, ...mind.threads, ...mind.lead_plan, mind.intent]
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (mind.insight ?? "").replace(/\s+/g, " ").trim();
 }
 
 function mindIsBlank(mind: Mind): boolean {

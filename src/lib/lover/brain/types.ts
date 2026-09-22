@@ -25,38 +25,16 @@ export type Note = {
   updatedAt: number;
 };
 
-export type MindReading = { guess: string; conf: number };
-
 export type Mind = {
   turn_seq: number;
-  rosie_now: string;
-  undercurrent: string;
-  reading: MindReading[];
-  soft_spot: string;
-  my_feel: string;
-  my_view: string;
-  my_logic: string;
-  lead_plan: string[];
-  intent: string;
-  threads: string[];
-  recent_intents: string[];
+  insight: string;
   memory_ids: string[];
   updated_at?: number;
 };
 
 export const EMPTY_MIND: Mind = {
   turn_seq: 0,
-  rosie_now: "",
-  undercurrent: "",
-  reading: [],
-  soft_spot: "",
-  my_feel: "",
-  my_view: "",
-  my_logic: "",
-  lead_plan: [],
-  intent: "",
-  threads: [],
-  recent_intents: [],
+  insight: "",
   memory_ids: [],
 };
 
@@ -78,6 +56,7 @@ export type BrainMeta = {
   lastSynthWeek: string;
   lastReportMonth: string;
   timeZone: string;
+  hygieneMemoryLoopAt?: number;
   coreIndex?: { version: number; day: string; ids: string[] };
   spendLimits?: {
     daySoft: number;

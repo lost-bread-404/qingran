@@ -3,6 +3,7 @@ import { noteAsOf, messageAsOf, messageEditedAfter } from "./as-of.ts";
 import { codeVersion, getBlockByHash, getCharterByHash, type ArchiveRefs, type ReflectRefs, type VoiceRefs } from "./log-refs.ts";
 import { fromPgArray, getMeta } from "./store.ts";
 import { resolveTz } from "./tz.ts";
+import { coerceMind } from "./mind-parse.ts";
 import { EMPTY_MIND, type IndexItem, type Mind, type Note, type StoredMessage } from "./types.ts";
 import { noteAsIndex } from "./voice/retrieve.ts";
 import { buildTail, buildVoiceMessages } from "./voice/pack-build.ts";
@@ -115,7 +116,7 @@ async function loadMindAt(turnSeq: number): Promise<Mind | null> {
   if (!rows[0]) return null;
   const data = typeof rows[0].data === "string" ? JSON.parse(String(rows[0].data)) : rows[0].data;
   if (!data || typeof data !== "object") return EMPTY_MIND;
-  return { ...EMPTY_MIND, ...(data as Partial<Mind>), turn_seq: turnSeq };
+  return coerceMind(data, turnSeq);
 }
 
 function asNumArr(v: unknown): number[] {

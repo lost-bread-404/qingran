@@ -16,6 +16,7 @@ import { EMPTY_MIND } from "../types.ts";
 import { pickHotNotes } from "./retrieve.ts";
 import { topicJump } from "./jump.ts";
 import { loadPrompt } from "../prompts/store.ts";
+import { ensureMemoryHygiene } from "../memory-hygiene.ts";
 import {
   buildTail,
   renderVoiceLongterm,
@@ -86,6 +87,7 @@ export async function loadHotContext(input: {
     kind: userExisting?.kind,
     timeZone: input.timeZone,
   });
+  await ensureMemoryHygiene();
 
   const [history, mind, portrait, meta] = await Promise.all([
     listHistoryWindow(input.userMsgId, HISTORY_WINDOW),
@@ -95,8 +97,16 @@ export async function loadHotContext(input: {
   ]);
 
   const liveMind = mind.turn_seq ? mind : EMPTY_MIND;
-  const jumped = topicJump(input.text, liveMind);
-  const picked = await pickHotNotes(mind.memory_ids ?? [], input.text, { jump: jumped.jump });
+  const mindAgeMs = liveMind.updated_at ? input.nowMs - liveMind.updated_at : 0;
+  const mindStale = Boolean(liveMind.updated_at) && mindAgeMs > SESSION_GAP_MS;
+  const injectMind = input.profile.injectMind !== false;
+  const tailMind = !injectMind || mindStale || !liveMind.insight.trim() ? EMPTY_MIND : liveMind;
+  const jumped = topicJump(input.text, tailMind);
+  const picked = await pickHotNotes(
+    !injectMind || mindStale ? [] : mind.memory_ids ?? [],
+    input.text,
+    { jump: jumped.jump },
+  );
   const notes = picked.notes;
   const pickedIds = picked.mindIds;
   const fallbackIds = picked.queryIds;
@@ -110,17 +120,15 @@ export async function loadHotContext(input: {
     careHint = Boolean(log && log.coverage !== "ok" && !asked);
   }
 
-  const mindAgeMs = liveMind.updated_at ? input.nowMs - liveMind.updated_at : 0;
-  const mindStale = Boolean(liveMind.updated_at) && mindAgeMs > SESSION_GAP_MS;
   const clockText = formatClock(input.nowMs, input.timeZone);
   const tail = buildTail({
     clock: clockText,
-    mind: liveMind,
+    mind: tailMind,
     notes,
     timeZone: input.timeZone,
     careHint,
     nowMs: input.nowMs,
-    stale: mindStale && Boolean(liveMind.updated_at) && liveMind.turn_seq > 0,
+    stale: false,
     jump: jumped.jump,
   });
 
@@ -132,7 +140,7 @@ export async function loadHotContext(input: {
     longterm,
     history,
     userText: input.text,
-    mind: liveMind,
+    mind: tailMind,
     notes,
     clockText,
     timeZone: input.timeZone,
