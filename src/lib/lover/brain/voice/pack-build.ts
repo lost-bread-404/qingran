@@ -2,6 +2,7 @@ import { HISTORY_WINDOW, PORTRAIT_MAX_CHARS, SESSION_GAP_MS } from "../config.ts
 import { formatClock } from "../time.ts";
 import { formatMindAge } from "../usage.ts";
 import type { Mind, Note, PortraitRow, StoredMessage, VoiceChatMessage } from "../types.ts";
+import { EMPTY_MIND } from "../types.ts";
 import { QINGRAN_STANCE_ONE_LINE } from "./prompts.ts";
 import { hearingTagGuide } from "../../prompt.ts";
 import { modelFacingText } from "../../message-markup.ts";
@@ -41,6 +42,134 @@ function formatMemories(notes: Note[], timeZone: string): string {
       return `${md} ${n.text}`;
     })
     .join("\n");
+}
+
+export const VOICE_THIN_HISTORY = 8;
+export type VoiceStrip = "none" | "mind" | "notes" | "thin";
+export const VOICE_STRIPS: VoiceStrip[] = ["none", "mind", "notes", "thin"];
+
+export type VoicePackParts = {
+  charter: string;
+  longterm: string;
+  history: StoredMessage[];
+  userText: string;
+  mind: Mind;
+  notes: Note[];
+  clockText: string;
+  timeZone: string;
+  careHint: boolean;
+  nowMs: number;
+  mindStale: boolean;
+  jump: boolean;
+};
+
+export type VoiceInputChars = {
+  system: number;
+  mind: number;
+  notes: number;
+  history: number;
+  user: number;
+};
+
+export function systemCharter(charter: string): string {
+  return (charter.trim() || "你就是清然。正在和 Rosie 语音通话。") + "\n\n" + hearingTagGuide();
+}
+
+export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip): VoiceChatMessage[] {
+  if (strip === "thin") {
+    const history = parts.history.slice(-VOICE_THIN_HISTORY).map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: modelFacingText(m.text),
+    }));
+    return [
+      { role: "system", content: systemCharter(parts.charter) },
+      ...history,
+      { role: "user", content: parts.userText },
+    ];
+  }
+  const mind = strip === "none" ? parts.mind : EMPTY_MIND;
+  const notes = strip === "none" || strip === "mind" ? parts.notes : [];
+  const tail = buildTail({
+    clock: parts.clockText,
+    mind,
+    notes,
+    timeZone: parts.timeZone,
+    careHint: parts.careHint,
+    nowMs: parts.nowMs,
+    stale: parts.mindStale && Boolean(parts.mind.updated_at) && parts.mind.turn_seq > 0,
+    jump: parts.jump,
+  });
+  return buildVoiceMessages({
+    charter: parts.charter,
+    longterm: parts.longterm,
+    history: parts.history,
+    tail,
+    userText: parts.userText,
+  });
+}
+
+export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
+  const system = systemCharter(parts.charter).length;
+  const tailMind = buildTail({
+    clock: parts.clockText,
+    mind: parts.mind,
+    notes: [],
+    timeZone: parts.timeZone,
+    careHint: false,
+    nowMs: parts.nowMs,
+    stale: parts.mindStale,
+    jump: parts.jump,
+  });
+  const tailBare = buildTail({
+    clock: parts.clockText,
+    mind: EMPTY_MIND,
+    notes: [],
+    timeZone: parts.timeZone,
+    careHint: false,
+    nowMs: parts.nowMs,
+    stale: false,
+    jump: false,
+  });
+  const tailNotes = buildTail({
+    clock: parts.clockText,
+    mind: EMPTY_MIND,
+    notes: parts.notes,
+    timeZone: parts.timeZone,
+    careHint: false,
+    nowMs: parts.nowMs,
+    stale: false,
+    jump: false,
+  });
+  return {
+    system,
+    mind: Math.max(0, tailMind.length - tailBare.length),
+    notes: Math.max(0, tailNotes.length - tailBare.length),
+    history: parts.history.reduce((n, m) => n + modelFacingText(m.text).length, 0),
+    user: parts.userText.length,
+  };
+}
+
+export function formatVoiceInputCharsLine(c: VoiceInputChars): string {
+  return `chars system=${c.system} mind=${c.mind} notes=${c.notes} history=${c.history} user=${c.user}`;
+}
+
+export function parseVoiceInputCharsLine(note: string | null | undefined): VoiceInputChars | null {
+  const m = (note ?? "").match(/chars system=(\d+) mind=(\d+) notes=(\d+) history=(\d+) user=(\d+)/);
+  if (!m) return null;
+  return {
+    system: Number(m[1]),
+    mind: Number(m[2]),
+    notes: Number(m[3]),
+    history: Number(m[4]),
+    user: Number(m[5]),
+  };
+}
+
+export function stripLabel(strip: VoiceStrip): string {
+  if (strip === "mind") return "去掉了 mind";
+  if (strip === "notes") return "去掉了 mind 和记忆笔记";
+  if (strip === "thin") return "只保留 system prompt、最近 8 条对话和用户消息";
+  return "未裁剪";
 }
 
 function readingLine(mind: Mind): string {
@@ -146,7 +275,7 @@ export function buildVoiceMessages(opts: {
   tail: string;
   userText: string;
 }): VoiceChatMessage[] {
-  const charter = (opts.charter.trim() || "你就是清然。正在和 Rosie 语音通话。") + "\n\n" + hearingTagGuide();
+  const charter = systemCharter(opts.charter);
   const long =
     opts.longterm ??
     renderVoiceLongterm(opts.selfSummary ?? "", opts.bondSummary ?? "", opts.portrait ?? []);

@@ -27,6 +27,11 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.match(src, /\.slice\(0, 1000\)/);
   assert.match(src, />finish_reason</);
   assert.match(src, />input_chars</);
+  assert.match(src, /logInputChars/);
+  assert.match(src, /parseVoiceInputCharsLine/);
+  assert.match(src, /记忆笔记/);
+  assert.match(src, /对话历史/);
+  assert.match(src, /用户消息/);
   assert.doesNotMatch(src, /定向录制/);
   assert.doesNotMatch(src, /hearingNbest/);
 });

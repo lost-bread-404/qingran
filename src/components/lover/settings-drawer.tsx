@@ -18,6 +18,7 @@ import {
   brainGetDbSize,
 } from "@/lib/lover/brain/api";
 import type { BrainLogRow, Mind, Note, PortraitRow, Subject } from "@/lib/lover/brain/types";
+import { parseVoiceInputCharsLine } from "@/lib/lover/brain/voice/pack-build";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/lover/memory";
 import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
@@ -647,7 +648,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                       </div>
                       <div>
                         <dt className="text-[10px] uppercase tracking-wide">input_chars</dt>
-                        <dd className="mt-0.5">{row.inputChars ?? "—"}</dd>
+                        <dd className="mt-0.5 whitespace-pre-wrap break-all">{logInputChars(row)}</dd>
                       </div>
                     </dl>
                   </details>
@@ -665,6 +666,16 @@ function logFailFirstLine(row: BrainLogRow): string {
   const src = (row.error || row.note || "").trim();
   if (!src) return "";
   return src.split(/\r?\n/, 1)[0] ?? "";
+}
+
+function logInputChars(row: BrainLogRow): string {
+  const split = parseVoiceInputCharsLine(row.note);
+  const parts = split
+    ? `system ${split.system} · mind ${split.mind} · 记忆笔记 ${split.notes} · 对话历史 ${split.history} · 用户消息 ${split.user}`
+    : "";
+  if (parts && row.inputChars != null) return `${row.inputChars}（${parts}）`;
+  if (parts) return parts;
+  return row.inputChars != null ? String(row.inputChars) : "—";
 }
 
 function logFinishReason(row: BrainLogRow): string {

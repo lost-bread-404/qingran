@@ -75,6 +75,39 @@ export function takeTalkDelta(json: unknown): { token: string; finishReason: str
   };
 }
 
+const USAGE_ONLY_KEYS = new Set(["usage", "id", "object", "created", "model", "system_fingerprint"]);
+
+export function describeNonTextTalkEvent(json: unknown): string | null {
+  if (!json || typeof json !== "object") return null;
+  const { token } = takeTalkDelta(json);
+  if (token) return null;
+  const obj = json as Record<string, unknown>;
+  const hasChoices = Array.isArray(obj.choices) && obj.choices.length > 0;
+  if (!hasChoices) {
+    const keys = Object.keys(obj);
+    if (obj.usage != null && keys.every((k) => USAGE_ONLY_KEYS.has(k))) return null;
+    const copy = { ...obj };
+    delete copy.usage;
+    const s = JSON.stringify(copy);
+    return s && s !== "{}" ? s : null;
+  }
+  const copy = { ...obj };
+  delete copy.usage;
+  return JSON.stringify(copy);
+}
+
+export function isRetryableEmptyTalk(opts: {
+  status: number | null;
+  finishReason: string | null;
+  speech: string;
+}): boolean {
+  if (opts.status !== 200) return false;
+  if (opts.speech.trim()) return false;
+  const reason = opts.finishReason;
+  if (reason && reason !== "stop" && reason !== "length") return false;
+  return true;
+}
+
 export function talkFailFromResult(result: TalkChatResult): TalkFailOutcome {
   if (result.kind === "exception") {
     const ex = classifyTalkException(result.threw);

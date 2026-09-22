@@ -15,9 +15,23 @@ import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { pickHotNotes } from "./retrieve.ts";
 import { topicJump } from "./jump.ts";
-import { buildTail, buildVoiceMessages, renderVoiceLongterm } from "./pack-build.ts";
+import {
+  buildTail,
+  renderVoiceLongterm,
+  voiceInputChars,
+  voiceMessagesForStrip,
+  type VoiceInputChars,
+  type VoicePackParts,
+} from "./pack-build.ts";
 
-export { buildTail, buildVoiceMessages, renderVoiceLongterm } from "./pack-build.ts";
+export {
+  buildTail,
+  buildVoiceMessages,
+  renderVoiceLongterm,
+  voiceInputChars,
+  voiceMessagesForStrip,
+} from "./pack-build.ts";
+export type { VoiceInputChars, VoicePackParts, VoiceStrip } from "./pack-build.ts";
 
 export type HotContext = {
   messages: VoiceChatMessage[];
@@ -42,6 +56,8 @@ export type HotContext = {
   clockText: string;
   timeZone: string;
   refs: VoiceRefs;
+  parts: VoicePackParts;
+  inputChars: VoiceInputChars;
 };
 
 export async function loadHotContext(input: {
@@ -107,18 +123,27 @@ export async function loadHotContext(input: {
 
   const longterm = renderVoiceLongterm(meta.selfSummary, meta.bondSummary, portrait);
   const charter = input.profile.systemPrompt;
+  const parts: VoicePackParts = {
+    charter,
+    longterm,
+    history,
+    userText: input.text,
+    mind: liveMind,
+    notes,
+    clockText,
+    timeZone: input.timeZone,
+    careHint,
+    nowMs: input.nowMs,
+    mindStale,
+    jump: jumped.jump,
+  };
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(charter.trim() || "你就是清然。正在和 Rosie 语音通话。"),
     rememberBlock("voice_longterm", longterm),
   ]);
 
-  const messages = buildVoiceMessages({
-    charter,
-    longterm,
-    history,
-    tail,
-    userText: input.text,
-  });
+  const messages = voiceMessagesForStrip(parts, "none");
+  const inputChars = voiceInputChars(parts);
 
   const historyIds = history.map((m) => m.id);
   const refs: VoiceRefs = {
@@ -163,5 +188,7 @@ export async function loadHotContext(input: {
     clockText,
     timeZone: input.timeZone,
     refs,
+    parts,
+    inputChars,
   };
 }

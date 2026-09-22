@@ -4,6 +4,8 @@ import { test } from "node:test";
 import {
   TALK_FAIL,
   classifyTalkException,
+  describeNonTextTalkEvent,
+  isRetryableEmptyTalk,
   takeTalkDelta,
   talkFailFromResult,
 } from "./talk-fail.ts";
@@ -91,8 +93,46 @@ test("stream-talk logs each turn and maps timeout, empty, filter, HTTP, TTS", ()
   assert.match(src, /takeTalkDelta/);
   assert.match(src, /TALK_FAIL\.tts/);
   assert.match(src, /tts: ttsOnly \|\| undefined/);
+  assert.match(src, /failOnEmpty/);
+  assert.match(src, /describeNonTextTalkEvent/);
+  assert.match(src, /isRetryableEmptyTalk/);
   const api = readFileSync(new URL("../../routes/api/talk.ts", import.meta.url), "utf8");
   assert.match(api, /talkFailFromResult/);
   assert.match(api, /logTalkTurn/);
+  assert.match(api, /runVoiceWithFallback/);
+  assert.match(api, /formatVoiceLogNote/);
   assert.doesNotMatch(api, /线路有点不稳，稍后再说/);
 });
+
+test("describeNonTextTalkEvent skips text and usage-only chunks", () => {
+  assert.equal(describeNonTextTalkEvent({ choices: [{ delta: { content: "嗯" } }] }), null);
+  assert.equal(
+    describeNonTextTalkEvent({
+      id: "c",
+      object: "chat.completion.chunk",
+      usage: { prompt_tokens: 10, completion_tokens: 0 },
+    }),
+    null,
+  );
+  const role = describeNonTextTalkEvent({
+    choices: [{ delta: { role: "assistant" }, finish_reason: null }],
+  });
+  assert.match(role ?? "", /assistant/);
+  const stop = describeNonTextTalkEvent({
+    choices: [{ delta: {}, finish_reason: "stop" }],
+    usage: { prompt_tokens: 12, completion_tokens: 0 },
+  });
+  assert.match(stop ?? "", /finish_reason":"stop"/);
+  assert.doesNotMatch(stop ?? "", /prompt_tokens/);
+});
+
+test("isRetryableEmptyTalk only for 200 empty stop/length/null", () => {
+  assert.equal(isRetryableEmptyTalk({ status: 200, finishReason: "stop", speech: "" }), true);
+  assert.equal(isRetryableEmptyTalk({ status: 200, finishReason: null, speech: "" }), true);
+  assert.equal(isRetryableEmptyTalk({ status: 200, finishReason: "length", speech: "  " }), true);
+  assert.equal(isRetryableEmptyTalk({ status: 200, finishReason: "content_filter", speech: "" }), false);
+  assert.equal(isRetryableEmptyTalk({ status: 500, finishReason: "stop", speech: "" }), false);
+  assert.equal(isRetryableEmptyTalk({ status: null, finishReason: null, speech: "" }), false);
+  assert.equal(isRetryableEmptyTalk({ status: 200, finishReason: "stop", speech: "在" }), false);
+});
+

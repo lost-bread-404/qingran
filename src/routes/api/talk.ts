@@ -6,8 +6,8 @@ import { drainJobs, enqueue } from "@/lib/lover/brain/jobs";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
 import { upsertMessage } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
-import { parseUsage } from "@/lib/lover/brain/usage";
 import { loadHotContext } from "@/lib/lover/brain/voice/pack";
+import { runVoiceWithFallback, formatVoiceLogNote } from "@/lib/lover/brain/voice/voice-fallback";
 import { recordVoiceTurn } from "@/lib/lover/brain/voice-log";
 import { syncTalkTimeZone } from "@/lib/lover/brain/log-refs";
 import { checkSpend } from "@/lib/lover/brain/spend/check";
@@ -15,7 +15,7 @@ import { talkRateHit } from "@/lib/lover/brain/spend/rate";
 import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
 import { lockedProfile, type Profile } from "@/lib/lover/types";
-import { runTalkStream, type TalkStreamEvent } from "@/lib/lover/stream-talk";
+import { type TalkStreamEvent } from "@/lib/lover/stream-talk";
 import { logTalkTurn, talkFailFromResult } from "@/lib/lover/talk-fail";
 import { recordTurnTrace } from "@/lib/lover/brain/turn-trace";
 
@@ -109,10 +109,9 @@ export const Route = createFileRoute("/api/talk")({
               let firstAudioMs: number | null = null;
               let interrupted = false;
               const tVoice = Date.now();
-              const streamResult = await runTalkStream(
-                { text, messages: ctx.messages, replyId, voiceSpeed: profile.voiceSpeed },
+              const fallback = await runVoiceWithFallback(
+                { text, parts: ctx.parts, replyId, voiceSpeed: profile.voiceSpeed },
                 (event) => {
-                  if (event.t === "text_end") speech = event.speech || speech;
                   if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;
                   if (event.t === "timing" && event.k === "first_audio_ms") firstAudioMs = event.ms;
                   if (event.t === "err") {
@@ -120,13 +119,13 @@ export const Route = createFileRoute("/api/talk")({
                     send(event);
                     return;
                   }
-                  if (event.t === "done") {
-                    speech = event.speech || speech;
-                    return;
-                  }
+                  if (event.t === "done") return;
                   send(event);
                 },
               );
+              const streamResult = fallback.result;
+              speech = fallback.speech;
+              failed = fallback.failed || failed;
               ttftMs = streamResult.ttftMs ?? ttftMs;
               firstAudioMs = streamResult.firstAudioMs ?? firstAudioMs;
               const totalMs = Date.now() - tVoice;
@@ -153,7 +152,7 @@ export const Route = createFileRoute("/api/talk")({
                 });
               }
 
-              const usage = parseUsage(streamResult.usage);
+              const usage = fallback.usage;
               await recordVoiceTurn({
                 ctx,
                 replyId,
@@ -169,6 +168,13 @@ export const Route = createFileRoute("/api/talk")({
                 localDay: localDay(userCreatedAt, timeZone),
                 ttsChars: streamResult.ttsChars,
                 finishReason: streamResult.finishReason,
+                note: formatVoiceLogNote({
+                  attempts: fallback.attempts,
+                  usedStrip: fallback.usedStrip,
+                  chars: ctx.inputChars,
+                  failed,
+                  failMessage: fallback.failMessage,
+                }),
               });
               const selectedIds = [...ctx.pickedIds, ...ctx.queryIds];
               await recordTurnTrace({
