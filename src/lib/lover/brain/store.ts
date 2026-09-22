@@ -1,6 +1,7 @@
 import { getSql, type Sql } from "../../db.ts";
 import { newId } from "../storage.ts";
 import { HISTORY_WINDOW, INDEX_MAX_ITEMS, SESSION_GAP_MS } from "./config.ts";
+import { clipLogRecord } from "./log-clip.ts";
 import { now } from "./clock.ts";
 import { localDay, sessionIdFor, shiftDay } from "./time.ts";
 import { similar } from "./text.ts";
@@ -1542,8 +1543,14 @@ export async function appendBrainLog(row: {
   outputRef?: string | null;
   promptKey?: string | null;
   promptHash?: string | null;
+  trimmed?: boolean;
 }): Promise<number | null> {
   try {
+    const clipped = clipLogRecord({
+      inputSystem: row.inputSystem,
+      inputUser: row.inputUser,
+      outputText: row.outputText,
+    });
     const db = await getSql();
     const rows = await db.query<{ id: number }>(
       `insert into brain_log (
@@ -1552,8 +1559,8 @@ export async function appendBrainLog(row: {
          tokens_in, tokens_cached, tokens_out, tokens_reasoning, cost_usd, error, trimmed,
          code_version, refs, output_ref, cost_usd_est, prompt_key, prompt_hash
        ) values (
-         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,false,
-         $22,$23::jsonb,$24,$25,$26,$27
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
+         $23,$24::jsonb,$25,$26,$27,$28
        ) returning id`,
       [
         row.jobId ?? null,
@@ -1568,15 +1575,16 @@ export async function appendBrainLog(row: {
         row.model ?? null,
         row.effort ?? null,
         row.turnSeq ?? null,
-        row.inputSystem ?? null,
-        row.inputUser ?? null,
-        row.outputText ?? null,
+        clipped.inputSystem,
+        clipped.inputUser,
+        clipped.outputText,
         row.tokensIn ?? null,
         row.tokensCached ?? null,
         row.tokensOut ?? null,
         row.tokensReasoning ?? null,
         row.costUsd ?? null,
         row.error ?? null,
+        Boolean(row.trimmed) || clipped.truncated,
         row.codeVersion ?? null,
         row.refs == null ? null : JSON.stringify(row.refs),
         row.outputRef ?? null,
@@ -1679,9 +1687,40 @@ export async function voiceModelStatsLast7d(): Promise<VoiceModelStats[]> {
     .sort((a, b) => b.n - a.n || a.model.localeCompare(b.model));
 }
 
-export async function listBrainLog(limit = 50): Promise<BrainLogRow[]> {
+export type BrainLogFilter = {
+  route?: string | null;
+  from?: number | null;
+  to?: number | null;
+};
+
+export async function listBrainLog(limit = 50, filter?: BrainLogFilter): Promise<BrainLogRow[]> {
   const db = await getSql();
-  const rows = await db.query<Record<string, unknown>>("select * from brain_log order by at desc, id desc limit $1", [limit]);
+  const params: unknown[] = [];
+  const where: string[] = [];
+  if (filter?.route) {
+    params.push(filter.route);
+    where.push(`(route = $${params.length} or step = $${params.length} or step like $${params.length} || ':%')`);
+  }
+  if (filter?.from != null) {
+    params.push(filter.from);
+    where.push(`at >= $${params.length}`);
+  }
+  if (filter?.to != null) {
+    params.push(filter.to);
+    where.push(`at <= $${params.length}`);
+  }
+  params.push(limit);
+  const rows = await db.query<Record<string, unknown>>(
+    `select id, job_id, step, ok, ms, input_chars,
+            left(raw, 300) as raw, note, at, route, model, effort, turn_seq,
+            tokens_in, tokens_cached, tokens_out, tokens_reasoning, cost_usd, error, trimmed,
+            prompt_key, prompt_hash, left(output_text, 300) as output_text
+     from brain_log
+     ${where.length ? `where ${where.join(" and ")}` : ""}
+     order by at desc, id desc
+     limit $${params.length}`,
+    params,
+  );
   return rows.map((r) => ({
     id: asInt(r.id),
     jobId: r.job_id ? String(r.job_id) : null,

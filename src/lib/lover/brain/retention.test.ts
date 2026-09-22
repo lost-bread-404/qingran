@@ -20,7 +20,7 @@ test("retention trims high-freq text, rolls spend monthly, keeps last mind per s
     setClock(() => nowMs);
     await patchMeta({ timeZone: TZ });
 
-    // Recent high-freq row with copied inputs — one-shot legacy strip (not age-based).
+    // Recent high-freq row keeps full input until LOG_TEXT_DAYS.
     await appendBrainLog({
       step: "voice:x",
       ok: true,
@@ -39,7 +39,7 @@ test("retention trims high-freq text, rolls spend monthly, keeps last mind per s
       inputUser: "DUSK-USER",
       outputText: "x".repeat(400),
     });
-    const old = nowMs - 10 * 86_400_000;
+    const old = nowMs - 40 * 86_400_000;
     await iso.sql.query(`update brain_log set at = $1 where id = $2`, [old, duskId]);
 
     await insertBrainTurn({
@@ -79,14 +79,14 @@ test("retention trims high-freq text, rolls spend monthly, keeps last mind per s
     await iso.sql.query(`update qr_block_snapshots set last_seen = $1`, [nowMs - 100 * 86_400_000]);
 
     const r = await runRetention(nowMs);
-    assert.ok(r.legacyHighFreq >= 1, `legacyHighFreq=${r.legacyHighFreq}`);
+    assert.equal(r.legacyHighFreq, 0);
     assert.ok(r.tails >= 1, `tails=${r.tails}`);
     assert.ok(r.logText >= 1, `logText=${r.logText}`);
     const voice = await iso.sql.query<{ input_system: string | null; trimmed: boolean }>(
       `select input_system, trimmed from brain_log where route = 'voice'`,
     );
-    assert.equal(voice[0]?.input_system, null);
-    assert.equal(voice[0]?.trimmed, true);
+    assert.equal(voice[0]?.input_system, "SYSTEM");
+    assert.equal(voice[0]?.trimmed, false);
     const dusk = await iso.sql.query<{ input_system: string | null; output_text: string | null; trimmed: boolean }>(
       `select input_system, output_text, trimmed from brain_log where route = 'dusk'`,
     );

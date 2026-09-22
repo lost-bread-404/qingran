@@ -166,7 +166,7 @@ function envNum(name: string, fallback: number): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
-export const LOG_TEXT_DAYS = envNum("QR_LOG_TEXT_DAYS", 7);
+export const LOG_TEXT_DAYS = envNum("QR_LOG_TEXT_DAYS", 30);
 export const SNAPSHOT_DAYS = envNum("QR_SNAPSHOT_DAYS", 90);
 export const DB_LIMIT_MB = envNum("QR_DB_LIMIT_MB", 512);
 export const JUMP_SCORE_MAX = envNum("QR_JUMP_MAX", 0.12);

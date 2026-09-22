@@ -29,12 +29,15 @@ export async function recordVoiceTurn(opts: {
       ? (opts.usage as TokenUsage)
       : parseUsage(opts.usage);
   const model = opts.model || "voice";
-  const inputText = opts.ctx.messages.map((m) => m.content).join("\n");
+  const messages = opts.ctx.messages;
+  const inputText = messages.map((m) => m.content).join("\n");
   const settled = settleLlmCost(model, usage, inputText, opts.display);
   const outputRef = opts.display ? `message:${opts.replyId}` : null;
   const note =
     opts.note ??
     (opts.finishReason ? `finish_reason=${opts.finishReason}` : null);
+  const system = messages.find((m) => m.role === "system")?.content ?? "";
+  const rest = messages.filter((m, i) => !(i === messages.findIndex((row) => row.role === "system") && m.role === "system"));
   const logId = await appendBrainLog({
     step: `voice:${model}`,
     ok: !opts.failed && Boolean(opts.display),
@@ -46,9 +49,9 @@ export async function recordVoiceTurn(opts: {
     model: opts.model,
     effort: opts.effort ?? null,
     turnSeq: opts.userCreatedAt,
-    inputSystem: null,
-    inputUser: null,
-    outputText: null,
+    inputSystem: system || null,
+    inputUser: rest.length ? rest.map((m) => `【${m.role}】\n${m.content}`).join("\n\n") : null,
+    outputText: opts.display || null,
     tokensIn: usage.tokensIn ?? settled.tokensIn ?? null,
     tokensCached: usage.tokensCached,
     tokensOut: usage.tokensOut ?? settled.tokensOut ?? null,
@@ -62,7 +65,7 @@ export async function recordVoiceTurn(opts: {
     promptKey: opts.ctx.promptKey,
     promptHash: opts.ctx.promptHash,
   });
-  await maybeWriteRawLog(logId, { messages: opts.ctx.messages });
+  await maybeWriteRawLog(logId, { messages });
   await recordLlmSpend({
     route: "voice",
     model,

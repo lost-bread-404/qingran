@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extractJson } from "./text.ts";
+import { readFileSync } from "node:fs";
 import { classifyReflectFailure, finishReasonFromApi, type CallModelResult } from "./llm.ts";
+import { extractJson } from "./text.ts";
 
 test("extractJson handles fences, wrappers, and arrays", () => {
   assert.equal(extractJson('{"a":1}'), '{"a":1}');
@@ -41,4 +42,12 @@ test("finishReasonFromApi reads chat, responses status, and incomplete reason", 
   assert.equal(finishReasonFromApi({ status: "completed" }), "completed");
   assert.equal(finishReasonFromApi({ incomplete_details: { reason: "max_output_tokens" } }), "max_output_tokens");
   assert.equal(finishReasonFromApi(null), null);
+});
+
+test("callModel always stores input and output text", () => {
+  const src = readFileSync(new URL("./llm.ts", import.meta.url), "utf8");
+  assert.match(src, /inputSystem: input.system/);
+  assert.match(src, /outputText: text/);
+  assert.doesNotMatch(src, /skipOutput/);
+  assert.doesNotMatch(src, /HIGH_FREQ_ROUTES/);
 });

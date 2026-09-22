@@ -212,9 +212,9 @@ test("rebuild matches captured voice/reflect/archive bodies after later mutation
     const high = await iso.sql.query<{ input_system: string | null; input_user: string | null; route: string }>(
       `select route, input_system, input_user from brain_log where route in ('voice','reflect','archive')`,
     );
+    assert.ok(high.length >= 1);
     for (const row of high) {
-      assert.equal(row.input_system, null, row.route);
-      assert.equal(row.input_user, null, row.route);
+      assert.ok(row.input_system || row.input_user, row.route);
     }
   } finally {
     globalThis.fetch = realFetch;

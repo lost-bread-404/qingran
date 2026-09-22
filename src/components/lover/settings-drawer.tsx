@@ -13,19 +13,30 @@ import { formatHearingTimingSummary, parseHearingTimingLine } from "@/lib/lover/
 import { formatCallAudioLogLines, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
   brainGetCallLog,
+  brainGetDbSize,
   brainGetLongLayer,
+  brainListLogs,
   brainListNotes,
   brainListPrompts,
+  brainListVoiceModels,
   brainResetMind,
   brainRestorePrompt,
   brainSaveLongLayer,
   brainSaveNote,
   brainSavePrompt,
-  brainGetDbSize,
-  brainListVoiceModels,
 } from "@/lib/lover/brain/api";
 import type { BrainLogRow, Mind, Note, PortraitRow, Subject } from "@/lib/lover/brain/types";
 import { parseVoiceInputCharsLine } from "@/lib/lover/brain/voice/pack-build";
+import {
+  formatCallLogPlain,
+  formatDbBytes,
+  labelCallMessages,
+  LOG_RANGE_FILTERS,
+  LOG_ROUTE_FILTERS,
+  logRangeMs,
+  type CallLogMessage,
+  type LogRangeId,
+} from "@/lib/lover/call-log-view";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/lover/memory";
 import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
@@ -48,7 +59,7 @@ type PromptItem = {
 };
 
 type CallDetail = {
-  messages: Array<{ role: string; content: string }>;
+  messages: CallLogMessage[];
   warnings: string[];
   output: string;
 };
@@ -154,6 +165,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [promptBusy, setPromptBusy] = useState<string | null>(null);
   const [promptError, setPromptError] = useState<string | null>(null);
   const [callById, setCallById] = useState<Record<number, CallDetail | "loading">>({});
+  const [logRoute, setLogRoute] = useState<string | null>(null);
+  const [logRange, setLogRange] = useState<LogRangeId>("7d");
+  const [logCopied, setLogCopied] = useState<number | null>(null);
+  const [dbSize, setDbSize] = useState<{ totalBytes: number | null; limitMb: number; warn: boolean } | null>(null);
   const viewport = useVisualViewportHeight(open);
 
   useEffect(() => {
@@ -217,6 +232,29 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     };
   }, [open, tab]);
 
+  useEffect(() => {
+    if (!open || tab !== "log") return;
+    let cancelled = false;
+    const to = Date.now();
+    const from = to - logRangeMs(logRange);
+    void brainListLogs({ data: { route: logRoute, from, to, limit: 200 } })
+      .then((rows) => {
+        if (!cancelled) setLog(rows as BrainLogRow[]);
+      })
+      .catch(() => {
+        if (!cancelled) setLog([]);
+      });
+    void brainGetDbSize()
+      .then((s) => {
+        if (cancelled) return;
+        setDbSize({ totalBytes: s.totalBytes ?? null, limitMb: s.limitMb, warn: Boolean(s.warn) });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tab, logRoute, logRange]);
+
   async function refresh() {
     const [noteRes, layer] = await Promise.all([
       brainListNotes({ data: { q: query || undefined, subject: subject || undefined } }),
@@ -229,7 +267,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setMind(layer.mind);
     setLog(layer.log);
     void brainGetDbSize()
-      .then((s) => setDbWarn(Boolean(s.warn)))
+      .then((s) => {
+        setDbWarn(Boolean(s.warn));
+        setDbSize({ totalBytes: s.totalBytes ?? null, limitMb: s.limitMb, warn: Boolean(s.warn) });
+      })
       .catch(() => setDbWarn(false));
   }
 
@@ -311,11 +352,14 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
           (typeof obj?.output_text === "string" && obj.output_text) ||
           (typeof obj?.raw === "string" && obj.raw) ||
           "";
+        const warnings = Array.isArray(obj?.warnings)
+          ? (obj.warnings as string[])
+          : rebuilt?.warnings ?? [];
         setCallById((m) => ({
           ...m,
           [row.id]: {
-            messages: assembled ?? [],
-            warnings: rebuilt?.warnings ?? [],
+            messages: labelCallMessages(assembled ?? []),
+            warnings,
             output,
           },
         }));
@@ -326,6 +370,33 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
           [row.id]: { messages: [], warnings: ["读不出这次发给模型的全文"], output: "" },
         }));
       });
+  }
+
+  async function copyCall(row: BrainLogRow, detail: CallDetail) {
+    const text = formatCallLogPlain({
+      step: row.step,
+      model: row.model,
+      effort: row.effort,
+      ms: row.ms,
+      tokensIn: row.tokensIn,
+      tokensOut: row.tokensOut,
+      tokensCached: row.tokensCached,
+      tokensReasoning: row.tokensReasoning,
+      costUsd: row.costUsd,
+      finishReason: logFinishReason(row),
+      error: row.error,
+      inputChars: row.inputChars,
+      trimmed: row.trimmed,
+      messages: detail.messages,
+      output: detail.output || row.outputText || "",
+    });
+    try {
+      await navigator.clipboard.writeText(text);
+      setLogCopied(row.id);
+      window.setTimeout(() => setLogCopied((cur) => (cur === row.id ? null : cur)), 1500);
+    } catch {
+      setLogCopied(null);
+    }
   }
 
   async function saveLong() {
@@ -983,6 +1054,54 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
+            <p className="text-xs text-subtle">
+              占用 {formatDbBytes(dbSize?.totalBytes ?? null)}
+              {dbSize?.limitMb ? ` / ${dbSize.limitMb} MB` : ""}
+              {" · "}记录保留 30 天
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                aria-pressed={logRoute == null}
+                onClick={() => setLogRoute(null)}
+                className={cn(
+                  "min-h-11 rounded-md px-3 text-sm",
+                  logRoute == null ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                )}
+              >
+                全部
+              </button>
+              {LOG_ROUTE_FILTERS.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={logRoute === id}
+                  onClick={() => setLogRoute(logRoute === id ? null : id)}
+                  className={cn(
+                    "min-h-11 rounded-md px-3 text-sm",
+                    logRoute === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {LOG_RANGE_FILTERS.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={logRange === id}
+                  onClick={() => setLogRange(id)}
+                  className={cn(
+                    "min-h-11 rounded-md px-3 text-sm",
+                    logRange === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             {slowEngineHint(hearingProvider) ? (
               <p className="text-xs text-live">{slowEngineHint(hearingProvider)}</p>
             ) : null}
@@ -996,7 +1115,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                     .map((row) => {
                       const timing = parseHearingTimingLine(row.note);
                       return (
-                        <li key={row.id} className="text-[11px] leading-relaxed text-fg">
+                        <li key={row.id} className="text-xs leading-relaxed text-fg">
                           <span className="text-subtle">{logClock(row.at)} </span>
                           {timing ? formatHearingTimingSummary(timing) : row.note || `${row.ms ?? "—"}ms`}
                         </li>
@@ -1012,6 +1131,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                 const failLine = row.ok ? "" : logFailFirstLine(row);
                 const timing = parseHearingTimingLine(row.note);
                 const engineHint = slowEngineHintFromNote(row.note);
+                const detail = callById[row.id];
+                const loaded = detail && detail !== "loading" ? detail : null;
                 return (
                   <details
                     key={row.id}
@@ -1031,63 +1152,63 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                       ) : null}
                       {failLine ? <p className="mt-1 text-live">{failLine}</p> : null}
                     </summary>
-                    <dl className="mt-2 flex flex-col gap-1.5 text-subtle">
-                      <div>
-                        <dt className="text-[10px] uppercase tracking-wide">prompt</dt>
-                        <dd className="mt-0.5 break-all">
-                          {row.promptKey || "—"}
-                          {row.promptHash ? ` · ${row.promptHash.slice(0, 12)}` : ""}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[10px] uppercase tracking-wide">发给模型</dt>
-                        <dd className="mt-0.5 whitespace-pre-wrap break-all">
-                          {callById[row.id] === "loading"
-                            ? "正在拼回这一次的全文…"
-                            : callById[row.id] && callById[row.id] !== "loading"
-                              ? (callById[row.id] as CallDetail).messages.length
-                                ? (callById[row.id] as CallDetail).messages
-                                    .map((m, i) => `【${m.role} ${i + 1}】\n${m.content}`)
-                                    .join("\n\n")
-                                : "这一次没有存下完整 prompt。"
-                              : "点开后会去拼。"}
-                        </dd>
-                      </div>
-                      {callById[row.id] && callById[row.id] !== "loading" && (callById[row.id] as CallDetail).warnings.length ? (
-                        <div>
-                          <dt className="text-[10px] uppercase tracking-wide">warnings</dt>
-                          <dd className="mt-0.5 whitespace-pre-wrap break-all text-live">
-                            {(callById[row.id] as CallDetail).warnings.join("\n")}
-                          </dd>
-                        </div>
+                    <div className="mt-3 flex flex-col gap-3">
+                      <section>
+                        <p className="text-xs text-subtle">参数与耗时</p>
+                        <dl className="mt-1 flex flex-col gap-1 text-subtle">
+                          <div>模型 {row.model || "—"}{row.effort ? ` · ${row.effort}` : ""}</div>
+                          <div>耗时 {row.ms != null ? `${row.ms}ms` : "—"}</div>
+                          <div>
+                            tokens in {row.tokensIn ?? "—"} · out {row.tokensOut ?? "—"} · cached {row.tokensCached ?? "—"}
+                            {row.tokensReasoning != null ? ` · reasoning ${row.tokensReasoning}` : ""}
+                          </div>
+                          <div>input_chars {logInputChars(row)}</div>
+                          <div>finish_reason {logFinishReason(row) || "—"}</div>
+                          {row.error ? <div className="text-live">{row.error}</div> : null}
+                          {row.trimmed ? <div>已截断到 200KB</div> : null}
+                          {row.note ? <div className="whitespace-pre-wrap break-all">{row.note}</div> : null}
+                        </dl>
+                      </section>
+                      <section>
+                        <p className="text-xs text-subtle">输入</p>
+                        {detail === "loading" || !detail ? (
+                          <p className="mt-1 text-subtle">{detail === "loading" ? "正在读这一次的全文…" : "点开后会去读。"}</p>
+                        ) : detail.messages.length ? (
+                          <div className="mt-1 flex flex-col gap-1">
+                            {detail.messages.map((msg, i) => (
+                              <details key={`${row.id}-${i}`} className="rounded-md bg-bg px-2 py-1">
+                                <summary className="cursor-pointer text-fg">
+                                  {msg.label} · {msg.role}
+                                </summary>
+                                <pre className="mt-1 whitespace-pre-wrap break-all text-muted">{msg.content || "（空）"}</pre>
+                              </details>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-subtle">这一次没有存下完整输入。</p>
+                        )}
+                      </section>
+                      {loaded?.warnings.length ? (
+                        <p className="whitespace-pre-wrap break-all text-live">{loaded.warnings.join("\n")}</p>
                       ) : null}
-                      <div>
-                        <dt className="text-[10px] uppercase tracking-wide">返回</dt>
-                        <dd className="mt-0.5 whitespace-pre-wrap break-all">
-                          {callById[row.id] && callById[row.id] !== "loading"
-                            ? (callById[row.id] as CallDetail).output || row.outputText || (row.raw ?? "").slice(0, 1000) || "—"
-                            : (row.outputText || (row.raw ?? "").slice(0, 1000) || "—")}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[10px] uppercase tracking-wide">note</dt>
-                        <dd className="mt-0.5 whitespace-pre-wrap break-all">{row.note || "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-[10px] uppercase tracking-wide">raw</dt>
-                        <dd className="mt-0.5 whitespace-pre-wrap break-all">
-                          {(row.raw ?? "").slice(0, 1000) || "—"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[10px] uppercase tracking-wide">finish_reason</dt>
-                        <dd className="mt-0.5 break-all">{logFinishReason(row) || "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-[10px] uppercase tracking-wide">input_chars</dt>
-                        <dd className="mt-0.5 whitespace-pre-wrap break-all">{logInputChars(row)}</dd>
-                      </div>
-                    </dl>
+                      <section>
+                        <p className="text-xs text-subtle">输出</p>
+                        <pre className="mt-1 whitespace-pre-wrap break-all text-fg">
+                          {loaded
+                            ? loaded.output || "（空）"
+                            : row.outputText || (row.raw ?? "").slice(0, 1000) || "—"}
+                        </pre>
+                      </section>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="min-h-11"
+                        disabled={!loaded}
+                        onClick={() => loaded && void copyCall(row, loaded)}
+                      >
+                        {logCopied === row.id ? "已复制" : "复制全部"}
+                      </Button>
+                    </div>
                   </details>
                 );
               })

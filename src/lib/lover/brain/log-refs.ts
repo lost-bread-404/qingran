@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { getSql } from "../../db.ts";
 import { now } from "./clock.ts";
 import { getMeta, patchMeta } from "./store.ts";
+import { clipLogJson } from "./log-clip.ts";
 import { resolveTz } from "./tz.ts";
 
 export const HIGH_FREQ_ROUTES = new Set(["voice", "reflect", "archive"]);
@@ -119,14 +120,18 @@ export async function getBlockByHash(hash: string): Promise<{ kind: string; text
 }
 
 export async function maybeWriteRawLog(logId: number | null, input: unknown): Promise<void> {
-  if (!logId || logRawHours() <= 0) return;
+  if (!logId) return;
   try {
     const db = await getSql();
+    const clipped = clipLogJson(input);
     await db.query(`insert into brain_log_raw (log_id, input, at) values ($1,$2::jsonb,$3) on conflict (log_id) do nothing`, [
       logId,
-      JSON.stringify(input ?? null),
+      clipped.value,
       now(),
     ]);
+    if (clipped.truncated) {
+      await db.query(`update brain_log set trimmed = true where id = $1`, [logId]);
+    }
   } catch (err) {
     console.error("[log-raw] write failed", err);
   }

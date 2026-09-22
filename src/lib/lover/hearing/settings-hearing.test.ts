@@ -49,8 +49,8 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.doesNotMatch(src, /row\.error \|\| row\.note/);
   assert.match(src, /logFinishReason/);
   assert.match(src, /\.slice\(0, 1000\)/);
-  assert.match(src, />finish_reason</);
-  assert.match(src, />input_chars</);
+  assert.match(src, /finish_reason/);
+  assert.match(src, /input_chars/);
   assert.match(src, /logInputChars/);
   assert.match(src, /parseVoiceInputCharsLine/);
   assert.match(src, /记忆笔记/);
@@ -76,13 +76,20 @@ test("settings prompts tab edits catalog steps and log expand shows assembled pr
   assert.match(src, /恢复默认/);
   assert.match(src, /\{system_prompt\}/);
   assert.match(src, /brainGetCallLog/);
-  assert.match(src, /发给模型/);
+  assert.match(src, /brainListLogs/);
+  assert.match(src, /复制全部/);
+  assert.match(src, />输入</);
+  assert.match(src, />输出</);
+  assert.match(src, />参数与耗时</);
+  assert.match(src, /记录保留 30 天/);
   assert.match(src, /loadCall/);
   const api = readFileSync(new URL("../brain/api.ts", import.meta.url), "utf8");
   assert.match(api, /brainListPrompts/);
   assert.match(api, /brainSavePrompt/);
   assert.match(api, /brainRestorePrompt/);
   assert.match(api, /assembled/);
+  assert.match(api, /brainListLogs/);
+  assert.match(api, /messagesFromStored/);
 });
 
 test("transcript pencil opens confirm in debug; bubble text is not a hidden confirm entry", () => {

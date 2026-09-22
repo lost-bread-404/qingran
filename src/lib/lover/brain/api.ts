@@ -245,6 +245,18 @@ export const brainGetLongLayer = createServerFn({ method: "GET" }).handler(async
   return { portrait, self: meta.selfSummary, bond: meta.bondSummary, mind, log };
 });
 
+export const brainListLogs = createServerFn({ method: "POST" })
+  .validator(
+    (input: { limit?: number; route?: string | null; from?: number | null; to?: number | null }) => input,
+  )
+  .handler(async ({ data }) => {
+    return listBrainLog(Math.min(Math.max(data.limit ?? 200, 1), 500), {
+      route: data.route ?? null,
+      from: data.from ?? null,
+      to: data.to ?? null,
+    });
+  });
+
 export const brainSaveLongLayer = createServerFn({ method: "POST" })
   .validator(
     (input: {
@@ -390,21 +402,36 @@ export const brainGetCallLog = createServerFn({ method: "POST" })
   .validator((input: { id: number }) => input)
   .handler(async ({ data }) => {
     const { getSql } = await import("../../db.ts");
+    const { messagesFromStored } = await import("../call-log-view.ts");
     const db = await getSql();
     const rows = await db.query<Record<string, unknown>>("select * from brain_log where id = $1", [data.id]);
     const row = asJson(rows[0] ?? null) as Record<string, unknown> | null;
     if (!row) return null;
-    const rebuilt = await (await import("./rebuild.ts")).rebuildFromLog({
-      id: Number(row.id),
-      route: row.route ? String(row.route) : null,
-      turn_seq: row.turn_seq == null ? null : Number(row.turn_seq),
-    });
+    const rawRows = await db.query<{ input: unknown }>("select input from brain_log_raw where log_id = $1", [data.id]);
+    const storedMessages = messagesFromStored(rawRows[0]?.input);
+    const fallbackMessages =
+      storedMessages ??
+      [
+        row.input_system ? { role: "system", content: String(row.input_system) } : null,
+        row.input_user ? { role: "user", content: String(row.input_user) } : null,
+      ].filter((item): item is { role: string; content: string } => Boolean(item));
+    let rebuilt: { messages: Array<{ role: string; content: string }>; warnings: string[] } | null = null;
+    if (!fallbackMessages.length) {
+      rebuilt = await (await import("./rebuild.ts")).rebuildFromLog({
+        id: Number(row.id),
+        route: row.route ? String(row.route) : null,
+        turn_seq: row.turn_seq == null ? null : Number(row.turn_seq),
+      });
+    }
     const output = row.output_text ? String(row.output_text) : row.raw ? String(row.raw) : "";
+    const messages = fallbackMessages.length ? fallbackMessages : rebuilt?.messages ?? [];
     return {
       ...row,
       rebuilt: asJson(rebuilt),
-      assembled: rebuilt?.messages ?? null,
+      assembled: messages,
       output,
+      stored: Boolean(fallbackMessages.length),
+      warnings: rebuilt?.warnings ?? [],
     };
   });
 

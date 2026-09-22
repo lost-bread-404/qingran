@@ -33,23 +33,6 @@ async function trimLogText(nowMs: number): Promise<number> {
   );
 }
 
-async function trimLegacyHighFreq(): Promise<number> {
-  return updateBatch(
-    `update brain_log set
-       input_system = null,
-       input_user = null,
-       trimmed = true
-     where id in (
-       select id from brain_log
-       where route in ('voice','reflect','archive')
-         and (input_system is not null or input_user is not null)
-       order by id limit $1
-     )
-     returning id`,
-    [BATCH],
-  );
-}
-
 async function clearTurnTails(): Promise<number> {
   return updateBatch(
     `update brain_turns set tail = null
@@ -155,14 +138,8 @@ async function rollupAndTrimSpend(nowMs: number): Promise<number> {
 
 async function trimRawLogs(nowMs: number): Promise<number> {
   const hours = logRawHours();
+  const cutoff = hours > 0 ? nowMs - hours * 3_600_000 : nowMs - LOG_TEXT_DAYS * 86_400_000;
   const db = await getSql();
-  if (hours <= 0) {
-    const rows = await db.query<{ n: number }>(
-      `with d as (delete from brain_log_raw returning log_id) select count(*)::int as n from d`,
-    );
-    return Number(rows[0]?.n) || 0;
-  }
-  const cutoff = nowMs - hours * 3_600_000;
   const rows = await db.query<{ n: number }>(
     `with d as (delete from brain_log_raw where at < $1 returning log_id) select count(*)::int as n from d`,
     [cutoff],
@@ -220,11 +197,6 @@ export async function runRetention(nowMs = now()): Promise<RetentionResult> {
     for (let i = 0; i < 40; i++) {
       const n = await trimLogText(nowMs);
       result.logText += n;
-      if (n < BATCH) break;
-    }
-    for (let i = 0; i < 40; i++) {
-      const n = await trimLegacyHighFreq();
-      result.legacyHighFreq += n;
       if (n < BATCH) break;
     }
     for (let i = 0; i < 40; i++) {

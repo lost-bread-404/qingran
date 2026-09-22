@@ -11,7 +11,7 @@ import { extractJson } from "./text.ts";
 import { parseUsage, settleLlmCost } from "./usage.ts";
 import { checkSpend, recordLlmSpend } from "./spend/check.ts";
 import { jobRateHit, SPEND_RATE_ERR } from "./spend/rate.ts";
-import { codeVersion, HIGH_FREQ_ROUTES, maybeWriteRawLog, xaiStoreEnabled } from "./log-refs.ts";
+import { codeVersion, maybeWriteRawLog, xaiStoreEnabled } from "./log-refs.ts";
 
 export function finishReasonFromApi(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return null;
@@ -179,6 +179,22 @@ function responseSnippet(raw: unknown, err?: unknown): string {
   return text.replace(/\s+/g, " ").slice(0, 200);
 }
 
+function logMessagesOf(input: CallModelInput): Array<{ role: string; content: string }> {
+  const messages: Array<{ role: string; content: string }> = [
+    { role: "system", content: input.system },
+    ...userPartsOf(input).map((content) => ({ role: "user" as const, content })),
+  ];
+  if (input.previous?.length) {
+    for (const part of input.previous) {
+      if (!part || typeof part !== "object") continue;
+      const row = part as { role?: unknown; content?: unknown };
+      if (row.content == null) continue;
+      messages.push({ role: String(row.role || "user"), content: String(row.content) });
+    }
+  }
+  return messages;
+}
+
 export const SPEND_HOLD_ERR = "spend-paused";
 
 export function classifyReflectFailure(result: CallModelResult): string {
@@ -208,7 +224,6 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     ms: Date.now() - started,
   });
 
-  const high = HIGH_FREQ_ROUTES.has(route);
   const failLog = {
     jobId: input.jobId,
     step: `${route}:${resolved.model}`,
@@ -225,14 +240,15 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     outputRef: input.outputRef ?? null,
     promptKey: input.promptKey ?? null,
     promptHash: input.promptHash ?? null,
-    inputSystem: high ? null : input.system,
-    inputUser: high ? null : joinedUser(input),
+    inputSystem: input.system,
+    inputUser: joinedUser(input),
   };
 
   const hold = await checkSpend(route);
   if (!hold.allow) {
     const result = fail(SPEND_HOLD_ERR);
-    await appendBrainLog({ ...failLog, ms: result.ms, note: SPEND_HOLD_ERR, error: SPEND_HOLD_ERR });
+    const logId = await appendBrainLog({ ...failLog, ms: result.ms, note: SPEND_HOLD_ERR, error: SPEND_HOLD_ERR });
+    await maybeWriteRawLog(logId, { messages: logMessagesOf(input) });
     return result;
   }
 
@@ -245,7 +261,8 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
 
   if (!apiKey) {
     const result = fail("no-key");
-    await appendBrainLog({ ...failLog, ms: result.ms, note: "no-key", error: "no-key" });
+    const logId = await appendBrainLog({ ...failLog, ms: result.ms, note: "no-key", error: "no-key" });
+    await maybeWriteRawLog(logId, { messages: logMessagesOf(input) });
     return result;
   }
 
@@ -271,7 +288,6 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
   if (input.previous?.length) body.input = [...(body.input as unknown[]), ...input.previous];
   if (route === "reflect") body.prompt_cache_key = REFLECT_PROMPT_CACHE_KEY;
 
-  const skipOutput = high && route === "reflect" && !input.keepOutputText;
   const baseLog = {
     jobId: input.jobId,
     route,
@@ -283,8 +299,8 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     outputRef: input.outputRef ?? null,
     promptKey: input.promptKey ?? null,
     promptHash: input.promptHash ?? null,
-    inputSystem: high ? null : input.system,
-    inputUser: high ? null : joinedUser(input),
+    inputSystem: input.system,
+    inputUser: joinedUser(input),
   };
 
   try {
@@ -315,7 +331,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       inputChars: inputCharsOf(input),
       raw: text.slice(0, 4000),
       note: failNote ?? (finish ? `finish_reason=${finish}` : null),
-      outputText: skipOutput ? null : text,
+      outputText: text,
       tokensIn: usage.tokensIn ?? settled.tokensIn ?? null,
       tokensCached: usage.tokensCached,
       tokensOut: usage.tokensOut ?? settled.tokensOut ?? null,
@@ -324,7 +340,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       costUsdEst: settled.usdEst,
       error: failNote,
     });
-    await maybeWriteRawLog(logId, { system: input.system, user: userPartsOf(input) });
+    await maybeWriteRawLog(logId, { messages: logMessagesOf(input) });
     await recordLlmSpend({
       route,
       model: resolved.model,
@@ -377,6 +393,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       note: failKind,
       error: timedOut ? "timeout" : `http_error 0 ${snippet}`,
     });
+    await maybeWriteRawLog(logId, { messages: logMessagesOf(input) });
     return {
       ...fail(timedOut ? "timeout" : "error"),
       ms,
