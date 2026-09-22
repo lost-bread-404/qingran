@@ -24,6 +24,7 @@ test("round-trips prompt, memories, and chat", () => {
   assert.equal(parsed.profile.memoryCursor, "abc");
   assert.equal(parsed.profile.debugHearing, true);
   assert.equal(parsed.profile.hearingNbest, false);
+  assert.equal(parsed.profile.silenceMs, 1500);
   assert.equal(parsed.memories[0]?.text, "Rosie 怕冷");
   assert.equal(parsed.messages[1]?.text, "在。");
   assert.equal(parsed.messages[0]?.voiceTurnId, "turn-1");

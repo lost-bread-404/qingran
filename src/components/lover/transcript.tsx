@@ -311,6 +311,7 @@ function UserBubble({
               {[
                 user.hearingTiming.hearMs != null ? `说完→识别完 ${user.hearingTiming.hearMs}ms` : null,
                 user.hearingTiming.grokMs != null ? `识别完→字 ${user.hearingTiming.grokMs}ms` : null,
+                user.hearingTiming.ttftMs != null ? `首字 ${user.hearingTiming.ttftMs}ms` : null,
                 user.hearingTiming.ttsMs != null ? `→出声 ${user.hearingTiming.ttsMs}ms` : null,
                 user.hearingTiming.engine ?? null,
               ]

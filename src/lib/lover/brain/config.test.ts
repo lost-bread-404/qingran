@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { LONG_DRAIN_MS, MODEL_CLASSES, ROUTES, resolveRoute, validateModelClasses } from "./config.ts";
+import { LONG_DRAIN_MS, MODEL_CLASSES, ROUTES, resolveRoute, resolveVoiceChat, validateModelClasses } from "./config.ts";
 
 test("model classes pass capability checks", () => {
   assert.deepEqual(validateModelClasses(), []);
@@ -11,14 +11,30 @@ test("model classes pass capability checks", () => {
 
 test("route overrides class, env route beats class", () => {
   const voice = resolveRoute("voice");
-  assert.equal(voice.model, MODEL_CLASSES.REALTIME.model);
-  assert.equal(voice.effort, null);
+  assert.equal(voice.model, MODEL_CLASSES.FAST_THINKER.model);
+  assert.equal(voice.effort, "low");
+  assert.equal(voice.timeoutMs, 60_000);
   const report = resolveRoute("report");
   assert.equal(report.effort, "medium");
   const reflect = resolveRoute("reflect");
   assert.equal(reflect.cls, "FAST_THINKER");
   assert.equal(reflect.effort, "low");
   assert.equal(MODEL_CLASSES.FAST_THINKER.model, "grok-4.3");
+});
+
+test("voice chat picker maps to grok-4.3 or the 4.20 safety model", () => {
+  const low = resolveVoiceChat("4.3-low");
+  assert.equal(low.model, MODEL_CLASSES.FAST_THINKER.model);
+  assert.equal(low.effort, "low");
+  assert.equal(low.timeoutMs, 60_000);
+  const mid = resolveVoiceChat("4.3-medium");
+  assert.equal(mid.model, MODEL_CLASSES.FAST_THINKER.model);
+  assert.equal(mid.effort, "medium");
+  const safe = resolveVoiceChat("4.20");
+  assert.equal(safe.model, MODEL_CLASSES.REALTIME.model);
+  assert.equal(safe.effort, null);
+  assert.deepEqual(resolveVoiceChat(), low);
+  assert.deepEqual(resolveVoiceChat("nope"), low);
 });
 
 test("every route timeout fits in LONG_DRAIN_MS with 10s slack", () => {

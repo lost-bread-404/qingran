@@ -72,7 +72,6 @@ import {
   updateClipProsody,
   countProsodyClips,
   upsertEvalRun,
-  hearingSttKeyterms,
   type LabClipFilter,
 } from "./persist.ts";
 import { applyConfusions } from "./confusions.ts";
@@ -82,6 +81,8 @@ import { parseStoredProsody } from "../prosody.ts";
 import { scrubHallucination } from "../stt-text.ts";
 import { waitUntil } from "@vercel/functions";
 import { gitCommitSha, hashQingranPrompt } from "./eval-meta.ts";
+import { backgroundRefreshHearingStt, hotPathHearingStt } from "./stt-cache.ts";
+import { recordHearingTimingLog } from "./timing-log.ts";
 import {
   applyUtteranceTag,
   parseAcousticTags,
@@ -152,6 +153,7 @@ export type RunHearingInput = {
   nbest?: boolean;
   extraKeyterms?: string[];
   debugHearing?: boolean;
+  silenceWaitMs?: number;
   mode?: HearingMode;
   audioRoute?: AudioRoute;
   peakRms?: number;
@@ -332,15 +334,10 @@ export const runHearing = createServerFn({ method: "POST" })
       context: data.context,
       nbest: Boolean(data.nbest),
     };
-    let extraKeyterms = data.extraKeyterms ?? [];
-    let confusionRules: Awaited<ReturnType<typeof listHearingConfusions>> = [];
-    try {
-      const sql = await getSql();
-      extraKeyterms = await hearingSttKeyterms(sql, extraKeyterms);
-      confusionRules = await listHearingConfusions(sql);
-    } catch {
-      extraKeyterms = data.extraKeyterms ?? [];
-    }
+    const hot = hotPathHearingStt(data.extraKeyterms ?? []);
+    const extraKeyterms = hot.keyterms;
+    const confusionRules = hot.rules;
+    const sttStart = Date.now();
     const xaiPromise = transcribeWithXai({
       audioBase64: data.audioBase64,
       mimeType: data.mimeType,
@@ -352,7 +349,36 @@ export const runHearing = createServerFn({ method: "POST" })
     const [xai, outcome] = await Promise.all([xaiPromise, hearingPromise]);
 
     const picked = chooseHearing({ provider, outcome, xai });
+    const stt_done = Date.now();
+    const uploadMs = Math.max(0, sttStart - upload_start);
+    const sttMs = Math.max(0, stt_done - sttStart);
+    const silenceMs = data.silenceWaitMs ?? null;
+    const followup = (timing: {
+      ok: boolean;
+      correctMs: number;
+      engineUsed: string;
+      raw?: string | null;
+      error?: string | null;
+    }) => {
+      waitUntil(
+        (async () => {
+          await recordHearingTimingLog({
+            ok: timing.ok,
+            silenceMs,
+            uploadMs,
+            sttMs,
+            correctMs: timing.correctMs,
+            engineRequested: data.provider,
+            engineUsed: timing.engineUsed,
+            raw: timing.raw,
+            error: timing.error,
+          });
+          if (hot.needsRefresh) await backgroundRefreshHearingStt();
+        })(),
+      );
+    };
     if (!picked.hearing && !xai.ok && xai.quota) {
+      followup({ ok: false, correctMs: 0, engineUsed: "xai", error: "quota" });
       return {
         ok: true,
         turnId,
@@ -377,7 +403,9 @@ export const runHearing = createServerFn({ method: "POST" })
     let fallback = picked.fallback;
     let fallbackReason: string | undefined = picked.fallback_reason;
     const originalXai = picked.xaiText;
+    const correctStart = Date.now();
     const corrected = applyConfusions(originalXai, confusionRules);
+    const correctMs = Date.now() - correctStart;
     let xaiText = corrected.text;
     const durationSec = wavDurationMs(data.audioBase64) / 1000;
     const peakRms = wavPeakRms(data.audioBase64);
@@ -411,7 +439,6 @@ export const runHearing = createServerFn({ method: "POST" })
     const predicted =
       used !== "xai" ? withMeowFromText(predictedBase, originalXai || taggedCore) : predictedBase;
     const tagged = taggedCore ? applyUtteranceTag(taggedCore, predicted) : "";
-    const stt_done = Date.now();
     const latency_ms = hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0);
     const audioLlmMs =
       outcome && !outcome.ok
@@ -433,38 +460,52 @@ export const runHearing = createServerFn({ method: "POST" })
     });
 
     waitUntil(
-      persistHearingTurn({
-        turnId,
-        used,
-        model,
-        data,
-        upload_start,
-        stt_done,
-        latency_ms,
-        hearing,
-        xaiText: originalXai,
-        pickedXaiText: originalXai,
-        tagged,
-        predictedTags: predicted,
-        commitSha,
-        promptHash,
-        fallback,
-        fallbackReason,
-        outcome,
-        scrubbedSuspect: scrubbed.suspect,
-        disagreement,
-        durationMs: Math.round(durationSec * 1000),
-        peakRms: data.peakRms ?? peakRms,
-        capture: Boolean(data.capture || data.debugHearing),
-        refusal,
-        engineRequested: data.provider,
-        engineUsed: used,
-        engineFallback,
-        engineErrorDetail,
-        audioLlmMs,
-        sttCorrectedText: corrected.text,
-        sttCorrections: corrected.replacements,
-      }),
+      (async () => {
+        await recordHearingTimingLog({
+          ok: !drop && Boolean(tagged || xaiText),
+          silenceMs,
+          uploadMs,
+          sttMs,
+          correctMs,
+          engineRequested: data.provider,
+          engineUsed: used,
+          raw: originalXai,
+          error: engineErrorDetail,
+        });
+        await persistHearingTurn({
+          turnId,
+          used,
+          model,
+          data,
+          upload_start,
+          stt_done,
+          latency_ms,
+          hearing,
+          xaiText: originalXai,
+          pickedXaiText: originalXai,
+          tagged,
+          predictedTags: predicted,
+          commitSha,
+          promptHash,
+          fallback,
+          fallbackReason,
+          outcome,
+          scrubbedSuspect: scrubbed.suspect,
+          disagreement,
+          durationMs: Math.round(durationSec * 1000),
+          peakRms: data.peakRms ?? peakRms,
+          capture: Boolean(data.capture || data.debugHearing),
+          refusal,
+          engineRequested: data.provider,
+          engineUsed: used,
+          engineFallback,
+          engineErrorDetail,
+          audioLlmMs,
+          sttCorrectedText: corrected.text,
+          sttCorrections: corrected.replacements,
+        });
+        if (hot.needsRefresh) await backgroundRefreshHearingStt();
+      })(),
     );
 
     return {

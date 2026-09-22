@@ -15,6 +15,7 @@ export type TalkStreamEvent =
       finishReason?: string | null;
       ms?: number;
       chars?: number;
+      ttftMs?: number;
     }
   | {
       t: "err";

@@ -119,7 +119,7 @@ describe("hearing schema", () => {
         engineFallback: "http",
         engineErrorDetail: "503 overloaded",
       }),
-      "引擎：xai(fallback: error) 503 overloaded",
+      "当前引擎：gemini（会拖慢识别） · 引擎：xai(fallback: error) 503 overloaded",
     );
   });
 

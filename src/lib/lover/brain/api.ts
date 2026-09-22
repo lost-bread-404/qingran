@@ -222,7 +222,7 @@ export const brainGetLongLayer = createServerFn({ method: "GET" }).handler(async
     listPortrait(),
     getMeta(),
     getMind(),
-    listBrainLog(50),
+    listBrainLog(80),
   ]);
   return { portrait, self: meta.selfSummary, bond: meta.bondSummary, mind, log };
 });

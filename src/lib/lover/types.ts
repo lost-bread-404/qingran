@@ -1,11 +1,24 @@
 import { DEFAULT_HEARING_PROVIDER, isHearingProvider, type HearingProviderId } from "./hearing/config.ts";
 import type { AcousticTags } from "./hearing/tags.ts";
+import { isSilenceMs, SILENCE_MS, type SilenceMs } from "./vad.ts";
 
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "steer" | "setting" | "unheard";
+export type VoiceChatId = "4.3-low" | "4.3-medium" | "4.20";
 
 export const CONTEXT_WINDOW = 40;
+
+export const VOICE_CHAT_OPTIONS: { id: VoiceChatId; label: string }[] = [
+  { id: "4.3-low", label: "grok-4.3 low" },
+  { id: "4.3-medium", label: "grok-4.3 medium" },
+  { id: "4.20", label: "grok-4.20-0309-non-reasoning" },
+];
+export const DEFAULT_VOICE_CHAT: VoiceChatId = "4.3-low";
+
+export function isVoiceChatId(value: unknown): value is VoiceChatId {
+  return value === "4.3-low" || value === "4.3-medium" || value === "4.20";
+}
 
 export type Profile = {
   systemPrompt: string;
@@ -17,6 +30,8 @@ export type Profile = {
   captureAudio: boolean;
   debugHearing: boolean;
   hearingNbest: boolean;
+  voiceChat: VoiceChatId;
+  silenceMs: SilenceMs;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -36,6 +51,7 @@ export type ChatMessage = {
     hearMs?: number;
     grokMs?: number;
     ttsMs?: number;
+    ttftMs?: number;
     engine?: string;
   };
   interrupted?: boolean;
@@ -44,6 +60,7 @@ export type ChatMessage = {
     finishReason?: string | null;
     ms?: number;
     chars?: number;
+    ttftMs?: number;
   };
 };
 
@@ -79,6 +96,8 @@ export const DEFAULT_PROFILE: Profile = {
   captureAudio: true,
   debugHearing: true,
   hearingNbest: false,
+  voiceChat: DEFAULT_VOICE_CHAT,
+  silenceMs: SILENCE_MS,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -99,6 +118,8 @@ type LooseProfile = Partial<Profile> & {
   captureAudio?: boolean;
   debugHearing?: boolean;
   hearingNbest?: boolean;
+  voiceChat?: string;
+  silenceMs?: number;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -115,6 +136,8 @@ export function lockedProfile(input?: unknown): Profile {
     debugHearing: raw.debugHearing !== false,
     captureAudio: raw.debugHearing !== false,
     hearingNbest: Boolean(raw.hearingNbest),
+    voiceChat: isVoiceChatId(raw.voiceChat) ? raw.voiceChat : DEFAULT_VOICE_CHAT,
+    silenceMs: isSilenceMs(raw.silenceMs) ? raw.silenceMs : SILENCE_MS,
   };
 }
 

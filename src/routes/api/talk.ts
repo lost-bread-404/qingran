@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { enqueueArchiveIfNeeded } from "@/lib/lover/brain/archivist";
-import { assertModelConfig, LONG_DRAIN_MS } from "@/lib/lover/brain/config";
+import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } from "@/lib/lover/brain/config";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
 import { drainJobs, enqueue } from "@/lib/lover/brain/jobs";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
@@ -114,8 +114,10 @@ export const Route = createFileRoute("/api/talk")({
               let firstAudioMs: number | null = null;
               let interrupted = false;
               tVoice = Date.now();
+              const primary = resolveVoiceChat(profile.voiceChat);
+              const safety = voiceSafetyPick();
               const fallback = await runVoiceWithFallback(
-                { text, parts: ctx.parts, replyId, voiceSpeed: profile.voiceSpeed },
+                { text, parts: ctx.parts, replyId, voiceSpeed: profile.voiceSpeed, primary, safety },
                 (event) => {
                   if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;
                   if (event.t === "timing" && event.k === "first_audio_ms") firstAudioMs = event.ms;
@@ -153,6 +155,7 @@ export const Route = createFileRoute("/api/talk")({
                   finishReason: streamResult.finishReason,
                   ms: streamResult.ms,
                   chars: streamResult.chars,
+                  ttftMs: ttftMs ?? undefined,
                 });
               }
 
@@ -172,12 +175,14 @@ export const Route = createFileRoute("/api/talk")({
                 localDay: localDay(userCreatedAt, timeZone),
                 ttsChars: streamResult.ttsChars,
                 finishReason: streamResult.finishReason,
+                effort: streamResult.effort == null ? null : String(streamResult.effort),
                 note: formatVoiceLogNote({
                   attempts: fallback.attempts,
                   usedStrip: fallback.usedStrip,
                   chars: ctx.inputChars,
                   failed,
                   failMessage: fallback.failMessage,
+                  modelFallback: fallback.modelFallback,
                 }),
               });
               const selectedIds = [...ctx.pickedIds, ...ctx.queryIds];

@@ -10,6 +10,7 @@ import {
   MIN_SPEECH_MS,
   nextFloor,
   POST_QINGRAN_MS,
+  SILENCE_MS,
   shouldEndUtterance,
   START_FLOOR_MIN,
   START_FLOOR_MULT,
@@ -53,10 +54,11 @@ test("debug hold never drops below max(0.005, floor*1.4)", () => {
   assert.equal(holdThreshold(0.02, true), Math.max(0.005, 0.02 * 1.4));
 });
 
-test("silence after two seconds ends the turn", () => {
+test("silence after 1.5 seconds ends the turn", () => {
+  assert.equal(SILENCE_MS, 1500);
   assert.equal(
     shouldEndUtterance({
-      now: 3500,
+      now: 3000,
       startAt: 0,
       lastVoiceAt: 1400,
       voiced: false,
@@ -78,6 +80,32 @@ test("a one-second pause is not enough to send", () => {
       lastTextAt: 1400,
     }),
     false,
+  );
+});
+
+test("silence threshold follows the 1.0 / 1.5 / 2.0 setting", () => {
+  const base = {
+    now: 2500,
+    startAt: 0,
+    lastVoiceAt: 1400,
+    voiced: false,
+    hasText: true,
+    lastTextAt: 1400,
+  };
+  assert.equal(shouldEndUtterance({ ...base, silenceMs: 1000 }), true);
+  assert.equal(shouldEndUtterance({ ...base, silenceMs: 1500 }), false);
+  assert.equal(shouldEndUtterance({ ...base, silenceMs: 2000 }), false);
+  assert.equal(
+    shouldEndUtterance({
+      now: 3500,
+      startAt: 0,
+      lastVoiceAt: 1400,
+      voiced: false,
+      hasText: true,
+      lastTextAt: 1400,
+      silenceMs: 2000,
+    }),
+    true,
   );
 });
 

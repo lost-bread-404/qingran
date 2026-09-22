@@ -40,6 +40,7 @@ test("formatVoiceLogNote records which strip succeeded and the char split", () =
     failed: false,
   });
   assert.match(note, /第2次成功，去掉了 mind/);
+  assert.match(note, /model_fallback=no/);
   assert.match(note, /status=200 finish_reason=stop usage prompt_tokens=80 completion_tokens=6/);
   assert.match(note, /chars system=10 mind=20 notes=30 history=40 user=5/);
   assert.match(note, /try1 未裁剪 empty/);
@@ -62,7 +63,51 @@ test("formatVoiceLogNote failed empty keeps the fail line first", () => {
     failMessage: "她没说出话（空回复）",
   });
   assert.equal(note.split("\n")[0], "她没说出话（空回复）");
+  assert.match(note, /model_fallback=no/);
   assert.match(note, /第4次仍空，只保留 system prompt、最近 8 条对话和用户消息/);
   assert.match(note, /events=\{"choices"/);
   assert.match(note, /try4 只保留 system prompt、最近 8 条对话和用户消息 empty/);
+});
+
+test("formatVoiceLogNote records model fallback and per-try ttft", () => {
+  const note = formatVoiceLogNote({
+    attempts: [
+      attempt({
+        strip: "none",
+        model: "primary-model",
+        effort: "low",
+        ttftMs: 4200,
+        ms: 5100,
+      }),
+      attempt({
+        strip: "none",
+        model: "safety-model",
+        chars: 8,
+        ms: 700,
+        ttftMs: 320,
+        promptTokens: 40,
+        completionTokens: 4,
+        empty: false,
+        ok: true,
+        message: null,
+        otherEvents: "",
+      }),
+    ],
+    usedStrip: "none",
+    chars: { system: 10, mind: 20, notes: 30, history: 40, user: 5 },
+    failed: false,
+    modelFallback: {
+      from: "primary-model/low",
+      to: "safety-model/none",
+      reason: "empty",
+    },
+  });
+  assert.match(note, /第2次成功，未裁剪/);
+  assert.match(
+    note,
+    /model_fallback=yes reason=empty from=primary-model\/low to=safety-model\/none/,
+  );
+  assert.match(note, /ttft_ms=320/);
+  assert.match(note, /try1 未裁剪 empty model=primary-model effort=low ttft_ms=4200/);
+  assert.match(note, /try2 未裁剪 ok model=safety-model ttft_ms=320/);
 });

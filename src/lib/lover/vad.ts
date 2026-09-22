@@ -1,5 +1,7 @@
 export const MIN_SPEECH_MS = 220;
-export const SILENCE_MS = 2000;
+export const SILENCE_MS = 1500;
+export const SILENCE_MS_OPTIONS = [1000, 1500, 2000] as const;
+export type SilenceMs = (typeof SILENCE_MS_OPTIONS)[number];
 export const VOICE_SPIKE_MS = 80;
 export const LISTEN_WARMUP_MS = 380;
 /** First 500ms after getUserMedia: iOS mic is often still muted/silent. */
@@ -21,6 +23,10 @@ export const DEBUG_START_CUE_MIN = 0.0025;
 export const DEBUG_START_CUE_MULT = 1.05;
 export const DEBUG_HOLD_FLOOR_MIN = 0.005;
 export const DEBUG_HOLD_FLOOR_MULT = 1.4;
+
+export function isSilenceMs(value: unknown): value is SilenceMs {
+  return value === 1000 || value === 1500 || value === 2000;
+}
 
 export function clampFloor(value: number) {
   return Math.min(0.045, Math.max(0.004, value));
@@ -81,11 +87,13 @@ export type EndpointInput = {
   voiced: boolean;
   hasText: boolean;
   lastTextAt: number;
+  silenceMs?: number;
 };
 
 export function shouldEndUtterance(input: EndpointInput) {
   const spoken = input.now - input.startAt;
   if (spoken < MIN_SPEECH_MS) return false;
   if (input.voiced) return false;
-  return input.now - input.lastVoiceAt >= SILENCE_MS;
+  const silence = isSilenceMs(input.silenceMs) ? input.silenceMs : SILENCE_MS;
+  return input.now - input.lastVoiceAt >= silence;
 }

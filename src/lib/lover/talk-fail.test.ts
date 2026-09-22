@@ -5,6 +5,7 @@ import {
   TALK_FAIL,
   classifyTalkException,
   describeNonTextTalkEvent,
+  formatTalkTrace,
   isRetryableEmptyTalk,
   takeTalkDelta,
   talkFailFromResult,
@@ -95,7 +96,8 @@ test("takeTalkDelta reads token and finish_reason from SSE json", () => {
 
 test("stream-talk logs each turn and maps timeout, empty, filter, HTTP, TTS", () => {
   const src = readFileSync(new URL("./stream-talk.ts", import.meta.url), "utf8");
-  assert.match(src, /AbortSignal\.timeout\(28_000\)/);
+  assert.match(src, /AbortSignal\.timeout\(route\.timeoutMs\)/);
+  assert.match(src, /reasoning_effort/);
   assert.match(src, /talkFailFromResult/);
   assert.match(src, /logTalkTurn/);
   assert.match(src, /takeTalkDelta/);
@@ -109,6 +111,7 @@ test("stream-talk logs each turn and maps timeout, empty, filter, HTTP, TTS", ()
   assert.match(api, /logTalkTurn/);
   assert.match(api, /runVoiceWithFallback/);
   assert.match(api, /formatVoiceLogNote/);
+  assert.match(api, /resolveVoiceChat/);
   assert.doesNotMatch(api, /线路有点不稳，稍后再说/);
 });
 
@@ -139,8 +142,14 @@ test("isRetryableEmptyTalk only for 200 empty stop/length/null", () => {
   assert.equal(isRetryableEmptyTalk({ status: 200, finishReason: null, speech: "" }), true);
   assert.equal(isRetryableEmptyTalk({ status: 200, finishReason: "length", speech: "  " }), true);
   assert.equal(isRetryableEmptyTalk({ status: 200, finishReason: "content_filter", speech: "" }), false);
+  assert.equal(isRetryableEmptyTalk({ status: 200, finishReason: "stop", speech: "在" }), false);
   assert.equal(isRetryableEmptyTalk({ status: 500, finishReason: "stop", speech: "" }), false);
   assert.equal(isRetryableEmptyTalk({ status: null, finishReason: null, speech: "" }), false);
-  assert.equal(isRetryableEmptyTalk({ status: 200, finishReason: "stop", speech: "在" }), false);
 });
 
+test("formatTalkTrace includes 首字 when ttft is present", () => {
+  assert.equal(
+    formatTalkTrace({ status: 200, finishReason: "stop", ms: 1200, ttftMs: 820 }),
+    "status 200 · finish_reason=stop · 首字 820ms · 1200ms",
+  );
+});

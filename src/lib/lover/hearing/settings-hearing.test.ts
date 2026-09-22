@@ -17,6 +17,12 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.match(src, /打开标注页/);
   assert.match(src, /to="\/lab"/);
   assert.match(src, />高级</);
+  assert.match(src, /回复模型/);
+  assert.match(src, /VOICE_CHAT_OPTIONS/);
+  assert.match(src, /voiceChat: opt\.id/);
+  assert.match(src, /切换后下一句立刻生效/);
+  const types = readFileSync(new URL("../types.ts", import.meta.url), "utf8");
+  assert.match(types, /DEFAULT_VOICE_CHAT: VoiceChatId = "4\.3-low"/);
   assert.match(src, /引擎自检/);
   assert.match(src, /hearingConnectionTest/);
   assert.match(src, /让她忘掉最近还没记住的对话？已经记住的事和故事线不受影响。/);
@@ -34,6 +40,13 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.match(src, /记忆笔记/);
   assert.match(src, /对话历史/);
   assert.match(src, /用户消息/);
+  assert.match(src, /静音判定/);
+  assert.match(src, /SILENCE_MS_OPTIONS/);
+  assert.match(src, /1\.5 秒/);
+  assert.match(src, /会拖慢识别/);
+  assert.match(src, /最近听力耗时/);
+  assert.match(src, /parseHearingTimingLine/);
+  assert.match(src, /\.slice\(0, 20\)/);
   assert.doesNotMatch(src, /定向录制/);
   assert.doesNotMatch(src, /hearingNbest/);
 });
@@ -181,6 +194,8 @@ test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance",
   assert.match(call, /MIN_SPEECH_MS/);
   assert.match(call, /canBeginUtterance/);
   assert.match(call, /speechRiseAtRef/);
+  assert.match(call, /silenceMs: getHearingSession\(\)\.silenceMs/);
+  assert.match(call, /silenceWaitMs/);
   assert.match(hold, /vadFloor: triggerFloorRef/);
   assert.match(hold, /holdThreshold/);
   assert.match(hold, /holdToTalk: true/);
@@ -249,6 +264,23 @@ test("lab engine compare stays in store but is off the lab page", () => {
 test("runHearing persists with waitUntil; xai skips audio-LLM and a second STT", () => {
   const store = readFileSync(new URL("./store.ts", import.meta.url), "utf8");
   const hear = readFileSync(new URL("../hear.ts", import.meta.url), "utf8");
+  const persist = readFileSync(new URL("./persist.ts", import.meta.url), "utf8");
+  const cron = readFileSync(new URL("../../../routes/api/cron/brain.ts", import.meta.url), "utf8");
+  const run = store.slice(store.indexOf("export const runHearing"), store.indexOf("const xaiPromise"));
+  assert.doesNotMatch(run, /getSql\(/);
+  assert.doesNotMatch(run, /hearingSttKeyterms/);
+  assert.doesNotMatch(run, /listHearingConfusions/);
+  assert.doesNotMatch(run, /maybeRebuildLexicon/);
+  assert.match(store, /hotPathHearingStt/);
+  assert.match(store, /backgroundRefreshHearingStt/);
+  assert.match(store, /recordHearingTimingLog/);
+  assert.match(hear, /silenceWaitMs/);
+  assert.match(persist, /Talk hot path must use hotPathHearingStt/);
+  assert.doesNotMatch(
+    persist.slice(persist.indexOf("export async function lexiconKeyterms"), persist.indexOf("export async function hearingSttKeyterms")),
+    /maybeRebuildLexicon/,
+  );
+  assert.match(cron, /maybeRebuildLexicon/);
   assert.match(store, /from "@vercel\/functions"/);
   assert.match(store, /waitUntil\(/);
   assert.match(store, /provider === "xai" \? Promise.resolve\(null\)/);
@@ -285,6 +317,7 @@ test("debug transcript shows segmented latency", () => {
   const src = readFileSync(new URL("../../../components/lover/transcript.tsx", import.meta.url), "utf8");
   assert.match(src, /说完→识别完/);
   assert.match(src, /识别完→字/);
+  assert.match(src, /首字/);
   assert.match(src, /→出声/);
   assert.match(src, /hearingTiming\.engine/);
 });

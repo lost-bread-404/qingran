@@ -280,6 +280,7 @@ export function useCall({ onUtterance, prompt }: Options) {
   const flushUtterance = useCallback(async () => {
     if (phaseRef.current !== "speaking-you") return;
     const endpoint_fired = Date.now();
+    const silenceWaitMs = Math.max(0, Math.round(performance.now() - lastVoiceRef.current));
     setPhaseBoth("transcribing");
     deafRef.current = true;
     await new Promise((resolve) => window.setTimeout(resolve, 180));
@@ -317,6 +318,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         vadFloor: triggerFloorRef.current,
         hearToTriggerMs: hearToTriggerRef.current ?? undefined,
         prerollPeakRms: prerollPeakRef.current ?? undefined,
+        silenceWaitMs,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
@@ -412,6 +414,7 @@ export function useCall({ onUtterance, prompt }: Options) {
             voiced,
             hasText,
             lastTextAt: lastTextAtRef.current,
+            silenceMs: getHearingSession().silenceMs,
           })
         ) {
           const spoken = now - speechStartRef.current;
@@ -427,6 +430,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         voiced: false,
         hasText: Boolean((finalTextRef.current || interimRef.current).trim()),
         lastTextAt: lastTextAtRef.current,
+        silenceMs: getHearingSession().silenceMs,
       }) && void flushUtterance();
     }
     rafRef.current = requestAnimationFrame(tick);

@@ -906,7 +906,6 @@ export async function rebuildPersonalLexicon(sql: Sql): Promise<void> {
 }
 
 export async function lexiconKeyterms(sql: Sql): Promise<string[]> {
-  await maybeRebuildLexicon(sql);
   const words = await sql<{ term: string }>`
     select term from qingran_personal_lexicon where kind = 'word' order by count desc, term limit ${LEXICON_WORD_CAP}
   `;
@@ -919,6 +918,7 @@ export async function lexiconKeyterms(sql: Sql): Promise<string[]> {
   return [...words.map((row) => row.term), ...phrases.map((row) => row.term)];
 }
 
+/** Blocking path for lab/eval. Talk hot path must use hotPathHearingStt instead. */
 export async function hearingSttKeyterms(sql: Sql, extra: string[] = []): Promise<string[]> {
   try {
     const rules = await activeConfusionRules(sql);

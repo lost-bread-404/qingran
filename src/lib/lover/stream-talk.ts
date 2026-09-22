@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { applyAvailabilityFallback, checkModelAvailability, resolveRoute, VOICE_IO } from "./brain/config";
+import { applyAvailabilityFallback, checkModelAvailability, resolveRoute, VOICE_IO, type Effort } from "./brain/config";
 import { spokenForTts } from "./speech-tags";
 import { shouldFlushSpoken, ttsRequestBody, ttsSpeed } from "./tts";
 import type { VoiceChatMessage } from "./brain/types";
@@ -30,6 +30,7 @@ export type TalkStreamEvent =
       finishReason?: string | null;
       ms?: number;
       chars?: number;
+      ttftMs?: number;
     }
   | {
       t: "err";
@@ -48,6 +49,9 @@ export type TalkStreamInput = {
   replyId?: string;
   voiceSpeed?: number;
   failOnEmpty?: boolean;
+  model?: string;
+  effort?: Effort;
+  timeoutMs?: number;
 };
 
 type Emit = (event: TalkStreamEvent) => void;
@@ -63,6 +67,7 @@ export type TalkStreamResult = {
   ttftMs: number | null;
   firstAudioMs: number | null;
   model: string;
+  effort: Effort;
   ttsChars: number;
   status: number | null;
   finishReason: string | null;
@@ -77,6 +82,7 @@ function emptyResult(partial: Partial<TalkStreamResult> = {}): TalkStreamResult 
     ttftMs: null,
     firstAudioMs: null,
     model: "",
+    effort: null,
     ttsChars: 0,
     status: null,
     finishReason: null,
@@ -102,8 +108,14 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   const speed = ttsSpeed(data.voiceSpeed ?? 1);
   void checkModelAvailability(apiKey);
-  const route = applyAvailabilityFallback(resolveRoute("voice"));
-  const t0 = Date.now();
+  const base = resolveRoute("voice");
+  const route = applyAvailabilityFallback({
+    ...base,
+    model: data.model || base.model,
+    effort: data.effort !== undefined ? data.effort : base.effort,
+    timeoutMs: data.timeoutMs || base.timeoutMs,
+  });
+  let t0 = Date.now();
   let ttftSent = false;
   let firstAudioSent = false;
   let ttftMs: number | null = null;
@@ -149,21 +161,24 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   let res: Response;
   try {
+    const body: Record<string, unknown> = {
+      model: route.model,
+      temperature: 0.85,
+      max_tokens: route.maxOutput,
+      stream: true,
+      stream_options: { include_usage: true },
+      messages: data.messages,
+    };
+    if (route.effort) body.reasoning_effort = route.effort;
+    t0 = Date.now();
     res = await fetch("https://api.x.ai/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: route.model,
-        temperature: 0.85,
-        max_tokens: route.maxOutput,
-        stream: true,
-        stream_options: { include_usage: true },
-        messages: data.messages,
-      }),
-      signal: AbortSignal.timeout(28_000),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(route.timeoutMs),
     });
   } catch (err) {
     const outcome = talkFailFromResult({ kind: "exception", threw: err, ms: Date.now() - t0 });
@@ -171,6 +186,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     const ex = classifyTalkException(err);
     return emptyResult({
       model: route.model,
+      effort: route.effort,
       ms: Date.now() - t0,
       otherEvents: `${ex.name}: ${ex.message}`.slice(0, 500),
     });
@@ -188,6 +204,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     fail(outcome.message ?? TALK_FAIL.network, outcome.log);
     return emptyResult({
       model: route.model,
+      effort: route.effort,
       status,
       ms: Date.now() - t0,
       otherEvents: body.slice(0, 500),
@@ -206,13 +223,14 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       logTalkTurn(outcome.log);
       return emptyResult({
         model: route.model,
+        effort: route.effort,
         status,
         ms: Date.now() - t0,
         otherEvents: "empty body",
       });
     }
     fail(outcome.message ?? TALK_FAIL.empty, outcome.log);
-    return emptyResult({ model: route.model, status, ms: Date.now() - t0, otherEvents: "empty body" });
+    return emptyResult({ model: route.model, effort: route.effort, status, ms: Date.now() - t0, otherEvents: "empty body" });
   }
 
   let full = "";
@@ -313,6 +331,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
         ttftMs,
         firstAudioMs,
         model: route.model,
+        effort: route.effort,
         ttsChars: 0,
         status,
         finishReason,
@@ -328,6 +347,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       ttftMs,
       firstAudioMs,
       model: route.model,
+      effort: route.effort,
       ttsChars: live.tts?.chars ?? 0,
       status,
       finishReason,
@@ -360,12 +380,14 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     finishReason,
     ms: Date.now() - t0,
     chars: speech.length,
+    ttftMs: ttftMs ?? undefined,
   });
   return {
     usage,
     ttftMs,
     firstAudioMs,
     model: route.model,
+    effort: route.effort,
     ttsChars,
     status,
     finishReason,

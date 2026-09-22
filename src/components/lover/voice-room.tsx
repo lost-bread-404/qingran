@@ -177,6 +177,7 @@ export function VoiceRoom() {
       extraKeyterms,
       contextBefore: lastDialogueTurns(contextTurns),
       systemPrompt: profile.systemPrompt,
+      silenceMs: profile.silenceMs,
     });
   }, [profile, messages.length, memories]);
   useEffect(() => {
@@ -487,7 +488,7 @@ export function VoiceRoom() {
         void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: tagged } });
         void patchHearingReplyId({ data: { turnId: opts.voiceTurnId, replyMessageId: reply.id } });
       }
-      const stampTiming = (partial: { grokMs?: number; ttsMs?: number }) => {
+      const stampTiming = (partial: { grokMs?: number; ttsMs?: number; ttftMs?: number }) => {
         if (!profileRef.current.debugHearing) return;
         const next = { ...userMsg.hearingTiming, ...partial };
         userMsg.hearingTiming = next;
@@ -547,6 +548,10 @@ export function VoiceRoom() {
           },
           (event) => {
             if (turn !== turnRef.current) return;
+            if (event.t === "timing" && event.k === "ttft_ms") {
+              stampTiming({ ttftMs: event.ms });
+              return;
+            }
             if (event.t === "text") {
               if (userMsg.hearingTiming?.grokMs == null) stampTiming({ grokMs: Date.now() - sttDoneAt });
               full += event.d;
@@ -572,6 +577,7 @@ export function VoiceRoom() {
                 finishReason: event.finishReason ?? null,
                 ms: event.ms,
                 chars: event.chars,
+                ttftMs: event.ttftMs ?? userMsg.hearingTiming?.ttftMs,
               };
               const finalMsg = { ...reply, text: display, talkTrace };
               setMessages((prev) => prev.map((m) => (m.id === reply.id ? finalMsg : m)));

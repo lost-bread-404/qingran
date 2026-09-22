@@ -53,6 +53,7 @@ export async function hearUtterance(input: {
   hearToTriggerMs?: number;
   prerollPeakRms?: number;
   holdToTalk?: boolean;
+  silenceWaitMs?: number;
 }): Promise<HeardUtterance> {
   const session = getHearingSession();
   const turnId = newId();
@@ -99,6 +100,7 @@ export async function hearUtterance(input: {
         nbest: session.nbest,
         extraKeyterms: session.extraKeyterms,
         debugHearing,
+        silenceWaitMs: input.silenceWaitMs,
         mode: session.mode,
         audioRoute: session.audioRoute,
         peakRms: input.peakRms,

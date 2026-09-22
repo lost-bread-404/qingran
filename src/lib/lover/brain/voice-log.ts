@@ -22,6 +22,7 @@ export async function recordVoiceTurn(opts: {
   ttsChars?: number;
   finishReason?: string | null;
   note?: string | null;
+  effort?: string | null;
 }): Promise<number | null> {
   const usage: TokenUsage =
     opts.usage && typeof opts.usage === "object" && "tokensIn" in (opts.usage as object)
@@ -43,6 +44,7 @@ export async function recordVoiceTurn(opts: {
     note,
     route: "voice",
     model: opts.model,
+    effort: opts.effort ?? null,
     turnSeq: opts.userCreatedAt,
     inputSystem: null,
     inputUser: null,

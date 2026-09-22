@@ -140,6 +140,12 @@ export function formatEngineMix(stats: EngineUseStats | null | undefined): strin
   return `${mix} · 退回 ${fb}`;
 }
 
+export function slowEngineHint(provider?: string | null): string {
+  const id = (provider ?? "").trim();
+  if (!id || id === "xai") return "";
+  return `当前引擎：${id}（会拖慢识别）`;
+}
+
 export function engineLineFromHeard(heard: {
   engineRequested?: string;
   engineUsed?: string;
@@ -147,13 +153,15 @@ export function engineLineFromHeard(heard: {
   engineErrorDetail?: string;
 }): string | undefined {
   if (!heard.engineUsed && !heard.engineRequested) return undefined;
-  return formatEngineLine({
+  const line = formatEngineLine({
     requested: heard.engineRequested,
     used: heard.engineUsed,
     fallback: Boolean(heard.engineFallback),
     fallbackReason: heard.engineFallback,
     errorDetail: heard.engineErrorDetail,
   });
+  const hint = slowEngineHint(heard.engineRequested);
+  return hint ? `${hint} · ${line}` : line;
 }
 
 export function logHearingTurn(log: {

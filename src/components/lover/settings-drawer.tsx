@@ -8,6 +8,8 @@ import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-vi
 import { HEARING_PROVIDERS, labEngineLabel, type HearingProviderId } from "@/lib/lover/hearing/config";
 import { PROVIDER_ENV } from "@/lib/lover/hearing/env";
 import { hearingConnectionTest, hearingEnvStatus } from "@/lib/lover/hearing/store";
+import { slowEngineHint } from "@/lib/lover/hearing/select";
+import { formatHearingTimingSummary, parseHearingTimingLine } from "@/lib/lover/hearing/timing-format";
 import { formatCallAudioLogLines, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
   brainGetLongLayer,
@@ -22,7 +24,8 @@ import { parseVoiceInputCharsLine } from "@/lib/lover/brain/voice/pack-build";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/lover/memory";
 import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
-import { DEFAULT_SYSTEM_PROMPT, type Profile } from "@/lib/lover/types";
+import { DEFAULT_SYSTEM_PROMPT, VOICE_CHAT_OPTIONS, type Profile, type VoiceChatId } from "@/lib/lover/types";
+import { SILENCE_MS_OPTIONS, type SilenceMs } from "@/lib/lover/vad";
 import { cn } from "@/lib/utils";
 
 type Tab = "prompt" | "notes" | "portrait" | "mind" | "log" | "hearing";
@@ -62,6 +65,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [newBody, setNewBody] = useState("");
   const [dbWarn, setDbWarn] = useState(false);
   const [clearArmed, setClearArmed] = useState(false);
+  const [voiceChat, setVoiceChat] = useState<VoiceChatId>(profile.voiceChat);
+  const [silenceMs, setSilenceMs] = useState<SilenceMs>(profile.silenceMs);
   const viewport = useVisualViewportHeight(open);
 
   useEffect(() => {
@@ -69,6 +74,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setDraft(profile.systemPrompt);
     setHearingProvider(profile.hearingProvider);
     setDebugHearing(profile.debugHearing);
+    setVoiceChat(profile.voiceChat);
+    setSilenceMs(profile.silenceMs);
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setTab("prompt");
     void hearingEnvStatus().then((result) => setProviderReady(result.providers)).catch(() => undefined);
@@ -112,6 +119,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       hearingProvider: nextProvider,
       captureAudio: debugHearing,
       debugHearing,
+      voiceChat,
+      silenceMs,
     });
     onOpenChange(false);
   }
@@ -531,8 +540,41 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
               <summary className="cursor-pointer text-sm">高级</summary>
               <div className="mt-3 flex flex-col gap-4">
                 <div>
+                  <p className="mb-2 text-sm">回复模型</p>
+                  <p className="mb-2 text-xs text-subtle">实时对话用。切换后下一句立刻生效。grok-4.3 失败或空回复会自动用 4.20 再试一次。</p>
+                  <div className="flex flex-col gap-2">
+                    {VOICE_CHAT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setVoiceChat(opt.id);
+                          onSave({
+                            ...profile,
+                            systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
+                            hearingProvider,
+                            captureAudio: debugHearing,
+                            debugHearing,
+                            voiceChat: opt.id,
+                            silenceMs,
+                          });
+                        }}
+                        className={cn(
+                          "min-h-11 rounded-md px-3 py-3 text-left text-sm",
+                          voiceChat === opt.id ? "bg-accent text-accent-fg" : "bg-bg text-muted",
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
                   <p className="mb-2 text-sm">听力引擎</p>
                   <p className="mb-2 text-xs text-subtle">实时默认 xAI + Apple。其它引擎会拒答亲密内容，只留在这里备查。</p>
+                  {slowEngineHint(hearingProvider) ? (
+                    <p className="mb-2 text-xs text-live">{slowEngineHint(hearingProvider)}</p>
+                  ) : null}
                   <div className="grid grid-cols-2 gap-2">
                     {HEARING_PROVIDERS.map((id) => {
                       const ready = providerReady ? providerReady[id] : true;
@@ -555,6 +597,36 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                         </button>
                       );
                     })}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-2 text-sm">静音判定</p>
+                  <p className="mb-2 text-xs text-subtle">说完后等多久才开始识别。默认 1.5 秒。</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {SILENCE_MS_OPTIONS.map((ms) => (
+                      <button
+                        key={ms}
+                        type="button"
+                        onClick={() => {
+                          setSilenceMs(ms);
+                          onSave({
+                            ...profile,
+                            systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
+                            hearingProvider,
+                            captureAudio: debugHearing,
+                            debugHearing,
+                            voiceChat,
+                            silenceMs: ms,
+                          });
+                        }}
+                        className={cn(
+                          "min-h-11 rounded-md px-3 py-3 text-sm",
+                          silenceMs === ms ? "bg-accent text-accent-fg" : "bg-bg text-muted",
+                        )}
+                      >
+                        {(ms / 1000).toFixed(1)} 秒
+                      </button>
+                    ))}
                   </div>
                 </div>
                 <div>
@@ -617,11 +689,35 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
+            {slowEngineHint(hearingProvider) ? (
+              <p className="text-xs text-live">{slowEngineHint(hearingProvider)}</p>
+            ) : null}
+            {log.filter((row) => row.route === "hear" || row.step === "hearing").length ? (
+              <div className="mb-2 rounded-md bg-surface-2 px-3 py-2">
+                <p className="text-xs text-subtle">最近听力耗时</p>
+                <ul className="mt-1 flex flex-col gap-1">
+                  {log
+                    .filter((row) => row.route === "hear" || row.step === "hearing")
+                    .slice(0, 20)
+                    .map((row) => {
+                      const timing = parseHearingTimingLine(row.note);
+                      return (
+                        <li key={row.id} className="text-[11px] leading-relaxed text-fg">
+                          <span className="text-subtle">{logClock(row.at)} </span>
+                          {timing ? formatHearingTimingSummary(timing) : row.note || `${row.ms ?? "—"}ms`}
+                        </li>
+                      );
+                    })}
+                </ul>
+              </div>
+            ) : null}
             {log.length === 0 ? (
               <p className="text-sm text-subtle">还没有调用记录。</p>
             ) : (
               log.map((row) => {
                 const failLine = row.ok ? "" : logFailFirstLine(row);
+                const timing = parseHearingTimingLine(row.note);
+                const engineHint = slowEngineHintFromNote(row.note);
                 return (
                   <details key={row.id} className="rounded-md bg-surface-2 px-3 py-2 text-xs">
                     <summary className="cursor-pointer">
@@ -629,6 +725,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                         <span className={row.ok ? "text-fg" : "text-live"}>{row.step}</span>
                         <span className="text-subtle">{row.ms != null ? `${row.ms}ms` : ""}</span>
                       </div>
+                      {engineHint ? <p className="mt-1 text-live">{engineHint}</p> : null}
+                      {timing ? (
+                        <p className="mt-1 text-subtle">{formatHearingTimingSummary(timing)}</p>
+                      ) : null}
                       {failLine ? <p className="mt-1 text-live">{failLine}</p> : null}
                     </summary>
                     <dl className="mt-2 flex flex-col gap-1.5 text-subtle">
@@ -666,6 +766,19 @@ function logFailFirstLine(row: BrainLogRow): string {
   const src = (row.note || row.error || "").trim();
   if (!src) return "";
   return src.split(/\r?\n/, 1)[0] ?? "";
+}
+
+function slowEngineHintFromNote(note: string | null | undefined): string {
+  const line = (note ?? "").split(/\r?\n/).find((part) => part.includes("会拖慢识别"));
+  return line?.trim() || "";
+}
+
+function logClock(at: number): string {
+  try {
+    return new Date(at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return "";
+  }
 }
 
 function logInputChars(row: BrainLogRow): string {

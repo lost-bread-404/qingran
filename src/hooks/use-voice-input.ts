@@ -276,6 +276,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
         peakRms: peakRms(samples, sampleRate) || frames.reduce((max, frame) => Math.max(max, frame.rms), 0),
         vadFloor: triggerFloorRef.current,
         holdToTalk: true,
+        silenceWaitMs: 0,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "";

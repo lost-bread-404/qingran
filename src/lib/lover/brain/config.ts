@@ -75,7 +75,7 @@ export const ROUTES: Record<
   Route,
   { cls: ModelClass; effort?: Effort; timeoutMs: number; maxOutput: number }
 > = {
-  voice: { cls: "REALTIME", timeoutMs: 28_000, maxOutput: 550 },
+  voice: { cls: "FAST_THINKER", effort: "low", timeoutMs: 60_000, maxOutput: 550 },
   reflect: { cls: "FAST_THINKER", timeoutMs: 240_000, maxOutput: 4_000 },
   archive: { cls: "WORKHORSE", timeoutMs: 30_000, maxOutput: 6_000 },
   dusk: { cls: "ANALYST", timeoutMs: 60_000, maxOutput: 8_000 },
@@ -213,6 +213,31 @@ export function resolveRoute(route: Route): ResolvedRoute {
     timeoutMs: spec.timeoutMs,
     maxOutput: spec.maxOutput,
   };
+}
+
+export type VoiceModelPick = {
+  model: string;
+  effort: Effort;
+  timeoutMs: number;
+};
+
+export function resolveVoiceChat(id?: string | null): VoiceModelPick {
+  if (id === "4.3-medium") {
+    return { model: MODEL_CLASSES.FAST_THINKER.model, effort: "medium", timeoutMs: 90_000 };
+  }
+  if (id === "4.20") {
+    return { model: MODEL_CLASSES.REALTIME.model, effort: null, timeoutMs: 28_000 };
+  }
+  const voice = resolveRoute("voice");
+  return { model: voice.model, effort: voice.effort ?? "low", timeoutMs: voice.timeoutMs };
+}
+
+export function voiceSafetyPick(): VoiceModelPick {
+  return resolveVoiceChat("4.20");
+}
+
+export function sameVoicePick(a: VoiceModelPick, b: VoiceModelPick): boolean {
+  return a.model === b.model && a.effort === b.effort;
 }
 
 export function validateModelClasses(): string[] {
