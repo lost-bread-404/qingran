@@ -34,6 +34,7 @@ test("default sense stays the mid gear after a round trip", () => {
   assert.equal(locked.holdMin, 0.0045);
   assert.equal(locked.cueMin, 0.003);
   assert.equal(locked.endWaitMs, 1500);
+  assert.equal(locked.maxUtteranceMs, 30_000);
   assert.equal(locked.toneOn, false);
   assert.equal(locked.voicedClarity, 0.58);
   assert.equal(locked.pitchHoldMs, 200);

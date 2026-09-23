@@ -360,7 +360,10 @@ export function HearingSensePanel({
         />
       </Category>
 
-      <Category title="断句" hint="停多久算一句话说完。只有这一个数。">
+      <Category
+        title="断句"
+        hint="停多久算一句话说完。音量够、但这一帧没有稳定人声基频，按静音计，风扇和底噪撑不住「还在说」。超过最长一句就结束，送给识别。"
+      >
         <div className="flex items-baseline justify-between gap-3">
           <p className="text-sm">说完等待</p>
           <p className="text-sm tabular-nums">{(sense.endWaitMs / 1000).toFixed(1)} 秒</p>
@@ -377,6 +380,44 @@ export function HearingSensePanel({
           value={sense.endWaitMs / 1000}
           aria-label="说完等待"
           onChange={(e) => onChange({ ...sense, endWaitMs: Math.round(Number(e.target.value) * 1000) })}
+        />
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="text-sm">最长一句</p>
+          <p className="text-sm tabular-nums">{Math.round(sense.maxUtteranceMs / 1000)} 秒</p>
+        </div>
+        <p className="text-xs text-subtle">
+          现在 {Math.round(sense.maxUtteranceMs / 1000)} 秒 · 默认 30 秒 · 5–120。到点就结束并送去识别，不管房间还响不响。
+        </p>
+        <input
+          type="range"
+          className="h-11 w-full accent-accent"
+          min={5}
+          max={120}
+          step={1}
+          value={sense.maxUtteranceMs / 1000}
+          aria-label="最长一句"
+          onChange={(e) => onChange({ ...sense, maxUtteranceMs: Math.round(Number(e.target.value) * 1000) })}
+        />
+        <Fine
+          label="保持绝对门槛"
+          value={sense.holdMin}
+          def={record.holdMin}
+          min={0.001}
+          max={0.05}
+          step={0.0005}
+          digits={4}
+          hint="和轻声里是同一个数。已经在说时，低于这个就当成停了。调高，底噪更不容易把一句拖住。"
+          onChange={(holdMin) => onChange(withRecordFine(sense, { holdMin }))}
+        />
+        <Fine
+          label="保持倍数"
+          value={sense.holdMult}
+          def={record.holdMult}
+          min={1}
+          max={3}
+          step={0.01}
+          hint="和轻声里是同一个数。音量还要超过底噪的这么多倍，并且这一帧有稳定人声基频，才算还在说。只有音量、没有基频，按静音倒计时。"
+          onChange={(holdMult) => onChange(withRecordFine(sense, { holdMult }))}
         />
       </Category>
 

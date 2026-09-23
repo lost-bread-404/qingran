@@ -4,9 +4,11 @@ import {
   canBeginUtterance,
   DEBUG_START_FLOOR_MIN,
   DEBUG_START_FLOOR_MULT,
+  holdCountsAsSpeech,
   holdThreshold,
   isHoldVoiced,
   isSpeechStart,
+  MAX_UTTERANCE_MS,
   MIN_SPEECH_MS,
   nextFloor,
   POST_QINGRAN_MS,
@@ -155,12 +157,95 @@ test("a short click is not flushed as an utterance", () => {
 test("a long turn is not force-ended while you are still talking", () => {
   assert.equal(
     shouldEndUtterance({
+      now: 20_000,
+      startAt: 0,
+      lastVoiceAt: 20_000,
+      voiced: true,
+      hasText: true,
+      lastTextAt: 19_000,
+      maxUtteranceMs: 30_000,
+    }),
+    false,
+  );
+});
+
+test("steady room noise does not hold the turn open", () => {
+  const floor = 0.01;
+  const rms = floor * 1.3;
+  assert.equal(isHoldVoiced(rms, floor), true);
+  assert.equal(
+    holdCountsAsSpeech({ rms, floor, hz: 0, clarity: 0.12, clarityCut: 0.58 }),
+    false,
+  );
+  let lastVoiceAt = 400;
+  let now = 400;
+  let ended = false;
+  for (let i = 0; i < 60; i += 1) {
+    now += 40;
+    const keeps = holdCountsAsSpeech({ rms, floor, hz: 0, clarity: 0.12, clarityCut: 0.58 });
+    if (
+      shouldEndUtterance({
+        now,
+        startAt: 0,
+        lastVoiceAt,
+        voiced: keeps,
+        hasText: true,
+        lastTextAt: 400,
+        silenceMs: 1500,
+        maxUtteranceMs: 30_000,
+      })
+    ) {
+      ended = true;
+      break;
+    }
+  }
+  assert.equal(ended, true);
+  assert.ok(now >= 400 + 1500);
+  assert.ok(now < 400 + 2000);
+});
+
+test("stable human pitch above the hold floor keeps the turn open", () => {
+  const floor = 0.01;
+  assert.equal(
+    holdCountsAsSpeech({ rms: floor * 1.3, floor, hz: 180, clarity: 0.8, clarityCut: 0.58 }),
+    true,
+  );
+  assert.equal(
+    shouldEndUtterance({
+      now: 4000,
+      startAt: 0,
+      lastVoiceAt: 4000,
+      voiced: true,
+      hasText: true,
+      lastTextAt: 3900,
+      maxUtteranceMs: 30_000,
+    }),
+    false,
+  );
+});
+
+test("past the max length the turn ends even while still voiced", () => {
+  assert.equal(MAX_UTTERANCE_MS, 30_000);
+  assert.equal(
+    shouldEndUtterance({
       now: 30_000,
       startAt: 0,
       lastVoiceAt: 30_000,
       voiced: true,
       hasText: true,
       lastTextAt: 29_000,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldEndUtterance({
+      now: 29_000,
+      startAt: 0,
+      lastVoiceAt: 29_000,
+      voiced: true,
+      hasText: true,
+      lastTextAt: 29_000,
+      maxUtteranceMs: 30_000,
     }),
     false,
   );

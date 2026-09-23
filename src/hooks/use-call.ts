@@ -39,8 +39,8 @@ import {
   MIN_SPEECH_MS,
   POST_QINGRAN_MS,
   canBeginUtterance,
+  holdCountsAsSpeech,
   holdThreshold,
-  isHoldVoiced,
   isSpeechStart,
   nextFloor,
   shouldEndUtterance,
@@ -62,6 +62,9 @@ export function useCall({ onUtterance, prompt }: Options) {
   const [phase, setPhase] = useState<CallPhase>("idle");
   const [level, setLevel] = useState(0);
   const [threshold, setThreshold] = useState(0);
+  const [listenSec, setListenSec] = useState(0);
+  const [rmsNow, setRmsNow] = useState(0);
+  const [holdNow, setHoldNow] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const liveRef = useRef(false);
@@ -156,6 +159,9 @@ export function useCall({ onUtterance, prompt }: Options) {
     interimRef.current = "";
     setLevel(0);
     setThreshold(0);
+    setListenSec(0);
+    setRmsNow(0);
+    setHoldNow(0);
   }, []);
 
   const hangup = useCallback(() => {
@@ -369,6 +375,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         (now - speechStartRef.current) / 1000,
         true,
         session.sense.voicedClarity,
+        speaking ? 0 : 0.008,
       );
       if (speaking) {
         framesRef.current.push(frame);
@@ -382,6 +389,13 @@ export function useCall({ onUtterance, prompt }: Options) {
       const cut = speaking ? holdThreshold(floor, false, cuts) : startThreshold(floor, false, cuts);
       setLevel(Math.min(1, rms * 8));
       setThreshold(Math.min(1, cut * 8));
+      if (speaking) {
+        setListenSec(Math.max(0, Math.floor((now - speechStartRef.current) / 1000)));
+        setRmsNow(rms);
+        setHoldNow(cut);
+      } else {
+        setListenSec(0);
+      }
       if (deafRef.current || phaseRef.current !== "listening" || now < listenReadyAtRef.current) {
         speechRiseAtRef.current = 0;
       } else if (rising) {
@@ -401,7 +415,14 @@ export function useCall({ onUtterance, prompt }: Options) {
         speechRiseAtRef.current = 0;
       }
       if (speaking) {
-        const voiced = isHoldVoiced(rms, floor, false, cuts);
+        const voiced = holdCountsAsSpeech({
+          rms,
+          floor,
+          hz: frame.hz,
+          clarity: frame.clarity,
+          clarityCut: session.sense.voicedClarity,
+          cuts,
+        });
         if (voiced) {
           if (!voiceBurstAtRef.current) voiceBurstAtRef.current = now;
           if (now - voiceBurstAtRef.current >= VOICE_SPIKE_MS) lastVoiceRef.current = now;
@@ -418,6 +439,7 @@ export function useCall({ onUtterance, prompt }: Options) {
             hasText,
             lastTextAt: lastTextAtRef.current,
             silenceMs: getHearingSession().silenceMs,
+            maxUtteranceMs: session.sense.maxUtteranceMs,
           })
         ) {
           const spoken = now - speechStartRef.current;
@@ -434,6 +456,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         hasText: Boolean((finalTextRef.current || interimRef.current).trim()),
         lastTextAt: lastTextAtRef.current,
         silenceMs: getHearingSession().silenceMs,
+        maxUtteranceMs: getHearingSession().sense.maxUtteranceMs,
       }) && void flushUtterance();
     }
     rafRef.current = requestAnimationFrame(tick);
@@ -744,6 +767,9 @@ export function useCall({ onUtterance, prompt }: Options) {
     phase,
     level,
     threshold,
+    listenSec,
+    rms: rmsNow,
+    hold: holdNow,
     error,
     start,
     hangup,

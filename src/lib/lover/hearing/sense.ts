@@ -7,7 +7,7 @@ import {
   type StoredProsody,
   type ToneThresholds,
 } from "../prosody.ts";
-import { clampEndWaitMs } from "../vad.ts";
+import { clampEndWaitMs, clampMaxUtteranceMs, MAX_UTTERANCE_MS } from "../vad.ts";
 import type { VadCuts } from "../vad.ts";
 
 export type SenseGear = "low" | "mid" | "high" | "custom";
@@ -26,6 +26,8 @@ export type HearingSense = {
   brightCut: number;
   minVoicedMs: number;
   endWaitMs: number;
+  /** Hard stop. The clip is sent to recognition even if the room is still loud. */
+  maxUtteranceMs: number;
   noiseGear: SenseGear;
   voicedMin: number;
   noiseMinMs: number;
@@ -114,6 +116,7 @@ export const DEFAULT_HEARING_SENSE: HearingSense = {
   recordGear: "mid",
   ...RECORD_PRESETS.mid,
   endWaitMs: 1500,
+  maxUtteranceMs: MAX_UTTERANCE_MS,
   noiseGear: "mid",
   ...NOISE_PRESETS.mid,
   voicedClarity: 0.58,
@@ -178,10 +181,12 @@ export function lockHearingSense(
   const voicedClarity = clampVoicedClarity(src.voicedClarity);
   const pitchHoldMs = clampPitchHoldMs(src.pitchHoldMs);
   const endWaitMs = clampEndWaitMs(src.endWaitMs ?? legacy?.endWaitMs);
+  const maxUtteranceMs = clampMaxUtteranceMs(src.maxUtteranceMs);
   return {
     recordGear: recordGearFor(fine),
     ...fine,
     endWaitMs,
+    maxUtteranceMs,
     noiseGear: noiseGearFor(voicedMin, noiseMinMs),
     voicedMin,
     noiseMinMs,

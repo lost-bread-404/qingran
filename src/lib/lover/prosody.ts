@@ -105,6 +105,7 @@ export function sampleProsody(
   t: number,
   needPitch: boolean,
   minClarity = 0.58,
+  pitchMinRms = 0.008,
 ): ProsodyFrame {
   const time = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(time);
@@ -112,7 +113,7 @@ export function sampleProsody(
   const freq = new Uint8Array(analyser.frequencyBinCount);
   analyser.getByteFrequencyData(freq);
   const shape = spectralShape(freq, sampleRate);
-  const pitch = needPitch && rms >= 0.008 ? pitchWithClarity(time, sampleRate, minClarity) : { hz: 0, clarity: 0 };
+  const pitch = needPitch && rms >= pitchMinRms ? pitchWithClarity(time, sampleRate, minClarity) : { hz: 0, clarity: 0 };
   return {
     t,
     rms,

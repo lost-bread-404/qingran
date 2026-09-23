@@ -1,3 +1,5 @@
+import { HUMAN_F0_MAX_HZ, HUMAN_F0_MIN_HZ } from "./hearing/night-voice.ts";
+
 export const MIN_SPEECH_MS = 220;
 export const SILENCE_MS = 1500;
 export const END_WAIT_MIN = 800;
@@ -19,6 +21,11 @@ export const START_CUE_MIN = 0.003;
 export const START_CUE_MULT = 1.12;
 export const HOLD_FLOOR_MIN = 0.0045;
 export const HOLD_FLOOR_MULT = 1.25;
+/** One utterance is cut and sent to recognition after this long, even if the room is still noisy. */
+export const MAX_UTTERANCE_MS = 30_000;
+export const MAX_UTTERANCE_MIN = 5_000;
+export const MAX_UTTERANCE_MAX = 120_000;
+export const MAX_UTTERANCE_STEP = 1_000;
 
 export const DEBUG_START_FLOOR_MIN = 0.003;
 export const DEBUG_START_FLOOR_MULT = 1.25;
@@ -36,6 +43,13 @@ export function clampEndWaitMs(value: unknown, fallback = SILENCE_MS): number {
   if (!Number.isFinite(n)) return fallback;
   const stepped = Math.round(n / END_WAIT_STEP) * END_WAIT_STEP;
   return Math.min(END_WAIT_MAX, Math.max(END_WAIT_MIN, stepped));
+}
+
+export function clampMaxUtteranceMs(value: unknown, fallback = MAX_UTTERANCE_MS): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const stepped = Math.round(n / MAX_UTTERANCE_STEP) * MAX_UTTERANCE_STEP;
+  return Math.min(MAX_UTTERANCE_MAX, Math.max(MAX_UTTERANCE_MIN, stepped));
 }
 
 export type VadCuts = {
@@ -94,6 +108,24 @@ export function isHoldVoiced(rms: number, floor: number, debug = false, cuts?: V
   return rms > holdThreshold(floor, debug, cuts);
 }
 
+/** Loud enough, and a stable fundamental inside the human band. Noise fails the second half. */
+export function isStableHumanPitch(hz: number, clarity: number, clarityCut: number): boolean {
+  return hz >= HUMAN_F0_MIN_HZ && hz <= HUMAN_F0_MAX_HZ && clarity >= clarityCut;
+}
+
+export function holdCountsAsSpeech(input: {
+  rms: number;
+  floor: number;
+  hz: number;
+  clarity: number;
+  clarityCut: number;
+  debug?: boolean;
+  cuts?: VadCuts | null;
+}): boolean {
+  if (!isHoldVoiced(input.rms, input.floor, input.debug ?? false, input.cuts)) return false;
+  return isStableHumanPitch(input.hz, input.clarity, input.clarityCut);
+}
+
 /** Annotation mode keeps the lowered start threshold but needs a held burst before recording. */
 export function canBeginUtterance(input: {
   rising: boolean;
@@ -114,10 +146,13 @@ export type EndpointInput = {
   hasText: boolean;
   lastTextAt: number;
   silenceMs?: number;
+  maxUtteranceMs?: number;
 };
 
 export function shouldEndUtterance(input: EndpointInput) {
   const spoken = input.now - input.startAt;
+  const cap = clampMaxUtteranceMs(input.maxUtteranceMs, MAX_UTTERANCE_MS);
+  if (spoken >= cap) return true;
   if (spoken < MIN_SPEECH_MS) return false;
   if (input.voiced) return false;
   const silence = clampEndWaitMs(input.silenceMs, SILENCE_MS);

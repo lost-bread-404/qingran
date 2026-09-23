@@ -80,6 +80,7 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.match(panel, /噪音和轻声的识别/);
   assert.match(panel, /轻声敏感度/);
   assert.match(panel, /说完等待/);
+  assert.match(panel, /最长一句/);
   assert.match(panel, /1\.5 秒/);
   assert.match(panel, /断句/);
   assert.match(panel, /噪音过滤/);
@@ -321,6 +322,8 @@ test("call and hold-to-talk pass peak_rms and trigger floor into hearUtterance",
   assert.match(call, /canBeginUtterance/);
   assert.match(call, /speechRiseAtRef/);
   assert.match(call, /silenceMs: getHearingSession\(\)\.silenceMs/);
+  assert.match(call, /maxUtteranceMs/);
+  assert.match(call, /holdCountsAsSpeech/);
   assert.match(call, /silenceWaitMs/);
   assert.match(hold, /vadFloor: triggerFloorRef/);
   assert.match(hold, /holdThreshold/);

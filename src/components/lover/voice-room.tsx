@@ -1183,7 +1183,7 @@ export function VoiceRoom() {
   const composing = composerOpen && !recording && !call.active;
   const statusLine = call.active
     ? call.phase === "speaking-you"
-      ? "在听你"
+      ? `在听你 · ${call.listenSec} 秒`
       : call.phase === "transcribing"
         ? "听你说的话"
         : status === "thinking"
@@ -1449,7 +1449,7 @@ export function VoiceRoom() {
                     ? status === "speaking"
                       ? "点按钮挂断"
                       : call.phase === "speaking-you"
-                        ? "说完停两秒再发给她"
+                        ? `在听 ${call.listenSec} 秒 · 音量 ${call.rms.toFixed(3)} / 保持 ${call.hold.toFixed(3)}`
                         : "通话中"
                     : recording
                       ? voice.interim.trim() || "松开发送"
