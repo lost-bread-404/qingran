@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
-import { HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD } from "@/lib/lover/hearing/config";
+import { HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD, lockSttKeyterms } from "@/lib/lover/hearing/config";
 import { formatHearingTimingSummary, parseHearingTimingLine } from "@/lib/lover/hearing/timing-format";
 import { formatCallAudioLogLines, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
@@ -122,6 +122,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
   const [labPassword, setLabPassword] = useState("");
   const [tab, setTab] = useState<Tab>("prompt");
+  const [openPrompt, setOpenPrompt] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [query, setQuery] = useState("");
   const [subject, setSubject] = useState<Subject | "">("");
@@ -150,6 +151,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [injectMemories, setInjectMemories] = useState(profile.injectMemories);
   const [injectLongterm, setInjectLongterm] = useState(profile.injectLongterm);
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
+  const [keytermDraft, setKeytermDraft] = useState(profile.sttKeyterms.join("\n"));
   const historySyncRef = useRef(0);
   const [hygieneNotes, setHygieneNotes] = useState<Array<{ id: string; text: string; subject: string; localDay: string }>>([]);
   const [promptItems, setPromptItems] = useState<PromptItem[]>([]);
@@ -176,6 +178,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setInjectMemories(profile.injectMemories);
     setInjectLongterm(profile.injectLongterm);
     setHistoryWindow(profile.historyWindow);
+    setKeytermDraft(profile.sttKeyterms.join("\n"));
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setTab("prompt");
     setPromptItems([]);
@@ -292,6 +295,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       injectMemories,
       injectLongterm,
       historyWindow,
+      sttKeyterms: lockSttKeyterms(keytermDraft.split("\n")),
       ...patch,
     });
   }
@@ -631,17 +635,14 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
             <p className="text-xs text-subtle">
-              每一步都是一组消息，不只是 system。展开后可以改每一条的 role 和正文，增删消息。占位符旁可以看当前内容，也可以预览真正发给模型的 messages。人设只用「人设」那一份，这里用 {"{system_prompt}"} 引用。记下之后下一轮立刻生效。
+              点开一步改消息。人设在「人设」页，这里用 {"{system_prompt}"} 引用。记下后下一轮生效。
             </p>
-            <div className="flex flex-col gap-4 rounded-md bg-surface-2 px-3 py-3">
-              <div>
-                <p className="text-sm">这一轮带上什么</p>
-                <p className="mt-1 text-xs text-subtle">只影响清然开口的那一句。记笔记、画像和内心照常跑。</p>
-              </div>
-              <label className="flex items-start gap-3">
+            <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
+              <p className="px-1 pt-1 text-sm">这一轮带上什么</p>
+              <p className="px-1 pb-1 text-xs text-subtle">只影响开口那一句。关掉记忆后检索照常跑，只是不带进去。</p>
+              <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
                 <input
                   type="checkbox"
-                  className="mt-1"
                   checked={injectMemories}
                   onChange={(e) => {
                     const next = e.target.checked;
@@ -649,17 +650,11 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                     persistProfile({ injectMemories: next });
                   }}
                 />
-                <span>
-                  <span className="block text-sm">记忆</span>
-                  <span className="block text-xs text-subtle">
-                    关掉后这一轮不带检索到的笔记。检索照常跑，并记在链路里，方便对比。
-                  </span>
-                </span>
+                <span className="text-sm">记忆</span>
               </label>
-              <label className="flex items-start gap-3">
+              <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
                 <input
                   type="checkbox"
-                  className="mt-1"
                   checked={injectLongterm}
                   onChange={(e) => {
                     const next = e.target.checked;
@@ -667,21 +662,13 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                     persistProfile({ injectLongterm: next });
                   }}
                 />
-                <span>
-                  <span className="block text-sm">长期记忆</span>
-                  <span className="block text-xs text-subtle">
-                    关掉后不带我自己、我们、我眼中的她。不影响后台的内心、记笔记和画像。
-                  </span>
-                </span>
+                <span className="text-sm">长期记忆</span>
               </label>
-              <div>
+              <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
                   <p className="text-sm">上下文长度</p>
                   <p className="text-sm tabular-nums">{historyWindow}</p>
                 </div>
-                <p className="mb-2 text-xs text-subtle">
-                  最近多少条对话写进这一轮。0 就是完全不带历史。下一句生效。归档也按这个数判断哪些话滑出窗口。
-                </p>
                 <input
                   type="range"
                   min={0}
@@ -692,7 +679,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                   onChange={(e) => commitHistoryWindow(Number(e.target.value))}
                   className="h-11 w-full accent-accent"
                 />
-                <p className="mt-2 text-xs text-subtle">
+                <p className="text-xs text-subtle">
                   {formatVoiceInjectLine(
                     voiceInjectFromProfile({ injectMemories, injectLongterm, historyWindow }),
                   )}
@@ -711,6 +698,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                   item={item}
                   draft={promptDrafts[item.key] ?? item.body}
                   busy={promptBusy === item.key}
+                  open={openPrompt === item.key}
+                  onOpenChange={(next) =>
+                    setOpenPrompt((current) => (next ? item.key : current === item.key ? null : current))
+                  }
                   onDraft={(body) => setPromptDrafts((d) => ({ ...d, [item.key]: body }))}
                   onSave={() => void savePromptItem(item.key)}
                   onRestore={() => void restorePromptItem(item.key)}
@@ -1010,21 +1001,43 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
             <section className="flex flex-col gap-3">
               <div>
                 <p className="text-sm">识别时发出去的内容</p>
-                <p className="mt-1 text-xs text-subtle">
-                  声学标签不是 xAI 或 Apple 写进字里的。它们只回你说的字。标签是字回来之后，本地按声音加上的。
-                </p>
+                <p className="mt-1 text-xs text-subtle">xAI 和 Apple 只回你说的字，不收一段说明。</p>
               </div>
               <div className="rounded-md bg-surface-2 px-3 py-3">
                 <p className="text-sm">发给 xAI 的</p>
                 <p className="mt-1 text-xs text-subtle">
-                  转写接口不收一段说明。下面是每次原样发出去的字段，再加上你最近说过的词。没有 prompt。
+                  模型、填充词和静音阈值是固定的。下面的词一行一个，会作为 keyterm 发出去。最近说过的词仍会另外带上。
                 </p>
-                <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-fg">
+                <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-relaxed text-fg">
 {`model: ${HEARING.xai.model}
 filler_words: true
-vad_threshold: ${DEFAULT_XAI_VAD_THRESHOLD}
-${STT_KEYTERMS.map((term) => `keyterm: ${term}`).join("\n")}`}
+vad_threshold: ${DEFAULT_XAI_VAD_THRESHOLD}`}
                 </pre>
+                <label className="mt-3 block text-xs text-subtle" htmlFor="stt-keyterms">
+                  keyterm
+                </label>
+                <Textarea
+                  id="stt-keyterms"
+                  value={keytermDraft}
+                  onChange={(e) => setKeytermDraft(e.target.value)}
+                  onBlur={() => {
+                    const next = lockSttKeyterms(keytermDraft.split("\n"));
+                    setKeytermDraft(next.join("\n"));
+                    persistProfile({ sttKeyterms: next });
+                  }}
+                  className="mt-1 min-h-40 font-mono text-sm leading-relaxed"
+                />
+                <button
+                  type="button"
+                  className="mt-2 h-11 text-sm text-muted"
+                  onClick={() => {
+                    const next = [...STT_KEYTERMS];
+                    setKeytermDraft(next.join("\n"));
+                    persistProfile({ sttKeyterms: next });
+                  }}
+                >
+                  恢复默认词
+                </button>
               </div>
               <div className="rounded-md bg-surface-2 px-3 py-3">
                 <p className="text-sm">发给 Apple 的</p>
@@ -1037,12 +1050,6 @@ continuous: true
 interimResults: true
 maxAlternatives: 3`}
                 </pre>
-              </div>
-              <div className="rounded-md bg-surface-2 px-3 py-3">
-                <p className="text-sm">声学标签</p>
-                <p className="mt-1 text-xs text-subtle">
-                  本地只加长短：有声短于 0.42 秒写 short，否则写 long。不加走向、气声和事件。格式是〔长短·走向·声线｜事件〕，例如〔long· · ｜〕。告诉清然怎么读这些标记的那段，在「指令 → 每轮回复」里，不发给识别。
-                </p>
               </div>
             </section>
             <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">

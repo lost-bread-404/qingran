@@ -14,7 +14,7 @@ import {
   UNRECOGNIZED_TEXT,
   voiceTurnIdForMessage,
 } from "./hearing/heard";
-import { applyUtteranceTag, predictUtteranceTags, stripAcousticTags } from "./hearing/tags.ts";
+import { stripAcousticTags } from "./hearing/tags.ts";
 import { applyNightVoiceGate, wavDurationMsFromBytes, type VoiceStats } from "./hearing/night-voice.ts";
 import { formatSenseLine, toneFromSense } from "./hearing/sense.ts";
 import { readTone } from "./prosody";
@@ -83,7 +83,6 @@ export async function hearUtterance(input: {
   const provider: HearingProviderId = session.provider;
   const persist = debugHearing || session.capture;
   let ranHearing = false;
-  const predictedFromFrames = predictUtteranceTags({ frames: input.frames });
   const durationMs = clip ? await clipDurationMs(clip) : 0;
   const tone = toneFromSense(session.sense);
   const toneReading = readTone(input.frames, tone);
@@ -93,6 +92,8 @@ export async function hearUtterance(input: {
     applyNightVoiceGate(heard, {
       voicedMin: session.nightVoicedMin,
       minMs: session.nightMinMs,
+      pitchHoldMs: session.sense.pitchHoldMs,
+      clarity: session.sense.voicedClarity,
       stats,
       frames: input.frames,
       durationMs,
@@ -116,6 +117,7 @@ export async function hearUtterance(input: {
         context: session.context || undefined,
         nbest: session.nbest,
         extraKeyterms: session.extraKeyterms,
+        keyterms: session.sttKeyterms,
         debugHearing,
         silenceWaitMs: input.silenceWaitMs,
         mode: session.mode,
@@ -125,13 +127,16 @@ export async function hearUtterance(input: {
         hearToTriggerMs: input.hearToTriggerMs,
         prerollPeakRms: input.prerollPeakRms,
         liveTextSource: input.liveText.trim() ? "webspeech" : "none",
-        predictedTags: predictedFromFrames,
         contextBefore: session.contextBefore,
         systemPrompt: session.systemPrompt || input.prompt,
         holdToTalk: Boolean(input.holdToTalk),
         prosody: downsampleProsody(input.frames),
         senseLine,
         hearingInstruction: session.hearingInstruction,
+        voicedMin: session.nightVoicedMin,
+        noiseMinMs: session.nightMinMs,
+        voicedClarity: session.sense.voicedClarity,
+        pitchHoldMs: session.sense.pitchHoldMs,
         toneRise: toneReading.riseRatio,
         toneGlide: toneReading.glide,
         toneFade: toneReading.fade,
@@ -141,7 +146,6 @@ export async function hearUtterance(input: {
     });
     ranHearing = true;
     if (result.quota) throw new Error(QUOTA_HINT);
-    const predicted = result.predictedTags ?? predictedFromFrames;
     const engine = engineFields(provider, result);
     if (result.hallucinationSuspect) {
       return seal(heardFromHearing({
@@ -154,7 +158,6 @@ export async function hearUtterance(input: {
         saveError: result.saveError,
         endpointFired: input.endpoint_fired,
         sttDoneAt: Date.now(),
-        predictedTags: predicted,
         hallucinationSuspect: true,
         hallucinationReason: result.hallucinationReason,
         ...engine,
@@ -165,7 +168,7 @@ export async function hearUtterance(input: {
       result.provider !== "xai" && result.tagged
         ? stripAcousticTags(result.tagged).trim() || finishHeard(xaiForFinish, input.liveText, result.words, input.frames, audioStats(input.frames), finishOpts)
         : finishHeard(xaiForFinish, input.liveText, result.words, input.frames, audioStats(input.frames), finishOpts);
-    const tagged = core ? applyUtteranceTag(core, predicted) : "";
+    const tagged = stripAcousticTags(core).trim();
     return seal(heardFromHearing({
       debugHearing,
       turnId,
@@ -176,7 +179,6 @@ export async function hearUtterance(input: {
       saveError: result.saveError,
       endpointFired: input.endpoint_fired,
       sttDoneAt: Date.now(),
-      predictedTags: predicted,
       ...engine,
     }), result.correctedText || result.xaiText || tagged, result.voice);
   } catch (err) {
@@ -192,7 +194,6 @@ export async function hearUtterance(input: {
       noiseOnly: true,
       endpointFired: input.endpoint_fired,
       sttDoneAt: Date.now(),
-      predictedTags: predictedFromFrames,
       engineRequested: provider,
       engineUsed: "xai",
     }), "");
@@ -214,18 +215,16 @@ export async function hearUtterance(input: {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
   const stats = audioStats(input.frames);
-  const finished = finishHeard(text, input.liveText, words, input.frames, stats, finishOpts);
-  const tagged = finished ? applyUtteranceTag(finished, predictedFromFrames) : "";
+  const finished = stripAcousticTags(finishHeard(text, input.liveText, words, input.frames, stats, finishOpts)).trim();
   const scrubbed = scrubHallucination(text, stats, input.liveText, { holdToTalk: input.holdToTalk });
   return seal(heardFromHearing({
     debugHearing,
     turnId,
-    tagged,
+    tagged: finished,
     xaiText: text,
     noiseOnly: !finished,
     endpointFired: input.endpoint_fired,
     sttDoneAt: Date.now(),
-    predictedTags: predictedFromFrames,
     hallucinationSuspect: scrubbed.suspect,
     hallucinationReason:
       scrubbed.reason === "apple_empty" || scrubbed.reason === "short_quiet" ? scrubbed.reason : undefined,

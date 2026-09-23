@@ -1,4 +1,4 @@
-import { clampNightMinMs, clampNightVoicedRatio } from "./night-voice.ts";
+import { clampNightMinMs, clampNightVoicedRatio, clampPitchHoldMs, clampVoicedClarity } from "./night-voice.ts";
 import { cueToneMarks } from "./metrics.ts";
 import {
   DEFAULT_TONE_THRESHOLDS,
@@ -29,6 +29,10 @@ export type HearingSense = {
   noiseGear: SenseGear;
   voicedMin: number;
   noiseMinMs: number;
+  /** How steady a fundamental must be before it counts as a voice. Lower lets breath and murmur through. */
+  voicedClarity: number;
+  /** A run of human pitch at least this long is speech even when the ratio is low. */
+  pitchHoldMs: number;
   toneOn: boolean;
   riseQuestion: number;
   glideRatio: number;
@@ -112,6 +116,8 @@ export const DEFAULT_HEARING_SENSE: HearingSense = {
   endWaitMs: 1500,
   noiseGear: "mid",
   ...NOISE_PRESETS.mid,
+  voicedClarity: 0.58,
+  pitchHoldMs: 200,
   ...TONE_DEFAULTS,
 };
 
@@ -169,6 +175,8 @@ export function lockHearingSense(
   };
   const voicedMin = clampNightVoicedRatio(src.voicedMin ?? legacy?.voicedMin);
   const noiseMinMs = clampNightMinMs(src.noiseMinMs ?? legacy?.noiseMinMs);
+  const voicedClarity = clampVoicedClarity(src.voicedClarity);
+  const pitchHoldMs = clampPitchHoldMs(src.pitchHoldMs);
   const endWaitMs = clampEndWaitMs(src.endWaitMs ?? legacy?.endWaitMs);
   return {
     recordGear: recordGearFor(fine),
@@ -177,6 +185,8 @@ export function lockHearingSense(
     noiseGear: noiseGearFor(voicedMin, noiseMinMs),
     voicedMin,
     noiseMinMs,
+    voicedClarity,
+    pitchHoldMs,
     toneOn: src.toneOn === true,
     riseQuestion: num(src.riseQuestion, TONE_DEFAULTS.riseQuestion, 1, 2, 0.01),
     glideRatio: num(src.glideRatio, TONE_DEFAULTS.glideRatio, 0, 0.3, 0.005),

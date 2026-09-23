@@ -31,8 +31,21 @@ export function resetPromptCache() {
   cache = null;
 }
 
+function stripAcousticGuide(text: string): string {
+  return text
+    .replace(/Rosie 的话有时会带语气标记[\s\S]*?没有标记就按普通口语听。\s*/g, "")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 function materialize(key: PromptKey, raw: string | null): { body: string; doc: PromptDoc; custom: boolean; hash: string } {
   const doc = parsePromptBody(key, raw);
+  if (key === "voice") {
+    for (const variant of doc.variants) {
+      for (const message of variant.messages) {
+        message.content = stripAcousticGuide(message.content);
+      }
+    }
+  }
   const body = serializeDoc(doc);
   return {
     body,

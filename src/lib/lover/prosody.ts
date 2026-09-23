@@ -54,7 +54,7 @@ function rmsFromTimeDomain(data: Uint8Array): number {
   return Math.sqrt(sum / Math.max(1, data.length));
 }
 
-export function pitchWithClarity(data: Uint8Array, sampleRate: number) {
+export function pitchWithClarity(data: Uint8Array, sampleRate: number, minClarity = 0.58) {
   const n = Math.min(data.length, 1024);
   if (n < 80) return { hz: 0, clarity: 0 };
   const buf = new Float32Array(n);
@@ -85,7 +85,7 @@ export function pitchWithClarity(data: Uint8Array, sampleRate: number) {
       bestTau = tau;
     }
   }
-  if (!bestTau || best < 0.58) return { hz: 0, clarity: best };
+  if (!bestTau || best < minClarity) return { hz: 0, clarity: best };
 
   const prev = bestTau > tauMin ? nsdfAt(bestTau - 1) : best;
   const next = bestTau < tauMax ? nsdfAt(bestTau + 1) : best;
@@ -104,6 +104,7 @@ export function sampleProsody(
   sampleRate: number,
   t: number,
   needPitch: boolean,
+  minClarity = 0.58,
 ): ProsodyFrame {
   const time = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(time);
@@ -111,7 +112,7 @@ export function sampleProsody(
   const freq = new Uint8Array(analyser.frequencyBinCount);
   analyser.getByteFrequencyData(freq);
   const shape = spectralShape(freq, sampleRate);
-  const pitch = needPitch && rms >= 0.008 ? pitchWithClarity(time, sampleRate) : { hz: 0, clarity: 0 };
+  const pitch = needPitch && rms >= 0.008 ? pitchWithClarity(time, sampleRate, minClarity) : { hz: 0, clarity: 0 };
   return {
     t,
     rms,
@@ -481,6 +482,7 @@ export function prosodyFromSamples(
   samples: Float32Array,
   sampleRate: number,
   hopMs = PROSODY_HOP_MS,
+  minClarity = 0.58,
 ): StoredProsody {
   const hop = Math.max(1, Math.round((sampleRate * hopMs) / 1000));
   const win = Math.max(hop, Math.round(sampleRate * 0.04));
@@ -500,7 +502,7 @@ export function prosodyFromSamples(
       sum += v * v;
     }
     const rms = Math.sqrt(sum / Math.max(1, n));
-    const pitch = rms >= 0.008 ? pitchWithClarity(time, sampleRate) : { hz: 0, clarity: 0 };
+    const pitch = rms >= 0.008 ? pitchWithClarity(time, sampleRate, minClarity) : { hz: 0, clarity: 0 };
     const shape = cheapSpectrum(slice, sampleRate);
     frames.push({
       t: i / sampleRate,

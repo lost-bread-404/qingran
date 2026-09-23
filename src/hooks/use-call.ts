@@ -362,16 +362,17 @@ export function useCall({ onUtterance, prompt }: Options) {
     const now = performance.now();
     if (analyser) {
       const speaking = phaseRef.current === "speaking-you";
+      const session = getHearingSession();
       const frame = sampleProsody(
         analyser,
         ctxRef.current?.sampleRate ?? 44100,
         (now - speechStartRef.current) / 1000,
         true,
+        session.sense.voicedClarity,
       );
       if (speaking) {
         framesRef.current.push(frame);
       }
-      const session = getHearingSession();
       const cuts = recordCuts(session.sense);
       const rms = frame.rms;
       pushTimedRms(prerollLevelsRef.current, { t: now, rms }, PRE_ROLL_SEC * 1000);

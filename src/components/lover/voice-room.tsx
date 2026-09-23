@@ -50,6 +50,7 @@ import { streamTalk } from "@/lib/lover/talk-client";
 import { warmBrain } from "@/lib/lover/brain/warm-client";
 import { classifyTalkException, TALK_FAIL, talkExceptionHint } from "@/lib/lover/talk-fail";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { stripAcousticTags } from "@/lib/lover/hearing/tags";
 import { engineLineFromHeard } from "@/lib/lover/hearing/select";
 import { formatCallAudioLog, installAudioTrace, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
@@ -151,6 +152,7 @@ export function VoiceRoom() {
   } | null>(null);
   const [flagBusy, setFlagBusy] = useState(false);
   const [flagError, setFlagError] = useState<string | null>(null);
+  const [praisedIds, setPraisedIds] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
     warmBrain();
@@ -196,6 +198,7 @@ export function VoiceRoom() {
       nightMinMs: profile.nightMinMs,
       sense: profile.hearingSense,
       hearingInstruction: profile.hearingInstruction,
+      sttKeyterms: profile.sttKeyterms,
     });
   }, [profile, messages.length, memories, replyPick, status]);
   useEffect(() => {
@@ -439,6 +442,7 @@ export function VoiceRoom() {
     ) => {
       const tagged = sayRaw.trim();
       if (!tagged) return;
+      if ((opts?.skipQingran || opts?.nightNoise) && !getHearingSession().debugHearing) return;
       const say = stripHearingMarkup(tagged).trim() || tagged;
       const at = Date.now();
       const injectLine = formatVoiceInjectLine(voiceInjectFromProfile(profileRef.current));
@@ -1347,7 +1351,7 @@ export function VoiceRoom() {
                 const msg = messages.find((m) => m.id === id);
                 if (!msg) return;
                 setEditingId(id);
-                setEditDraft(msg.text);
+                setEditDraft(stripAcousticTags(msg.text));
                 setComposerOpen(false);
                 setStatus("idle");
               }}
@@ -1370,15 +1374,28 @@ export function VoiceRoom() {
               onUndoConfirm={(id) => void undoConfirm(id)}
               undoConfirmId={undoConfirmId}
               onNoiseReply={(id) => void replyToNoise(id)}
+              praisedIds={praisedIds}
               onFlagReply={(assistantId, replyToId, rating) => {
                 if (rating === "up") {
-                  if (flagBusy) return;
+                  if (flagBusy || praisedIds.has(assistantId)) return;
+                  setPraisedIds((prev) => {
+                    const next = new Set(prev);
+                    next.add(assistantId);
+                    return next;
+                  });
                   void saveReplyFlag({
                     messageId: assistantId,
                     replyTo: replyToId,
                     note: "",
                     rating: "up",
                     tags: [],
+                  }).then((ok) => {
+                    if (ok) return;
+                    setPraisedIds((prev) => {
+                      const next = new Set(prev);
+                      next.delete(assistantId);
+                      return next;
+                    });
                   });
                   return;
                 }

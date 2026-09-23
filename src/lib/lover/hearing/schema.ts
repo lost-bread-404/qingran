@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { applyAltTags, clipAlternatives } from "./nbest.ts";
-import { applyUtteranceTag, cueEventToTag, tagsFromCues } from "./tags.ts";
+import { cueEventToTag } from "./tags.ts";
 
 export const CONTOURS = ["rising", "falling", "flat", "wavering"] as const;
 export const LENGTHS = ["short", "long"] as const;
@@ -126,7 +126,6 @@ export function formatTaggedText(result: HearingModelOutput): string {
   if (!text && result.cues.length === 0) return "";
   let used = text || result.cues.map((cue) => cue.token).join("");
   if (result.alternatives?.length) used = applyAltTags(used, result.alternatives);
-  if (result.cues.length) used = applyUtteranceTag(used, tagsFromCues(result.cues));
   return used.trim();
 }
 

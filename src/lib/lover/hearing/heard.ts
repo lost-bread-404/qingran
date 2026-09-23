@@ -105,3 +105,9 @@ export function voiceTurnIdForMessage(
 ): string | undefined {
   return heard.clipId || heard.persistPending ? heard.turnId : undefined;
 }
+
+/** Debug keeps silence and misses for labeling. Otherwise only a real transcript is stored. */
+export function shouldRecordHearing(input: { debugHearing: boolean; text: string }): boolean {
+  if (input.debugHearing) return true;
+  return Boolean(input.text.trim());
+}

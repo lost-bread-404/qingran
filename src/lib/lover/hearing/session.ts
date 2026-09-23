@@ -1,5 +1,5 @@
 import type { HearingProviderId } from "./config.ts";
-import { DEFAULT_HEARING_PROVIDER } from "./config.ts";
+import { DEFAULT_HEARING_PROVIDER, STT_KEYTERMS } from "./config.ts";
 import type { ContextTurn } from "./context.ts";
 import { DEFAULT_HEARING_SENSE, type HearingSense } from "./sense.ts";
 import type { AudioRoute, HearingMode } from "./route.ts";
@@ -24,6 +24,7 @@ export type HearingSession = {
   nightMinMs: number;
   sense: HearingSense;
   hearingInstruction: string;
+  sttKeyterms: string[];
 };
 
 const session: HearingSession = {
@@ -46,6 +47,7 @@ const session: HearingSession = {
   nightMinMs: DEFAULT_HEARING_SENSE.noiseMinMs,
   sense: DEFAULT_HEARING_SENSE,
   hearingInstruction: "",
+  sttKeyterms: [...STT_KEYTERMS],
 };
 
 export function getHearingSession(): HearingSession {

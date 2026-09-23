@@ -3,6 +3,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { pairMessages } from "@/lib/lover/pair-messages";
+import { stripAcousticTags } from "@/lib/lover/hearing/tags";
 import { formatTalkTrace } from "@/lib/lover/talk-fail";
 import type { ChatMessage } from "@/lib/lover/types";
 
@@ -33,6 +34,7 @@ type Props = {
   onUndoConfirm?: (id: string) => void;
   undoConfirmId?: string | null;
   onFlagReply?: (assistantId: string, replyToId?: string, rating?: "up" | "down") => void;
+  praisedIds?: ReadonlySet<string>;
   onSelectReply?: (userId: string, replyId: string) => void;
   onNoiseReply?: (id: string) => void;
 };
@@ -66,6 +68,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     onUndoConfirm,
     undoConfirmId,
     onFlagReply,
+    praisedIds,
     onSelectReply,
     onNoiseReply,
   },
@@ -167,7 +170,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                     ref={editorRef}
                     autoFocus
                     enterKeyHint="done"
-                    value={editDraft ?? pair.user.text}
+                    value={editDraft ?? stripAcousticTags(pair.user.text)}
                     onChange={(e) => onEditDraft?.(e.target.value)}
                     className="min-h-28 w-full text-left"
                   />
@@ -248,20 +251,25 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                   </div>
                 ) : null}
                 {onFlagReply && shown.text.trim() ? (
-                  <div className="flex items-center gap-6 self-start">
+                  <div className="relative z-10 flex items-center gap-6 self-start">
                     <button
                       type="button"
                       aria-label="这条回复好"
+                      aria-pressed={praisedIds?.has(shown.id) ?? false}
                       onClick={() => onFlagReply(shown.id, pair.user?.id ?? shown.replyTo, "up")}
-                      className="grid size-11 place-items-center text-subtle transition-colors duration-150 hover:text-fg"
+                      className={
+                        praisedIds?.has(shown.id)
+                          ? "grid size-11 place-items-center text-fg [touch-action:manipulation]"
+                          : "grid size-11 place-items-center text-subtle transition-colors duration-150 hover:text-fg [touch-action:manipulation]"
+                      }
                     >
-                      <ThumbsUp className="size-4" />
+                      <ThumbsUp className={praisedIds?.has(shown.id) ? "size-4 fill-current" : "size-4"} />
                     </button>
                     <button
                       type="button"
                       aria-label="差在哪"
                       onClick={() => onFlagReply(shown.id, pair.user?.id ?? shown.replyTo, "down")}
-                      className="min-h-11 rounded-md px-3 text-sm text-subtle transition-colors duration-150 hover:text-fg"
+                      className="min-h-11 rounded-md px-3 text-sm text-subtle transition-colors duration-150 hover:text-fg [touch-action:manipulation]"
                     >
                       差在哪
                     </button>
@@ -358,7 +366,7 @@ function UserBubble({
             />
           ) : null}
           <p className="whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
-            {user.text}
+            {stripAcousticTags(user.text)}
           </p>
           {debugHearing && (user.hearingTiming || user.injectLine) ? (
             <p className="text-[10px] text-subtle">

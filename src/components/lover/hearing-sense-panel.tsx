@@ -294,7 +294,7 @@ export function HearingSensePanel({
             min={0}
             max={1}
             step={0.05}
-            hint="稳定基频落在人声范围里的帧，占比低于这个就当噪音，只存录音不回复。调高，更严格。"
+            hint="有声片段里，稳定基频落在人声范围的帧，占这些帧的比例。低于这个就当噪音。前后的静音不算进去。调高，更严格。"
             onChange={(voicedMin) => onChange(withNoiseFine(sense, { voicedMin }))}
           />
           <Fine
@@ -305,8 +305,29 @@ export function HearingSensePanel({
             max={2000}
             step={50}
             digits={0}
-            hint="短于这个毫秒数就当噪音。调高，很短的一声会被丢掉。语气词里也是这个数。"
+            hint="有声片段加起来短于这个毫秒数就当噪音。整段录音里的静音不算。调高，很短的一声会被丢掉。语气词里也是这个数。"
             onChange={(noiseMinMs) => onChange(withNoiseFine(sense, { noiseMinMs }))}
+          />
+          <Fine
+            label="人声清晰度"
+            value={sense.voicedClarity}
+            def={DEFAULT_HEARING_SENSE.voicedClarity}
+            min={0.2}
+            max={0.9}
+            step={0.01}
+            hint="基频要多清楚才算人声。调低，气声、呢喃更容易被认成人声，但噪音也更容易混进来。"
+            onChange={(voicedClarity) => onChange({ ...sense, voicedClarity })}
+          />
+          <Fine
+            label="连续人声"
+            value={sense.pitchHoldMs}
+            def={DEFAULT_HEARING_SENSE.pitchHoldMs}
+            min={0}
+            max={2000}
+            step={10}
+            digits={0}
+            hint="有声片段里，连续检测到人声基频达到这个毫秒数，就当成说话，不再因为占比不够丢掉。默认 200。"
+            onChange={(pitchHoldMs) => onChange({ ...sense, pitchHoldMs })}
           />
         </Fines>
       </Category>
@@ -334,7 +355,7 @@ export function HearingSensePanel({
           max={2000}
           step={50}
           digits={0}
-          hint="和噪音过滤里的最短人声是同一个数。调高，很短的一声留不下来。"
+          hint="和噪音过滤里的最短人声是同一个数。算的是有声片段，不是整段录音。调高，很短的一声留不下来。"
           onChange={(noiseMinMs) => onChange(withNoiseFine(sense, { noiseMinMs }))}
         />
       </Category>

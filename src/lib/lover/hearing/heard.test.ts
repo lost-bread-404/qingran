@@ -4,6 +4,7 @@ import {
   clipSaveBanner,
   errorText,
   heardFromHearing,
+  shouldRecordHearing,
   UNRECOGNIZED_TEXT,
   voiceTurnIdForMessage,
 } from "./heard.ts";
@@ -75,6 +76,13 @@ test("voiceTurnId is omitted until the clip actually saved", () => {
   assert.equal(voiceTurnIdForMessage({ turnId: heard.turnId, clipId: heard.clipId }), undefined);
   assert.equal(voiceTurnIdForMessage(heard), "t3");
   assert.match(clipSaveBanner(heard.saveError ?? ""), /录音没存上/);
+});
+
+test("non-debug does not record silence or a miss; debug still does", () => {
+  assert.equal(shouldRecordHearing({ debugHearing: false, text: "" }), false);
+  assert.equal(shouldRecordHearing({ debugHearing: false, text: "   " }), false);
+  assert.equal(shouldRecordHearing({ debugHearing: false, text: "在吗" }), true);
+  assert.equal(shouldRecordHearing({ debugHearing: true, text: "" }), true);
 });
 
 test("non-debug empty still returns blank so the UI can say 没听清", () => {

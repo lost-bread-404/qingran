@@ -1,4 +1,4 @@
-import { parseAcousticTags, applyUtteranceTag, type AcousticTags } from "./hearing/tags.ts";
+import { parseAcousticTags, stripAcousticTags, type AcousticTags } from "./hearing/tags.ts";
 import type { ChatMessage, MessageKind } from "./types";
 
 export function encodeStoredMessage(msg: ChatMessage): string {
@@ -120,6 +120,5 @@ export function isNightNoiseBody(body: string): boolean {
 }
 
 export function modelFacingText(body: string): string {
-  const decoded = decodeStoredBody(body);
-  return decoded.predictedTags ? applyUtteranceTag(decoded.text, decoded.predictedTags) : decoded.text;
+  return stripAcousticTags(decodeStoredBody(body).text).trim();
 }

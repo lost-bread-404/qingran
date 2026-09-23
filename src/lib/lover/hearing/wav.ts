@@ -103,10 +103,10 @@ export function decodeWavPcm16(base64: string): { samples: Float32Array; sampleR
   }
 }
 
-export function prosodyFromWav(base64: string): StoredProsody | null {
+export function prosodyFromWav(base64: string, minClarity = 0.58): StoredProsody | null {
   const decoded = decodeWavPcm16(base64);
   if (!decoded || decoded.samples.length < 80) return null;
-  return prosodyFromSamples(decoded.samples, decoded.sampleRate);
+  return prosodyFromSamples(decoded.samples, decoded.sampleRate, undefined, minClarity);
 }
 
 

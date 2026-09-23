@@ -23,6 +23,8 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   const editor = readFileSync(new URL("../../../components/lover/prompt-step-editor.tsx", import.meta.url), "utf8");
   assert.match(editor, /回复模型/);
   assert.match(editor, /未使用/);
+  assert.match(editor, /最近 \$\{opt\.stats\.n\} 次使用的平均花费时长/);
+  assert.match(editor, /item\.key === "voice" \? <p className="text-xs text-subtle">\{modelStatLine\(selected\)\}<\/p>/);
   assert.match(editor, /supportsEffort/);
   assert.match(editor, /VOICE_EFFORT_OPTIONS/);
   assert.match(editor, /切换后下一句立刻生效/);
@@ -67,7 +69,9 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.match(src, /识别时发出去的内容/);
   assert.match(src, /发给 xAI 的/);
   assert.match(src, /发给 Apple 的/);
-  assert.match(src, /声学标签/);
+  assert.doesNotMatch(src, /声学标签/);
+  assert.match(src, /stt-keyterms/);
+  assert.match(src, /lockSttKeyterms/);
   assert.doesNotMatch(src, /xAI 和 Apple 不收这段/);
   assert.match(src, /STT_KEYTERMS/);
   const panel = readFileSync(new URL("../../../components/lover/hearing-sense-panel.tsx", import.meta.url), "utf8");
@@ -84,6 +88,9 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.match(panel, /不再看音量/);
   assert.match(panel, /label="人声占比"/);
   assert.match(panel, /label="最短人声"/);
+  assert.match(panel, /label="人声清晰度"/);
+  assert.match(panel, /气声、呢喃更容易被认成人声/);
+  assert.match(panel, /label="连续人声"/);
   assert.match(panel, /aria-label=\{label\}/);
   assert.match(panel, /起始绝对门槛/);
   assert.match(panel, /保持绝对门槛/);
@@ -195,6 +202,8 @@ test("transcript has 差在哪 below the reply, 44pt targets, no thumbs-down", (
   assert.match(src, /aria-label="打开标注"/);
   assert.match(src, /aria-label="差在哪"/);
   assert.match(src, /aria-label="这条回复好"/);
+  assert.match(src, /aria-pressed=\{praisedIds\?\.has\(shown\.id\)/);
+  assert.match(src, /fill-current/);
   assert.doesNotMatch(src, /aria-label="这条回复不好"/);
   assert.doesNotMatch(src, /ThumbsDown/);
   assert.match(src, /ThumbsUp/);
@@ -415,8 +424,11 @@ test("runHearing persists with waitUntil; xai skips audio-LLM and a second STT",
   assert.match(store, /isLabEvalEngine/);
   assert.match(store, /isQwenHearingModel/);
   assert.match(store, /hearWithQwen\(audioBase64, undefined, id\)/);
-  assert.match(store, /lengthOnlyTags\(data\.predictedTags\)/);
-  assert.match(store, /used !== "xai" \? withMeowFromText/);
+  assert.doesNotMatch(store, /applyUtteranceTag/);
+  assert.doesNotMatch(store, /lengthOnlyTags/);
+  assert.match(store, /keyterms: data\.keyterms/);
+  assert.doesNotMatch(hear, /applyUtteranceTag/);
+  assert.match(hear, /keyterms: session\.sttKeyterms/);
   assert.match(hear, /ranHearing \|\| provider === "xai"/);
   assert.match(hear, /transcribeVoice/);
   assert.match(hear, /hallucinationSuspect/);

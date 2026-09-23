@@ -18,8 +18,30 @@ import {
 } from "./night-voice.ts";
 import type { ProsodyFrame } from "../prosody.ts";
 
-function frame(hz: number, clarity = 0.8): ProsodyFrame {
-  return { t: 0, rms: 0.02, hz, clarity, centroid: 400, bright: 0.1 };
+function frame(hz: number, clarity = 0.8, t = 0, rms = 0.02): ProsodyFrame {
+  return { t, rms, hz, clarity, centroid: 400, bright: 0.1 };
+}
+
+function spread(rows: ProsodyFrame[], spanSec: number): ProsodyFrame[] {
+  if (rows.length <= 1) return rows;
+  return rows.map((row, index) => ({ ...row, t: (spanSec * index) / (rows.length - 1) }));
+}
+
+function timeline(totalMs: number, hopMs: number, at: (t: number) => Partial<ProsodyFrame>): ProsodyFrame[] {
+  const frames: ProsodyFrame[] = [];
+  for (let ms = 0; ms <= totalMs; ms += hopMs) {
+    const t = ms / 1000;
+    const over = at(t);
+    frames.push({
+      t,
+      rms: over.rms ?? 0.001,
+      hz: over.hz ?? 0,
+      clarity: over.clarity ?? 0,
+      centroid: over.centroid ?? 400,
+      bright: over.bright ?? 0.1,
+    });
+  }
+  return frames;
 }
 
 function heard(text: string, extra: Partial<HeardUtterance> = {}): HeardUtterance {
@@ -27,17 +49,16 @@ function heard(text: string, extra: Partial<HeardUtterance> = {}): HeardUtteranc
 }
 
 test("voiced ratio counts only stable pitch inside the human band", () => {
-  const frames = [
-    frame(180),
-    frame(40),
-    frame(900),
-    frame(0, 0),
-    frame(200, 0.2),
-    frame(220),
-  ];
+  const frames = spread(
+    [frame(180), frame(40), frame(900), frame(0, 0), frame(200, 0.2), frame(220)],
+    0.48,
+  );
   const stats = measureVoiceStats(frames, 480);
   assert.equal(stats.frameCount, 6);
+  assert.equal(stats.denomFrames, 6);
+  assert.equal(stats.inBandFrames, 2);
   assert.equal(stats.voicedRatio, 2 / 6);
+  assert.equal(stats.voicedMs, 480);
   assert.equal(stats.f0MinHz, 40);
   assert.equal(stats.f0MaxHz, 900);
   assert.equal(stats.f0InVoice, false);
@@ -46,18 +67,18 @@ test("voiced ratio counts only stable pitch inside the human band", () => {
 });
 
 test("night noise is low voiced ratio or short duration, not missing words", () => {
-  const voice = measureVoiceStats([frame(160), frame(170), frame(180), frame(0, 0)], 420);
+  const voice = measureVoiceStats(spread([frame(160), frame(170), frame(180), frame(0, 0)], 0.42), 420);
   assert.equal(nightIsNoise(voice, { voicedMin: NIGHT_VOICED_MIN, minMs: NIGHT_MIN_MS }), false);
-  const rustle = measureVoiceStats([frame(0, 0), frame(40), frame(0, 0), frame(30, 0.2)], 900);
+  const rustle = measureVoiceStats(spread([frame(0, 0), frame(40), frame(0, 0), frame(30, 0.2)], 0.9), 900);
   assert.equal(nightIsNoise(rustle, { voicedMin: 0.3, minMs: 300 }), true);
-  const shortHmm = measureVoiceStats([frame(180), frame(190)], 180);
+  const shortHmm = measureVoiceStats(spread([frame(180), frame(190)], 0.18), 180);
   assert.equal(nightIsNoise(shortHmm, { voicedMin: 0.3, minMs: 300 }), true);
   assert.equal(nightIsNoise(measureVoiceStats([], 120), { voicedMin: 0.3, minMs: 300 }), true);
   assert.equal(nightIsNoise(measureVoiceStats([], 0), { voicedMin: 0.3, minMs: 300 }), false);
 });
 
 test("voice is kept all day, even a soft 嗯 Apple missed; noise is a mark, not a filler", () => {
-  const voice = measureVoiceStats([frame(150), frame(160), frame(155), frame(0, 0)], 500);
+  const voice = measureVoiceStats(spread([frame(150), frame(160), frame(155), frame(0, 0)], 0.5), 500);
   const kept = applyNightVoiceGate(heard(UNRECOGNIZED_TEXT, { hallucinationSuspect: true, skipQingran: true }), {
     voicedMin: 0.3,
     minMs: 300,
@@ -90,7 +111,7 @@ test("voice is kept all day, even a soft 嗯 Apple missed; noise is a mark, not 
   const noise = applyNightVoiceGate(heard("啊", { hallucinationSuspect: false }), {
     voicedMin: 0.3,
     minMs: 300,
-    stats: measureVoiceStats([frame(0, 0), frame(40), frame(0, 0), frame(0, 0)], 800),
+    stats: measureVoiceStats(spread([frame(0, 0), frame(40), frame(0, 0), frame(0, 0)], 0.8), 800),
   });
   assert.equal(noise.skipQingran, true);
   assert.equal(noise.nightNoise, true);
@@ -104,7 +125,7 @@ test("the pitch gate runs even when an old profile had night mode off", () => {
   const noise = applyNightVoiceGate(heardRow, {
     voicedMin: 0.3,
     minMs: 300,
-    stats: measureVoiceStats([frame(0, 0), frame(0, 0), frame(40, 0.2)], 600),
+    stats: measureVoiceStats(spread([frame(0, 0), frame(0, 0), frame(40, 0.2)], 0.6), 600),
   });
   assert.equal(noise.nightNoise, true);
   assert.equal(noise.skipQingran, true);
@@ -126,6 +147,51 @@ test("thresholds clamp and the lab line shows ratio, pitch, duration", () => {
     formatClipVoiceLine({ voicedRatio: null, f0MinHz: null, f0MaxHz: null, durationMs: 180 }),
     "人声 — · 基频 — · 180ms",
   );
+  assert.equal(
+    formatClipVoiceLine({
+      voicedRatio: 0.83,
+      f0MinHz: 160,
+      f0MaxHz: 190,
+      durationMs: 4000,
+      voicedMs: 1000,
+      inBandFrames: 25,
+      denomFrames: 25,
+      voiceNoise: false,
+    }),
+    "人声 0.83 · 基频 160–190 Hz · 4000ms · 有声 1000ms · 25/25 · 说话",
+  );
+});
+
+test("silence around a short utterance is not the denominator", () => {
+  const speech = timeline(4000, 40, (t) =>
+    t >= 1.5 && t <= 2.5 ? { rms: 0.05, hz: 180, clarity: 0.8 } : { rms: 0.001 },
+  );
+  const stats = measureVoiceStats(speech, 4000);
+  assert.ok(stats.frameCount > stats.denomFrames);
+  assert.ok(stats.inBandFrames / stats.frameCount < 0.3);
+  assert.ok(stats.voicedRatio >= 0.9);
+  assert.ok(stats.voicedMs >= 800 && stats.voicedMs <= 1200);
+  assert.equal(nightIsNoise(stats, { voicedMin: 0.3, minMs: 300 }), false);
+
+  const friction = timeline(2000, 40, () => ({ rms: 0.05, hz: 0, clarity: 0.2 }));
+  const rustle = measureVoiceStats(friction, 2000);
+  assert.ok(rustle.denomFrames > 0);
+  assert.equal(rustle.inBandFrames, 0);
+  assert.equal(nightIsNoise(rustle, { voicedMin: 0.3, minMs: 300 }), true);
+
+  const hmm = timeline(200, 40, () => ({ rms: 0.03, hz: 190, clarity: 0.7 }));
+  const soft = measureVoiceStats(hmm, 200);
+  assert.equal(soft.continuousMs, 200);
+  assert.ok(soft.voicedMs < 300);
+  assert.equal(nightIsNoise(soft, { voicedMin: 0.3, minMs: 300 }), false);
+
+  const buried = timeline(1000, 40, (t) =>
+    t <= 0.2 ? { rms: 0.05, hz: 180, clarity: 0.8 } : { rms: 0.05, hz: 0, clarity: 0.1 },
+  );
+  const lowRatio = measureVoiceStats(buried, 1000);
+  assert.ok(lowRatio.voicedRatio < 0.3);
+  assert.ok(lowRatio.continuousMs >= 200);
+  assert.equal(nightIsNoise(lowRatio, { voicedMin: 0.3, minMs: 300 }), false);
 });
 
 test("wav header duration does not need the sample payload", () => {

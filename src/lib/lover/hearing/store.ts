@@ -26,7 +26,7 @@ import { deleteHearingWav, putHearingWav, readHearingWav } from "./blob.ts";
 import { isNoiseDisagreement, shouldDropAsNoise } from "./noise.ts";
 import { goldTierFor, isGoldSource, type GoldSource } from "./gold.ts";
 import type { AudioRoute, HearingMode } from "./route.ts";
-import { errorText } from "./heard.ts";
+import { errorText, shouldRecordHearing } from "./heard.ts";
 import { envPresence } from "./env.ts";
 import { scoreHearing, type ScoreWindow } from "./score.ts";
 import {
@@ -78,20 +78,17 @@ import { parseTuneClips, tuneToneThresholds } from "./tone-tune.ts";
 import { lockHearingSense, previewToneReplay } from "./sense.ts";
 import { silenceWavBase64, wavDurationMs, wavPeakRms, prosodyFromWav } from "./wav.ts";
 import { framesFromStored, parseStoredProsody } from "../prosody.ts";
-import { measureVoiceStats, type VoiceStats } from "./night-voice.ts";
+import { measureVoiceStats, nightIsNoise, NIGHT_MIN_MS, NIGHT_VOICED_MIN, clampPitchHoldMs, clampVoicedClarity, type VoiceStats } from "./night-voice.ts";
 import { scrubHallucination } from "../stt-text.ts";
 import { waitUntil } from "@vercel/functions";
 import { gitCommitSha, hashQingranPrompt } from "./eval-meta.ts";
 import { backgroundRefreshHearingStt, hotPathHearingStt } from "./stt-cache.ts";
 import { recordHearingTimingLog } from "./timing-log.ts";
 import {
-  applyUtteranceTag,
   parseAcousticTags,
   parsePartialAcousticTags,
   parseTagKeys,
   tagsFromCues,
-  withMeowFromText,
-  lengthOnlyTags,
   type AcousticTags,
   type TagKey,
 } from "./tags.ts";
@@ -174,6 +171,11 @@ export type RunHearingInput = {
   tonePeak?: number | null;
   toneMark?: string | null;
   hearingInstruction?: string;
+  voicedMin?: number;
+  noiseMinMs?: number;
+  voicedClarity?: number;
+  pitchHoldMs?: number;
+  keyterms?: string[];
 };
 
 export type RunHearingOutput = {
@@ -353,6 +355,7 @@ export const runHearing = createServerFn({ method: "POST" })
       mimeType: data.mimeType,
       prompt: data.prompt,
       extraKeyterms,
+      keyterms: data.keyterms,
     });
     const hearingPromise: Promise<AdapterOutcome | null> =
       provider === "xai" ? Promise.resolve(null) : dispatchProvider(provider, data.audioBase64, callOpts);
@@ -421,8 +424,10 @@ export const runHearing = createServerFn({ method: "POST" })
     const durationSec = wavDurationMs(data.audioBase64) / 1000;
     const peakRms = wavPeakRms(data.audioBase64);
     const durationMs = Math.round(durationSec * 1000);
-    const storedProsody = prosodyFromWav(data.audioBase64) ?? parseStoredProsody(data.prosody);
-    const voice = measureVoiceStats(framesFromStored(storedProsody), durationMs);
+    const clarity = clampVoicedClarity(data.voicedClarity);
+    const pitchHoldMs = clampPitchHoldMs(data.pitchHoldMs);
+    const storedProsody = prosodyFromWav(data.audioBase64, clarity) ?? parseStoredProsody(data.prosody);
+    const voice = measureVoiceStats(framesFromStored(storedProsody), durationMs, { clarity });
     const liveText = data.liveText ?? "";
     const holdToTalk = Boolean(data.holdToTalk) || data.mode === "text";
     const scrubbed = scrubHallucination(originalXai, { durationSec, peakRms }, liveText, { holdToTalk });
@@ -437,11 +442,7 @@ export const runHearing = createServerFn({ method: "POST" })
     const providerNoise = Boolean(hearing?.noise_only && used !== "xai");
     const disagreement = isNoiseDisagreement(providerNoise, xaiText);
     const drop = shouldDropAsNoise(providerNoise, xaiText) || scrubbed.suspect;
-    const predictedBase =
-      used !== "xai" && hearing?.cues?.length
-        ? tagsFromCues(hearing.cues)
-        : lengthOnlyTags(data.predictedTags);
-    const taggedCore = drop
+    const tagged = drop
       ? ""
       : scrubbed.reason === "prefer_apple_quiet"
         ? liveText
@@ -450,9 +451,6 @@ export const runHearing = createServerFn({ method: "POST" })
           : used === "xai"
             ? xaiText
             : picked.tagged;
-    const predicted =
-      used !== "xai" ? withMeowFromText(predictedBase, originalXai || taggedCore) : predictedBase;
-    const tagged = taggedCore ? applyUtteranceTag(taggedCore, predicted) : "";
     const latency_ms = hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0);
     const audioLlmMs =
       outcome && !outcome.ok
@@ -473,54 +471,64 @@ export const runHearing = createServerFn({ method: "POST" })
       errorDetail: engineErrorDetail,
     });
 
+    const voiceNoise = nightIsNoise(voice, {
+      voicedMin: data.voicedMin ?? NIGHT_VOICED_MIN,
+      minMs: data.noiseMinMs ?? NIGHT_MIN_MS,
+      pitchHoldMs,
+    });
+
     waitUntil(
       (async () => {
-        await recordHearingTimingLog({
-          ok: !drop && Boolean(tagged || xaiText),
-          silenceMs,
-          uploadMs,
-          sttMs,
-          correctMs,
-          engineRequested: provider,
-          engineUsed: used,
-          raw: originalXai,
-          error: engineErrorDetail,
-          senseLine: data.senseLine,
-        });
-        await persistHearingTurn({
-          turnId,
-          used,
-          model,
-          data,
-          upload_start,
-          stt_done,
-          latency_ms,
-          hearing,
-          xaiText: originalXai,
-          pickedXaiText: originalXai,
-          tagged,
-          predictedTags: predicted,
-          commitSha,
-          promptHash,
-          fallback,
-          fallbackReason,
-          outcome,
-          scrubbedSuspect: scrubbed.suspect,
-          disagreement,
-          durationMs,
-          peakRms: data.peakRms ?? peakRms,
-          capture: Boolean(data.capture || data.debugHearing),
-          refusal,
-          engineRequested: provider,
-          engineUsed: used,
-          engineFallback,
-          engineErrorDetail,
-          audioLlmMs,
-          sttCorrectedText: corrected.text,
-          sttCorrections: corrected.replacements,
-          prosody: storedProsody,
-          voice,
-        });
+        const keptText = drop || voiceNoise ? "" : (tagged || xaiText || "").trim();
+        if (shouldRecordHearing({ debugHearing: Boolean(data.debugHearing), text: keptText })) {
+          await recordHearingTimingLog({
+            ok: !drop && Boolean(tagged || xaiText),
+            silenceMs,
+            uploadMs,
+            sttMs,
+            correctMs,
+            engineRequested: provider,
+            engineUsed: used,
+            raw: originalXai,
+            error: engineErrorDetail,
+            senseLine: data.senseLine,
+          });
+          await persistHearingTurn({
+            turnId,
+            used,
+            model,
+            data,
+            upload_start,
+            stt_done,
+            latency_ms,
+            hearing,
+            xaiText: originalXai,
+            pickedXaiText: originalXai,
+            tagged,
+            predictedTags: null,
+            commitSha,
+            promptHash,
+            fallback,
+            fallbackReason,
+            outcome,
+            scrubbedSuspect: scrubbed.suspect,
+            disagreement,
+            durationMs,
+            peakRms: data.peakRms ?? peakRms,
+            capture: Boolean(data.capture || data.debugHearing),
+            refusal,
+            engineRequested: provider,
+            engineUsed: used,
+            engineFallback,
+            engineErrorDetail,
+            audioLlmMs,
+            sttCorrectedText: corrected.text,
+            sttCorrections: corrected.replacements,
+            prosody: storedProsody,
+            voice,
+            voiceNoise,
+          });
+        }
         if (hot.needsRefresh) await backgroundRefreshHearingStt();
       })(),
     );
@@ -546,7 +554,7 @@ export const runHearing = createServerFn({ method: "POST" })
       hallucinationReason: scrubbed.suspect && (scrubbed.reason === "apple_empty" || scrubbed.reason === "short_quiet")
         ? scrubbed.reason
         : undefined,
-      predictedTags: predicted,
+      predictedTags: undefined,
       engine_requested: provider,
       engine_fallback_reason: engineFallback,
       engine_error_detail: engineErrorDetail ?? undefined,
@@ -1396,6 +1404,7 @@ async function persistHearingTurn(input: {
   sttCorrections?: { wrong: string; correct: string }[];
   prosody?: unknown;
   voice?: VoiceStats | null;
+  voiceNoise?: boolean;
 }) {
   await upsertTurn({
     id: input.turnId,
@@ -1454,11 +1463,15 @@ async function persistHearingTurn(input: {
       promptHash: input.promptHash,
       contextBefore: input.data.contextBefore,
       hallucinationSuspect: input.scrubbedSuspect,
-      prosody: input.prosody ?? parseStoredProsody(input.data.prosody) ?? (input.data.audioBase64 ? prosodyFromWav(input.data.audioBase64) : null),
+      prosody: input.prosody ?? parseStoredProsody(input.data.prosody) ?? (input.data.audioBase64 ? prosodyFromWav(input.data.audioBase64, clampVoicedClarity(input.data.voicedClarity)) : null),
       sttCorrectedText: input.sttCorrectedText ?? null,
-      voicedRatio: input.voice && input.voice.frameCount ? Number(input.voice.voicedRatio.toFixed(4)) : null,
+      voicedRatio: input.voice ? Number(input.voice.voicedRatio.toFixed(4)) : null,
       f0MinHz: input.voice?.f0MinHz ?? null,
       f0MaxHz: input.voice?.f0MaxHz ?? null,
+      voicedMs: input.voice?.voicedMs ?? null,
+      inBandFrames: input.voice?.inBandFrames ?? null,
+      denomFrames: input.voice?.denomFrames ?? null,
+      voiceNoise: input.voice ? Boolean(input.voiceNoise) : null,
       toneRise: input.data.toneRise ?? null,
       toneGlide: input.data.toneGlide ?? null,
       toneFade: input.data.toneFade ?? null,
@@ -1589,6 +1602,10 @@ async function insertClip(input: {
   voicedRatio?: number | null;
   f0MinHz?: number | null;
   f0MaxHz?: number | null;
+  voicedMs?: number | null;
+  inBandFrames?: number | null;
+  denomFrames?: number | null;
+  voiceNoise?: boolean | null;
   toneRise?: number | null;
   toneGlide?: number | null;
   toneFade?: number | null;
@@ -1637,6 +1654,10 @@ async function insertClip(input: {
     voicedRatio: input.voicedRatio ?? null,
     f0MinHz: input.f0MinHz ?? null,
     f0MaxHz: input.f0MaxHz ?? null,
+    voicedMs: input.voicedMs ?? null,
+    inBandFrames: input.inBandFrames ?? null,
+    denomFrames: input.denomFrames ?? null,
+    voiceNoise: input.voiceNoise ?? null,
     toneRise: input.toneRise ?? null,
     toneGlide: input.toneGlide ?? null,
     toneFade: input.toneFade ?? null,

@@ -129,7 +129,13 @@ export function useVoiceInput({ lang, prompt }: Options) {
       pcmTapRef.current = null;
     }
     const tick = () => {
-      const frame = sampleProsody(analyser, ctx.sampleRate, (performance.now() - t0) / 1000, true);
+      const frame = sampleProsody(
+        analyser,
+        ctx.sampleRate,
+        (performance.now() - t0) / 1000,
+        true,
+        getHearingSession().sense.voicedClarity,
+      );
       framesRef.current.push(frame);
       noiseFloorRef.current = nextFloor(noiseFloorRef.current, frame.rms, true);
       const cuts = recordCuts(getHearingSession().sense);

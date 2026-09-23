@@ -32,7 +32,7 @@ describe("hearing schema", () => {
     const parsed = parseHearingJson(raw);
     assert.equal(parsed.cues[0]?.token, "嗯");
     const tagged = formatTaggedText(parsed);
-    assert.equal(tagged, "嗯今天好累〔long·rising·breathy｜〕");
+    assert.equal(tagged, "嗯今天好累");
     assert.equal(stripCueTags(tagged), "嗯今天好累");
   });
 
@@ -217,7 +217,7 @@ describe("hearing schema", () => {
     });
     assert.equal(picked.fallback, false);
     assert.equal(picked.used, "gemini");
-    assert.equal(picked.tagged, "嗯今天好累〔long·rising·breathy｜〕");
+    assert.equal(picked.tagged, "嗯今天好累");
   });
 
   it("stratifies splits 70/30 per category", () => {

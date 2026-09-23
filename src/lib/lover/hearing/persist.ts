@@ -66,6 +66,10 @@ export type InsertClipRowInput = {
   voicedRatio?: number | null;
   f0MinHz?: number | null;
   f0MaxHz?: number | null;
+  voicedMs?: number | null;
+  inBandFrames?: number | null;
+  denomFrames?: number | null;
+  voiceNoise?: boolean | null;
   toneRise?: number | null;
   toneGlide?: number | null;
   toneFade?: number | null;
@@ -83,6 +87,7 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       final_text, peak_rms, vad_floor, hear_to_trigger_ms, preroll_peak_rms,
       predicted_tags, commit_sha, prompt_hash, context_before, prosody, stt_corrected_text,
       voiced_ratio, f0_min_hz, f0_max_hz,
+      voiced_ms, voice_num, voice_den, voice_noise,
       tone_rise, tone_glide, tone_fade, tone_peak, tone_mark, sense_line
     )
     values (
@@ -118,6 +123,10 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       ${input.voicedRatio ?? null},
       ${input.f0MinHz ?? null},
       ${input.f0MaxHz ?? null},
+      ${input.voicedMs ?? null},
+      ${input.inBandFrames ?? null},
+      ${input.denomFrames ?? null},
+      ${input.voiceNoise ?? null},
       ${input.toneRise ?? null},
       ${input.toneGlide ?? null},
       ${input.toneFade ?? null},
@@ -261,6 +270,10 @@ export type LabeledClipRow = {
   prerollPeakRms: number | null;
   durationMs: number | null;
   voicedRatio: number | null;
+  voicedMs: number | null;
+  inBandFrames: number | null;
+  denomFrames: number | null;
+  voiceNoise: boolean | null;
   f0MinHz: number | null;
   f0MaxHz: number | null;
   toneRise: number | null;
@@ -291,6 +304,10 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
     preroll_peak_rms: number | null;
     duration_ms: number | null;
     voiced_ratio: number | null;
+    voiced_ms: number | null;
+    voice_num: number | null;
+    voice_den: number | null;
+    voice_noise: boolean | null;
     f0_min_hz: number | null;
     f0_max_hz: number | null;
     tone_rise: number | null;
@@ -305,6 +322,7 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
             predicted_tags, gold_tags, tags_touched,
             hear_to_trigger_ms, preroll_peak_rms,
             duration_ms, voiced_ratio, f0_min_hz, f0_max_hz,
+            voiced_ms, voice_num, voice_den, voice_noise,
             tone_rise, tone_glide, tone_fade, tone_peak, tone_mark, sense_line
      from qingran_hearing_clips
      where gold_source is not null
@@ -334,6 +352,10 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
         prerollPeakRms: row.preroll_peak_rms == null ? null : Number(row.preroll_peak_rms),
         durationMs: row.duration_ms == null ? null : Number(row.duration_ms),
         voicedRatio: row.voiced_ratio == null ? null : Number(row.voiced_ratio),
+        voicedMs: row.voiced_ms == null ? null : Number(row.voiced_ms),
+        inBandFrames: row.voice_num == null ? null : Number(row.voice_num),
+        denomFrames: row.voice_den == null ? null : Number(row.voice_den),
+        voiceNoise: row.voice_noise == null ? null : Boolean(row.voice_noise),
         f0MinHz: row.f0_min_hz == null ? null : Number(row.f0_min_hz),
         f0MaxHz: row.f0_max_hz == null ? null : Number(row.f0_max_hz),
         toneRise: row.tone_rise == null ? null : Number(row.tone_rise),

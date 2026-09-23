@@ -35,6 +35,8 @@ test("default sense stays the mid gear after a round trip", () => {
   assert.equal(locked.cueMin, 0.003);
   assert.equal(locked.endWaitMs, 1500);
   assert.equal(locked.toneOn, false);
+  assert.equal(locked.voicedClarity, 0.58);
+  assert.equal(locked.pitchHoldMs, 200);
   assert.equal(locked.riseQuestion, 1.18);
   assert.equal(locked.flatZone, 0.1);
   assert.equal(formatSenseLine(locked), "录音：中 · 等待：1.5s · 噪音：中 · 语气：关");
@@ -69,6 +71,8 @@ test("old silence and voice fields fill a profile that has no sense yet", () => 
   assert.equal(locked.noiseGear, "high");
   assert.equal(locked.recordGear, "mid");
   assert.equal(locked.toneOn, false);
+  assert.equal(locked.voicedClarity, 0.58);
+  assert.equal(locked.pitchHoldMs, 200);
 });
 
 test("tone stays off unless the switch is on, and the flat zone blocks every mark", () => {

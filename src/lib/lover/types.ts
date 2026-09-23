@@ -1,4 +1,4 @@
-import { DEFAULT_HEARING_PROVIDER, type HearingProviderId } from "./hearing/config.ts";
+import { DEFAULT_HEARING_PROVIDER, type HearingProviderId, lockSttKeyterms } from "./hearing/config.ts";
 import { HEARING_INSTRUCTION } from "./hearing/instruction.ts";
 import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
@@ -59,6 +59,8 @@ export type Profile = {
   promptModels: Partial<Record<PromptKey, PromptModelPick>>;
   /** Leftover audio-LLM instruction. Live hearing is xAI + Apple and does not send this. */
   hearingInstruction: string;
+  /** Fixed words sent to xAI as keyterm. Recent dialogue terms are added on top. */
+  sttKeyterms: string[];
 };
 
 export type ChatRole = "user" | "assistant";
@@ -142,6 +144,7 @@ export const DEFAULT_PROFILE: Profile = {
   hearingSense: DEFAULT_HEARING_SENSE,
   promptModels: {},
   hearingInstruction: "",
+  sttKeyterms: lockSttKeyterms(undefined),
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -176,6 +179,7 @@ type LooseProfile = Partial<Profile> & {
   hearingSense?: unknown;
   promptModels?: unknown;
   hearingInstruction?: unknown;
+  sttKeyterms?: unknown;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -208,6 +212,7 @@ export function lockedProfile(input?: unknown): Profile {
     hearingSense,
     promptModels: lockPromptModels(raw.promptModels),
     hearingInstruction: lockHearingInstruction(raw.hearingInstruction),
+    sttKeyterms: lockSttKeyterms(raw.sttKeyterms),
   };
 }
 

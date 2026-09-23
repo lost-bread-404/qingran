@@ -25,6 +25,7 @@ export async function transcribeWithXai(input: {
   mimeType: string;
   prompt?: string;
   extraKeyterms?: string[];
+  keyterms?: readonly string[];
 }): Promise<XaiStt | XaiSttFail> {
   const started = Date.now();
   const apiKey = process.env.XAI_API_KEY;
@@ -44,7 +45,7 @@ export async function transcribeWithXai(input: {
   form.append("vad_threshold", String(xaiVadThreshold()));
   const seen = new Set<string>();
   const terms: string[] = [];
-  for (const term of [...STT_KEYTERMS, ...(input.extraKeyterms ?? [])]) {
+  for (const term of [...(input.keyterms ?? STT_KEYTERMS), ...(input.extraKeyterms ?? [])]) {
     const next = term.trim().slice(0, 50);
     if (!next || seen.has(next)) continue;
     seen.add(next);

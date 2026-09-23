@@ -43,6 +43,22 @@ export const STT_KEYTERMS: readonly string[] = [
   "呜喵",
 ];
 
+/** User list, or the built-in list when a profile has never set one. Empty is allowed. */
+export function lockSttKeyterms(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [...STT_KEYTERMS];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const next = item.trim().slice(0, 50);
+    if (!next || seen.has(next)) continue;
+    seen.add(next);
+    out.push(next);
+    if (out.length >= 100) break;
+  }
+  return out;
+}
+
 /** Fillers and onomatopoeia that are real speech, including repeats (嗯嗯, 嗷呜嗷呜). */
 export const VOCAL_CUES: readonly string[] = [
   "嗯",
