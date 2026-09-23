@@ -1,4 +1,4 @@
-import { callModel, type ToolDef } from "../llm.ts";
+import { asModelInput, callModel, type ToolDef } from "../llm.ts";
 import {
   getTheme,
   listDays,
@@ -11,6 +11,7 @@ import {
 import { computeAllFindings, seriesFromDayFactors } from "./stats.ts";
 import { listDayFactors } from "../store.ts";
 import { loadPrompt } from "../prompts/store.ts";
+import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { daysInclusive } from "../time.ts";
 
 const TOOLS: ToolDef[] = [
@@ -167,17 +168,18 @@ async function defineAdhocFactor(args: Record<string, unknown>): Promise<unknown
   });
   const assignPrompt = await loadPrompt("assign");
   const result = await callModel("assign", {
-    system: assignPrompt.body,
-    input: `按给定判定标准，给每一天标 1、0 或 null（未知）。不要猜，不要入库。
-特征：${name}
-定义：${definition}
-日期：${daysInclusive(fromDay, toDay).join(", ")}
-
-【day logs】
-${days.map((d) => `${d.day}|${d.summary}|e=${d.energy}|m=${d.mood}|did=${JSON.stringify(d.did)}|wins=${JSON.stringify(d.wins)}`).join("\n").slice(0, 6000)}
-
-【笔记】
-${notes.map((n) => `${n.localDay}|${n.text}`).join("\n").slice(0, 4000)}`,
+    ...asModelInput(
+      renderVariant(parsePromptBody("assign", assignPrompt.body), "adhoc", {
+        name,
+        definition,
+        dates: daysInclusive(fromDay, toDay).join(", "),
+        day_logs: days
+          .map((d) => `${d.day}|${d.summary}|e=${d.energy}|m=${d.mood}|did=${JSON.stringify(d.did)}|wins=${JSON.stringify(d.wins)}`)
+          .join("\n")
+          .slice(0, 6000),
+        notes: notes.map((n) => `${n.localDay}|${n.text}`).join("\n").slice(0, 4000),
+      }),
+    ),
     schema: ADHOC_SCHEMA,
     promptKey: assignPrompt.key,
     promptHash: assignPrompt.hash,
@@ -258,8 +260,7 @@ export async function askDiary(question: string): Promise<{ text: string; ok: bo
   const askPrompt = await loadPrompt("ask");
   for (let i = 0; i < 8; i++) {
     const result = await callModel("ask", {
-      system: askPrompt.body,
-      input: question,
+      ...asModelInput(renderVariant(parsePromptBody("ask", askPrompt.body), "question", { question })),
       tools: TOOLS,
       previous,
       promptKey: askPrompt.key,
@@ -289,15 +290,16 @@ export async function askDiary(question: string): Promise<{ text: string; ok: bo
   const notes = await listNotes({ q: question, fromRosie: true, lens: "diary", status: "active", limit: 20 });
   const days = await listDays("2000-01-01", "2100-01-01");
   const fallback = await callModel("ask", {
-    system: askPrompt.body,
-    input: `没有 function calling。只用下面检索到的材料回答。没有数字就说数据不足。
-问题：${question}
-
-笔记：
-${notes.map((n) => `${n.localDay} ${n.id} ${n.text}`).join("\n")}
-
-最近 day logs：
-${days.slice(-14).map((d) => `${d.day} e=${d.energy} m=${d.mood} ${d.summary}`).join("\n")}`,
+    ...asModelInput(
+      renderVariant(parsePromptBody("ask", askPrompt.body), "fallback", {
+        question,
+        notes: notes.map((n) => `${n.localDay} ${n.id} ${n.text}`).join("\n"),
+        day_logs: days
+          .slice(-14)
+          .map((d) => `${d.day} e=${d.energy} m=${d.mood} ${d.summary}`)
+          .join("\n"),
+      }),
+    ),
     promptKey: askPrompt.key,
     promptHash: askPrompt.hash,
   });

@@ -76,8 +76,10 @@ import {
 } from "./persist.ts";
 import { applyConfusions } from "./confusions.ts";
 import { parseTuneClips, tuneToneThresholds } from "./tone-tune.ts";
+import { lockHearingSense, previewToneReplay } from "./sense.ts";
 import { silenceWavBase64, wavDurationMs, wavPeakRms, prosodyFromWav } from "./wav.ts";
-import { parseStoredProsody } from "../prosody.ts";
+import { framesFromStored, parseStoredProsody } from "../prosody.ts";
+import { measureVoiceStats, type VoiceStats } from "./night-voice.ts";
 import { scrubHallucination } from "../stt-text.ts";
 import { waitUntil } from "@vercel/functions";
 import { gitCommitSha, hashQingranPrompt } from "./eval-meta.ts";
@@ -166,6 +168,12 @@ export type RunHearingInput = {
   systemPrompt?: string;
   holdToTalk?: boolean;
   prosody?: unknown;
+  senseLine?: string;
+  toneRise?: number | null;
+  toneGlide?: number | null;
+  toneFade?: number | null;
+  tonePeak?: number | null;
+  toneMark?: string | null;
 };
 
 export type RunHearingOutput = {
@@ -197,6 +205,7 @@ export type RunHearingOutput = {
   audio_llm_ms?: number;
   correctedText?: string;
   sttCorrections?: { wrong: string; correct: string }[];
+  voice?: VoiceStats | null;
 };
 
 function labSecret(): string {
@@ -372,6 +381,7 @@ export const runHearing = createServerFn({ method: "POST" })
             engineUsed: timing.engineUsed,
             raw: timing.raw,
             error: timing.error,
+            senseLine: data.senseLine,
           });
           if (hot.needsRefresh) await backgroundRefreshHearingStt();
         })(),
@@ -409,6 +419,9 @@ export const runHearing = createServerFn({ method: "POST" })
     let xaiText = corrected.text;
     const durationSec = wavDurationMs(data.audioBase64) / 1000;
     const peakRms = wavPeakRms(data.audioBase64);
+    const durationMs = Math.round(durationSec * 1000);
+    const storedProsody = prosodyFromWav(data.audioBase64) ?? parseStoredProsody(data.prosody);
+    const voice = measureVoiceStats(framesFromStored(storedProsody), durationMs);
     const liveText = data.liveText ?? "";
     const holdToTalk = Boolean(data.holdToTalk) || data.mode === "text";
     const scrubbed = scrubHallucination(originalXai, { durationSec, peakRms }, liveText, { holdToTalk });
@@ -471,6 +484,7 @@ export const runHearing = createServerFn({ method: "POST" })
           engineUsed: used,
           raw: originalXai,
           error: engineErrorDetail,
+          senseLine: data.senseLine,
         });
         await persistHearingTurn({
           turnId,
@@ -492,7 +506,7 @@ export const runHearing = createServerFn({ method: "POST" })
           outcome,
           scrubbedSuspect: scrubbed.suspect,
           disagreement,
-          durationMs: Math.round(durationSec * 1000),
+          durationMs,
           peakRms: data.peakRms ?? peakRms,
           capture: Boolean(data.capture || data.debugHearing),
           refusal,
@@ -503,6 +517,8 @@ export const runHearing = createServerFn({ method: "POST" })
           audioLlmMs,
           sttCorrectedText: corrected.text,
           sttCorrections: corrected.replacements,
+          prosody: storedProsody,
+          voice,
         });
         if (hot.needsRefresh) await backgroundRefreshHearingStt();
       })(),
@@ -536,6 +552,7 @@ export const runHearing = createServerFn({ method: "POST" })
       audio_llm_ms: audioLlmMs ?? undefined,
       correctedText: corrected.text,
       sttCorrections: corrected.replacements,
+      voice: voice.frameCount ? voice : null,
     };
   });
 
@@ -725,6 +742,29 @@ export const unlabelHearingByTurn = createServerFn({ method: "POST" })
       return await unlabelClip(sql, { turnId: data.turnId });
     } catch (err) {
       return { ok: false as const, error: errorText(err) };
+    }
+  });
+
+export const previewHearingTone = createServerFn({ method: "POST" })
+  .validator((input: { password: string; sense: unknown }) => input)
+  .handler(async ({ data }) => {
+    try {
+      assertLab(data.password);
+      const sql = await getSql();
+      const rows = await listToneTuneClips(sql);
+      const clips = parseTuneClips(rows).slice(0, 50);
+      const sense = lockHearingSense(data.sense);
+      return { ok: true as const, ...previewToneReplay(clips, sense) };
+    } catch (err) {
+      return {
+        ok: false as const,
+        error: errorText(err),
+        n: 0,
+        marked: 0,
+        agree: 0,
+        markedRate: 0,
+        agreeRate: 0,
+      };
     }
   });
 
@@ -1353,6 +1393,8 @@ async function persistHearingTurn(input: {
   audioLlmMs?: number | null;
   sttCorrectedText?: string;
   sttCorrections?: { wrong: string; correct: string }[];
+  prosody?: unknown;
+  voice?: VoiceStats | null;
 }) {
   await upsertTurn({
     id: input.turnId,
@@ -1411,8 +1453,17 @@ async function persistHearingTurn(input: {
       promptHash: input.promptHash,
       contextBefore: input.data.contextBefore,
       hallucinationSuspect: input.scrubbedSuspect,
-      prosody: parseStoredProsody(input.data.prosody) ?? (input.data.audioBase64 ? prosodyFromWav(input.data.audioBase64) : null),
+      prosody: input.prosody ?? parseStoredProsody(input.data.prosody) ?? (input.data.audioBase64 ? prosodyFromWav(input.data.audioBase64) : null),
       sttCorrectedText: input.sttCorrectedText ?? null,
+      voicedRatio: input.voice && input.voice.frameCount ? Number(input.voice.voicedRatio.toFixed(4)) : null,
+      f0MinHz: input.voice?.f0MinHz ?? null,
+      f0MaxHz: input.voice?.f0MaxHz ?? null,
+      toneRise: input.data.toneRise ?? null,
+      toneGlide: input.data.toneGlide ?? null,
+      toneFade: input.data.toneFade ?? null,
+      tonePeak: input.data.tonePeak ?? null,
+      toneMark: input.data.toneMark ?? null,
+      senseLine: input.data.senseLine ?? null,
     });
   } catch (err) {
     const saveError = errorText(err);
@@ -1534,6 +1585,15 @@ async function insertClip(input: {
   hallucinationSuspect?: boolean;
   prosody?: unknown;
   sttCorrectedText?: string | null;
+  voicedRatio?: number | null;
+  f0MinHz?: number | null;
+  f0MaxHz?: number | null;
+  toneRise?: number | null;
+  toneGlide?: number | null;
+  toneFade?: number | null;
+  tonePeak?: number | null;
+  toneMark?: string | null;
+  senseLine?: string | null;
 }): Promise<string> {
   const id = newId();
   const sql = await getSql();
@@ -1573,6 +1633,15 @@ async function insertClip(input: {
     contextBefore: input.contextBefore,
     prosody: input.prosody ?? null,
     sttCorrectedText: input.sttCorrectedText ?? null,
+    voicedRatio: input.voicedRatio ?? null,
+    f0MinHz: input.f0MinHz ?? null,
+    f0MaxHz: input.f0MaxHz ?? null,
+    toneRise: input.toneRise ?? null,
+    toneGlide: input.toneGlide ?? null,
+    toneFade: input.toneFade ?? null,
+    tonePeak: input.tonePeak ?? null,
+    toneMark: input.toneMark ?? null,
+    senseLine: input.senseLine ?? null,
   });
   return id;
 }

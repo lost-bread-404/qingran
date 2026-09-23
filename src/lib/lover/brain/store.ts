@@ -1,6 +1,7 @@
 import { getSql, type Sql } from "../../db.ts";
 import { newId } from "../storage.ts";
-import { HISTORY_WINDOW, INDEX_MAX_ITEMS, SESSION_GAP_MS } from "./config.ts";
+import { collapseReplyVariants } from "../pair-messages.ts";
+import { HISTORY_WINDOW, INDEX_MAX_ITEMS, SESSION_GAP_MS, clampHistoryWindow } from "./config.ts";
 import { clipLogRecord } from "./log-clip.ts";
 import { now } from "./clock.ts";
 import { localDay, sessionIdFor, shiftDay } from "./time.ts";
@@ -279,7 +280,9 @@ export async function listHistoryWindow(
   excludeId: string | null,
   limit = HISTORY_WINDOW,
 ): Promise<StoredMessage[]> {
+  if (limit <= 0) return [];
   const db = await getSql();
+  const fetchN = Math.min(limit + 32, 240);
   const rows = await db.query<Record<string, unknown>>(
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
@@ -287,9 +290,14 @@ export async function listHistoryWindow(
        and created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
      order by created_at desc, id desc
      limit $2`,
-    [excludeId, limit],
+    [excludeId, fetchN],
   );
-  return rows.map(rowMessage).reverse();
+  return collapseReplyVariants(rows.map(rowMessage).reverse())
+    .filter((message) => {
+      if (!excludeId || message.role !== "assistant") return true;
+      return !message.text.includes(`⟦回:${excludeId}⟧`);
+    })
+    .slice(-limit);
 }
 
 export async function getMessage(id: string): Promise<StoredMessage | null> {
@@ -400,8 +408,9 @@ export async function updateMessageText(id: string, text: string, kind?: StoredM
   }
 }
 
-export async function unarchivedOverflow(limit: number): Promise<StoredMessage[]> {
+export async function unarchivedOverflow(limit: number, historyWindow = HISTORY_WINDOW): Promise<StoredMessage[]> {
   const db = await getSql();
+  const keep = clampHistoryWindow(historyWindow);
   const rows = await db.query<Record<string, unknown>>(
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
@@ -414,9 +423,16 @@ export async function unarchivedOverflow(limit: number): Promise<StoredMessage[]
        )
      order by created_at asc, id asc
      limit $2`,
-    [HISTORY_WINDOW, limit],
+    [keep, limit],
   );
   return rows.map(rowMessage);
+}
+
+export async function getStoredHistoryWindow(): Promise<number> {
+  const db = await getSql();
+  const rows = await db.query<{ data: unknown }>("select data from qingran_profile where id = 1");
+  const data = asJson<Record<string, unknown>>(rows[0]?.data, {});
+  return clampHistoryWindow(data.historyWindow);
 }
 
 export async function unarchivedForSession(sessionId: string): Promise<StoredMessage[]> {

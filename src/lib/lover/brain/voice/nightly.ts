@@ -1,6 +1,6 @@
 import { BOND_MAX_CHARS, PORTRAIT_MAX_CHARS, SELF_MAX_CHARS } from "../config.ts";
 import { now as wallClock } from "../clock.ts";
-import { callModel } from "../llm.ts";
+import { callModel, asModelInput } from "../llm.ts";
 import {
   dormantOldPortrait,
   getMeta,
@@ -14,7 +14,7 @@ import { clipChars } from "../time.ts";
 import { newId } from "../../storage.ts";
 import { similar } from "../text.ts";
 import { isQingranBehaviorRecap, DROP_PORTRAIT_TOPICS } from "../memory-hygiene.ts";
-import { fillTemplate } from "../prompts/fill.ts";
+import { renderVariant, parsePromptBody } from "../prompts/doc.ts";
 import { loadPrompt } from "../prompts/store.ts";
 
 const SCHEMA = {
@@ -43,6 +43,24 @@ const SCHEMA = {
   },
 };
 
+export function portraitVars(input: {
+  charter: string;
+  oldPortrait: Array<{ id: string; topic: string; body: string }>;
+  selfSummary: string;
+  bondSummary: string;
+  qingranNotes: Array<{ id: string; text: string }>;
+  rosieNotes: Array<{ id: string; subject: string; text: string }>;
+}): Record<string, string> {
+  return {
+    system_prompt: input.charter,
+    old_portrait: input.oldPortrait.map((p) => `${p.id}|${p.topic}|${p.body}`).join("\n") || "（没有）",
+    old_self: input.selfSummary || "（没有）",
+    old_bond: input.bondSummary || "（没有）",
+    qingran_notes: input.qingranNotes.map((n) => `${n.id}|${n.text}`).join("\n") || "（没有）",
+    rosie_notes: input.rosieNotes.map((n) => `${n.id}|${n.subject}|${n.text}`).join("\n") || "（没有）",
+  };
+}
+
 export async function updatePortraitSelfBond(day: string, jobId?: string): Promise<void> {
   const notes = await listNotes({
     fromDay: day,
@@ -57,26 +75,21 @@ export async function updatePortraitSelfBond(day: string, jobId?: string): Promi
   const rosieNotes = relevant.filter((n) => n.subject === "rosie" || (n.subject === "us" && n.fromRosie));
   const loaded = await loadPrompt("portrait");
   const charter = await getProfilePrompt();
+  const messages = renderVariant(
+    parsePromptBody("portrait", loaded.body),
+    "main",
+    portraitVars({
+      charter,
+      oldPortrait,
+      selfSummary: meta.selfSummary,
+      bondSummary: meta.bondSummary,
+      qingranNotes,
+      rosieNotes,
+    }),
+  );
 
   const result = await callModel("portrait", {
-    system: fillTemplate(loaded.body, { system_prompt: charter }),
-    input: `输出 portrait_ops（按自由 topic upsert，evidence_ids 必须是存在的笔记 id）、self_summary（≤300字，第一人称，只依据清然笔记和旧 summary，不编造重大经历）、bond_summary（≤200字：称呼、梗、共同时刻、未兑现约定）。
-先对照旧主题，意思相近的合并，不要新开。只写 Rosie 的稳定理解。不要写清然最近做了什么。
-
-【旧的我眼中的她】
-${oldPortrait.map((p) => `${p.id}|${p.topic}|${p.body}`).join("\n") || "（没有）"}
-
-【旧的我自己】
-${meta.selfSummary || "（没有）"}
-
-【旧的我们】
-${meta.bondSummary || "（没有）"}
-
-【清然自己的笔记】（只用于 self_summary）
-${qingranNotes.map((n) => `${n.id}|${n.text}`).join("\n") || "（没有）"}
-
-【关于 Rosie 的笔记】
-${rosieNotes.map((n) => `${n.id}|${n.subject}|${n.text}`).join("\n") || "（没有）"}`,
+    ...asModelInput(messages),
     schema: SCHEMA,
     jobId,
     promptKey: loaded.key,

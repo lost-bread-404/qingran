@@ -64,6 +64,7 @@ export function formatVoiceLogNote(opts: {
   failed: boolean;
   failMessage?: string | null;
   modelFallback?: VoiceModelFallbackNote | null;
+  injectLine?: string | null;
 }): string {
   const used = opts.attempts.at(-1);
   const n = opts.attempts.length;
@@ -94,6 +95,7 @@ export function formatVoiceLogNote(opts: {
     .slice(0, 500);
   lines.push(events ? `events=${events}` : "events=(none)");
   lines.push(formatVoiceInputCharsLine(opts.chars));
+  if (opts.injectLine) lines.push(opts.injectLine);
   if (n > 1) {
     for (let i = 0; i < n; i++) lines.push(tryLine(i, opts.attempts[i]!));
   }

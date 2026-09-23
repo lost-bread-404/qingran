@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { now } from "./clock.ts";
 import { enqueue, runJobsNow } from "./jobs.ts";
-import { LONG_DRAIN_MS, listVoiceCatalog } from "./config.ts";
+import { LONG_DRAIN_MS, clampHistoryWindow, listVoiceCatalog } from "./config.ts";
 import { runInBackground } from "./wait-until.ts";
 import {
   bumpNotesVersion,
@@ -40,7 +40,6 @@ import {
 import type { JobType, Lens, Note, Subject } from "./types.ts";
 import { askDiary } from "./diary/ask.ts";
 import { evaluateIfDue, startExperiment } from "./diary/experiments.ts";
-import { buildReportData } from "./diary/report.ts";
 import { safetyFlag } from "./diary/stats.ts";
 import { localDay, shiftDay } from "./time.ts";
 import { resolveTz } from "./tz.ts";
@@ -317,6 +316,15 @@ export const brainResetMind = createServerFn({ method: "POST" }).handler(async (
   return { ok: true as const };
 });
 
+/** Re-check which messages have slid out of the voice window. Does not change reflector or portrait. */
+export const brainSyncHistoryWindow = createServerFn({ method: "POST" })
+  .validator((input: { historyWindow: number }) => input)
+  .handler(async ({ data }) => {
+    const { enqueueArchiveIfNeeded } = await import("./archivist.ts");
+    await enqueueArchiveIfNeeded(now(), clampHistoryWindow(data.historyWindow));
+    return { ok: true as const };
+  });
+
 export const brainActiveNotes = createServerFn({ method: "GET" }).handler(async () => listActiveNotes());
 
 export const brainExportBackup = createServerFn({ method: "POST" })
@@ -507,12 +515,31 @@ export const brainExportLogs = createServerFn({ method: "POST" })
     return { table: page.table, rows: asJson(rows), next: page.next };
   });
 
-export { buildReportData, convertV1 };
-
 export const brainListPrompts = createServerFn({ method: "GET" }).handler(async () => {
   const { listPrompts } = await import("./prompts/store.ts");
   return listPrompts();
 });
+
+export const brainPreviewVoiceSlots = createServerFn({ method: "GET" }).handler(async () => {
+  const { loadVoicePerspective } = await import("./voice/pack.ts");
+  return loadVoicePerspective();
+});
+
+export const brainPreviewPrompt = createServerFn({ method: "POST" })
+  .validator((input: { key: string; variantId?: string; body?: string }) => input)
+  .handler(async ({ data }) => {
+    const { previewPrompt } = await import("./prompts/preview.ts");
+    return previewPrompt(data);
+  });
+
+export const brainRollbackPrompt = createServerFn({ method: "POST" })
+  .validator((input: { key: string; hash: string }) => input)
+  .handler(async ({ data }) => {
+    const { isPromptKey } = await import("./prompts/catalog.ts");
+    const { rollbackPrompt } = await import("./prompts/store.ts");
+    if (!isPromptKey(data.key)) throw new Error("unknown-prompt");
+    return rollbackPrompt(data.key, data.hash);
+  });
 
 export const brainSavePrompt = createServerFn({ method: "POST" })
   .validator((input: { key: string; body: string }) => input)

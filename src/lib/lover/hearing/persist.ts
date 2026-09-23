@@ -63,6 +63,15 @@ export type InsertClipRowInput = {
   contextBefore?: unknown;
   prosody?: unknown;
   sttCorrectedText?: string | null;
+  voicedRatio?: number | null;
+  f0MinHz?: number | null;
+  f0MaxHz?: number | null;
+  toneRise?: number | null;
+  toneGlide?: number | null;
+  toneFade?: number | null;
+  tonePeak?: number | null;
+  toneMark?: string | null;
+  senseLine?: string | null;
 };
 
 export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promise<void> {
@@ -72,7 +81,9 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       xai_text, hearing_text, hearing_json, live_text,
       blob_error, storage_backend, stt_text, mode, audio_route, turn_id, disagreement,
       final_text, peak_rms, vad_floor, hear_to_trigger_ms, preroll_peak_rms,
-      predicted_tags, commit_sha, prompt_hash, context_before, prosody, stt_corrected_text
+      predicted_tags, commit_sha, prompt_hash, context_before, prosody, stt_corrected_text,
+      voiced_ratio, f0_min_hz, f0_max_hz,
+      tone_rise, tone_glide, tone_fade, tone_peak, tone_mark, sense_line
     )
     values (
       ${input.id},
@@ -103,7 +114,16 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
       ${input.promptHash ?? null},
       ${input.contextBefore ? JSON.stringify(input.contextBefore) : null}::jsonb,
       ${input.prosody ? JSON.stringify(input.prosody) : null}::jsonb,
-      ${input.sttCorrectedText ?? null}
+      ${input.sttCorrectedText ?? null},
+      ${input.voicedRatio ?? null},
+      ${input.f0MinHz ?? null},
+      ${input.f0MaxHz ?? null},
+      ${input.toneRise ?? null},
+      ${input.toneGlide ?? null},
+      ${input.toneFade ?? null},
+      ${input.tonePeak ?? null},
+      ${input.toneMark ?? null},
+      ${input.senseLine ?? null}
     )
   `;
 }
@@ -239,6 +259,16 @@ export type LabeledClipRow = {
   tagsTouched: TagKey[];
   hearToTriggerMs: number | null;
   prerollPeakRms: number | null;
+  durationMs: number | null;
+  voicedRatio: number | null;
+  f0MinHz: number | null;
+  f0MaxHz: number | null;
+  toneRise: number | null;
+  toneGlide: number | null;
+  toneFade: number | null;
+  tonePeak: number | null;
+  toneMark: string | null;
+  senseLine: string | null;
 };
 
 export async function listLabeledClipRows(sql: Sql, page = 1) {
@@ -259,11 +289,23 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
     tags_touched: string[] | null;
     hear_to_trigger_ms: number | null;
     preroll_peak_rms: number | null;
+    duration_ms: number | null;
+    voiced_ratio: number | null;
+    f0_min_hz: number | null;
+    f0_max_hz: number | null;
+    tone_rise: number | null;
+    tone_glide: number | null;
+    tone_fade: number | null;
+    tone_peak: number | null;
+    tone_mark: string | null;
+    sense_line: string | null;
   }>(
     `select id, turn_id, final_text, gold_text, gold_source,
             noise_only, literal_mismatch, tone_note, gold_at::text as gold_at,
             predicted_tags, gold_tags, tags_touched,
-            hear_to_trigger_ms, preroll_peak_rms
+            hear_to_trigger_ms, preroll_peak_rms,
+            duration_ms, voiced_ratio, f0_min_hz, f0_max_hz,
+            tone_rise, tone_glide, tone_fade, tone_peak, tone_mark, sense_line
      from qingran_hearing_clips
      where gold_source is not null
      order by coalesce(gold_at, created_at) desc, id desc
@@ -290,6 +332,16 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
         tagsTouched: parseTagKeys(row.tags_touched),
         hearToTriggerMs: row.hear_to_trigger_ms == null ? null : Number(row.hear_to_trigger_ms),
         prerollPeakRms: row.preroll_peak_rms == null ? null : Number(row.preroll_peak_rms),
+        durationMs: row.duration_ms == null ? null : Number(row.duration_ms),
+        voicedRatio: row.voiced_ratio == null ? null : Number(row.voiced_ratio),
+        f0MinHz: row.f0_min_hz == null ? null : Number(row.f0_min_hz),
+        f0MaxHz: row.f0_max_hz == null ? null : Number(row.f0_max_hz),
+        toneRise: row.tone_rise == null ? null : Number(row.tone_rise),
+        toneGlide: row.tone_glide == null ? null : Number(row.tone_glide),
+        toneFade: row.tone_fade == null ? null : Number(row.tone_fade),
+        tonePeak: row.tone_peak == null ? null : Number(row.tone_peak),
+        toneMark: row.tone_mark,
+        senseLine: row.sense_line,
       }),
     ),
     total: Number(count[0]?.n) || 0,
@@ -791,6 +843,8 @@ export async function clipLabelByTurn(sql: Sql, turnId: string): Promise<ClipLab
 function visibleMessageBody(body: string | null): string {
   if (!body) return "";
   let text = body;
+  const picked = text.match(/^⟦选:[^⟧]+⟧/);
+  if (picked) text = text.slice(picked[0].length);
   if (text.startsWith("⟦已扫⟧")) text = text.slice(4);
   const hear = text.match(/^⟦听:[^⟧]+⟧/);
   if (hear) text = text.slice(hear[0].length);

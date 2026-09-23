@@ -1,10 +1,11 @@
-import { callModel } from "../llm.ts";
+import { asModelInput, callModel } from "../llm.ts";
 import { now as wallClock } from "../clock.ts";
 import { listDayFactors, listExperiments, listFactors, upsertExperiment } from "../store.ts";
 import { daysInclusive, shiftDay } from "../time.ts";
 import type { Experiment } from "../types.ts";
 import { newId } from "../../storage.ts";
 import { loadPrompt } from "../prompts/store.ts";
+import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 
 const SCHEMA = {
   name: "experiments",
@@ -36,8 +37,11 @@ export async function proposeExperiments(reportData: unknown, jobId?: string): P
   if (existing.some((e) => e.status === "proposed" || e.status === "active")) return;
   const loaded = await loadPrompt("experiments");
   const result = await callModel("report", {
-    system: loaded.body,
-    input: JSON.stringify(reportData).slice(0, 12_000),
+    ...asModelInput(
+      renderVariant(parsePromptBody("experiments", loaded.body), "main", {
+        data: JSON.stringify(reportData).slice(0, 12_000),
+      }),
+    ),
     schema: SCHEMA,
     jobId,
     promptKey: loaded.key,

@@ -19,6 +19,8 @@ export function encodeStoredMessage(msg: ChatMessage): string {
   }
   if (msg.scanned) text = `⟦已扫⟧${text}`;
   if (msg.interrupted) text = `⟦断⟧${text}`;
+  if (msg.nightNoise) text = `⟦夜噪⟧${text}`;
+  if (msg.activeReply) text = `⟦选:${msg.activeReply}⟧${text}`;
   return text;
 }
 
@@ -29,8 +31,10 @@ export function decodeStoredBody(body: string, kindCol?: string): {
   voiceTurnId?: string;
   hearingGold?: ChatMessage["hearingGold"];
   replyTo?: string;
+  activeReply?: string;
   predictedTags?: AcousticTags;
   interrupted: boolean;
+  nightNoise: boolean;
 } {
   let text = body;
   let scanned = false;
@@ -41,8 +45,19 @@ export function decodeStoredBody(body: string, kindCol?: string): {
   let voiceTurnId: string | undefined;
   let hearingGold: ChatMessage["hearingGold"];
   let replyTo: string | undefined;
+  let activeReply: string | undefined;
   let predictedTags: AcousticTags | undefined;
   let interrupted = false;
+  let nightNoise = false;
+  const picked = text.match(/^⟦选:([^⟧]+)⟧/);
+  if (picked) {
+    activeReply = picked[1];
+    text = text.slice(picked[0].length);
+  }
+  if (text.startsWith("⟦夜噪⟧")) {
+    nightNoise = true;
+    text = text.slice("⟦夜噪⟧".length);
+  }
   if (text.startsWith("⟦断⟧")) {
     interrupted = true;
     text = text.slice("⟦断⟧".length);
@@ -84,7 +99,24 @@ export function decodeStoredBody(body: string, kindCol?: string): {
     kind = "unheard";
     text = text.slice(4);
   }
-  return { text, scanned, kind, voiceTurnId, hearingGold, replyTo, predictedTags, interrupted };
+  return { text, scanned, kind, voiceTurnId, hearingGold, replyTo, activeReply, predictedTags, interrupted, nightNoise };
+}
+
+/** Keep stored prefixes (hearing, chosen reply, …) and replace only the visible words. */
+export function mergeEditedUserBody(existing: string | undefined, plain: string): string {
+  const next = plain.trim();
+  if (!existing) return next;
+  if (!next) return existing;
+  const decoded = decodeStoredBody(existing);
+  if (decoded.text === next) return existing;
+  if (existing.endsWith(decoded.text)) {
+    return existing.slice(0, existing.length - decoded.text.length) + next;
+  }
+  return existing;
+}
+
+export function isNightNoiseBody(body: string): boolean {
+  return body.includes("⟦夜噪⟧");
 }
 
 export function modelFacingText(body: string): string {

@@ -24,6 +24,9 @@ export type VoiceRefs = {
   userMsgId: string;
   timeZone: string;
   mindAgeMs: number;
+  injectMemories?: boolean;
+  injectLongterm?: boolean;
+  historyWindow?: number;
 };
 
 export type ReflectRefs = {

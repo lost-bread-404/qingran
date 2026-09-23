@@ -1,6 +1,12 @@
 import { DEFAULT_HEARING_PROVIDER, isHearingProvider, type HearingProviderId } from "./hearing/config.ts";
 import type { AcousticTags } from "./hearing/tags.ts";
-import { isSilenceMs, SILENCE_MS, type SilenceMs } from "./vad.ts";
+import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
+import { DEFAULT_HEARING_SENSE, lockHearingSense, type HearingSense } from "./hearing/sense.ts";
+import { SILENCE_MS } from "./vad.ts";
+import { clampHistoryWindow, HISTORY_WINDOW } from "./brain/config.ts";
+
+export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio };
+export type { HearingSense };
 
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
@@ -29,8 +35,23 @@ export type Profile = {
   hearingNbest: boolean;
   voiceModel: string;
   voiceEffort: VoiceEffort;
-  silenceMs: SilenceMs;
+  /** Pause that ends a turn, milliseconds. 800–3000, default 1500. */
+  silenceMs: number;
   injectMind: boolean;
+  /** Retrieved notes in the voice prompt. Retrieval still runs when this is off. */
+  injectMemories: boolean;
+  /** Self / bond / portrait block in the voice prompt. */
+  injectLongterm: boolean;
+  /** Recent messages in the voice prompt, and the archive slide-out window. 0–80. */
+  historyWindow: number;
+  /** Kept for older profiles. Voice input no longer has a night switch; the pitch gate is always on. */
+  nightMode: boolean;
+  /** Voiced-frame share below this is noise, day and night. 0–1, default 0.3. */
+  nightVoicedMin: number;
+  /** Clips shorter than this are noise, day and night. Milliseconds, default 300. */
+  nightMinMs: number;
+  /** Hearing sensitivity page. Source of truth for VAD, end-wait, noise gate, and tone marks. */
+  hearingSense: HearingSense;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -44,6 +65,8 @@ export type ChatMessage = {
   scanned?: boolean;
   voiceTurnId?: string;
   replyTo?: string;
+  /** Which sibling reply stays in the thread. Other replies to the same user message are pages. */
+  activeReply?: string;
   predictedTags?: AcousticTags;
   hearingGold?: "unconfirmed" | "confirmed";
   hearingTiming?: {
@@ -53,6 +76,10 @@ export type ChatMessage = {
     ttftMs?: number;
     engine?: string;
   };
+  /** What this voice turn actually injected. Session-only debug caption. */
+  injectLine?: string;
+  /** Kept the clip and skipped the reply because it was not human voice. Tap to ask for one. */
+  nightNoise?: boolean;
   interrupted?: boolean;
   talkTrace?: {
     status?: number | null;
@@ -99,6 +126,13 @@ export const DEFAULT_PROFILE: Profile = {
   voiceEffort: DEFAULT_VOICE_EFFORT,
   silenceMs: SILENCE_MS,
   injectMind: true,
+  injectMemories: true,
+  injectLongterm: true,
+  historyWindow: HISTORY_WINDOW,
+  nightMode: true,
+  nightVoicedMin: NIGHT_VOICED_MIN,
+  nightMinMs: NIGHT_MIN_MS,
+  hearingSense: DEFAULT_HEARING_SENSE,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -124,10 +158,22 @@ type LooseProfile = Partial<Profile> & {
   voiceEffort?: string | null;
   silenceMs?: number;
   injectMind?: boolean;
+  injectMemories?: boolean;
+  injectLongterm?: boolean;
+  historyWindow?: number;
+  nightMode?: boolean;
+  nightVoicedMin?: number;
+  nightMinMs?: number;
+  hearingSense?: unknown;
 };
 
 export function lockedProfile(input?: unknown): Profile {
   const raw = (input && typeof input === "object" ? input : {}) as LooseProfile;
+  const hearingSense = lockHearingSense(raw.hearingSense, {
+    endWaitMs: raw.silenceMs,
+    voicedMin: raw.nightVoicedMin,
+    noiseMinMs: raw.nightMinMs,
+  });
   return {
     systemPrompt: pickSystemPrompt(raw).slice(0, 16_000),
     muted: Boolean(raw.muted),
@@ -142,9 +188,43 @@ export function lockedProfile(input?: unknown): Profile {
     hearingNbest: Boolean(raw.hearingNbest),
     voiceModel: pickVoiceModel(raw),
     voiceEffort: pickVoiceEffort(raw),
-    silenceMs: isSilenceMs(raw.silenceMs) ? raw.silenceMs : SILENCE_MS,
+    silenceMs: hearingSense.endWaitMs,
     injectMind: raw.injectMind !== false,
+    injectMemories: raw.injectMemories !== false,
+    injectLongterm: raw.injectLongterm !== false,
+    historyWindow: clampHistoryWindow(raw.historyWindow),
+    nightMode: raw.nightMode !== false,
+    nightVoicedMin: hearingSense.voicedMin,
+    nightMinMs: hearingSense.noiseMinMs,
+    hearingSense,
   };
+}
+
+export type VoiceInjectFlags = {
+  memories: boolean;
+  longterm: boolean;
+  history: number;
+};
+
+export function voiceInjectFromProfile(profile: {
+  injectMemories?: boolean;
+  injectLongterm?: boolean;
+  historyWindow?: number;
+}): VoiceInjectFlags {
+  return {
+    memories: profile.injectMemories !== false,
+    longterm: profile.injectLongterm !== false,
+    history: clampHistoryWindow(profile.historyWindow),
+  };
+}
+
+export function formatVoiceInjectLine(flags: VoiceInjectFlags): string {
+  return `记忆：${flags.memories ? "开" : "关"} · 长期：${flags.longterm ? "开" : "关"} · 历史：${flags.history}`;
+}
+
+export function parseVoiceInjectLine(note: string | null | undefined): string | null {
+  const found = (note ?? "").match(/记忆：[开关] · 长期：[开关] · 历史：\d{1,2}/);
+  return found?.[0] ?? null;
 }
 
 export function applyMemoryCursor(messages: ChatMessage[], cursor: string): ChatMessage[] {

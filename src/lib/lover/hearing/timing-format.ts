@@ -7,6 +7,7 @@ export type HearingTiming = {
   correctMs?: number | null;
   engineRequested?: string | null;
   engineUsed?: string | null;
+  senseLine?: string | null;
 };
 
 export type ParsedHearingTiming = {
@@ -29,6 +30,7 @@ export function formatHearingLogNote(t: HearingTiming): string {
     `静音等待 ${formatMs(t.silenceMs)} · 上传 ${formatMs(t.uploadMs)} · STT ${formatMs(t.sttMs)} · 纠错 ${formatMs(t.correctMs)}`,
   );
   if (t.engineUsed) lines.push(`engine=${t.engineUsed}`);
+  if (t.senseLine) lines.push(t.senseLine);
   return lines.join("\n");
 }
 

@@ -1,6 +1,7 @@
 import { sortMemoriesByTime } from "./memory.ts";
 import type { ChatMessage, Memory, Profile } from "./types";
 import { defaultPrompt } from "./brain/prompts/catalog.ts";
+import { parsePromptBody, renderVariant, type PromptDoc, type RenderedMessage } from "./brain/prompts/doc.ts";
 import { fillTemplate } from "./brain/prompts/fill.ts";
 
 function hearingTagGuideFromVoice(): string {
@@ -62,14 +63,42 @@ function formatChat(list: ChatMessage[]): string {
   return list.map((m) => `${m.role === "user" ? "Rosie" : "清然"}：${m.text}`).join("\n");
 }
 
+function promptDoc(key: "remember" | "overflow" | "consolidate", template?: string | PromptDoc): PromptDoc {
+  if (template && typeof template !== "string") return template;
+  return parsePromptBody(key, template);
+}
+
+export function rememberMessages(
+  stretch: string,
+  memories: Memory[],
+  template: string | PromptDoc = defaultPrompt("remember"),
+): RenderedMessage[] {
+  return renderVariant(promptDoc("remember", template), "main", {
+    memories: knownMemories(memories),
+    stretch: stretch.slice(0, 1800),
+  });
+}
+
 export function buildRememberPrompt(
   stretch: string,
   memories: Memory[],
-  template = defaultPrompt("remember"),
+  template: string | PromptDoc = defaultPrompt("remember"),
 ): string {
-  return fillTemplate(template, {
+  return rememberMessages(stretch, memories, template)
+    .map((message) => message.content)
+    .join("\n");
+}
+
+export function overflowMessages(
+  overflow: ChatMessage[],
+  lookahead: ChatMessage[],
+  memories: Memory[],
+  template: string | PromptDoc = defaultPrompt("overflow"),
+): RenderedMessage[] {
+  return renderVariant(promptDoc("overflow", template), "main", {
     memories: knownMemories(memories),
-    stretch: stretch.slice(0, 1800),
+    overflow: formatChat(overflow).slice(0, 2200),
+    lookahead: formatChat(lookahead).slice(0, 800),
   });
 }
 
@@ -77,13 +106,11 @@ export function buildOverflowRememberPrompt(
   overflow: ChatMessage[],
   lookahead: ChatMessage[],
   memories: Memory[],
-  template = defaultPrompt("overflow"),
+  template: string | PromptDoc = defaultPrompt("overflow"),
 ): string {
-  return fillTemplate(template, {
-    memories: knownMemories(memories),
-    overflow: formatChat(overflow).slice(0, 2200),
-    lookahead: formatChat(lookahead).slice(0, 800),
-  });
+  return overflowMessages(overflow, lookahead, memories, template)
+    .map((message) => message.content)
+    .join("\n");
 }
 
 export function parseRememberResult(raw: string): { facts: string[] } {
@@ -121,22 +148,33 @@ function asStringList(value: unknown): string[] {
     .slice(0, 6);
 }
 
-export function buildConsolidatePrompt(
+export function consolidateMessages(
   memories: Memory[],
   clock: string,
   timeZone = "UTC",
-  template = defaultPrompt("consolidate"),
-): string {
+  template: string | PromptDoc = defaultPrompt("consolidate"),
+): RenderedMessage[] {
   const list =
     memories.length === 0
       ? "（还没有）"
       : sortMemoriesByTime(memories)
           .map((m, i) => `${i + 1}. [${formatClock(m.createdAt || Date.now(), timeZone)}] ${m.text}`)
           .join("\n");
-  return fillTemplate(template, {
+  return renderVariant(promptDoc("consolidate", template), "main", {
     clock,
     memories: list.slice(0, 6000),
   });
+}
+
+export function buildConsolidatePrompt(
+  memories: Memory[],
+  clock: string,
+  timeZone = "UTC",
+  template: string | PromptDoc = defaultPrompt("consolidate"),
+): string {
+  return consolidateMessages(memories, clock, timeZone, template)
+    .map((message) => message.content)
+    .join("\n");
 }
 
 export function parseConsolidateResult(

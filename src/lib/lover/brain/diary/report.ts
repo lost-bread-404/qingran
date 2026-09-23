@@ -1,4 +1,4 @@
-import { callModel } from "../llm.ts";
+import { asModelInput, callModel } from "../llm.ts";
 import { now } from "../clock.ts";
 import {
   listDays,
@@ -15,6 +15,7 @@ import {
 import { daysInclusive, isoWeek, monthRange, shiftDay } from "../time.ts";
 import { proposeExperiments } from "./experiments.ts";
 import { loadPrompt } from "../prompts/store.ts";
+import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { narrativeNumbersOk } from "./report-check.ts";
 import { safetyFlag, sayDoByTag, stuckLoops } from "./stats.ts";
 
@@ -77,8 +78,11 @@ export async function writeNarrative(data: unknown, jobId?: string): Promise<str
   for (let i = 0; i < 3; i++) {
     const reportPrompt = await loadPrompt("report");
     const result = await callModel("report", {
-      system: reportPrompt.body,
-      input: JSON.stringify(data).slice(0, 20_000),
+      ...asModelInput(
+        renderVariant(parsePromptBody("report", reportPrompt.body), "main", {
+          data: JSON.stringify(data).slice(0, 20_000),
+        }),
+      ),
       jobId,
       promptKey: reportPrompt.key,
       promptHash: reportPrompt.hash,

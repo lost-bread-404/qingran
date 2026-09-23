@@ -13,7 +13,8 @@ export const DROP_PORTRAIT_TOPICS = [
 
 export const QINGRAN_SELF_NOTE_DAY = "2026-09-21";
 
-const BEHAVIOR_RE = /清然(重复)?承诺|清然答应|清然把她|清然陪|清然安抚|清然主导|清然训|清然哄/;
+const BEHAVIOR_RE =
+  /清然(重复)?承诺|清然答应|清然把她|清然陪|清然安抚|清然主导|清然训|清然哄|我(重复)?承诺|我答应你|我把你|我安抚你|我主导/;
 const TIME_RE = /今晚|明天|后天|周[一二三四五六日天]|点前|\d+\s*点|下次/;
 const PROMISE_RE = /承诺|答应|会/;
 
@@ -23,7 +24,9 @@ export function isQingranBehaviorRecap(text: string): boolean {
 
 export function isConcreteQingranPromise(text: string): boolean {
   if (/重复承诺/.test(text)) return false;
-  if (!/清然/.test(text)) return false;
+  const named = /清然/.test(text);
+  const first = /我承诺|我答应/.test(text);
+  if (!named && !first) return false;
   return TIME_RE.test(text) && PROMISE_RE.test(text) && text.replace(/\s+/g, "").length >= 12;
 }
 

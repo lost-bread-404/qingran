@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Pencil, ThumbsUp, Volume2 } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Pencil, ThumbsUp, Volume2 } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,6 +33,8 @@ type Props = {
   onUndoConfirm?: (id: string) => void;
   undoConfirmId?: string | null;
   onFlagReply?: (assistantId: string, replyToId?: string, rating?: "up" | "down") => void;
+  onSelectReply?: (userId: string, replyId: string) => void;
+  onNoiseReply?: (id: string) => void;
 };
 
 function nearBottom(el: HTMLElement): boolean {
@@ -64,6 +66,8 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     onUndoConfirm,
     undoConfirmId,
     onFlagReply,
+    onSelectReply,
+    onNoiseReply,
   },
   ref,
 ) {
@@ -190,32 +194,65 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                   onConfirmQuick={onConfirmQuick}
                   onUndoConfirm={onUndoConfirm}
                   undoConfirmId={undoConfirmId}
+                  onNoiseReply={onNoiseReply}
                 />
               )
             ) : null}
-            {pair.assistant?.text.trim() ? (
+            {(() => {
+              const replies = pair.replies ?? (pair.assistant ? [pair.assistant] : []);
+              const shown = pair.assistant;
+              if (!shown || (!shown.text.trim() && replies.length < 2)) return null;
+              const page = Math.max(0, replies.findIndex((reply) => reply.id === shown.id));
+              return (
               <div className="flex max-w-[min(22rem,92%)] flex-col gap-6 self-start">
+                {shown.text.trim() ? (
                 <div className="flex items-start gap-2">
                   <p className="whitespace-pre-wrap break-words font-display text-lg font-medium leading-relaxed tracking-tight text-fg">
-                    {pair.assistant.text}
+                    {shown.text}
                   </p>
                   {onPlay ? (
                     <button
                       type="button"
                       aria-label="播放这句话"
-                      onClick={() => onPlay(pair.assistant!.id, pair.assistant!.text)}
+                      onClick={() => onPlay(shown.id, shown.text)}
                       className="grid size-11 shrink-0 place-items-center text-subtle transition-colors duration-150 hover:text-fg"
                     >
                       <Volume2 className="size-4" />
                     </button>
                   ) : null}
                 </div>
-                {onFlagReply ? (
+                ) : null}
+                {replies.length > 1 && pair.user ? (
+                  <div className="flex items-center gap-2 text-sm text-subtle">
+                    <button
+                      type="button"
+                      aria-label="上一条回复"
+                      disabled={page <= 0}
+                      onClick={() => onSelectReply?.(pair.user!.id, replies[page - 1]!.id)}
+                      className="grid size-11 place-items-center disabled:opacity-30"
+                    >
+                      <ChevronLeft className="size-4" />
+                    </button>
+                    <span className="tabular-nums">
+                      {page + 1} / {replies.length}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="下一条回复"
+                      disabled={page >= replies.length - 1}
+                      onClick={() => onSelectReply?.(pair.user!.id, replies[page + 1]!.id)}
+                      className="grid size-11 place-items-center disabled:opacity-30"
+                    >
+                      <ChevronRight className="size-4" />
+                    </button>
+                  </div>
+                ) : null}
+                {onFlagReply && shown.text.trim() ? (
                   <div className="flex items-center gap-6 self-start">
                     <button
                       type="button"
                       aria-label="这条回复好"
-                      onClick={() => onFlagReply(pair.assistant!.id, pair.user?.id ?? pair.assistant!.replyTo, "up")}
+                      onClick={() => onFlagReply(shown.id, pair.user?.id ?? shown.replyTo, "up")}
                       className="grid size-11 place-items-center text-subtle transition-colors duration-150 hover:text-fg"
                     >
                       <ThumbsUp className="size-4" />
@@ -223,7 +260,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                     <button
                       type="button"
                       aria-label="差在哪"
-                      onClick={() => onFlagReply(pair.assistant!.id, pair.user?.id ?? pair.assistant!.replyTo, "down")}
+                      onClick={() => onFlagReply(shown.id, pair.user?.id ?? shown.replyTo, "down")}
                       className="min-h-11 rounded-md px-3 text-sm text-subtle transition-colors duration-150 hover:text-fg"
                     >
                       差在哪
@@ -231,7 +268,8 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                   </div>
                 ) : null}
               </div>
-            ) : null}
+              );
+            })()}
             {debugHearing && pair.assistant?.talkTrace ? (
               <p className="self-start text-[10px] text-subtle">{formatTalkTrace(pair.assistant.talkTrace)}</p>
             ) : null}
@@ -270,6 +308,7 @@ function UserBubble({
   onConfirmQuick,
   onUndoConfirm,
   undoConfirmId,
+  onNoiseReply,
 }: {
   user: ChatMessage;
   editable: boolean;
@@ -279,10 +318,25 @@ function UserBubble({
   onConfirmQuick?: (id: string) => void;
   onUndoConfirm?: (id: string) => void;
   undoConfirmId?: string | null;
+  onNoiseReply?: (id: string) => void;
 }) {
   const canConfirm = Boolean(debugHearing && user.voiceTurnId && onConfirmStart);
   const labeled = user.hearingGold === "confirmed";
   const showUndo = Boolean(canConfirm && labeled && undoConfirmId === user.id && onUndoConfirm);
+  if (user.nightNoise) {
+    return (
+      <div className="flex justify-end">
+        <button
+          type="button"
+          aria-label="让清然补一次回复"
+          onClick={() => onNoiseReply?.(user.id)}
+          className="min-h-8 rounded-full bg-surface-2 px-2.5 py-1 text-[11px] leading-none text-subtle transition-colors duration-150 hover:text-fg"
+        >
+          一声响动
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-end justify-end gap-2">
@@ -306,17 +360,20 @@ function UserBubble({
           <p className="whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
             {user.text}
           </p>
-          {debugHearing && user.hearingTiming ? (
+          {debugHearing && (user.hearingTiming || user.injectLine) ? (
             <p className="text-[10px] text-subtle">
-              {[
-                user.hearingTiming.hearMs != null ? `说完→识别完 ${user.hearingTiming.hearMs}ms` : null,
-                user.hearingTiming.grokMs != null ? `识别完→字 ${user.hearingTiming.grokMs}ms` : null,
-                user.hearingTiming.ttftMs != null ? `首字 ${user.hearingTiming.ttftMs}ms` : null,
-                user.hearingTiming.ttsMs != null ? `→出声 ${user.hearingTiming.ttsMs}ms` : null,
-                user.hearingTiming.engine ?? null,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
+              {user.hearingTiming
+                ? [
+                    user.hearingTiming.hearMs != null ? `说完→识别完 ${user.hearingTiming.hearMs}ms` : null,
+                    user.hearingTiming.grokMs != null ? `识别完→字 ${user.hearingTiming.grokMs}ms` : null,
+                    user.hearingTiming.ttftMs != null ? `首字 ${user.hearingTiming.ttftMs}ms` : null,
+                    user.hearingTiming.ttsMs != null ? `→出声 ${user.hearingTiming.ttsMs}ms` : null,
+                    user.hearingTiming.engine ?? null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : null}
+              {user.injectLine ? <span className="mt-0.5 block">{user.injectLine}</span> : null}
             </p>
           ) : null}
         </div>

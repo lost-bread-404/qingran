@@ -44,6 +44,9 @@ test("keepArchiveNote drops Qingran recaps and keeps Rosie facts plus dated prom
   assert.equal(keepArchiveNote({ text: "清然在准备解剖考试", subject: "qingran", fromRosie: false }), false);
   assert.equal(keepArchiveNote({ text: "清然重复承诺整夜陪伴她", subject: "us", fromRosie: false }), false);
   assert.equal(keepArchiveNote({ text: "清然承诺今晚一点前陪她写完这章", subject: "qingran", fromRosie: false }), true);
+  assert.equal(isConcreteQingranPromise("我承诺今晚一点前陪你写完这章"), true);
+  assert.equal(keepArchiveNote({ text: "我承诺今晚一点前陪你写完这章", subject: "qingran", fromRosie: false }), true);
+  assert.equal(keepArchiveNote({ text: "我承诺整夜陪伴你", subject: "us", fromRosie: false }), false);
   assert.equal(keepArchiveNote({ text: "她说清然陪着时才睡得着", subject: "us", fromRosie: true }), true);
   assert.equal(keepArchiveNote({ text: "论文又没动", subject: "rosie", fromRosie: true }), true);
 });

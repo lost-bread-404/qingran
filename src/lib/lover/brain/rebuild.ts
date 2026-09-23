@@ -6,8 +6,9 @@ import { resolveTz } from "./tz.ts";
 import { coerceMind } from "./mind-parse.ts";
 import { EMPTY_MIND, type IndexItem, type Mind, type Note, type StoredMessage } from "./types.ts";
 import { noteAsIndex } from "./voice/retrieve.ts";
-import { buildTail, buildVoiceMessages } from "./voice/pack-build.ts";
-import { buildArchivistInput } from "./archivist.ts";
+import { voiceInjectFromProfile } from "../types.ts";
+import { buildVoiceMessages } from "./voice/pack-build.ts";
+import { buildArchivistMessages } from "./archivist.ts";
 import { buildReflectorInput, formatReflectConversation } from "./voice/reflector.ts";
 import { defaultPrompt } from "./prompts/catalog.ts";
 import { getPromptVersion } from "./prompts/store.ts";
@@ -200,24 +201,26 @@ export async function rebuildVoiceMessages(turnSeq: number): Promise<RebuildResu
   const liveMind = mind ?? EMPTY_MIND;
   const tz = resolveTz(refs.timeZone || (await getMeta()).timeZone);
   const nowMs = (liveMind.updated_at ?? 0) + (refs.mindAgeMs || 0);
-  const tail = buildTail({
-    clock: refs.clockText,
+  const voiceBody = await promptBody(log?.promptHash ?? null, "voice");
+  const inject = voiceInjectFromProfile({
+    injectMemories: refs.injectMemories !== false,
+    injectLongterm: refs.injectLongterm !== false,
+    historyWindow: refs.historyWindow,
+  });
+  const messages = buildVoiceMessages({
+    charter: charter ?? "",
+    longtermOverride: block?.text ?? null,
+    history,
+    userText: user?.text ?? "",
     mind: liveMind,
     notes,
+    clock: refs.clockText,
     timeZone: tz,
     careHint: Boolean(refs.careHint),
     nowMs,
     stale: Boolean(refs.mindStale),
-    jump: Boolean(refs.jump),
-  });
-  const voiceBody = await promptBody(log?.promptHash ?? null, "voice");
-  const messages = buildVoiceMessages({
-    charter: charter ?? "",
-    longterm: block?.text ?? "",
-    history,
-    tail,
-    userText: user?.text ?? "",
     voiceTemplate: voiceBody,
+    inject,
   });
   return { messages, warnings };
 }
@@ -276,10 +279,7 @@ export async function rebuildArchiveInput(logId: number): Promise<RebuildResult>
   const pending = await messagesInOrder(refs.batchMessageIds ?? [], t, warnings);
   const candidates = await notesInOrder(refs.candidateNoteIds ?? [], t, warnings);
   return {
-    messages: [
-      { role: "system", content: await promptBody(log.promptHash, "archive") },
-      { role: "user", content: buildArchivistInput(pending, candidates) },
-    ],
+    messages: buildArchivistMessages(pending, candidates, await promptBody(log.promptHash, "archive")),
     warnings,
   };
 }

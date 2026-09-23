@@ -1,0 +1,37 @@
+/** Client-safe backup constants. Do not import the database from this file. */
+export const BACKUP_KIND = "qingran-backup";
+
+/** Import order. brain/backup.ts checks this against BACKUP_TABLES. */
+export const IMPORT_ORDER = [
+  "brain_meta",
+  "qingran_messages",
+  "mem_notes",
+  "mem_history",
+  "qr_portrait",
+  "qr_mind",
+  "diary_days",
+  "diary_intentions",
+  "diary_factors",
+  "diary_day_factors",
+  "diary_themes",
+  "diary_theme_members",
+  "diary_theme_weeks",
+  "diary_episodes",
+  "diary_findings",
+  "diary_experiments",
+  "diary_reports",
+  "brain_turns",
+  "qr_mind_history",
+  "brain_daily_digest",
+  "spend_events",
+  "spend_daily",
+  "spend_alerts",
+  "spend_reconcile",
+  "spend_overrides",
+  "qr_charter_versions",
+  "qr_block_snapshots",
+  "qingran_message_edits",
+  "spend_monthly",
+  "qr_prompts",
+  "qr_prompt_versions",
+] as const;

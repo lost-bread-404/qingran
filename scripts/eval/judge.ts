@@ -9,7 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import { resolveRoute } from "../../src/lib/lover/brain/config.ts";
-import { defaultPrompt } from "../../src/lib/lover/brain/prompts/catalog.ts";
+import { defaultDoc, renderVariant, type PromptDoc } from "../../src/lib/lover/brain/prompts/doc.ts";
 
 export type QingranScores = {
   followed_up: 0 | 1;
@@ -72,6 +72,15 @@ function outputText(raw: unknown): string {
     .join("");
 }
 
+async function judgeDoc(): Promise<PromptDoc> {
+  try {
+    const { loadPrompt } = await import("../../src/lib/lover/brain/prompts/store.ts");
+    return (await loadPrompt("judge")).doc;
+  } catch {
+    return defaultDoc("judge");
+  }
+}
+
 export async function judgeQingran(args: {
   charter: string;
   transcript: string;
@@ -79,15 +88,13 @@ export async function judgeQingran(args: {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) throw new Error("XAI_API_KEY is required");
   const r = resolveRoute("judge");
+  const messages = renderVariant(await judgeDoc(), "main", {
+    charter: args.charter,
+    transcript: args.transcript,
+  });
   const body: Record<string, unknown> = {
     model: r.model,
-    input: [
-      { role: "system", content: defaultPrompt("judge") },
-      {
-        role: "user",
-        content: `【人设】\n${args.charter}\n\n【对话】（最后一条清然的回复是被评估的对象）\n${args.transcript}`,
-      },
-    ],
+    input: messages,
     max_output_tokens: r.maxOutput,
     text: { format: { type: "json_schema", name: "judge", schema: SCHEMA, strict: true } },
   };

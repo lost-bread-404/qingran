@@ -2,13 +2,18 @@ import { getSql } from "../../../db.ts";
 import { now } from "../clock.ts";
 import { sha256Text } from "../log-refs.ts";
 import {
-  defaultPrompt,
   isPromptKey,
   promptKeys,
   promptSpec,
   type PromptKey,
   type PromptSpec,
 } from "./catalog.ts";
+import { defaultDoc, parsePromptBody, serializeDoc, type PromptDoc } from "./doc.ts";
+
+export type PromptVersionHit = {
+  hash: string;
+  lastSeen: number;
+};
 
 export type LoadedPrompt = {
   key: PromptKey;
@@ -16,6 +21,7 @@ export type LoadedPrompt = {
   hash: string;
   custom: boolean;
   updatedAt: number | null;
+  doc: PromptDoc;
 };
 
 type Cache = { bodies: Map<PromptKey, { body: string; updatedAt: number }>; loadedAt: number };
@@ -23,6 +29,17 @@ let cache: Cache | null = null;
 
 export function resetPromptCache() {
   cache = null;
+}
+
+function materialize(key: PromptKey, raw: string | null): { body: string; doc: PromptDoc; custom: boolean; hash: string } {
+  const doc = parsePromptBody(key, raw);
+  const body = serializeDoc(doc);
+  return {
+    body,
+    doc,
+    custom: body !== serializeDoc(defaultDoc(key)),
+    hash: sha256Text(body),
+  };
 }
 
 async function rememberVersion(key: PromptKey, body: string, hash: string, ts: number): Promise<void> {
@@ -64,17 +81,17 @@ async function ensureCache(): Promise<Cache> {
 }
 
 export async function loadPrompt(key: PromptKey): Promise<LoadedPrompt> {
-  const fallback = defaultPrompt(key);
   const hit = (await ensureCache()).bodies.get(key);
-  const body = hit?.body?.trim() ? hit.body : fallback;
-  const hash = sha256Text(body);
-  void rememberVersion(key, body, hash, now());
+  const raw = hit?.body?.trim() ? hit.body : null;
+  const made = materialize(key, raw);
+  void rememberVersion(key, made.body, made.hash, now());
   return {
     key,
-    body,
-    hash,
-    custom: Boolean(hit?.body && hit.body !== fallback),
+    body: made.body,
+    hash: made.hash,
+    custom: made.custom,
     updatedAt: hit?.updatedAt ?? null,
+    doc: made.doc,
   };
 }
 
@@ -92,11 +109,29 @@ export async function getPromptVersion(hash: string): Promise<string | null> {
   }
 }
 
+export async function listPromptVersions(key: PromptKey, limit = 5): Promise<PromptVersionHit[]> {
+  try {
+    const db = await getSql();
+    const rows = await db.query<{ hash: string; last_seen: number | string }>(
+      `select hash, last_seen from qr_prompt_versions where key = $1 order by last_seen desc limit $2`,
+      [key, Math.max(limit, 1) + 1],
+    );
+    return rows.slice(0, limit + 1).map((row) => ({
+      hash: String(row.hash),
+      lastSeen: Number(row.last_seen) || 0,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export type PromptListItem = PromptSpec & {
   body: string;
   hash: string;
   custom: boolean;
   updatedAt: number | null;
+  doc: PromptDoc;
+  versions: PromptVersionHit[];
 };
 
 export async function listPrompts(): Promise<PromptListItem[]> {
@@ -105,25 +140,33 @@ export async function listPrompts(): Promise<PromptListItem[]> {
   for (const key of promptKeys()) {
     const spec = promptSpec(key);
     const loaded = await loadPrompt(key);
-    items.push({ ...spec, body: loaded.body, hash: loaded.hash, custom: loaded.custom, updatedAt: loaded.updatedAt });
+    const versions = await listPromptVersions(key, 5);
+    items.push({
+      ...spec,
+      body: loaded.body,
+      hash: loaded.hash,
+      custom: loaded.custom,
+      updatedAt: loaded.updatedAt,
+      doc: loaded.doc,
+      versions,
+    });
   }
   return items;
 }
 
 export async function savePrompt(key: PromptKey, body: string): Promise<LoadedPrompt> {
-  const text = body.replace(/\r\n/g, "\n");
+  const made = materialize(key, body);
   const ts = now();
   const db = await getSql();
   await db.query(
     `insert into qr_prompts (key, body, updated_at)
      values ($1,$2,$3)
      on conflict (key) do update set body = excluded.body, updated_at = excluded.updated_at`,
-    [key, text, ts],
+    [key, made.body, ts],
   );
   resetPromptCache();
-  const hash = sha256Text(text);
-  await rememberVersion(key, text, hash, ts);
-  return { key, body: text, hash, custom: text !== defaultPrompt(key), updatedAt: ts };
+  await rememberVersion(key, made.body, made.hash, ts);
+  return { key, body: made.body, hash: made.hash, custom: made.custom, updatedAt: ts, doc: made.doc };
 }
 
 export async function restorePrompt(key: PromptKey): Promise<LoadedPrompt> {
@@ -131,4 +174,15 @@ export async function restorePrompt(key: PromptKey): Promise<LoadedPrompt> {
   await db.query(`delete from qr_prompts where key = $1`, [key]);
   resetPromptCache();
   return loadPrompt(key);
+}
+
+export async function rollbackPrompt(key: PromptKey, hash: string): Promise<LoadedPrompt> {
+  const db = await getSql();
+  const rows = await db.query<{ body: string }>(
+    `select body from qr_prompt_versions where hash = $1 and key = $2`,
+    [hash, key],
+  );
+  const body = rows[0]?.body;
+  if (!body) throw new Error("missing-version");
+  return savePrompt(key, body);
 }

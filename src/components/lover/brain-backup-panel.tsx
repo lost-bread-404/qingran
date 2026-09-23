@@ -6,14 +6,8 @@ import {
   brainImportFinish,
   brainImportV1,
 } from "@/lib/lover/brain/api";
-import {
-  BACKUP_KIND,
-  IMPORT_ORDER,
-  type BackupCursor,
-  type BackupRow,
-  type ExportPage,
-  type V1Backup,
-} from "@/lib/lover/brain/backup";
+import { BACKUP_KIND, IMPORT_ORDER } from "@/lib/lover/brain/backup-public";
+import type { BackupCursor, BackupRow, ExportPage, V1Backup } from "@/lib/lover/brain/backup";
 
 function downloadJson(name: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });

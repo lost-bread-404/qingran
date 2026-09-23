@@ -1,5 +1,6 @@
-import type { Profile } from "../../types.ts";
-import { HISTORY_WINDOW, SESSION_GAP_MS } from "../config.ts";
+import { mergeEditedUserBody } from "../../message-markup.ts";
+import { voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
+import { SESSION_GAP_MS } from "../config.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import {
   getDay,
@@ -7,6 +8,8 @@ import {
   getMeta,
   getMind,
   listHistoryWindow,
+  listNotes,
+  listNotesByIds,
   listPortrait,
   upsertMessage,
 } from "../store.ts";
@@ -19,7 +22,9 @@ import { loadPrompt } from "../prompts/store.ts";
 import { ensureMemoryHygiene } from "../memory-hygiene.ts";
 import {
   buildTail,
+  formatMemories,
   renderVoiceLongterm,
+  voiceFacingSlots,
   voiceInputChars,
   voiceMessagesForStrip,
   type VoiceInputChars,
@@ -62,6 +67,7 @@ export type HotContext = {
   inputChars: VoiceInputChars;
   promptKey: string;
   promptHash: string;
+  inject: VoiceInjectFlags;
 };
 
 export async function loadHotContext(input: {
@@ -82,15 +88,16 @@ export async function loadHotContext(input: {
   const user = await upsertMessage({
     id: input.userMsgId,
     role: "user",
-    text: userExisting?.text || input.text,
+    text: mergeEditedUserBody(userExisting?.text, input.text),
     createdAt: userExisting?.createdAt || input.userCreatedAt || input.nowMs,
     kind: userExisting?.kind,
     timeZone: input.timeZone,
   });
   await ensureMemoryHygiene();
 
+  const inject = voiceInjectFromProfile(input.profile);
   const [history, mind, portrait, meta] = await Promise.all([
-    listHistoryWindow(input.userMsgId, HISTORY_WINDOW),
+    listHistoryWindow(input.userMsgId, inject.history),
     getMind(),
     listPortrait(),
     getMeta(),
@@ -130,6 +137,7 @@ export async function loadHotContext(input: {
     nowMs: input.nowMs,
     stale: false,
     jump: jumped.jump,
+    inject,
   });
 
   const longterm = renderVoiceLongterm(meta.selfSummary, meta.bondSummary, portrait);
@@ -152,6 +160,9 @@ export async function loadHotContext(input: {
     selfSummary: meta.selfSummary,
     bondSummary: meta.bondSummary,
     portrait,
+    injectMemories: inject.memories,
+    injectLongterm: inject.longterm,
+    historyWindow: inject.history,
   };
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(charter.trim() || "你就是清然。正在和 Rosie 语音通话。"),
@@ -179,6 +190,9 @@ export async function loadHotContext(input: {
     userMsgId: input.userMsgId,
     timeZone: input.timeZone,
     mindAgeMs,
+    injectMemories: inject.memories,
+    injectLongterm: inject.longterm,
+    historyWindow: inject.history,
   };
 
   return {
@@ -208,5 +222,34 @@ export async function loadHotContext(input: {
     inputChars,
     promptKey: loaded.key,
     promptHash: loaded.hash,
+    inject,
+  };
+}
+
+/** What the reply model would see for the five slots. Does not write or bump recall. */
+export async function loadVoicePerspective(): Promise<{
+  self: string;
+  bond: string;
+  portrait: string;
+  mind: string;
+  memories: string;
+}> {
+  const [meta, portrait, mind] = await Promise.all([getMeta(), listPortrait(), getMind()]);
+  const ids = mind.memory_ids ?? [];
+  let notes = ids.length ? (await listNotesByIds(ids)).filter((note) => note.status === "active") : [];
+  if (!notes.length) notes = await listNotes({ status: "active", limit: 6 });
+  const slots = voiceFacingSlots({
+    selfSummary: meta.selfSummary,
+    bondSummary: meta.bondSummary,
+    portrait,
+    mind: mind.insight,
+    memories: formatMemories(notes, meta.timeZone || "UTC"),
+  });
+  return {
+    self: slots.self,
+    bond: slots.bond,
+    portrait: slots.portrait,
+    mind: slots.mind || "（还没有。回复里不会放【内心】）",
+    memories: slots.memories,
   };
 }

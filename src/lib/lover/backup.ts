@@ -79,6 +79,7 @@ function cloneMessage(m: ChatMessage): ChatMessage {
     scanned: m.scanned ? true : undefined,
     voiceTurnId: m.voiceTurnId ? String(m.voiceTurnId) : undefined,
     replyTo: m.replyTo ? String(m.replyTo) : undefined,
+    activeReply: m.activeReply ? String(m.activeReply) : undefined,
     hearingGold: m.hearingGold === "confirmed" ? "confirmed" : m.hearingGold === "unconfirmed" ? "unconfirmed" : undefined,
     interrupted: m.interrupted ? true : undefined,
   };

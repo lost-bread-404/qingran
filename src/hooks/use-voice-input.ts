@@ -15,6 +15,7 @@ import { logCallAudio } from "@/lib/lover/call-audio-log";
 import { hearUtterance } from "@/lib/lover/hear";
 import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { recordCuts } from "@/lib/lover/hearing/sense";
 import { warmupHearing } from "@/lib/lover/hearing/store";
 import { attachPcmTap, peakRms, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
@@ -131,8 +132,8 @@ export function useVoiceInput({ lang, prompt }: Options) {
       const frame = sampleProsody(analyser, ctx.sampleRate, (performance.now() - t0) / 1000, true);
       framesRef.current.push(frame);
       noiseFloorRef.current = nextFloor(noiseFloorRef.current, frame.rms, true);
-      const debugVad = getHearingSession().debugHearing;
-      const cut = holdThreshold(noiseFloorRef.current, debugVad);
+      const cuts = recordCuts(getHearingSession().sense);
+      const cut = holdThreshold(noiseFloorRef.current, false, cuts);
       setLevel(Math.min(1, frame.rms * 8));
       setThreshold(Math.min(1, cut * 8));
       rafRef.current = requestAnimationFrame(tick);

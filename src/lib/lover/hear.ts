@@ -15,6 +15,9 @@ import {
   voiceTurnIdForMessage,
 } from "./hearing/heard";
 import { applyUtteranceTag, predictUtteranceTags, stripAcousticTags } from "./hearing/tags.ts";
+import { applyNightVoiceGate, wavDurationMsFromBytes, type VoiceStats } from "./hearing/night-voice.ts";
+import { formatSenseLine, toneFromSense } from "./hearing/sense.ts";
+import { readTone } from "./prosody";
 
 export { UNRECOGNIZED_TEXT, clipSaveBanner, voiceTurnIdForMessage };
 export type { HeardUtterance };
@@ -81,6 +84,20 @@ export async function hearUtterance(input: {
   const persist = debugHearing || session.capture;
   let ranHearing = false;
   const predictedFromFrames = predictUtteranceTags({ frames: input.frames });
+  const durationMs = clip ? await clipDurationMs(clip) : 0;
+  const tone = toneFromSense(session.sense);
+  const toneReading = readTone(input.frames, tone);
+  const senseLine = formatSenseLine(session.sense);
+  const finishOpts = { holdToTalk: input.holdToTalk, tone };
+  const seal = (heard: HeardUtterance, rawText: string, stats?: VoiceStats | null) =>
+    applyNightVoiceGate(heard, {
+      voicedMin: session.nightVoicedMin,
+      minMs: session.nightMinMs,
+      stats,
+      frames: input.frames,
+      durationMs,
+      rawText,
+    });
 
   try {
     const result = await runHearing({
@@ -113,6 +130,12 @@ export async function hearUtterance(input: {
         systemPrompt: session.systemPrompt || input.prompt,
         holdToTalk: Boolean(input.holdToTalk),
         prosody: downsampleProsody(input.frames),
+        senseLine,
+        toneRise: toneReading.riseRatio,
+        toneGlide: toneReading.glide,
+        toneFade: toneReading.fade,
+        tonePeak: toneReading.peak,
+        toneMark: toneReading.mark,
       },
     });
     ranHearing = true;
@@ -120,7 +143,7 @@ export async function hearUtterance(input: {
     const predicted = result.predictedTags ?? predictedFromFrames;
     const engine = engineFields(provider, result);
     if (result.hallucinationSuspect) {
-      return heardFromHearing({
+      return seal(heardFromHearing({
         debugHearing,
         turnId,
         tagged: "",
@@ -134,15 +157,15 @@ export async function hearUtterance(input: {
         hallucinationSuspect: true,
         hallucinationReason: result.hallucinationReason,
         ...engine,
-      });
+      }), result.xaiText ?? "", result.voice);
     }
     const xaiForFinish = result.correctedText ?? result.xaiText;
     const core =
       result.provider !== "xai" && result.tagged
-        ? stripAcousticTags(result.tagged).trim() || finishHeard(xaiForFinish, input.liveText, result.words, input.frames, audioStats(input.frames), { holdToTalk: input.holdToTalk })
-        : finishHeard(xaiForFinish, input.liveText, result.words, input.frames, audioStats(input.frames), { holdToTalk: input.holdToTalk });
+        ? stripAcousticTags(result.tagged).trim() || finishHeard(xaiForFinish, input.liveText, result.words, input.frames, audioStats(input.frames), finishOpts)
+        : finishHeard(xaiForFinish, input.liveText, result.words, input.frames, audioStats(input.frames), finishOpts);
     const tagged = core ? applyUtteranceTag(core, predicted) : "";
-    return heardFromHearing({
+    return seal(heardFromHearing({
       debugHearing,
       turnId,
       tagged,
@@ -154,13 +177,13 @@ export async function hearUtterance(input: {
       sttDoneAt: Date.now(),
       predictedTags: predicted,
       ...engine,
-    });
+    }), result.correctedText || result.xaiText || tagged, result.voice);
   } catch (err) {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
 
   if (ranHearing || provider === "xai") {
-    return heardFromHearing({
+    return seal(heardFromHearing({
       debugHearing,
       turnId,
       tagged: "",
@@ -171,7 +194,7 @@ export async function hearUtterance(input: {
       predictedTags: predictedFromFrames,
       engineRequested: provider,
       engineUsed: "xai",
-    });
+    }), "");
   }
 
   let text = "";
@@ -190,12 +213,10 @@ export async function hearUtterance(input: {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
   const stats = audioStats(input.frames);
-  const finished = finishHeard(text, input.liveText, words, input.frames, stats, {
-    holdToTalk: input.holdToTalk,
-  });
+  const finished = finishHeard(text, input.liveText, words, input.frames, stats, finishOpts);
   const tagged = finished ? applyUtteranceTag(finished, predictedFromFrames) : "";
   const scrubbed = scrubHallucination(text, stats, input.liveText, { holdToTalk: input.holdToTalk });
-  return heardFromHearing({
+  return seal(heardFromHearing({
     debugHearing,
     turnId,
     tagged,
@@ -209,11 +230,20 @@ export async function hearUtterance(input: {
       scrubbed.reason === "apple_empty" || scrubbed.reason === "short_quiet" ? scrubbed.reason : undefined,
     engineRequested: provider,
     engineUsed: "xai",
-  });
+  }), text);
 }
 
 function audioStats(frames: ProsodyFrame[]) {
   const durationSec = frames.at(-1)?.t ?? 0;
   const peakRms = frames.reduce((max, frame) => Math.max(max, frame.rms), 0);
   return { durationSec, peakRms };
+}
+
+async function clipDurationMs(blob: Blob): Promise<number> {
+  try {
+    const bytes = new Uint8Array(await blob.slice(0, 8192).arrayBuffer());
+    return wavDurationMsFromBytes(bytes);
+  } catch {
+    return 0;
+  }
 }

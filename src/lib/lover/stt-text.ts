@@ -1,4 +1,4 @@
-import { classifyCue, cuesFromProsody, glueCueParts, hasCueEnergy, hasVoicedPitch, markForFrames, utteranceToneMark, voicedIslands, type CueWord, type ProsodyFrame, type ToneThresholds } from "./prosody.ts";
+import { classifyCue, cuesFromProsody, DEFAULT_TONE_THRESHOLDS, glueCueParts, hasCueEnergy, hasVoicedPitch, markForFrames, utteranceToneMark, voicedIslands, type CueWord, type ProsodyFrame, type ToneThresholds } from "./prosody.ts";
 import { islandVoiced, listenVocal } from "./vocal-event.ts";
 import { STT_KEYTERMS, VOCAL_CUES } from "./hearing/config.ts";
 
@@ -449,7 +449,7 @@ export function recoverCues(stt: string, frames?: ProsodyFrame[], th?: ToneThres
   const fixed = rewriteMisheardCues(existing, frames);
 
   if (fixed && !isMostlyFiller(fixed)) {
-    return shapeSajiaoTail(applyTonePunctuation(fixed, frames, th), frames);
+    return shapeSajiaoTail(applyTonePunctuation(fixed, frames, th), frames, th);
   }
 
   if (fixed && isMostlyFiller(fixed)) {
@@ -465,11 +465,11 @@ export function recoverCues(stt: string, frames?: ProsodyFrame[], th?: ToneThres
   if (heard.kind === "pant") return heard.text;
   if (heard.kind === "hum") return heard.text;
 
-  if (hasCueEnergy(frames) && hasVoicedPitch(frames)) return cuesFromProsody(frames);
+  if (hasCueEnergy(frames) && hasVoicedPitch(frames)) return cuesFromProsody(frames, th);
   const islands = voicedIslands(frames);
   const voiced = islands.filter(islandVoiced);
   if (!voiced.length) return "";
-  if (voiced.length === islands.length) return cuesFromProsody(frames);
+  if (voiced.length === islands.length) return cuesFromProsody(frames, th);
   return "";
 }
 
@@ -479,7 +479,7 @@ export function applyTonePunctuation(
   th?: ToneThresholds,
 ): string {
   if (!text || !frames?.length) return text;
-  if (isMostlyFiller(text)) return shapeCueProsody(text, undefined, frames);
+  if (isMostlyFiller(text)) return shapeCueProsody(text, undefined, frames, th);
   const mark = utteranceToneMark(frames, th);
   if (!mark) return text;
   const stripped = text.replace(/[，。！？…～~!?]+$/g, "");
@@ -530,7 +530,7 @@ export function finishHeard(
   _words: CueWord[] | undefined,
   frames: ProsodyFrame[] | undefined,
   audio?: { durationSec: number; peakRms: number },
-  opts?: { holdToTalk?: boolean },
+  opts?: { holdToTalk?: boolean; tone?: ToneThresholds },
 ): string {
   let xai = stripHehe(server);
   if (audio) {
@@ -539,14 +539,18 @@ export function finishHeard(
     xai = scrubbed.text;
   }
   const picked = pickTranscript(xai, stripHehe(browser));
-  return recoverCues(picked, frames);
+  return recoverCues(picked, frames, opts?.tone);
 }
 
-function shapeSajiaoTail(text: string, frames?: ProsodyFrame[]): string {
+function shapeSajiaoTail(
+  text: string,
+  frames?: ProsodyFrame[],
+  th: ToneThresholds = DEFAULT_TONE_THRESHOLDS,
+): string {
   if (!text || !frames?.length || isMostlyFiller(text)) return text;
   const islands = voicedIslands(frames);
   const last = islands[islands.length - 1];
-  if (!last || markForFrames(last.frames) !== "～") return text;
+  if (!last || markForFrames(last.frames, th) !== "～") return text;
   const stripped = text.replace(/[。！？]?$/, "");
   if (!/[嘛啦呢呀哦噢嗯啊吧]$/.test(stripped)) return text;
   return `${stripped}～`;
@@ -556,6 +560,7 @@ export function shapeCueProsody(
   text: string,
   words: CueWord[] | undefined,
   frames: ProsodyFrame[] | undefined,
+  th: ToneThresholds = DEFAULT_TONE_THRESHOLDS,
 ): string {
   if (!text || !frames?.length) return text;
   if (!isMostlyFiller(text) && !shouldKeepOnlyCues(text)) return text;
@@ -576,7 +581,7 @@ export function shapeCueProsody(
   if (timed.length && timed.every((word) => isCueToken(word.text))) {
     for (const word of timed) {
       const slice = frames.filter((f) => f.t >= word.start - 0.04 && f.t <= word.end + 0.04);
-      chunks.push(`${stripMarks(word.text)}${markForFrames(slice)}`);
+      chunks.push(`${stripMarks(word.text)}${markForFrames(slice, th)}`);
     }
   } else {
     const total = islands.reduce((sum, island) => sum + Math.max(0.08, island.end - island.start), 0);
@@ -589,10 +594,10 @@ export function shapeCueProsody(
       if (take <= 0) continue;
       const piece = chars.slice(used, used + take).join("");
       used += take;
-      chunks.push(`${piece}${markForFrames(island.frames)}`);
+      chunks.push(`${piece}${markForFrames(island.frames, th)}`);
     }
     if (used < chars.length && chunks.length) {
-      chunks[chunks.length - 1] = `${chars.join("")}${markForFrames(islands[islands.length - 1]!.frames)}`;
+      chunks[chunks.length - 1] = `${chars.join("")}${markForFrames(islands[islands.length - 1]!.frames, th)}`;
     }
     const joined = glueCueParts(chunks, islands);
     return keepCuePunct(joined) || text;

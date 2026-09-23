@@ -201,6 +201,10 @@ export type ToneThresholds = {
   bangPeak: number;
   bangDur: number;
   voicedClarity: number;
+  /** |end/start − 1| within this adds no mark and skips the other marks. 0 disables it. */
+  flatZone?: number;
+  /** False turns every mark off. Omitted means on, so older callers keep their punctuation. */
+  marks?: boolean;
 };
 
 export const DEFAULT_TONE_THRESHOLDS: ToneThresholds = {
@@ -225,11 +229,62 @@ export type StoredProsody = {
 
 export const PROSODY_HOP_MS = 40;
 
+function marksOn(th: ToneThresholds): boolean {
+  return th.marks !== false;
+}
+
+export type ToneReading = {
+  riseRatio: number | null;
+  glide: number | null;
+  fade: number | null;
+  peak: number | null;
+  mark: "" | "？" | "～" | "…" | "！";
+};
+
+function pitchEnds(hz: number[]): { start: number; end: number } | null {
+  if (hz.length < 4) return null;
+  const third = Math.max(1, Math.ceil(hz.length / 3));
+  const start = avg(hz.slice(0, third));
+  const end = avg(hz.slice(-third));
+  if (!(start > 80) || !(end > 0)) return null;
+  return { start, end };
+}
+
+function isFlatPitch(ratio: number | null, flatZone: number | undefined): boolean {
+  if (ratio == null || !flatZone || flatZone <= 0) return false;
+  return Math.abs(ratio - 1) <= flatZone;
+}
+
+export function readTone(frames: ProsodyFrame[], th: ToneThresholds = DEFAULT_TONE_THRESHOLDS): ToneReading {
+  if (frames.length < 2) {
+    return { riseRatio: null, glide: null, fade: null, peak: null, mark: "" };
+  }
+  const rms = frames.map((f) => f.rms);
+  const hz = frames.filter((f) => f.hz > 80 && f.clarity >= th.voicedClarity).map((f) => f.hz);
+  const third = Math.max(1, Math.ceil(rms.length / 3));
+  const head = avg(rms.slice(0, third));
+  const tail = avg(rms.slice(-third));
+  const peak = Math.max(...rms, 0);
+  const span = hz.length >= 3 ? Math.max(...hz) - Math.min(...hz) : 0;
+  const mid = avg(hz);
+  const ends = pitchEnds(hz);
+  const riseRatio = ends ? ends.end / ends.start : null;
+  const glide = mid > 0 ? span / mid : null;
+  const fade = head > 0 ? tail / head : null;
+  return {
+    riseRatio,
+    glide,
+    fade,
+    peak,
+    mark: utteranceToneMark(frames, th),
+  };
+}
+
 export function markForFrames(
   frames: ProsodyFrame[],
   th: ToneThresholds = DEFAULT_TONE_THRESHOLDS,
 ): "…" | "～" | "！" | "" {
-  if (frames.length < 2) return "";
+  if (!marksOn(th) || frames.length < 2) return "";
   const dur = (frames[frames.length - 1]?.t ?? 0) - (frames[0]?.t ?? 0);
   const rms = frames.map((f) => f.rms);
   const hz = frames.filter((f) => f.hz > 80 && f.clarity >= th.voicedClarity).map((f) => f.hz);
@@ -237,16 +292,17 @@ export function markForFrames(
   const head = avg(rms.slice(0, third));
   const tail = avg(rms.slice(-third));
   const peak = Math.max(...rms);
-  const mean = avg(rms);
   const span = hz.length >= 3 ? Math.max(...hz) - Math.min(...hz) : 0;
   const mid = avg(hz);
+  const ends = pitchEnds(hz);
+  const riseRatio = ends ? ends.end / ends.start : null;
+  if (isFlatPitch(riseRatio, th.flatZone)) return "";
   const glide = mid > 0 && span / mid >= th.glideRatio;
   const tilt = avg(frames.map((f) => f.tilt ?? 0));
   if (dur <= th.bangDur && peak >= th.bangPeak) return "！";
-  if (peak > Math.max(0.04, mean * 1.55) && dur <= 0.32) return "！";
-  if (glide && dur >= 0.1) return "～";
+  if (glide && dur >= th.waveDur) return "～";
   if (dur >= th.waveDur && tail >= head * 0.86 && peak <= th.bangPeak && tilt >= 0) return "～";
-  if ((tail < head * th.fadeRatio && dur >= 0.22) || dur >= th.longDur) return "…";
+  if (head > 0 && tail < head * th.fadeRatio && dur >= 0.22) return "…";
   return "";
 }
 
@@ -326,7 +382,7 @@ export function glueCueParts(parts: string[], islands: Island[], tight = false) 
   return out;
 }
 
-export function cuesFromProsody(frames: ProsodyFrame[]): string {
+export function cuesFromProsody(frames: ProsodyFrame[], th: ToneThresholds = DEFAULT_TONE_THRESHOLDS): string {
   const islands = voicedIslands(frames);
   if (!islands.length) return "";
   const parts: string[] = [];
@@ -335,9 +391,9 @@ export function cuesFromProsody(frames: ProsodyFrame[]): string {
     const cue = classifyCue(island.frames);
     const dur = island.end - island.start;
     const n = cueRepeat(cue, dur);
-    let mark = markForFrames(island.frames);
+    let mark = markForFrames(island.frames, th);
     const next = islands[i + 1];
-    if (!mark && next && next.start - island.end >= 0.1) mark = "…";
+    if (marksOn(th) && !mark && next && next.start - island.end >= 0.1) mark = "…";
     parts.push(`${cue.repeat(n)}${mark}`);
   }
   return glueCueParts(parts, islands, parts.every((part) => part.startsWith("哈")));
@@ -359,16 +415,15 @@ export function utteranceToneMark(
   frames: ProsodyFrame[],
   th: ToneThresholds = DEFAULT_TONE_THRESHOLDS,
 ): "～" | "…" | "？" | "！" | "" {
+  if (!marksOn(th)) return "";
   const islands = voicedIslands(frames);
   const last = islands[islands.length - 1];
   if (!last) return "";
   const hz = last.frames.filter((f) => f.hz > 80 && f.clarity >= th.voicedClarity).map((f) => f.hz);
-  if (hz.length >= 4) {
-    const third = Math.max(1, Math.ceil(hz.length / 3));
-    const start = avg(hz.slice(0, third));
-    const end = avg(hz.slice(-third));
-    if (start > 80 && end / start >= th.riseQuestion) return "？";
-  }
+  const ends = pitchEnds(hz);
+  const ratio = ends ? ends.end / ends.start : null;
+  if (isFlatPitch(ratio, th.flatZone)) return "";
+  if (ratio != null && ratio >= th.riseQuestion) return "？";
   return markForFrames(last.frames, th);
 }
 

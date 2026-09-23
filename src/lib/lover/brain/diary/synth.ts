@@ -1,6 +1,6 @@
 import { enqueue } from "../jobs.ts";
 import { now as wallClock } from "../clock.ts";
-import { callModel } from "../llm.ts";
+import { asModelInput, callModel } from "../llm.ts";
 import {
   addThemeMember,
   getFactorByName,
@@ -24,6 +24,7 @@ import {
 import { isoWeek, isoWeekStart, shiftDay } from "../time.ts";
 import type { Factor, Theme } from "../types.ts";
 import { loadPrompt } from "../prompts/store.ts";
+import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { recomputeStats } from "./recompute.ts";
 import { newId } from "../../storage.ts";
 import { getMemoryIndex } from "../voice/retrieve.ts";
@@ -170,14 +171,12 @@ async function assignBatch(noteIds: string[], themes: Theme[], jobId?: string) {
   if (!notes.length) return;
   const assignPrompt = await loadPrompt("assign");
   const result = await callModel("assign", {
-    system: assignPrompt.body,
-    input: `把笔记归入主题，可属于多个或都不属于。
-
-【themes】
-${themes.map((t) => `${t.id}|${t.name}|${t.definition}`).join("\n")}
-
-【notes】
-${notes.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n")}`,
+    ...asModelInput(
+      renderVariant(parsePromptBody("assign", assignPrompt.body), "notes", {
+        themes: themes.map((t) => `${t.id}|${t.name}|${t.definition}`).join("\n"),
+        notes: notes.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n"),
+      }),
+    ),
     schema: ASSIGN_SCHEMA,
     jobId,
     promptKey: assignPrompt.key,
@@ -231,24 +230,22 @@ export async function runSynth(
   const weeks = await listThemeWeeks();
   const synthPrompt = await loadPrompt("synth");
   const result = await callModel("synth", {
-    system: synthPrompt.body,
-    input: `维护主题。CREATE 需要至少 3 条笔记支持。user_feedback=rejected 的不能重建。
-
-【现有主题】
-${themes
-  .map((t) => {
-    const recent = weeks
-      .filter((w) => w.themeId === t.id)
-      .sort((a, b) => b.week.localeCompare(a.week))
-      .slice(0, 8)
-      .map((w) => `${w.week}:${w.mentions}`)
-      .join(",");
-    return `${t.id}|${t.name}|${t.definition}|members=${counts[t.id] ?? 0}|feedback=${t.userFeedback ?? ""}|weeks=${recent}`;
-  })
-  .join("\n")}
-
-【未归类笔记】
-${unassigned.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n").slice(0, 8000)}`,
+    ...asModelInput(
+      renderVariant(parsePromptBody("synth", synthPrompt.body), "themes", {
+        themes: themes
+          .map((t) => {
+            const recent = weeks
+              .filter((w) => w.themeId === t.id)
+              .sort((a, b) => b.week.localeCompare(a.week))
+              .slice(0, 8)
+              .map((w) => `${w.week}:${w.mentions}`)
+              .join(",");
+            return `${t.id}|${t.name}|${t.definition}|members=${counts[t.id] ?? 0}|feedback=${t.userFeedback ?? ""}|weeks=${recent}`;
+          })
+          .join("\n"),
+        notes: unassigned.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n").slice(0, 8000),
+      }),
+    ),
     schema: THEME_OPS_SCHEMA,
     jobId,
     promptKey: synthPrompt.key,
@@ -352,20 +349,17 @@ ${unassigned.map((n) => `${n.id}|${n.localDay}|${n.text}`).join("\n").slice(0, 8
     if (!weekKeys.length) continue;
     const assignWeek = await loadPrompt("assign");
     const judged = await callModel("assign", {
-      system: assignWeek.body,
-      input: `判断这些周是否对该主题有具体行动（day log 的 did/wins）。没有信息为 null。
-
-主题：${theme.name} ${theme.definition}
-
-【weeks】
-${weekKeys.join(", ")}
-
-【day logs】
-${days
-  .filter((d) => weekKeys.includes(isoWeek(d.day)))
-  .map((d) => `${d.day}|did=${JSON.stringify(d.did)}|wins=${JSON.stringify(d.wins)}`)
-  .join("\n")
-  .slice(0, 6000)}`,
+      ...asModelInput(
+        renderVariant(parsePromptBody("assign", assignWeek.body), "weeks", {
+          theme: `${theme.name} ${theme.definition}`,
+          weeks: weekKeys.join(", "),
+          day_logs: days
+            .filter((d) => weekKeys.includes(isoWeek(d.day)))
+            .map((d) => `${d.day}|did=${JSON.stringify(d.did)}|wins=${JSON.stringify(d.wins)}`)
+            .join("\n")
+            .slice(0, 6000),
+        }),
+      ),
       schema: ACTION_SCHEMA,
       jobId,
       promptKey: assignWeek.key,
@@ -395,20 +389,24 @@ ${days
   const recentDays = await listDays(shiftDay(end, -56), end);
   const factorPrompt = await loadPrompt("synth");
   const factorResult = await callModel("synth", {
-    system: factorPrompt.body,
-    input: `发现新的 factors。同一轮最多新增 5 个。rejected 的不能重建。
-
-【factors】
-${factors.map((f) => `${f.id}|${f.name}|${f.definition}|outcome=${f.isOutcome}|feedback=${f.userFeedback ?? ""}`).join("\n")}
-
-【findings】
-${findings.slice(0, 20).map((f) => `${f.kind}|${f.antecedentId}->${f.outcomeId}|lag=${f.lag}|lift=${f.lift}`).join("\n")}
-
-【day logs】
-${recentDays
-  .map((d) => `${d.day}|e=${d.energy}|m=${d.mood}|${d.summary}|wins=${JSON.stringify(d.wins)}|avoided=${JSON.stringify(d.avoided)}`)
-  .join("\n")
-  .slice(0, 8000)}`,
+    ...asModelInput(
+      renderVariant(parsePromptBody("synth", factorPrompt.body), "factors", {
+        factors: factors
+          .map((f) => `${f.id}|${f.name}|${f.definition}|outcome=${f.isOutcome}|feedback=${f.userFeedback ?? ""}`)
+          .join("\n"),
+        findings: findings
+          .slice(0, 20)
+          .map((f) => `${f.kind}|${f.antecedentId}->${f.outcomeId}|lag=${f.lag}|lift=${f.lift}`)
+          .join("\n"),
+        day_logs: recentDays
+          .map(
+            (d) =>
+              `${d.day}|e=${d.energy}|m=${d.mood}|${d.summary}|wins=${JSON.stringify(d.wins)}|avoided=${JSON.stringify(d.avoided)}`,
+          )
+          .join("\n")
+          .slice(0, 8000),
+      }),
+    ),
     schema: FACTOR_OPS_SCHEMA,
     jobId,
     promptKey: factorPrompt.key,
@@ -479,14 +477,18 @@ export async function runBackfill(factorId: string, jobId?: string): Promise<voi
     const batch = allDays.slice(i, i + 30);
     const backfillPrompt = await loadPrompt("backfill");
     const result = await callModel("backfill", {
-      system: backfillPrompt.body,
-      input: `按定义判定每天的 value（1/0/null）。
-
-factor: ${factor.name}
-definition: ${factor.definition}
-
-【days】
-${batch.map((d) => `${d.day}|${d.summary}|energy=${d.energy}|mood=${d.mood}|did=${JSON.stringify(d.did)}|wins=${JSON.stringify(d.wins)}|body=${d.body ?? ""}`).join("\n")}`,
+      ...asModelInput(
+        renderVariant(parsePromptBody("backfill", backfillPrompt.body), "main", {
+          factor_name: factor.name,
+          factor_definition: factor.definition,
+          days: batch
+            .map(
+              (d) =>
+                `${d.day}|${d.summary}|energy=${d.energy}|mood=${d.mood}|did=${JSON.stringify(d.did)}|wins=${JSON.stringify(d.wins)}|body=${d.body ?? ""}`,
+            )
+            .join("\n"),
+        }),
+      ),
       schema: VALUE_SCHEMA,
       jobId,
       promptKey: backfillPrompt.key,

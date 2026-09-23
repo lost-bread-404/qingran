@@ -50,6 +50,7 @@ export type CallModelInput = {
   system: string;
   input: string;
   inputParts?: string[];
+  messages?: Array<{ role: string; content: string }>;
   schema?: JsonSchema;
   tools?: ToolDef[];
   previous?: unknown[];
@@ -154,17 +155,32 @@ function parseJsonLoose(text: string): unknown {
   }
 }
 
+function apiMessagesOf(input: CallModelInput): Array<{ role: string; content: string }> {
+  if (input.messages?.length) return input.messages.map((message) => ({ role: message.role, content: message.content }));
+  return [{ role: "system", content: input.system }, ...userPartsOf(input).map((content) => ({ role: "user", content }))];
+}
+
 function userPartsOf(input: CallModelInput): string[] {
   if (input.inputParts && input.inputParts.length) return input.inputParts;
   return [input.input];
 }
 
 function joinedUser(input: CallModelInput): string {
-  return userPartsOf(input).join("\n-----\n");
+  const messages = apiMessagesOf(input);
+  let skippedSystem = false;
+  const parts: string[] = [];
+  for (const message of messages) {
+    if (!skippedSystem && message.role === "system") {
+      skippedSystem = true;
+      continue;
+    }
+    parts.push(message.content);
+  }
+  return parts.join("\n-----\n");
 }
 
 function inputCharsOf(input: CallModelInput): number {
-  return input.system.length + userPartsOf(input).reduce((s, p) => s + p.length, 0);
+  return apiMessagesOf(input).reduce((sum, message) => sum + message.content.length, 0);
 }
 
 function responseSnippet(raw: unknown, err?: unknown): string {
@@ -180,10 +196,7 @@ function responseSnippet(raw: unknown, err?: unknown): string {
 }
 
 function logMessagesOf(input: CallModelInput): Array<{ role: string; content: string }> {
-  const messages: Array<{ role: string; content: string }> = [
-    { role: "system", content: input.system },
-    ...userPartsOf(input).map((content) => ({ role: "user" as const, content })),
-  ];
+  const messages = [...apiMessagesOf(input)];
   if (input.previous?.length) {
     for (const part of input.previous) {
       if (!part || typeof part !== "object") continue;
@@ -193,6 +206,20 @@ function logMessagesOf(input: CallModelInput): Array<{ role: string; content: st
     }
   }
   return messages;
+}
+
+export function asModelInput(
+  messages: Array<{ role: string; content: string }>,
+): Pick<CallModelInput, "system" | "input" | "inputParts" | "messages"> {
+  const index = messages.findIndex((message) => message.role === "system");
+  const system = index >= 0 ? messages[index]!.content : "";
+  const rest = messages.filter((_, i) => i !== index);
+  return {
+    system,
+    input: rest.map((message) => message.content).join("\n-----\n"),
+    inputParts: rest.map((message) => message.content),
+    messages,
+  };
 }
 
 export const SPEND_HOLD_ERR = "spend-paused";
@@ -266,10 +293,10 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     return result;
   }
 
-  const parts = userPartsOf(input);
+  const apiMessages = apiMessagesOf(input);
   const body: Record<string, unknown> = {
     model: resolved.model,
-    input: [{ role: "system", content: input.system }, ...parts.map((content) => ({ role: "user", content }))],
+    input: input.previous?.length ? [...apiMessages, ...input.previous] : apiMessages,
     max_output_tokens: resolved.maxOutput,
     store: xaiStoreEnabled(),
   };
@@ -285,7 +312,6 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     };
   }
   if (input.tools?.length) body.tools = input.tools;
-  if (input.previous?.length) body.input = [...(body.input as unknown[]), ...input.previous];
   if (route === "reflect") body.prompt_cache_key = REFLECT_PROMPT_CACHE_KEY;
 
   const baseLog = {

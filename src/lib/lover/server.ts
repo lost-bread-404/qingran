@@ -1,8 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import {
-  buildConsolidatePrompt,
-  buildOverflowRememberPrompt,
-  buildRememberPrompt,
+  consolidateMessages,
+  overflowMessages,
+  rememberMessages,
   formatClock,
   parseConsolidateResult,
   parseOverflowResult,
@@ -62,12 +62,7 @@ export const rememberTurn = createServerFn({ method: "POST" })
           temperature: 0,
           max_tokens: 120,
           response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "user",
-              content: buildRememberPrompt(data.stretch, data.memories, loaded.body),
-            },
-          ],
+          messages: rememberMessages(data.stretch, data.memories, loaded.doc),
         }),
         signal: AbortSignal.timeout(8_000),
       });
@@ -106,17 +101,7 @@ export const rememberOverflow = createServerFn({ method: "POST" })
           temperature: 0,
           max_tokens: 180,
           response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "user",
-              content: buildOverflowRememberPrompt(
-                overflow,
-                data.lookahead.slice(0, 10),
-                data.memories,
-                loaded.body,
-              ),
-            },
-          ],
+          messages: overflowMessages(overflow, data.lookahead.slice(0, 10), data.memories, loaded.doc),
         }),
         signal: AbortSignal.timeout(10_000),
       });
@@ -156,7 +141,7 @@ export const consolidateMemories = createServerFn({ method: "POST" })
           temperature: 0.2,
           max_tokens: 700,
           response_format: { type: "json_object" },
-          messages: [{ role: "user", content: buildConsolidatePrompt(memories, clock, data.timeZone || "UTC", loaded.body) }],
+          messages: consolidateMessages(memories, clock, data.timeZone || "UTC", loaded.doc),
         }),
         signal: AbortSignal.timeout(20_000),
       });

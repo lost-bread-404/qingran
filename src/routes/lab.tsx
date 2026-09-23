@@ -31,9 +31,11 @@ import {
 import {
   exportTurnFeedbackFn,
   listTurnFeedbackFn,
-  type TurnFeedbackRow,
-} from "@/lib/lover/brain/turn-trace";
+} from "@/lib/lover/brain/turn-trace-fn";
+import type { TurnFeedbackRow } from "@/lib/lover/brain/turn-trace";
 import { CONFUSION_MIN_COUNT } from "@/lib/lover/hearing/confusions";
+import { formatClipVoiceLine } from "@/lib/lover/hearing/night-voice";
+import { formatToneReadingLine } from "@/lib/lover/hearing/sense";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
 import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/score";
 import type { AcousticTags } from "@/lib/lover/hearing/tags";
@@ -527,6 +529,9 @@ function HearingLabPage() {
                       {row.toneNote ? ` · ${row.toneNote}` : ""}
                       {row.hearToTriggerMs != null ? ` · 接话 ${row.hearToTriggerMs}ms` : ""}
                       {row.prerollPeakRms != null ? ` · 前1.5秒峰值 ${row.prerollPeakRms.toFixed(3)}` : ""}
+                      {` · ${formatClipVoiceLine(row)}`}
+                      {` · ${formatToneReadingLine(row)}`}
+                      {row.senseLine ? ` · ${row.senseLine}` : ""}
                     </p>
                     <p className="mt-1 text-sm">识别 {row.finalText || "（空）"}</p>
                     <p className="text-sm text-muted">标注 {row.goldText || "（空）"}</p>

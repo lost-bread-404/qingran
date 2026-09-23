@@ -5,6 +5,7 @@ import { EMPTY_MIND, type IndexItem, type Mind, type PortraitRow, type Theme } f
 import { coerceMind, validateMind } from "../mind-parse.ts";
 import { assembleRelatedIndex, resolveCoreIndex } from "./retrieve.ts";
 import { buildReflectorInput } from "./reflector.ts";
+import { defaultDoc, serializeDoc } from "../prompts/doc.ts";
 
 function item(id: string, extra: Partial<IndexItem> = {}): IndexItem {
   return {
@@ -147,6 +148,35 @@ test("portrait themes findings core index sort is deterministic", () => {
   const n1 = p.stable.indexOf("n1|");
   const n2 = p.stable.indexOf("n2|");
   assert.ok(n1 >= 0 && n2 > n1);
+  assert.match(p.stable, /【她的长期规律·主题】/);
+  assert.match(p.stable, /【记忆 index · 核心】/);
+  assert.doesNotMatch(p.stable, /只输出 insight/);
+});
+
+test("reflect user text comes from the template, not a hardcoded block", () => {
+  const doc = defaultDoc("reflect");
+  const variant = doc.variants[0];
+  if (!variant) throw new Error("missing reflect variant");
+  variant.messages[1] = { role: "user", content: "自定义稳定 {self}" };
+  const packed = buildReflectorInput(
+    {
+      charter: "你就是清然。",
+      selfSummary: "我在医学院。",
+      bondSummary: "",
+      portrait: [],
+      themes: [],
+      findings: [],
+      coreIndex: [],
+      clock: "现在",
+      relatedIndex: [],
+      oldMind: EMPTY_MIND,
+      conversation: "",
+    },
+    serializeDoc(doc),
+  );
+  assert.equal(packed.stable, "自定义稳定 我在医学院。");
+  assert.match(packed.turn, /只输出 insight 和 memory_ids/);
+  assert.doesNotMatch(packed.stable, /【我自己】/);
 });
 
 test("core index caps at 60, sorted by id; related caps at 30 and excludes core", () => {

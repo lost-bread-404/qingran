@@ -18,12 +18,12 @@ import { formatClock, localDay } from "../time.ts";
 import { now } from "../clock.ts";
 import { fillReflectTurn } from "../observability.ts";
 import { patchTurnTraceReflector } from "../turn-trace.ts";
+import { isNightNoiseBody } from "../../message-markup.ts";
 import { rememberBlock, rememberCharter, type ReflectRefs } from "../log-refs.ts";
 import { resolveTz } from "../tz.ts";
 import type { Finding, IndexItem, Mind, PortraitRow, StoredMessage, Theme } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
-import { defaultPrompt } from "../prompts/catalog.ts";
-import { fillTemplate } from "../prompts/fill.ts";
+import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import {
   formatIndexLine,
@@ -48,6 +48,7 @@ export { validateMind } from "../mind-parse.ts";
 
 export function formatReflectConversation(history: StoredMessage[], timeZone: string): string {
   return history
+    .filter((m) => !isNightNoiseBody(m.text))
     .map((m) => `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "Rosie" : "清然"}：${m.text}`)
     .join("\n");
 }
@@ -77,8 +78,8 @@ function findingLine(
     : `- 「${nameOf(f.antecedentId)}」之后${f.lag ? ` ${f.lag} 天内` : "当天"}常出现「${nameOf(f.outcomeId)}」（${f.n11} 次，是平时的 ${f.lift.toFixed(1)} 倍）`;
 }
 
-/** A = system（几乎不变），B = 第一段 user（日/记忆库变），C = 第二段 user（每轮变）。 */
-export function buildReflectorInput(parts: ReflectorParts, template = defaultPrompt("reflect")): ReflectorPacked {
+/** Data only. Headings and instructions live in the reflect template. */
+export function reflectVars(parts: ReflectorParts): Record<string, string> {
   const portrait = parts.portrait
     .filter((p) => p.status === "active")
     .slice()
@@ -86,44 +87,33 @@ export function buildReflectorInput(parts: ReflectorParts, template = defaultPro
   const themes = parts.themes.slice().sort((a, b) => a.id.localeCompare(b.id));
   const findings = parts.findings.slice().sort((a, b) => a.id.localeCompare(b.id));
   const core = parts.coreIndex.slice().sort((a, b) => a.id.localeCompare(b.id));
+  return {
+    system_prompt: parts.charter,
+    self: parts.selfSummary.trim() || "（还没有）",
+    bond: parts.bondSummary.trim() || "（还没有）",
+    portrait: portrait.map((p) => `${p.topic}：${p.body}`).join("\n") || "（还在认识她）",
+    themes: themes.length
+      ? themes.map((t) => `- ${t.name}：${t.definition}（${t.weekHint ?? "尚无周统计"}）`).join("\n")
+      : "（还没有）",
+    findings: findings.length ? findings.map((f) => f.line).join("\n") : "（还没有）",
+    index_core: core.map(formatIndexLine).join("\n") || "（还没有）",
+    clock: parts.clock,
+    index_related: parts.relatedIndex.map(formatIndexLine).join("\n") || "（还没有）",
+    old_mind: parts.oldMind.insight.trim() || "（空）",
+    conversation: parts.conversation.trim() || "（还没有）",
+  };
+}
 
-  const system = fillTemplate(template, { system_prompt: parts.charter }).trim();
-
-  let stable = `【我自己】
-${parts.selfSummary || "（还没有）"}
-
-【我们】
-${parts.bondSummary || "（还没有）"}
-
-【我眼中的她】
-${portrait.map((p) => `${p.topic}：${p.body}`).join("\n") || "（还在认识她）"}
-`;
-  if (themes.length) {
-    stable +=
-      "\n【她的长期规律·主题】\n" +
-      themes.map((t) => `- ${t.name}：${t.definition}（${t.weekHint ?? "尚无周统计"}）`).join("\n") +
-      "\n";
-  }
-  if (findings.length) {
-    stable += "\n【她的长期规律·发现】\n" + findings.map((f) => f.line).join("\n") + "\n";
-  }
-  stable += `\n【记忆 index · 核心】
-${core.map(formatIndexLine).join("\n") || "（还没有）"}`;
-
-  const turn = `现在是${parts.clock}。
-
-【记忆 index · 相关】
-${parts.relatedIndex.map(formatIndexLine).join("\n") || "（还没有）"}
-
-【上一刻的内心】
-${parts.oldMind.insight || "（空）"}
-
-【最近对话】
-${parts.conversation || "（还没有）"}
-
-只输出 insight 和 memory_ids。没有深层洞察时 insight 必须是空字符串。memory_ids 从【记忆 index · 核心】和【记忆 index · 相关】中挑，最多 6 个。`;
-
-  return { system, stable, turn };
+/** A = system（几乎不变），B = 第一段 user（日/记忆库变），C = 其余 user（每轮变）。文字全部来自模板。 */
+export function buildReflectorInput(parts: ReflectorParts, template?: string | null): ReflectorPacked {
+  const messages = renderVariant(parsePromptBody("reflect", template), "main", reflectVars(parts));
+  const system = messages.find((message) => message.role === "system")?.content ?? "";
+  const users = messages.filter((message) => message.role !== "system");
+  return {
+    system,
+    stable: users[0]?.content ?? "",
+    turn: users.slice(1).map((message) => message.content).join("\n\n"),
+  };
 }
 
 export async function runReflector(turnSeq: number, jobId?: string): Promise<Mind | null> {
@@ -142,7 +132,7 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
   const coreIndex = await getCoreIndexItems(day);
   const coreIds = new Set(coreIndex.map((i) => i.id));
   const rosieLast = history
-    .filter((m) => m.role === "user")
+    .filter((m) => m.role === "user" && !isNightNoiseBody(m.text))
     .slice(-4)
     .map((m) => m.text);
   const query = [...rosieLast, old.insight].filter(Boolean).join("\n");

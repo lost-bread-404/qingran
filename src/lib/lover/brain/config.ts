@@ -106,6 +106,15 @@ export const VOICE_IO = {
 
 export const DAY_BOUNDARY_HOUR = 4;
 export const HISTORY_WINDOW = 40;
+export const HISTORY_WINDOW_MIN = 0;
+export const HISTORY_WINDOW_MAX = 80;
+
+/** Voice context length. Unknown values stay at the default 40. */
+export function clampHistoryWindow(value: unknown, fallback = HISTORY_WINDOW): number {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(HISTORY_WINDOW_MIN, Math.min(HISTORY_WINDOW_MAX, Math.round(n)));
+}
 export const REFLECT_WINDOW = 12;
 export const ARCHIVE_BATCH_MAX = 40;
 export const ARCHIVE_MIN_OVERFLOW = 8;

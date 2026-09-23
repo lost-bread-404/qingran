@@ -1,4 +1,3 @@
-import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../../db.ts";
 import { gitCommitSha } from "../hearing/eval-meta.ts";
 import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
@@ -40,6 +39,10 @@ export type TurnTraceInput = {
     promptHash?: string | null;
     model?: string | null;
     ms?: number | null;
+    injectMemories?: boolean;
+    injectLongterm?: boolean;
+    historyWindow?: number;
+    injectLine?: string;
   };
   reply?: {
     text?: string;
@@ -226,13 +229,6 @@ export async function markTurnInterrupted(turnId: string): Promise<void> {
   }
 }
 
-export const markTurnInterruptedFn = createServerFn({ method: "POST" })
-  .validator((input: { turnId: string }) => input)
-  .handler(async ({ data }) => {
-    await markTurnInterrupted(data.turnId);
-    return { ok: true as const };
-  });
-
 function rowTrace(r: Record<string, unknown>): TurnTraceRow {
   return {
     turnId: String(r.turn_id),
@@ -336,38 +332,4 @@ export async function listTurnFeedback(limit = 200): Promise<TurnFeedbackRow[]> 
       : null,
   }));
 }
-
-function labSecret(): string {
-  if (process.env.HEARING_LAB_PASSWORD) return process.env.HEARING_LAB_PASSWORD;
-  if (!process.env.DATABASE_URL) return "qingran";
-  return "";
-}
-
-function assertLab(password: string) {
-  const secret = labSecret();
-  if (!secret || password !== secret) throw new Error("lab-locked");
-}
-
-export const listTurnFeedbackFn = createServerFn({ method: "POST" })
-  .validator((input: { password: string }) => input)
-  .handler(async ({ data }) => {
-    try {
-      assertLab(data.password);
-      return { ok: true as const, rows: await listTurnFeedback() };
-    } catch (err) {
-      return {
-        ok: false as const,
-        error: err instanceof Error ? err.message : String(err),
-        rows: [] as TurnFeedbackRow[],
-      };
-    }
-  });
-
-export const exportTurnFeedbackFn = createServerFn({ method: "POST" })
-  .validator((input: { password: string }) => input)
-  .handler(async ({ data }) => {
-    assertLab(data.password);
-    const rows = await listTurnFeedback(1000);
-    return { kind: "qingran-turn-feedback" as const, exportedAt: new Date().toISOString(), rows };
-  });
 

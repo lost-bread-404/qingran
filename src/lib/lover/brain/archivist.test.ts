@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { validateOps } from "./archive-ops.ts";
+import { openIsolatedSql } from "./eval-db.ts";
+import { listHistoryWindow, unarchivedOverflow, upsertMessage } from "./store.ts";
 import type { Note, StoredMessage } from "./types.ts";
 
 function msg(partial: Partial<StoredMessage> & Pick<StoredMessage, "id" | "role" | "text">): StoredMessage {
@@ -235,4 +237,61 @@ test("Qingran behavior recaps are dropped; concrete promises and Rosie facts are
   );
   const promise = out.find((x) => x.note.subject === "qingran");
   assert.equal(promise?.note.fromRosie, false);
+});
+
+test("unarchived overflow uses the same window as voice history, including zero", async () => {
+  const iso = await openIsolatedSql();
+  try {
+    for (let i = 0; i < 5; i++) {
+      await upsertMessage({
+        id: `m${i}`,
+        role: i % 2 ? "assistant" : "user",
+        text: `t${i}`,
+        createdAt: 1_000 + i,
+        timeZone: "UTC",
+      });
+    }
+    assert.deepEqual(
+      (await unarchivedOverflow(20, 2)).map((m) => m.id),
+      ["m0", "m1", "m2"],
+    );
+    assert.deepEqual(
+      (await unarchivedOverflow(20, 0)).map((m) => m.id),
+      ["m0", "m1", "m2", "m3", "m4"],
+    );
+    assert.deepEqual((await unarchivedOverflow(20, 5)).map((m) => m.id), []);
+    assert.equal((await listHistoryWindow(null, 0)).length, 0);
+    assert.equal((await listHistoryWindow("m4", 2)).map((m) => m.id).join(","), "m2,m3");
+  } finally {
+    await iso.close();
+  }
+});
+
+test("history keeps the chosen reply and ignores the other pages", async () => {
+  const iso = await openIsolatedSql();
+  const t = 2_000;
+  try {
+    await upsertMessage({ id: "u1", role: "user", text: "⟦选:a1⟧在吗", createdAt: t, timeZone: "UTC" });
+    await upsertMessage({
+      id: "a1",
+      role: "assistant",
+      text: "⟦回:u1⟧第一句",
+      createdAt: t + 1,
+      timeZone: "UTC",
+    });
+    await upsertMessage({
+      id: "a2",
+      role: "assistant",
+      text: "⟦回:u1⟧第二句",
+      createdAt: t + 2,
+      timeZone: "UTC",
+    });
+    assert.deepEqual(
+      (await listHistoryWindow(null, 10)).map((m) => m.id),
+      ["u1", "a1"],
+    );
+    assert.deepEqual((await listHistoryWindow("u1", 10)).map((m) => m.id), []);
+  } finally {
+    await iso.close();
+  }
 });

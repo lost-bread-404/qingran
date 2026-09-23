@@ -25,6 +25,7 @@ import { hearUtterance } from "@/lib/lover/hear";
 import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { logCallAudio } from "@/lib/lover/call-audio-log";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { recordCuts } from "@/lib/lover/hearing/sense";
 import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
 import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
 import { attachPcmTap, peakRms, peakTimedRms, PRE_ROLL_SEC, pushTimedRms, wavFromTap, type PcmTap, type TimedRms } from "@/lib/lover/pcm-tap";
@@ -361,7 +362,6 @@ export function useCall({ onUtterance, prompt }: Options) {
     const now = performance.now();
     if (analyser) {
       const speaking = phaseRef.current === "speaking-you";
-      const debugVad = getHearingSession().debugHearing;
       const frame = sampleProsody(
         analyser,
         ctxRef.current?.sampleRate ?? 44100,
@@ -371,12 +371,14 @@ export function useCall({ onUtterance, prompt }: Options) {
       if (speaking) {
         framesRef.current.push(frame);
       }
+      const session = getHearingSession();
+      const cuts = recordCuts(session.sense);
       const rms = frame.rms;
       pushTimedRms(prerollLevelsRef.current, { t: now, rms }, PRE_ROLL_SEC * 1000);
       noiseFloorRef.current = nextFloor(noiseFloorRef.current, rms, speaking);
       const floor = noiseFloorRef.current;
-      const rising = isSpeechStart(rms, floor, frame.clarity, frame.bright, debugVad);
-      const cut = speaking ? holdThreshold(floor, debugVad) : startThreshold(floor, debugVad);
+      const rising = isSpeechStart(rms, floor, frame.clarity, frame.bright, false, cuts);
+      const cut = speaking ? holdThreshold(floor, false, cuts) : startThreshold(floor, false, cuts);
       setLevel(Math.min(1, rms * 8));
       setThreshold(Math.min(1, cut * 8));
       if (deafRef.current || phaseRef.current !== "listening" || now < listenReadyAtRef.current) {
@@ -387,8 +389,8 @@ export function useCall({ onUtterance, prompt }: Options) {
           canBeginUtterance({
             rising: true,
             heldMs: now - speechRiseAtRef.current,
-            requireHold: debugVad,
-            minMs: MIN_SPEECH_MS,
+            requireHold: session.sense.minVoicedMs > 0,
+            minMs: session.sense.minVoicedMs || MIN_SPEECH_MS,
           })
         ) {
           speechRiseAtRef.current = 0;
@@ -398,7 +400,7 @@ export function useCall({ onUtterance, prompt }: Options) {
         speechRiseAtRef.current = 0;
       }
       if (speaking) {
-        const voiced = isHoldVoiced(rms, floor, debugVad);
+        const voiced = isHoldVoiced(rms, floor, false, cuts);
         if (voiced) {
           if (!voiceBurstAtRef.current) voiceBurstAtRef.current = now;
           if (now - voiceBurstAtRef.current >= VOICE_SPIKE_MS) lastVoiceRef.current = now;

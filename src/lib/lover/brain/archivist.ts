@@ -1,7 +1,7 @@
-import { ARCHIVE_BATCH_MAX, ARCHIVE_MIN_OVERFLOW, HISTORY_WINDOW, SESSION_GAP_MS } from "./config.ts";
+import { ARCHIVE_BATCH_MAX, ARCHIVE_MIN_OVERFLOW, HISTORY_WINDOW, SESSION_GAP_MS, clampHistoryWindow } from "./config.ts";
 import { now } from "./clock.ts";
 import { enqueue } from "./jobs.ts";
-import { callModel } from "./llm.ts";
+import { callModel, asModelInput } from "./llm.ts";
 import { validateOps, type RawOp } from "./archive-ops.ts";
 import {
   addLink,
@@ -17,10 +17,12 @@ import {
   unarchivedForDay,
   unarchivedForSession,
   unarchivedOverflow,
+  getStoredHistoryWindow,
   upsertNote,
 } from "./store.ts";
 import type { Note, StoredMessage } from "./types.ts";
 import { loadPrompt } from "./prompts/store.ts";
+import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
 import { getMemoryIndex } from "./voice/retrieve.ts";
 
 const SCHEMA = {
@@ -71,16 +73,33 @@ const SCHEMA = {
 
 export { validateOps };
 
-export function buildArchivistInput(pending: StoredMessage[], candidates: Note[]): string {
-  return `输出 JSON：{"ops":[...]}
+export function archiveVars(pending: StoredMessage[], candidates: Note[]): Record<string, string> {
+  return {
+    related_notes: candidates.map((n) => `${n.id}|${n.localDay}|${n.subject}|${n.text}`).join("\n") || "（没有）",
+    conversation:
+      pending
+        .map((m) => `${m.id}|${new Date(m.createdAt).toISOString()}|${m.role === "user" ? "Rosie" : "清然"}|${m.text}`)
+        .join("\n") || "（没有）",
+  };
+}
 
-【已有相关笔记】（id|日期|subject|text）
-${candidates.map((n) => `${n.id}|${n.localDay}|${n.subject}|${n.text}`).join("\n") || "（没有）"}
+export function buildArchivistMessages(pending: StoredMessage[], candidates: Note[], template?: string) {
+  return renderVariant(parsePromptBody("archive", template), "main", archiveVars(pending, candidates));
+}
 
-【对话】（id|时间|说话人|内容）
-${pending
-  .map((m) => `${m.id}|${new Date(m.createdAt).toISOString()}|${m.role === "user" ? "Rosie" : "清然"}|${m.text}`)
-  .join("\n")}`;
+export function buildArchivistInput(pending: StoredMessage[], candidates: Note[], template?: string): string {
+  return buildArchivistMessages(pending, candidates, template)
+    .filter((message) => message.role === "user")
+    .map((message) => message.content)
+    .join("\n");
+}
+
+export async function currentArchiveVars(): Promise<Record<string, string>> {
+  const keep = await getStoredHistoryWindow();
+  const overflow = await unarchivedOverflow(ARCHIVE_BATCH_MAX, keep);
+  const pending = overflow.slice(0, ARCHIVE_BATCH_MAX);
+  const candidates = pending.length ? await candidateNotes(pending) : [];
+  return archiveVars(pending, candidates);
 }
 
 async function candidateNotes(batch: StoredMessage[]): Promise<Note[]> {
@@ -111,15 +130,14 @@ export async function runArchivist(ids: string[], jobId?: string): Promise<void>
   if (!pending.length) return;
 
   const candidates = await candidateNotes(pending);
-  const input = buildArchivistInput(pending, candidates);
+  const loaded = await loadPrompt("archive");
+  const messages = buildArchivistMessages(pending, candidates, loaded.body);
   const refs = {
     batchMessageIds: pending.map((m) => m.id),
     candidateNoteIds: candidates.map((n) => n.id),
   };
-  const loaded = await loadPrompt("archive");
   const result = await callModel("archive", {
-    system: loaded.body,
-    input,
+    ...asModelInput(messages),
     schema: SCHEMA,
     jobId,
     refs,
@@ -155,8 +173,9 @@ export async function runArchivist(ids: string[], jobId?: string): Promise<void>
   await bumpNotesVersion();
 }
 
-export async function enqueueArchiveIfNeeded(userCreatedAt = now()): Promise<void> {
-  const overflow = await unarchivedOverflow(ARCHIVE_BATCH_MAX);
+export async function enqueueArchiveIfNeeded(userCreatedAt = now(), historyWindow?: number): Promise<void> {
+  const keep = historyWindow == null ? await getStoredHistoryWindow() : clampHistoryWindow(historyWindow);
+  const overflow = await unarchivedOverflow(ARCHIVE_BATCH_MAX, keep);
   if (overflow.length >= ARCHIVE_MIN_OVERFLOW) {
     const batch = overflow.slice(0, ARCHIVE_BATCH_MAX);
     await enqueue("archive", `archive:${batch[0]!.id}`, { ids: batch.map((m) => m.id) });

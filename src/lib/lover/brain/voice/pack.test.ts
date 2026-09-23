@@ -43,7 +43,6 @@ test("voice messages keep charter first and tail last before user", () => {
     history: [
       { id: "u1", role: "user", text: "嗯", createdAt: 1, kind: "say", archivedAt: null, sessionId: "s", localDay: "2026-09-15" },
     ],
-    tail: "现在是星期二。\n尾巴",
     userText: "今晚不想动",
   });
   assert.equal(msgs[0]!.role, "system");
@@ -52,7 +51,7 @@ test("voice messages keep charter first and tail last before user", () => {
   assert.equal(msgs[2]!.role, "user");
   assert.equal(msgs[2]!.content, "嗯");
   assert.equal(msgs[3]!.role, "system");
-  assert.match(msgs[3]!.content, /尾巴/);
+  assert.match(msgs[3]!.content, /说话要有逻辑/);
   assert.equal(msgs.at(-1)!.role, "user");
   assert.equal(msgs.at(-1)!.content, "今晚不想动");
 });
@@ -92,7 +91,7 @@ test("insight is injected in full without ellipsis", () => {
     careHint: false,
   });
   assert.match(tail, /【内心】/);
-  assert.match(tail, /她反复把累说成懒/);
+  assert.match(tail, /你反复把累说成懒/);
   assert.doesNotMatch(tail, /…/);
 });
 
@@ -246,5 +245,99 @@ test("voiceInputChars splits system mind notes history user", () => {
   assert.deepEqual(parseVoiceInputCharsLine(line), c);
   assert.equal(stripLabel("none"), "未裁剪");
   assert.equal(stripLabel("mind"), "去掉了 mind");
+});
+
+test("voice inject switches omit memories, longterm, and history independently", () => {
+  const base = {
+    charter: "你就是清然。",
+    selfSummary: "我在医学院",
+    bondSummary: "叫她小猫",
+    portrait: [{ id: "p", topic: "安慰", body: "别讲道理", status: "active" as const, evidenceIds: [], lastSeen: 0, updatedAt: 0 }],
+    history: [
+      { id: "u1", role: "user" as const, text: "昨天的事", createdAt: 1, kind: "say" as const, archivedAt: null, sessionId: "s", localDay: "2026-09-15" },
+      { id: "a1", role: "assistant" as const, text: "先休息", createdAt: 2, kind: "say" as const, archivedAt: null, sessionId: "s", localDay: "2026-09-15" },
+    ],
+    userText: "今晚不想动",
+    notes: [note],
+    clock: "星期二 21:00",
+    timeZone: "UTC",
+    mind: { ...EMPTY_MIND, turn_seq: 1, insight: "她把累说成懒" },
+  };
+  const offMem = buildVoiceMessages({ ...base, inject: { memories: false, longterm: true, history: 40 } })
+    .map((m) => m.content)
+    .join("\n");
+  assert.doesNotMatch(offMem, /【可以用的记忆】/);
+  assert.doesNotMatch(offMem, /难过时想被叫小猫/);
+  assert.match(offMem, /【我自己】/);
+  assert.match(offMem, /我在医学院/);
+  assert.match(offMem, /你把累说成懒/);
+  assert.match(offMem, /昨天的事/);
+
+  const offLong = buildVoiceMessages({ ...base, inject: { memories: true, longterm: false, history: 40 } })
+    .map((m) => m.content)
+    .join("\n");
+  assert.doesNotMatch(offLong, /【我自己】/);
+  assert.doesNotMatch(offLong, /【我们】/);
+  assert.doesNotMatch(offLong, /【我眼中的她】/);
+  assert.doesNotMatch(offLong, /我在医学院/);
+  assert.doesNotMatch(offLong, /别讲道理/);
+  assert.match(offLong, /难过时想被叫小猫/);
+  assert.match(offLong, /你把累说成懒/);
+
+  const noHist = buildVoiceMessages({ ...base, inject: { memories: true, longterm: true, history: 0 } });
+  assert.equal(noHist.some((m) => m.content === "昨天的事" || m.content === "先休息"), false);
+  assert.equal(noHist.at(-1)!.content, "今晚不想动");
+  assert.match(noHist.map((m) => m.content).join("\n"), /【我自己】/);
+});
+
+test("reply slots are rewritten into 清然's voice; charter, history, and this turn stay", () => {
+  const msgs = buildVoiceMessages({
+    charter: "你就是清然。正在和 Rosie 语音通话。",
+    selfSummary: "清然在医学院",
+    bondSummary: "叫她小猫",
+    portrait: [
+      {
+        id: "p",
+        topic: "日程",
+        body: "Rosie 今天日程很满",
+        status: "active",
+        evidenceIds: [],
+        lastSeen: 0,
+        updatedAt: 0,
+      },
+    ],
+    history: [
+      {
+        id: "u1",
+        role: "user",
+        text: "Rosie 说了这句话",
+        createdAt: 1,
+        kind: "say",
+        archivedAt: null,
+        sessionId: "s",
+        localDay: "2026-09-15",
+      },
+    ],
+    userText: "清然在吗",
+    notes: [{ ...note, text: "清然承诺陪 Rosie 写完" }],
+    clock: "星期二 21:00",
+    timeZone: "UTC",
+    mind: { ...EMPTY_MIND, turn_seq: 1, insight: "她其实一直在怕" },
+  });
+  const charter = msgs[0]!.content;
+  const longterm = msgs[1]!.content;
+  const tail = msgs[3]!.content;
+  assert.match(charter, /你就是清然/);
+  assert.match(charter, /正在和 Rosie 语音通话/);
+  assert.match(longterm, /我在医学院/);
+  assert.match(longterm, /叫你小猫/);
+  assert.match(longterm, /你今天日程很满/);
+  assert.doesNotMatch(longterm, /Rosie|清然/);
+  assert.doesNotMatch(longterm, /叫她/);
+  assert.match(tail, /我承诺陪你写完/);
+  assert.match(tail, /你其实一直在怕/);
+  assert.doesNotMatch(tail, /Rosie|清然/);
+  assert.equal(msgs[2]!.content, "Rosie 说了这句话");
+  assert.equal(msgs.at(-1)!.content, "清然在吗");
 });
 

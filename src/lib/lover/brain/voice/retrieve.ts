@@ -165,7 +165,7 @@ export async function getRelatedIndexItems(query: string, coreIds: Set<string>):
 export async function pickHotNotes(
   mindIds: string[],
   query: string,
-  opts: { jump: boolean },
+  opts: { jump: boolean; dry?: boolean },
 ): Promise<HotPick> {
   const N = opts.jump ? JUMP_PICK_MIND_SLOTS : PICK_MIND_SLOTS;
   const M = opts.jump ? JUMP_PICK_QUERY_SLOTS : PICK_QUERY_SLOTS;
@@ -204,7 +204,7 @@ export async function pickHotNotes(
   const byId = new Map(fetched.map((n) => [n.id, n]));
   const notes = picked.map((id) => byId.get(id)).filter((n): n is Note => Boolean(n)).slice(0, PICK_MAX);
   const keep = new Set(notes.map((n) => n.id));
-  await bumpRecall(notes.map((n) => n.id));
+  if (!opts.dry) await bumpRecall(notes.map((n) => n.id));
   const queryIdSet = new Set(queryIds);
   return {
     notes,

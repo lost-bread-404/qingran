@@ -14,7 +14,7 @@ import { checkSpend } from "@/lib/lover/brain/spend/check";
 import { talkRateHit } from "@/lib/lover/brain/spend/rate";
 import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
-import { lockedProfile, type Profile } from "@/lib/lover/types";
+import { formatVoiceInjectLine, lockedProfile, type Profile } from "@/lib/lover/types";
 import { type TalkStreamEvent } from "@/lib/lover/stream-talk";
 import { logTalkTurn, talkFailFromResult } from "@/lib/lover/talk-fail";
 import { recordTurnTrace } from "@/lib/lover/brain/turn-trace";
@@ -26,6 +26,7 @@ type TalkBody = {
   userMsgId?: string;
   userCreatedAt?: number;
   replyId?: string;
+  replyCreatedAt?: number;
   profile?: Profile;
   nowMs?: number;
   timeZone?: string;
@@ -137,12 +138,13 @@ export const Route = createFileRoute("/api/talk")({
               const totalMs = Date.now() - tVoice;
 
               const display = speech.trim();
+              const replyAt = Number(body.replyCreatedAt);
               if (display) {
                 await upsertMessage({
                   id: replyId,
                   role: "assistant",
                   text: `⟦回:${userMsgId}⟧${display}`.slice(0, 4000),
-                  createdAt: userCreatedAt + 1,
+                  createdAt: Number.isFinite(replyAt) && replyAt > 0 ? replyAt : userCreatedAt + 1,
                   timeZone,
                 });
               }
@@ -183,6 +185,7 @@ export const Route = createFileRoute("/api/talk")({
                   failed,
                   failMessage: fallback.failMessage,
                   modelFallback: fallback.modelFallback,
+                  injectLine: formatVoiceInjectLine(ctx.inject),
                 }),
               });
               const selectedIds = [...ctx.pickedIds, ...ctx.queryIds];
@@ -206,6 +209,10 @@ export const Route = createFileRoute("/api/talk")({
                   promptHash: ctx.charterHash,
                   model: streamResult.model,
                   ms: totalMs,
+                  injectMemories: ctx.inject.memories,
+                  injectLongterm: ctx.inject.longterm,
+                  historyWindow: ctx.inject.history,
+                  injectLine: formatVoiceInjectLine(ctx.inject),
                 },
                 reply: {
                   text: display,
@@ -215,7 +222,7 @@ export const Route = createFileRoute("/api/talk")({
               });
 
               await enqueue("reflect", `reflect:${userCreatedAt}`, { turnSeq: userCreatedAt });
-              await enqueueArchiveIfNeeded(userCreatedAt);
+              await enqueueArchiveIfNeeded(userCreatedAt, ctx.inject.history);
               await enqueuePeriodicIfDue(nowMs, timeZone);
               await runInBackground(() => drainJobs(LONG_DRAIN_MS));
             } catch (err) {
@@ -238,6 +245,7 @@ export const Route = createFileRoute("/api/talk")({
                   outcome.message ?? "线路有点不稳",
                   outcome.log.errorName ? `${outcome.log.errorName}: ${outcome.log.errorMessage}` : null,
                   `ms=${outcome.log.ms}`,
+                  packed ? formatVoiceInjectLine(packed.inject) : null,
                 ]
                   .filter(Boolean)
                   .join("\n");

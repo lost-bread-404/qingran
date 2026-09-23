@@ -1,5 +1,5 @@
 import { Check, Pencil, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,9 +23,11 @@ import {
   brainListVoiceModels,
   brainResetMind,
   brainRestorePrompt,
+  brainRollbackPrompt,
   brainSaveLongLayer,
   brainSaveNote,
   brainSavePrompt,
+  brainSyncHistoryWindow,
 } from "@/lib/lover/brain/api";
 import type { BrainLogRow, Mind, Note, PortraitRow, Subject } from "@/lib/lover/brain/types";
 import { parseVoiceInputCharsLine } from "@/lib/lover/brain/voice/pack-build";
@@ -40,25 +42,17 @@ import {
   type LogRangeId,
 } from "@/lib/lover/call-log-view";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/lover/memory";
+import { PromptStepEditor, type PromptEditorItem } from "@/components/lover/prompt-step-editor";
+import { HearingSensePanel } from "@/components/lover/hearing-sense-panel";
 import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
-import { DEFAULT_SYSTEM_PROMPT, VOICE_EFFORT_OPTIONS, isVoiceEffort, type Profile, type VoiceEffort } from "@/lib/lover/types";
-import { SILENCE_MS_OPTIONS, type SilenceMs } from "@/lib/lover/vad";
+import { DEFAULT_SYSTEM_PROMPT, VOICE_EFFORT_OPTIONS, clampHistoryWindow, formatVoiceInjectLine, isVoiceEffort, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
+import { parseSenseLine } from "@/lib/lover/hearing/sense";
 import { cn } from "@/lib/utils";
 
 type Tab = "prompt" | "prompts" | "notes" | "portrait" | "mind" | "log" | "hearing";
 
-type PromptItem = {
-  key: string;
-  name: string;
-  blurb: string;
-  placeholders: Array<{ token: string; meaning: string }>;
-  defaultText: string;
-  body: string;
-  hash: string;
-  custom: boolean;
-  updatedAt: number | null;
-};
+type PromptItem = PromptEditorItem;
 
 type CallDetail = {
   messages: CallLogMessage[];
@@ -161,8 +155,12 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [voiceEffort, setVoiceEffort] = useState<VoiceEffort>(profile.voiceEffort);
   const [voiceModels, setVoiceModels] = useState<VoiceModelOption[] | null>(null);
   const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
-  const [silenceMs, setSilenceMs] = useState<SilenceMs>(profile.silenceMs);
+  const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
   const [injectMind, setInjectMind] = useState(profile.injectMind);
+  const [injectMemories, setInjectMemories] = useState(profile.injectMemories);
+  const [injectLongterm, setInjectLongterm] = useState(profile.injectLongterm);
+  const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
+  const historySyncRef = useRef(0);
   const [hygieneNotes, setHygieneNotes] = useState<Array<{ id: string; text: string; subject: string; localDay: string }>>([]);
   const [promptItems, setPromptItems] = useState<PromptItem[]>([]);
   const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({});
@@ -182,8 +180,11 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setDebugHearing(profile.debugHearing);
     setVoiceModel(profile.voiceModel);
     setVoiceEffort(profile.voiceEffort);
-    setSilenceMs(profile.silenceMs);
+    setSense(profile.hearingSense);
     setInjectMind(profile.injectMind);
+    setInjectMemories(profile.injectMemories);
+    setInjectLongterm(profile.injectLongterm);
+    setHistoryWindow(profile.historyWindow);
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setTab("prompt");
     setPromptItems([]);
@@ -291,9 +292,25 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       debugHearing,
       voiceModel,
       voiceEffort,
-      silenceMs,
+      silenceMs: sense.endWaitMs,
+      nightVoicedMin: sense.voicedMin,
+      nightMinMs: sense.noiseMinMs,
+      hearingSense: sense,
       injectMind,
+      injectMemories,
+      injectLongterm,
+      historyWindow,
       ...patch,
+    });
+  }
+
+  function commitSense(next: HearingSense) {
+    setSense(next);
+    persistProfile({
+      hearingSense: next,
+      silenceMs: next.endWaitMs,
+      nightVoicedMin: next.voicedMin,
+      nightMinMs: next.noiseMinMs,
     });
   }
 
@@ -301,6 +318,16 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setVoiceModel(nextModel);
     setVoiceEffort(nextEffort);
     persistProfile({ voiceModel: nextModel, voiceEffort: nextEffort });
+  }
+
+  function commitHistoryWindow(nextRaw: number) {
+    const next = clampHistoryWindow(nextRaw);
+    setHistoryWindow(next);
+    persistProfile({ historyWindow: next });
+    window.clearTimeout(historySyncRef.current);
+    historySyncRef.current = window.setTimeout(() => {
+      void brainSyncHistoryWindow({ data: { historyWindow: next } }).catch(() => undefined);
+    }, 400);
   }
 
   function savePrompt() {
@@ -316,8 +343,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setPromptBusy(key);
     setPromptError(null);
     try {
-      const saved = (await brainSavePrompt({ data: { key, body } })) as PromptItem;
-      setPromptItems((rows) => rows.map((row) => (row.key === key ? { ...row, ...saved, name: row.name, blurb: row.blurb, placeholders: row.placeholders, defaultText: row.defaultText } : row)));
+      const saved = (await brainSavePrompt({ data: { key, body } })) as unknown as PromptItem;
+      setPromptItems((rows) => rows.map((row) => (row.key === key ? { ...row, ...saved, name: row.name, blurb: row.blurb, placeholders: row.placeholders } : row)));
       setPromptDrafts((d) => ({ ...d, [key]: saved.body }));
     } catch {
       setPromptError("没记下。");
@@ -330,17 +357,44 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setPromptBusy(key);
     setPromptError(null);
     try {
-      const restored = (await brainRestorePrompt({ data: { key } })) as PromptItem;
+      const restored = (await brainRestorePrompt({ data: { key } })) as unknown as PromptItem;
       setPromptItems((rows) =>
         rows.map((row) =>
           row.key === key
-            ? { ...row, ...restored, name: row.name, blurb: row.blurb, placeholders: row.placeholders, defaultText: row.defaultText }
+            ? { ...row, ...restored, name: row.name, blurb: row.blurb, placeholders: row.placeholders }
             : row,
         ),
       );
       setPromptDrafts((d) => ({ ...d, [key]: restored.body }));
     } catch {
       setPromptError("没恢复成默认。");
+    } finally {
+      setPromptBusy(null);
+    }
+  }
+
+  async function rollbackPromptItem(key: string, hash: string) {
+    setPromptBusy(key);
+    setPromptError(null);
+    try {
+      const restored = (await brainRollbackPrompt({ data: { key, hash } })) as unknown as PromptItem;
+      setPromptItems((rows) =>
+        rows.map((row) =>
+          row.key === key
+            ? {
+                ...row,
+                ...restored,
+                name: row.name,
+                blurb: row.blurb,
+                placeholders: row.placeholders,
+                versions: (row.versions ?? []).filter((version) => version.hash !== restored.hash),
+              }
+            : row,
+        ),
+      );
+      setPromptDrafts((d) => ({ ...d, [key]: restored.body }));
+    } catch {
+      setPromptError("没退回去。");
     } finally {
       setPromptBusy(null);
     }
@@ -572,69 +626,24 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
             <p className="text-xs text-subtle">
-              每个步骤发给模型的指令。人设只用「人设」那一份，这里用 {"{system_prompt}"} 引用。记下之后下一轮立刻生效。
+              每一步都是一组消息，不只是 system。展开后可以改每一条的 role 和正文，增删消息。占位符旁可以看当前内容，也可以预览真正发给模型的 messages。人设只用「人设」那一份，这里用 {"{system_prompt}"} 引用。记下之后下一轮立刻生效。
             </p>
             {promptError ? <p className="text-sm text-live">{promptError}</p> : null}
             {promptItems.length === 0 ? (
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
-              promptItems.map((item) => {
-                const draftBody = promptDrafts[item.key] ?? item.body;
-                const dirty = draftBody !== item.body;
-                const canRestore = item.custom || item.updatedAt != null;
-                return (
-                  <details key={item.key} className="rounded-md bg-surface-2 px-3 py-2">
-                    <summary className="cursor-pointer">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm text-fg">{item.name}</span>
-                        {item.custom ? <span className="text-[11px] text-live">已改</span> : null}
-                      </div>
-                      <p className="mt-1 text-xs text-subtle">{item.blurb}</p>
-                    </summary>
-                    {item.placeholders.length ? (
-                      <ul className="mt-2 flex flex-col gap-1 text-[11px] text-subtle">
-                        {item.placeholders.map((p) => (
-                          <li key={p.token}>
-                            <span className="text-fg">{`{${p.token}}`}</span>
-                            {" · "}
-                            {p.meaning}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="mt-2 text-[11px] text-subtle">这一步没有占位符。</p>
-                    )}
-                    <Textarea
-                      value={draftBody}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setPromptDrafts((d) => ({ ...d, [item.key]: value }));
-                        keepCaretVisible(e.currentTarget);
-                      }}
-                      onSelect={(e) => keepCaretVisible(e.currentTarget)}
-                      className="mt-2 min-h-40 resize-y font-mono text-xs leading-relaxed"
-                    />
-                    <div className="mt-2 flex gap-2">
-                      <Button
-                        type="button"
-                        size="pill"
-                        disabled={promptBusy === item.key || !dirty}
-                        onClick={() => void savePromptItem(item.key)}
-                      >
-                        {promptBusy === item.key ? "记下…" : "记下"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={promptBusy === item.key || !canRestore}
-                        onClick={() => void restorePromptItem(item.key)}
-                      >
-                        恢复默认
-                      </Button>
-                    </div>
-                  </details>
-                );
-              })
+              promptItems.map((item) => (
+                <PromptStepEditor
+                  key={item.key}
+                  item={item}
+                  draft={promptDrafts[item.key] ?? item.body}
+                  busy={promptBusy === item.key}
+                  onDraft={(body) => setPromptDrafts((d) => ({ ...d, [item.key]: body }))}
+                  onSave={() => void savePromptItem(item.key)}
+                  onRestore={() => void restorePromptItem(item.key)}
+                  onRollback={(hash) => void rollbackPromptItem(item.key, hash)}
+                />
+              ))
             )}
           </div>
         </div>
@@ -903,6 +912,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       ) : tab === "hearing" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
+            <HearingSensePanel sense={sense} labPassword={labPassword} onChange={commitSense} />
             <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
               <input
                 type="checkbox"
@@ -943,6 +953,66 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                     <span className="block text-xs text-subtle">关掉就只靠对话历史、记忆和人设，方便对比。</span>
                   </span>
                 </label>
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={injectMemories}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setInjectMemories(next);
+                      persistProfile({ injectMemories: next });
+                    }}
+                  />
+                  <span>
+                    <span className="block text-sm">记忆</span>
+                    <span className="block text-xs text-subtle">
+                      关掉后这一轮不带检索到的笔记。检索照常跑，并记在链路里，方便对比。
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={injectLongterm}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setInjectLongterm(next);
+                      persistProfile({ injectLongterm: next });
+                    }}
+                  />
+                  <span>
+                    <span className="block text-sm">长期记忆</span>
+                    <span className="block text-xs text-subtle">
+                      关掉后不带我自己、我们、我眼中的她。不影响后台的内心、记笔记和画像。
+                    </span>
+                  </span>
+                </label>
+                <div>
+                  <div className="mb-1 flex items-baseline justify-between gap-3">
+                    <p className="text-sm">上下文长度</p>
+                    <p className="text-sm tabular-nums">{historyWindow}</p>
+                  </div>
+                  <p className="mb-2 text-xs text-subtle">
+                    最近多少条对话写进这一轮。0 就是完全不带历史。下一句生效。归档也按这个数判断哪些话滑出窗口。
+                  </p>
+                  <input
+                    type="range"
+                    min={0}
+                    max={80}
+                    step={1}
+                    value={historyWindow}
+                    aria-label="上下文长度"
+                    onChange={(e) => commitHistoryWindow(Number(e.target.value))}
+                    className="h-11 w-full accent-accent"
+                  />
+                  <p className="mt-2 text-xs text-subtle">
+                    {formatVoiceInjectLine(
+                      voiceInjectFromProfile({ injectMemories, injectLongterm, historyWindow }),
+                    )}
+                  </p>
+                </div>
                 <div>
                   <p className="mb-2 text-sm">回复模型</p>
                   <p className="mb-2 text-xs text-subtle">
@@ -1001,112 +1071,90 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                     })}
                   </div>
                 </div>
-                <div>
-                  <p className="mb-2 text-sm">听力引擎</p>
-                  <p className="mb-2 text-xs text-subtle">实时默认 xAI + Apple。其它引擎会拒答亲密内容，只留在这里备查。</p>
-                  {slowEngineHint(hearingProvider) ? (
-                    <p className="mb-2 text-xs text-live">{slowEngineHint(hearingProvider)}</p>
-                  ) : null}
-                  <div className="grid grid-cols-2 gap-2">
-                    {HEARING_PROVIDERS.map((id) => {
-                      const ready = providerReady ? providerReady[id] : true;
-                      const missing = PROVIDER_ENV[id];
-                      return (
-                        <button
-                          key={id}
-                          type="button"
-                          disabled={!ready}
-                          onClick={() => ready && setHearingProvider(id)}
-                          className={cn(
-                            "min-h-11 rounded-md px-3 py-3 text-left text-sm disabled:opacity-50",
-                            hearingProvider === id ? "bg-accent text-accent-fg" : "bg-bg text-muted",
-                          )}
-                        >
-                          <span className="block">{({ xai: "xAI", qwen: "Qwen", gemini: "Gemini", selfhost: "自部署" } as Record<string, string>)[id]}</span>
-                          <span className="mt-1 block text-[11px] opacity-80">
-                            {providerReady == null ? "正在检查…" : ready ? "已配置" : `缺少 ${missing}`}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div>
-                  <p className="mb-2 text-sm">静音判定</p>
-                  <p className="mb-2 text-xs text-subtle">说完后等多久才开始识别。默认 1.5 秒。</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {SILENCE_MS_OPTIONS.map((ms) => (
-                      <button
-                        key={ms}
-                        type="button"
-                        onClick={() => {
-                          setSilenceMs(ms);
-                          persistProfile({ silenceMs: ms });
-                        }}
-                        className={cn(
-                          "min-h-11 rounded-md px-3 py-3 text-sm",
-                          silenceMs === ms ? "bg-accent text-accent-fg" : "bg-bg text-muted",
-                        )}
-                      >
-                        {(ms / 1000).toFixed(1)} 秒
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm">引擎自检</p>
-                  <p className="mt-1 text-xs text-subtle">用 lab 密码。对各引擎发 1 秒测试音频，看能不能通。</p>
-                  <Input
-                    type="password"
-                    value={labPassword}
-                    onChange={(e) => setLabPassword(e.target.value)}
-                    placeholder="lab 密码"
-                    className="mt-3"
-                    autoComplete="off"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="mt-2 min-h-11 w-full"
-                    disabled={probeBusy || !labPassword.trim()}
-                    onClick={() => {
-                      const secret = labPassword.trim();
-                      if (!secret) return;
-                      setProbeBusy(true);
-                      setProbeError(null);
-                      void hearingConnectionTest({ data: { password: secret } })
-                        .then((result) => {
-                          sessionStorage.setItem("qingran-hearing-lab", secret);
-                          setProbeRows(result.engines as Array<{ id: string; ok: boolean; latency_ms: number; error?: string }>);
-                        })
-                        .catch((err) => {
-                          setProbeRows(null);
-                          const message = err instanceof Error ? err.message : String(err);
-                          setProbeError(message === "lab-locked" ? "密码不对。" : message);
-                        })
-                        .finally(() => setProbeBusy(false));
-                    }}
-                  >
-                    {probeBusy ? "正在自检…" : "引擎自检"}
-                  </Button>
-                  {probeError ? <p className="mt-2 text-xs text-subtle">{probeError}</p> : null}
-                  {probeRows ? (
-                    <ul className="mt-3 flex flex-col gap-2">
-                      {probeRows.map((row) => (
-                        <li key={row.id} className="text-xs leading-relaxed">
-                          <span className="text-sm text-fg">
-                            {labEngineLabel(row.id)} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
-                          </span>
-                          {!row.ok && row.error ? (
-                            <span className="mt-1 block break-all text-subtle">{row.error}</span>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
               </div>
             </details>
+            <div>
+              <p className="mb-2 text-sm">听力引擎</p>
+              <p className="mb-2 text-xs text-subtle">实时默认 xAI + Apple。其它引擎会拒答亲密内容，只留在这里备查。</p>
+              {slowEngineHint(hearingProvider) ? (
+                <p className="mb-2 text-xs text-live">{slowEngineHint(hearingProvider)}</p>
+              ) : null}
+              <div className="grid grid-cols-2 gap-2">
+                {HEARING_PROVIDERS.map((id) => {
+                  const ready = providerReady ? providerReady[id] : true;
+                  const missing = PROVIDER_ENV[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      disabled={!ready}
+                      onClick={() => ready && setHearingProvider(id)}
+                      className={cn(
+                        "min-h-11 rounded-md px-3 py-3 text-left text-sm disabled:opacity-50",
+                        hearingProvider === id ? "bg-accent text-accent-fg" : "bg-bg text-muted",
+                      )}
+                    >
+                      <span className="block">{({ xai: "xAI", qwen: "Qwen", gemini: "Gemini", selfhost: "自部署" } as Record<string, string>)[id]}</span>
+                      <span className="mt-1 block text-[11px] opacity-80">
+                        {providerReady == null ? "正在检查…" : ready ? "已配置" : `缺少 ${missing}`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <p className="text-sm">引擎自检</p>
+              <p className="mt-1 text-xs text-subtle">用 lab 密码。对各引擎发 1 秒测试音频，看能不能通。上面「用已有录音试一次」也用这个密码。</p>
+              <Input
+                type="password"
+                value={labPassword}
+                onChange={(e) => setLabPassword(e.target.value)}
+                placeholder="lab 密码"
+                className="mt-3"
+                autoComplete="off"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-2 min-h-11 w-full"
+                disabled={probeBusy || !labPassword.trim()}
+                onClick={() => {
+                  const secret = labPassword.trim();
+                  if (!secret) return;
+                  setProbeBusy(true);
+                  setProbeError(null);
+                  void hearingConnectionTest({ data: { password: secret } })
+                    .then((result) => {
+                      sessionStorage.setItem("qingran-hearing-lab", secret);
+                      setProbeRows(result.engines as Array<{ id: string; ok: boolean; latency_ms: number; error?: string }>);
+                    })
+                    .catch((err) => {
+                      setProbeRows(null);
+                      const message = err instanceof Error ? err.message : String(err);
+                      setProbeError(message === "lab-locked" ? "密码不对。" : message);
+                    })
+                    .finally(() => setProbeBusy(false));
+                }}
+              >
+                {probeBusy ? "正在自检…" : "引擎自检"}
+              </Button>
+              {probeError ? <p className="mt-2 text-xs text-subtle">{probeError}</p> : null}
+              {probeRows ? (
+                <ul className="mt-3 flex flex-col gap-2">
+                  {probeRows.map((row) => (
+                    <li key={row.id} className="text-xs leading-relaxed">
+                      <span className="text-sm text-fg">
+                        {labEngineLabel(row.id)} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
+                      </span>
+                      {!row.ok && row.error ? (
+                        <span className="mt-1 block break-all text-subtle">{row.error}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
             {debugHearing ? <AudioTracePanel /> : null}
           </div>
         </div>
@@ -1173,10 +1221,12 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                     .slice(0, 20)
                     .map((row) => {
                       const timing = parseHearingTimingLine(row.note);
+                      const senseLine = parseSenseLine(row.note);
                       return (
                         <li key={row.id} className="text-xs leading-relaxed text-fg">
                           <span className="text-subtle">{logClock(row.at)} </span>
                           {timing ? formatHearingTimingSummary(timing) : row.note || `${row.ms ?? "—"}ms`}
+                          {senseLine ? <span className="mt-0.5 block text-subtle">{senseLine}</span> : null}
                         </li>
                       );
                     })}
@@ -1190,6 +1240,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                 const failLine = row.ok ? "" : logFailFirstLine(row);
                 const timing = parseHearingTimingLine(row.note);
                 const engineHint = slowEngineHintFromNote(row.note);
+                const injectLine = parseVoiceInjectLine(row.note);
+                const senseLine = parseSenseLine(row.note);
                 const detail = callById[row.id];
                 const loaded = detail && detail !== "loading" ? detail : null;
                 return (
@@ -1209,6 +1261,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                       {timing ? (
                         <p className="mt-1 text-subtle">{formatHearingTimingSummary(timing)}</p>
                       ) : null}
+                      {senseLine ? <p className="mt-1 text-subtle">{senseLine}</p> : null}
+                      {injectLine ? <p className="mt-1 text-subtle">{injectLine}</p> : null}
                       {failLine ? <p className="mt-1 text-live">{failLine}</p> : null}
                     </summary>
                     <div className="mt-3 flex flex-col gap-3">

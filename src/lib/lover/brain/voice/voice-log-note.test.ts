@@ -61,8 +61,10 @@ test("formatVoiceLogNote failed empty keeps the fail line first", () => {
     chars: { system: 1, mind: 2, notes: 3, history: 4, user: 5 },
     failed: true,
     failMessage: "她没说出话（空回复）",
+    injectLine: "记忆：关 · 长期：开 · 历史：20",
   });
   assert.equal(note.split("\n")[0], "她没说出话（空回复）");
+  assert.match(note, /记忆：关 · 长期：开 · 历史：20/);
   assert.match(note, /model_fallback=no/);
   assert.match(note, /第4次仍空，只保留 system prompt、最近 8 条对话和用户消息/);
   assert.match(note, /events=\{"choices"/);

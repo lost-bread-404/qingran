@@ -38,14 +38,15 @@ test("quiet coquettish cues can still start a turn", () => {
   assert.equal(isSpeechStart(0.009, floor, 0.1, 0.28), true);
 });
 
-test("debug VAD numbers are documented vs production", () => {
-  assert.equal(START_FLOOR_MIN, 0.01);
-  assert.equal(START_FLOOR_MULT, 1.95);
+test("production VAD is sensitive enough for a murmur, debug is lower still", () => {
+  assert.equal(START_FLOOR_MIN, 0.004);
+  assert.equal(START_FLOOR_MULT, 1.35);
   assert.equal(DEBUG_START_FLOOR_MIN, 0.003);
   assert.equal(DEBUG_START_FLOOR_MULT, 1.25);
   const floor = 0.008;
-  assert.equal(startThreshold(floor, false), Math.max(0.01, floor * 1.95));
+  assert.equal(startThreshold(floor, false), Math.max(0.004, floor * 1.35));
   assert.equal(startThreshold(floor, true), Math.max(0.003, floor * 1.25));
+  assert.ok(startThreshold(floor, false) > startThreshold(floor, true));
 });
 
 test("debug hold never drops below max(0.005, floor*1.4)", () => {

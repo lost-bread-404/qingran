@@ -215,8 +215,10 @@ function decodeStoredMessage(row: {
     voiceTurnId: decoded.voiceTurnId,
     hearingGold: decoded.hearingGold,
     replyTo: decoded.replyTo,
+    activeReply: decoded.activeReply,
     predictedTags: decoded.predictedTags,
     interrupted: decoded.interrupted || undefined,
+    nightNoise: decoded.nightNoise || undefined,
   };
 }
 

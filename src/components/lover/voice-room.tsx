@@ -14,7 +14,7 @@ import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-vi
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { base64ToBytes, concatBytes } from "@/lib/lover/audio";
 import { addManualMemory, mergeFacts, replaceMemories, updateMemory } from "@/lib/lover/memory";
-import { dropIncompleteReplies, historyForQingran, skipsQingran } from "@/lib/lover/pair-messages";
+import { collapseReplyVariants, dropIncompleteReplies, skipsQingran, unselectedReplyIds } from "@/lib/lover/pair-messages";
 import { planInterruptQingran } from "@/lib/lover/interrupt";
 import {
   enqueuePlayback,
@@ -63,16 +63,18 @@ import {
   patchHearingTurn,
   unlabelHearingByTurn,
 } from "@/lib/lover/hearing/store";
-import { markTurnInterruptedFn } from "@/lib/lover/brain/turn-trace";
+import { markTurnInterruptedFn } from "@/lib/lover/brain/turn-trace-fn";
 import { clipSaveBanner, UNRECOGNIZED_TEXT, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
+import { nightNoiseReplyText } from "@/lib/lover/hearing/night-voice";
 import { micActionForConfirmPanel, planOpenConfirmPanel, shouldAutoSpeakReply } from "@/lib/lover/hearing/confirm-call";
 import { planConfirmSave, sliceAfterMessage } from "@/lib/lover/hearing/confirm-resend";
 import type { AcousticTags, TagKey } from "@/lib/lover/hearing/tags";
 import { POST_QINGRAN_MS } from "@/lib/lover/vad";
 import {
-  CONTEXT_WINDOW,
   DEFAULT_PROFILE,
+  formatVoiceInjectLine,
   lockedProfile,
+  voiceInjectFromProfile,
   type ChatMessage,
   type Memory,
   type Profile,
@@ -109,6 +111,7 @@ export function VoiceRoom() {
   const memoriesRef = useRef<Memory[]>([]);
   const profileRef = useRef(profile);
   const chatRef = useRef<ChatMessage[]>([]);
+  const userWriteRef = useRef<Promise<unknown>>(Promise.resolve());
   const settingsOpenRef = useRef(false);
   const holdingRef = useRef(false);
   const finishingHoldRef = useRef(false);
@@ -153,9 +156,21 @@ export function VoiceRoom() {
     warmBrain();
   }, []);
 
+  const persistUser = (updated: ChatMessage) => {
+    userWriteRef.current = userWriteRef.current
+      .catch(() => undefined)
+      .then(() => updateRoomMessage({ data: updated }));
+    return userWriteRef.current;
+  };
+
+  const replyPick = messages
+    .filter((m) => m.role === "user" && m.activeReply)
+    .map((m) => `${m.id}:${m.activeReply}`)
+    .join(",");
+
   useEffect(() => {
     profileRef.current = profile;
-    const contextTurns = chatRef.current
+    const contextTurns = collapseReplyVariants(messages)
       .filter((m) => m.kind !== "steer" && m.kind !== "setting" && !skipsQingran(m))
       .map((m) => ({ role: m.role, text: m.text }));
     const context = buildHearingContext(contextTurns);
@@ -177,8 +192,11 @@ export function VoiceRoom() {
       contextBefore: lastDialogueTurns(contextTurns),
       systemPrompt: profile.systemPrompt,
       silenceMs: profile.silenceMs,
+      nightVoicedMin: profile.nightVoicedMin,
+      nightMinMs: profile.nightMinMs,
+      sense: profile.hearingSense,
     });
-  }, [profile, messages.length, memories]);
+  }, [profile, messages.length, memories, replyPick, status]);
   useEffect(() => {
     memoriesRef.current = memories;
   }, [memories]);
@@ -265,7 +283,7 @@ export function VoiceRoom() {
   useEffect(() => {
     if (!hydrated || !profile.autoRemember) return;
     void sweepOverflow();
-  }, [hydrated, messages.length, profile.autoRemember, profile.memoryCursor]);
+  }, [hydrated, messages.length, profile.autoRemember, profile.memoryCursor, profile.historyWindow]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -301,7 +319,7 @@ export function VoiceRoom() {
     try {
       while (profileRef.current.autoRemember) {
         const chat = chatRef.current;
-        const overflowAt = Math.max(0, chat.length - CONTEXT_WINDOW);
+        const overflowAt = Math.max(0, chat.length - profileRef.current.historyWindow);
         if (overflowAt === 0) break;
         const overflow = chat.slice(0, overflowAt).filter((m) => !m.scanned);
         if (overflow.length < 10) break;
@@ -408,8 +426,10 @@ export function VoiceRoom() {
       opts?: {
         history?: ChatMessage[];
         existingUser?: ChatMessage;
+        keepReplies?: boolean;
         voiceTurnId?: string;
         skipQingran?: boolean;
+        nightNoise?: boolean;
         endpointFired?: number;
         sttDoneAt?: number;
         predictedTags?: AcousticTags;
@@ -420,6 +440,7 @@ export function VoiceRoom() {
       if (!tagged) return;
       const say = stripHearingMarkup(tagged).trim() || tagged;
       const at = Date.now();
+      const injectLine = formatVoiceInjectLine(voiceInjectFromProfile(profileRef.current));
       const sttDoneAt = opts?.sttDoneAt ?? at;
       const hearMs =
         opts?.endpointFired && sttDoneAt >= opts.endpointFired ? sttDoneAt - opts.endpointFired : undefined;
@@ -429,6 +450,7 @@ export function VoiceRoom() {
         text: say,
         createdAt: at,
         kind: opts?.skipQingran ? "unheard" : "say",
+        nightNoise: opts?.nightNoise || undefined,
         voiceTurnId: opts?.voiceTurnId,
         predictedTags: opts?.predictedTags,
         hearingGold: opts?.voiceTurnId ? "unconfirmed" : undefined,
@@ -436,13 +458,29 @@ export function VoiceRoom() {
           hearMs != null || opts?.engine
             ? { hearMs, engine: opts?.engine }
             : undefined,
+        injectLine,
       };
       if (opts?.existingUser && (hearMs != null || opts?.engine)) {
         userMsg.hearingTiming = { ...userMsg.hearingTiming, hearMs, engine: opts.engine ?? userMsg.hearingTiming?.engine };
       }
+      userMsg.injectLine = injectLine;
+      const commitChoice = async () => {
+        const base = dropIncompleteReplies(chatRef.current, pendingIdsRef.current);
+        const dropIds = unselectedReplyIds(base);
+        if (!dropIds.length) {
+          chatRef.current = base;
+          return;
+        }
+        const drop = new Set(dropIds);
+        chatRef.current = base.filter((m) => !drop.has(m.id));
+        setMessages(chatRef.current);
+        await deleteRoomMessages({ data: { ids: dropIds } });
+      };
       if (opts?.skipQingran) {
+        await commitChoice();
+        chatRef.current = [...chatRef.current, userMsg];
+        setMessages(chatRef.current);
         setBanner(null);
-        setMessages((prev) => [...prev, userMsg]);
         void appendRoomMessage({ data: userMsg });
         if (opts.voiceTurnId) {
           void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: "" } });
@@ -450,6 +488,7 @@ export function VoiceRoom() {
         return;
       }
       if (!opts?.existingUser && busyRef.current) return;
+      if (!opts?.existingUser) await commitChoice();
       const turn = ++turnRef.current;
       busyRef.current = true;
       skipAutoPlayRef.current = false;
@@ -460,22 +499,38 @@ export function VoiceRoom() {
       voice.setError(null);
 
       const sourceHistory = opts?.history ?? chatRef.current;
-      const history = historyForQingran(sourceHistory);
+      const siblingFloor = (opts?.keepReplies ? sourceHistory : []).reduce(
+        (max, message) => (message.replyTo === userMsg.id ? Math.max(max, message.createdAt) : max),
+        userMsg.createdAt || at,
+      );
       const reply: ChatMessage = {
         id: newId(),
         role: "assistant",
         text: "",
-        createdAt: (userMsg.createdAt || at) + 1,
+        createdAt: Math.max(Date.now(), siblingFloor + 1),
         replyTo: userMsg.id,
       };
-      if (opts?.existingUser) {
+      if (opts?.existingUser && opts.keepReplies) {
+        const shownUser: ChatMessage = { ...userMsg, activeReply: reply.id };
+        setMessages((prev) => {
+          const has = prev.some((m) => m.id === shownUser.id);
+          const next = has
+            ? prev.map((m) => (m.id === shownUser.id ? { ...m, text: shownUser.text, activeReply: reply.id } : m))
+            : [...prev, shownUser];
+          const withReply = [...next.filter((m) => m.id !== reply.id), reply];
+          chatRef.current = withReply;
+          return withReply;
+        });
+        void persistUser(shownUser);
+      } else if (opts?.existingUser) {
         setMessages((prev) => {
           const idx = prev.findIndex((m) => m.id === userMsg.id);
           if (idx < 0) return [...(opts.history ?? sourceHistory), userMsg, reply];
           return [...prev.slice(0, idx), userMsg, reply];
         });
       } else {
-        setMessages((prev) => [...dropIncompleteReplies(prev, pendingIdsRef.current), userMsg, reply]);
+        chatRef.current = [...chatRef.current, userMsg, reply];
+        setMessages(chatRef.current);
         void appendRoomMessage({ data: userMsg });
       }
       pendingIdsRef.current.add(reply.id);
@@ -541,6 +596,7 @@ export function VoiceRoom() {
             userMsgId: userMsg.id,
             userCreatedAt: userMsg.createdAt || at,
             replyId: reply.id,
+            replyCreatedAt: reply.createdAt,
             profile: lockedProfile(profileRef.current),
             nowMs: Date.now(),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -698,6 +754,7 @@ export function VoiceRoom() {
       await sendTurn(heard.text, {
         voiceTurnId: voiceTurnIdForMessage(heard),
         skipQingran: heard.skipQingran,
+        nightNoise: heard.nightNoise,
         endpointFired: heard.endpointFired,
         sttDoneAt: heard.sttDoneAt,
         predictedTags: heard.predictedTags,
@@ -787,6 +844,7 @@ export function VoiceRoom() {
         void sendTurn(heard.text, {
           voiceTurnId: voiceTurnIdForMessage(heard),
           skipQingran: heard.skipQingran,
+          nightNoise: heard.nightNoise,
           endpointFired: heard.endpointFired,
           sttDoneAt: heard.sttDoneAt,
           predictedTags: heard.predictedTags,
@@ -857,6 +915,14 @@ export function VoiceRoom() {
     await sendTurn(say);
   }
 
+  async function replyToNoise(id: string) {
+    const current = chatRef.current.find((m) => m.id === id);
+    if (!current?.nightNoise) return;
+    const text = nightNoiseReplyText(current.text);
+    const updated: ChatMessage = { ...current, text, kind: "say", nightNoise: false };
+    await replayFrom(updated);
+  }
+
   async function saveEdit() {
     const current = lastUserSay(chatRef.current);
     const text = editDraft.trim();
@@ -868,7 +934,30 @@ export function VoiceRoom() {
     }
     const updated: ChatMessage = { ...current, text };
     setEditingId(null);
-    await replayFrom(updated);
+    abortRef.current?.abort();
+    stopPlayback();
+    const next = chatRef.current.map((m) => (m.id === updated.id ? updated : m));
+    chatRef.current = next;
+    setMessages(next);
+    await persistUser(updated);
+    await sendTurn(updated.text, {
+      existingUser: updated,
+      keepReplies: true,
+      voiceTurnId: updated.voiceTurnId,
+    });
+  }
+
+  function selectReply(userId: string, replyId: string) {
+    const user = chatRef.current.find((m) => m.id === userId);
+    if (!user || user.activeReply === replyId) return;
+    const replies = chatRef.current.filter((m) => m.replyTo === userId);
+    if (!replies.some((m) => m.id === replyId)) return;
+    stopPlayback();
+    const updated: ChatMessage = { ...user, activeReply: replyId };
+    const next = chatRef.current.map((m) => (m.id === userId ? updated : m));
+    chatRef.current = next;
+    setMessages(next);
+    void persistUser(updated);
   }
 
   async function replayFrom(updated: ChatMessage) {
@@ -1142,6 +1231,11 @@ export function VoiceRoom() {
                     ? "通话中"
                     : "在"}
               </p>
+              {profile.debugHearing ? (
+                <p className="text-[10px] text-subtle/80">
+                  {formatVoiceInjectLine(voiceInjectFromProfile(profile))}
+                </p>
+              ) : null}
               {profile.debugHearing && audioLog ? (
                 <p className="max-w-[14rem] truncate text-[10px] text-subtle/80">{audioLog}</p>
               ) : null}
@@ -1262,6 +1356,7 @@ export function VoiceRoom() {
                 if (call.active) call.hear();
               }}
               onEditSave={() => void saveEdit()}
+              onSelectReply={selectReply}
               onConfirmStart={(id) => {
                 const plan = planOpenConfirmPanel();
                 skipAutoPlayRef.current = plan.skipAutoPlay;
@@ -1273,6 +1368,7 @@ export function VoiceRoom() {
               onConfirmQuick={(id) => void saveConfirmQuick(id)}
               onUndoConfirm={(id) => void undoConfirm(id)}
               undoConfirmId={undoConfirmId}
+              onNoiseReply={(id) => void replyToNoise(id)}
               onFlagReply={(assistantId, replyToId, rating) => {
                 if (rating === "up") {
                   if (flagBusy) return;

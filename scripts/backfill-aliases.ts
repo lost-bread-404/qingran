@@ -5,9 +5,10 @@
  */
 import { getSql } from "../src/lib/db.ts";
 import { now } from "../src/lib/lover/brain/clock.ts";
-import { callModel } from "../src/lib/lover/brain/llm.ts";
+import { asModelInput, callModel } from "../src/lib/lover/brain/llm.ts";
 import { bumpNotesVersion, pgTextArray } from "../src/lib/lover/brain/store.ts";
 import { loadPrompt } from "../src/lib/lover/brain/prompts/store.ts";
+import { parsePromptBody, renderVariant } from "../src/lib/lover/brain/prompts/doc.ts";
 
 const BATCH = 40;
 
@@ -52,13 +53,11 @@ async function main() {
     const batch = rows.slice(i, i + BATCH);
     const loaded = await loadPrompt("assign");
     const result = await callModel("assign", {
-      system: loaded.body,
-      input: `你在给记忆笔记补 aliases，只用于检索，不会给清然看到。
-aliases：这条笔记以后还可能被怎么说起——同义说法、简称、相关的人名/地名/课程名、中英文对照。最多 6 个，每个 ≤12 字。没有就给空数组。不要改 text。
-
-给下面每条笔记写 aliases。
-
-${batch.map((n) => `${n.id}|${Array.isArray(n.tags) ? n.tags.join(",") : ""}|${n.text}`).join("\n")}`,
+      ...asModelInput(
+        renderVariant(parsePromptBody("assign", loaded.body), "aliases", {
+          notes: batch.map((n) => `${n.id}|${Array.isArray(n.tags) ? n.tags.join(",") : ""}|${n.text}`).join("\n"),
+        }),
+      ),
       schema: SCHEMA,
       promptKey: loaded.key,
       promptHash: loaded.hash,

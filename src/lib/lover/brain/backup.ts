@@ -9,8 +9,9 @@ import { enqueue } from "./jobs.ts";
 import { bumpNotesVersion, pgTextArray } from "./store.ts";
 import { localDay, sessionIdFor } from "./time.ts";
 import { resetRetrieveCache } from "./voice/retrieve.ts";
+import { BACKUP_KIND, IMPORT_ORDER } from "./backup-public.ts";
 
-export const BACKUP_KIND = "qingran-backup";
+export { BACKUP_KIND, IMPORT_ORDER };
 export const BACKUP_VERSION = 2;
 const PAGE_BYTES = 750_000;
 
@@ -486,7 +487,9 @@ export const BACKUP_TABLES: TableSpec[] = [
   },
 ];
 
-export const IMPORT_ORDER = [
+const TABLE_BY_NAME = new Map(BACKUP_TABLES.map((t) => [t.name, t]));
+
+const computedImportOrder = [
   "brain_meta",
   "qingran_messages",
   "mem_notes",
@@ -494,8 +497,9 @@ export const IMPORT_ORDER = [
     (n) => n !== "brain_meta" && n !== "qingran_messages" && n !== "mem_notes",
   ),
 ];
-
-const TABLE_BY_NAME = new Map(BACKUP_TABLES.map((t) => [t.name, t]));
+if (computedImportOrder.join("\n") !== IMPORT_ORDER.join("\n")) {
+  throw new Error("backup import order drifted from backup-public.ts");
+}
 
 function jsonSafe(value: unknown): Json {
   if (value == null) return null;

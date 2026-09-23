@@ -1,6 +1,6 @@
 import { enqueue } from "../jobs.ts";
 import { now } from "../clock.ts";
-import { callModel } from "../llm.ts";
+import { callModel, asModelInput } from "../llm.ts";
 import {
   firstMessageLocalDay,
   getMeta,
@@ -18,6 +18,7 @@ import type { DayLog } from "../types.ts";
 import { archiveDaySync } from "../archivist.ts";
 import { updatePortraitSelfBond } from "../voice/nightly.ts";
 import { loadPrompt } from "../prompts/store.ts";
+import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { applyIntentionOps, type IntentionOp } from "./intentions.ts";
 import { recomputeStats } from "./recompute.ts";
 import { writeDailyDigest } from "./digest.ts";
@@ -211,19 +212,14 @@ export async function runDusk(
 
   const duskPrompt = await loadPrompt("dusk");
   const dayResult = await callModel("dusk", {
-    system: duskPrompt.body,
-    input: `按下面材料整理这一天。
-
-【进行中的 intentions】
-${intentions.map((i) => `${i.id}|${i.status}|${i.tag ?? ""}|${i.text}`).join("\n") || "（没有）"}
-
-【日记笔记】
-${notes.map((n) => `${n.id}|${n.text}`).join("\n") || "（没有）"}
-
-【Rosie 的话】
-${rosieText || "（没有）"}
-
-日期 ${day}`,
+    ...asModelInput(
+      renderVariant(parsePromptBody("dusk", duskPrompt.body), "day", {
+        intentions: intentions.map((i) => `${i.id}|${i.status}|${i.tag ?? ""}|${i.text}`).join("\n") || "（没有）",
+        notes: notes.map((n) => `${n.id}|${n.text}`).join("\n") || "（没有）",
+        rosie_text: rosieText || "（没有）",
+        day,
+      }),
+    ),
     schema: DAY_SCHEMA,
     jobId,
     promptKey: duskPrompt.key,
@@ -262,19 +258,24 @@ ${rosieText || "（没有）"}
 
   const factors = await listFactors(true);
   const factorResult = await callModel("dusk", {
-    system: duskPrompt.body,
-    input: `根据这一天的材料，判定每个 factor 的 value：1、0 或 null（未知）。不要猜。
-
-【factors】
-${factors.map((f) => `${f.id}|${f.name}|${f.definition}`).join("\n")}
-
-【day log】
-${JSON.stringify({ day, summary: log.summary, energy: log.energy, mood: log.mood, body: log.body, did: log.did, avoided: log.avoided, events: log.events, wins: log.wins })}
-
-【笔记】
-${notes.map((n) => n.text).join("\n")}
-
-日期 ${day}`,
+    ...asModelInput(
+      renderVariant(parsePromptBody("dusk", duskPrompt.body), "factors", {
+        factors: factors.map((f) => `${f.id}|${f.name}|${f.definition}`).join("\n"),
+        day_log: JSON.stringify({
+          day,
+          summary: log.summary,
+          energy: log.energy,
+          mood: log.mood,
+          body: log.body,
+          did: log.did,
+          avoided: log.avoided,
+          events: log.events,
+          wins: log.wins,
+        }),
+        notes: notes.map((n) => n.text).join("\n"),
+        day,
+      }),
+    ),
     schema: FACTOR_SCHEMA,
     jobId,
     promptKey: duskPrompt.key,

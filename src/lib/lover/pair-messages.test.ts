@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { UNRECOGNIZED_TEXT } from "./hearing/heard.ts";
 import { INTERRUPTED_MARK } from "./interrupt.ts";
+import { decodeStoredBody, encodeStoredMessage, mergeEditedUserBody } from "./message-markup.ts";
 import {
   dropIncompleteReplies,
   historyForQingran,
   pairMessages,
+  shownReply,
   skipsQingran,
   sortConversation,
+  unselectedReplyIds,
 } from "./pair-messages.ts";
 import type { ChatMessage } from "./types.ts";
 
@@ -146,4 +149,58 @@ test("historyForQingran does not double the interrupt mark", () => {
     msg("a1", "assistant", `已经有了${INTERRUPTED_MARK}`, 1, { interrupted: true }),
   ]);
   assert.equal(history[0]?.text, `已经有了${INTERRUPTED_MARK}`);
+});
+
+test("sibling replies stay on one turn and the chosen page continues", () => {
+  const messages = [
+    msg("u1", "user", "在吗", 1, { activeReply: "a1" }),
+    msg("a1", "assistant", "第一句", 2, { replyTo: "u1" }),
+    msg("a2", "assistant", "第二句", 3, { replyTo: "u1" }),
+  ];
+  const pairs = pairMessages(messages);
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0]?.assistant?.id, "a1");
+  assert.deepEqual(pairs[0]?.replies?.map((reply) => reply.id), ["a1", "a2"]);
+  assert.deepEqual(historyForQingran(messages).map((m) => m.id), ["u1", "a1"]);
+  assert.deepEqual(unselectedReplyIds(messages), ["a2"]);
+});
+
+test("without a chosen page, the newest reply continues and the rest are dropped later", () => {
+  const messages = [
+    msg("u1", "user", "在吗", 1),
+    msg("a1", "assistant", "第一句", 2, { replyTo: "u1" }),
+    msg("a2", "assistant", "第二句", 3, { replyTo: "u1" }),
+  ];
+  assert.equal(shownReply(messages[0], [messages[1]!, messages[2]!])?.id, "a2");
+  assert.deepEqual(historyForQingran(messages).map((m) => m.id), ["u1", "a2"]);
+  assert.deepEqual(unselectedReplyIds(messages), ["a1"]);
+});
+
+test("an empty chosen page does not discard the reply that has words", () => {
+  const messages = [
+    msg("u1", "user", "在吗", 1, { activeReply: "a2" }),
+    msg("a1", "assistant", "第一句", 2, { replyTo: "u1" }),
+    msg("a2", "assistant", "", 3, { replyTo: "u1" }),
+  ];
+  assert.equal(pairMessages(messages)[0]?.assistant?.id, "a2");
+  assert.deepEqual(unselectedReplyIds(messages), ["a2"]);
+  assert.deepEqual(historyForQingran(messages).map((m) => m.id), ["u1", "a1"]);
+});
+
+test("chosen reply marker round-trips and an edit keeps the prefixes", () => {
+  const stored = encodeStoredMessage({
+    id: "u1",
+    role: "user",
+    text: "在吗",
+    createdAt: 1,
+    activeReply: "a2",
+    voiceTurnId: "turn-1",
+  });
+  assert.equal(decodeStoredBody(stored).activeReply, "a2");
+  assert.equal(decodeStoredBody(stored).text, "在吗");
+  assert.equal(mergeEditedUserBody(stored, "在吗"), stored);
+  const edited = mergeEditedUserBody(stored, "过来");
+  assert.equal(decodeStoredBody(edited).text, "过来");
+  assert.equal(decodeStoredBody(edited).activeReply, "a2");
+  assert.equal(decodeStoredBody(edited).voiceTurnId, "turn-1");
 });

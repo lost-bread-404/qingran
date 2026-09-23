@@ -9,6 +9,8 @@ export type HeardUtterance = {
   clipId?: string;
   saveError?: string;
   skipQingran: boolean;
+  /** Stored the clip and did not reply because it was not human voice. */
+  nightNoise?: boolean;
   persistPending?: boolean;
   endpointFired?: number;
   sttDoneAt?: number;
