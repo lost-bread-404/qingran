@@ -202,7 +202,7 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
         ph("portrait", "状态为 active 的画像，每行「主题：正文」，超长会截断。没有时是「（还在慢慢认识你）」。注入回复前改成第一人称，库里原文不变。"),
         ph(
           "history_messages",
-          "最近对话，条数由设置 → 高级里的「上下文长度」决定（0–80，默认 40）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息，不拼成一段文字。设成 0 或没有对话就整段去掉。role 不使用。",
+          "最近对话，条数由设置 → 指令里的「上下文长度」决定（0–80，默认 40）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息，不拼成一段文字。设成 0 或没有对话就整段去掉。role 不使用。",
         ),
         ph("clock", "当前时间，用资料里的时区。"),
         ph(

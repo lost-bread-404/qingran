@@ -5,10 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
-import { HEARING_PROVIDERS, HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD, labEngineLabel, type HearingProviderId } from "@/lib/lover/hearing/config";
-import { PROVIDER_ENV } from "@/lib/lover/hearing/env";
-import { hearingConnectionTest, hearingEnvStatus } from "@/lib/lover/hearing/store";
-import { slowEngineHint } from "@/lib/lover/hearing/select";
+import { HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD } from "@/lib/lover/hearing/config";
 import { formatHearingTimingSummary, parseHearingTimingLine } from "@/lib/lover/hearing/timing-format";
 import { formatCallAudioLogLines, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
@@ -48,7 +45,6 @@ import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
 import { DEFAULT_SYSTEM_PROMPT, clampHistoryWindow, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
 import { defaultPromptModel } from "@/lib/lover/brain/prompts/models";
-import { HEARING_INSTRUCTION, HEARING_USER_LINE } from "@/lib/lover/hearing/instruction";
 import { parseSenseLine } from "@/lib/lover/hearing/sense";
 import { cn } from "@/lib/utils";
 
@@ -123,13 +119,8 @@ type Props = {
 
 export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearChat }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
-  const [hearingProvider, setHearingProvider] = useState<HearingProviderId>(profile.hearingProvider);
   const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
-  const [providerReady, setProviderReady] = useState<Record<HearingProviderId, boolean> | null>(null);
   const [labPassword, setLabPassword] = useState("");
-  const [probeBusy, setProbeBusy] = useState(false);
-  const [probeError, setProbeError] = useState<string | null>(null);
-  const [probeRows, setProbeRows] = useState<Array<{ id: string; ok: boolean; latency_ms: number; error?: string }> | null>(null);
   const [tab, setTab] = useState<Tab>("prompt");
   const [notes, setNotes] = useState<Note[]>([]);
   const [query, setQuery] = useState("");
@@ -154,7 +145,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
   const [promptModels, setPromptModels] = useState(profile.promptModels);
   const [hearingInstruction, setHearingInstruction] = useState(profile.hearingInstruction);
-  const instructionTimer = useRef(0);
   const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
   const [injectMind, setInjectMind] = useState(profile.injectMind);
   const [injectMemories, setInjectMemories] = useState(profile.injectMemories);
@@ -176,7 +166,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   useEffect(() => {
     if (!open) return;
     setDraft(profile.systemPrompt);
-    setHearingProvider(profile.hearingProvider);
     setDebugHearing(profile.debugHearing);
     setVoiceModel(profile.voiceModel);
     setVoiceEffort(profile.voiceEffort);
@@ -193,7 +182,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setPromptDrafts({});
     setPromptError(null);
     setCallById({});
-    void hearingEnvStatus().then((result) => setProviderReady(result.providers)).catch(() => undefined);
     setEditingId(null);
     setNewAt(toDatetimeLocal(Date.now()));
     setClearArmed(false);
@@ -289,7 +277,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     onSave({
       ...profile,
       systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
-      hearingProvider,
+      hearingProvider: "xai",
       captureAudio: debugHearing,
       debugHearing,
       voiceModel,
@@ -330,12 +318,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     persistProfile({ promptModels: next });
   }
 
-  function commitInstruction(next: string) {
-    setHearingInstruction(next);
-    window.clearTimeout(instructionTimer.current);
-    instructionTimer.current = window.setTimeout(() => {
-      persistProfile({ hearingInstruction: next });
-    }, 400);
+  function savePrompt() {
+    persistProfile({ hearingProvider: "xai" });
+    onOpenChange(false);
   }
 
   function promptPick(key: string): { model: string; effort: VoiceEffort } {
@@ -356,14 +341,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     historySyncRef.current = window.setTimeout(() => {
       void brainSyncHistoryWindow({ data: { historyWindow: next } }).catch(() => undefined);
     }, 400);
-  }
-
-  function savePrompt() {
-    const ready = providerReady?.[hearingProvider];
-    const fallback = HEARING_PROVIDERS.find((id) => providerReady?.[id]) ?? "xai";
-    const nextProvider = ready === false ? fallback : hearingProvider;
-    persistProfile({ hearingProvider: nextProvider });
-    onOpenChange(false);
   }
 
   async function savePromptItem(key: string) {
@@ -656,6 +633,72 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
             <p className="text-xs text-subtle">
               每一步都是一组消息，不只是 system。展开后可以改每一条的 role 和正文，增删消息。占位符旁可以看当前内容，也可以预览真正发给模型的 messages。人设只用「人设」那一份，这里用 {"{system_prompt}"} 引用。记下之后下一轮立刻生效。
             </p>
+            <div className="flex flex-col gap-4 rounded-md bg-surface-2 px-3 py-3">
+              <div>
+                <p className="text-sm">这一轮带上什么</p>
+                <p className="mt-1 text-xs text-subtle">只影响清然开口的那一句。记笔记、画像和内心照常跑。</p>
+              </div>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={injectMemories}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setInjectMemories(next);
+                    persistProfile({ injectMemories: next });
+                  }}
+                />
+                <span>
+                  <span className="block text-sm">记忆</span>
+                  <span className="block text-xs text-subtle">
+                    关掉后这一轮不带检索到的笔记。检索照常跑，并记在链路里，方便对比。
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={injectLongterm}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setInjectLongterm(next);
+                    persistProfile({ injectLongterm: next });
+                  }}
+                />
+                <span>
+                  <span className="block text-sm">长期记忆</span>
+                  <span className="block text-xs text-subtle">
+                    关掉后不带我自己、我们、我眼中的她。不影响后台的内心、记笔记和画像。
+                  </span>
+                </span>
+              </label>
+              <div>
+                <div className="mb-1 flex items-baseline justify-between gap-3">
+                  <p className="text-sm">上下文长度</p>
+                  <p className="text-sm tabular-nums">{historyWindow}</p>
+                </div>
+                <p className="mb-2 text-xs text-subtle">
+                  最近多少条对话写进这一轮。0 就是完全不带历史。下一句生效。归档也按这个数判断哪些话滑出窗口。
+                </p>
+                <input
+                  type="range"
+                  min={0}
+                  max={80}
+                  step={1}
+                  value={historyWindow}
+                  aria-label="上下文长度"
+                  onChange={(e) => commitHistoryWindow(Number(e.target.value))}
+                  className="h-11 w-full accent-accent"
+                />
+                <p className="mt-2 text-xs text-subtle">
+                  {formatVoiceInjectLine(
+                    voiceInjectFromProfile({ injectMemories, injectLongterm, historyWindow }),
+                  )}
+                </p>
+              </div>
+            </div>
             {promptError ? <p className="text-sm text-live">{promptError}</p> : null}
             {promptItems.length === 0 ? (
               <p className="text-sm text-subtle">正在读指令…</p>
@@ -951,7 +994,19 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       ) : tab === "hearing" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
-            <HearingSensePanel sense={sense} labPassword={labPassword} onChange={commitSense} />
+            <HearingSensePanel
+              sense={sense}
+              labPassword={labPassword}
+              onLabPassword={(next) => {
+                setLabPassword(next);
+                try {
+                  sessionStorage.setItem("qingran-hearing-lab", next);
+                } catch {
+                  /* private mode */
+                }
+              }}
+              onChange={commitSense}
+            />
             <section className="flex flex-col gap-3">
               <div>
                 <p className="text-sm">识别时发出去的内容</p>
@@ -986,33 +1041,8 @@ maxAlternatives: 3`}
               <div className="rounded-md bg-surface-2 px-3 py-3">
                 <p className="text-sm">声学标签</p>
                 <p className="mt-1 text-xs text-subtle">
-                  走 xAI 时，本地只加长短：有声短于 0.42 秒写 short，否则写 long。不加走向、气声和事件。格式是〔长短·走向·声线｜事件〕，例如〔long· · ｜〕。走向、气声、笑哭只有在用 Qwen、Gemini 或自部署时，才按下面这段说明让那个模型填。告诉清然怎么读这些标记的那段，在「指令 → 每轮回复」里，不发给识别。
+                  本地只加长短：有声短于 0.42 秒写 short，否则写 long。不加走向、气声和事件。格式是〔长短·走向·声线｜事件〕，例如〔long· · ｜〕。告诉清然怎么读这些标记的那段，在「指令 → 每轮回复」里，不发给识别。
                 </p>
-              </div>
-              <div>
-                <div className="mb-1 flex items-baseline justify-between gap-3">
-                  <p className="text-sm">发给 Qwen / Gemini / 自部署的说明</p>
-                  <button
-                    type="button"
-                    className="shrink-0 text-xs text-muted underline-offset-4 hover:underline"
-                    onClick={() => commitInstruction("")}
-                  >
-                    恢复默认
-                  </button>
-                </div>
-                <p className="mb-2 text-xs text-subtle">
-                  xAI 和 Apple 不收这段。改完下一句识别就用新的。用户那一句固定是：{HEARING_USER_LINE}
-                </p>
-                <Textarea
-                  value={hearingInstruction.trim() ? hearingInstruction : HEARING_INSTRUCTION}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    commitInstruction(next.trim() === HEARING_INSTRUCTION.trim() ? "" : next);
-                  }}
-                  className="min-h-64 resize-y font-mono text-xs leading-relaxed"
-                  maxLength={8000}
-                  aria-label="听力识别说明"
-                />
               </div>
             </section>
             <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
@@ -1025,7 +1055,7 @@ maxAlternatives: 3`}
               <span>
                 <span className="block text-sm">标注模式</span>
                 <span className="block text-xs text-subtle">
-                  打开后每一句都存成 clip，并启用确认面板。关掉就不存录音，铅笔只是改字。
+                  打开后每一句都存成 clip，并启用确认面板。关掉就不存录音，铅笔只是改字。改完要点右上角保存。
                 </span>
               </span>
             </label>
@@ -1036,169 +1066,6 @@ maxAlternatives: 3`}
             >
               打开标注页
             </Link>
-            <details className="rounded-md bg-surface-2 px-3 py-3">
-              <summary className="cursor-pointer text-sm">高级</summary>
-              <div className="mt-3 flex flex-col gap-4">
-                <label className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={injectMind}
-                    onChange={(e) => {
-                      const next = e.target.checked;
-                      setInjectMind(next);
-                      persistProfile({ injectMind: next });
-                    }}
-                  />
-                  <span>
-                    <span className="block text-sm">把内心写进回复</span>
-                    <span className="block text-xs text-subtle">关掉就只靠对话历史、记忆和人设，方便对比。</span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={injectMemories}
-                    onChange={(e) => {
-                      const next = e.target.checked;
-                      setInjectMemories(next);
-                      persistProfile({ injectMemories: next });
-                    }}
-                  />
-                  <span>
-                    <span className="block text-sm">记忆</span>
-                    <span className="block text-xs text-subtle">
-                      关掉后这一轮不带检索到的笔记。检索照常跑，并记在链路里，方便对比。
-                    </span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={injectLongterm}
-                    onChange={(e) => {
-                      const next = e.target.checked;
-                      setInjectLongterm(next);
-                      persistProfile({ injectLongterm: next });
-                    }}
-                  />
-                  <span>
-                    <span className="block text-sm">长期记忆</span>
-                    <span className="block text-xs text-subtle">
-                      关掉后不带我自己、我们、我眼中的她。不影响后台的内心、记笔记和画像。
-                    </span>
-                  </span>
-                </label>
-                <div>
-                  <div className="mb-1 flex items-baseline justify-between gap-3">
-                    <p className="text-sm">上下文长度</p>
-                    <p className="text-sm tabular-nums">{historyWindow}</p>
-                  </div>
-                  <p className="mb-2 text-xs text-subtle">
-                    最近多少条对话写进这一轮。0 就是完全不带历史。下一句生效。归档也按这个数判断哪些话滑出窗口。
-                  </p>
-                  <input
-                    type="range"
-                    min={0}
-                    max={80}
-                    step={1}
-                    value={historyWindow}
-                    aria-label="上下文长度"
-                    onChange={(e) => commitHistoryWindow(Number(e.target.value))}
-                    className="h-11 w-full accent-accent"
-                  />
-                  <p className="mt-2 text-xs text-subtle">
-                    {formatVoiceInjectLine(
-                      voiceInjectFromProfile({ injectMemories, injectLongterm, historyWindow }),
-                    )}
-                  </p>
-                </div>
-              </div>
-            </details>
-            <div>
-              <p className="mb-2 text-sm">听力引擎</p>
-              <p className="mb-2 text-xs text-subtle">实时默认 xAI + Apple。其它引擎会拒答亲密内容，只留在这里备查。</p>
-              {slowEngineHint(hearingProvider) ? (
-                <p className="mb-2 text-xs text-live">{slowEngineHint(hearingProvider)}</p>
-              ) : null}
-              <div className="grid grid-cols-2 gap-2">
-                {HEARING_PROVIDERS.map((id) => {
-                  const ready = providerReady ? providerReady[id] : true;
-                  const missing = PROVIDER_ENV[id];
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      disabled={!ready}
-                      onClick={() => ready && setHearingProvider(id)}
-                      className={cn(
-                        "min-h-11 rounded-md px-3 py-3 text-left text-sm disabled:opacity-50",
-                        hearingProvider === id ? "bg-accent text-accent-fg" : "bg-bg text-muted",
-                      )}
-                    >
-                      <span className="block">{({ xai: "xAI", qwen: "Qwen", gemini: "Gemini", selfhost: "自部署" } as Record<string, string>)[id]}</span>
-                      <span className="mt-1 block text-[11px] opacity-80">
-                        {providerReady == null ? "正在检查…" : ready ? "已配置" : `缺少 ${missing}`}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div>
-              <p className="text-sm">引擎自检</p>
-              <p className="mt-1 text-xs text-subtle">用 lab 密码。对各引擎发 1 秒测试音频，看能不能通。上面「用已有录音试一次」也用这个密码。</p>
-              <Input
-                type="password"
-                value={labPassword}
-                onChange={(e) => setLabPassword(e.target.value)}
-                placeholder="lab 密码"
-                className="mt-3"
-                autoComplete="off"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-2 min-h-11 w-full"
-                disabled={probeBusy || !labPassword.trim()}
-                onClick={() => {
-                  const secret = labPassword.trim();
-                  if (!secret) return;
-                  setProbeBusy(true);
-                  setProbeError(null);
-                  void hearingConnectionTest({ data: { password: secret } })
-                    .then((result) => {
-                      sessionStorage.setItem("qingran-hearing-lab", secret);
-                      setProbeRows(result.engines as Array<{ id: string; ok: boolean; latency_ms: number; error?: string }>);
-                    })
-                    .catch((err) => {
-                      setProbeRows(null);
-                      const message = err instanceof Error ? err.message : String(err);
-                      setProbeError(message === "lab-locked" ? "密码不对。" : message);
-                    })
-                    .finally(() => setProbeBusy(false));
-                }}
-              >
-                {probeBusy ? "正在自检…" : "引擎自检"}
-              </Button>
-              {probeError ? <p className="mt-2 text-xs text-subtle">{probeError}</p> : null}
-              {probeRows ? (
-                <ul className="mt-3 flex flex-col gap-2">
-                  {probeRows.map((row) => (
-                    <li key={row.id} className="text-xs leading-relaxed">
-                      <span className="text-sm text-fg">
-                        {labEngineLabel(row.id)} {row.ok ? "成功" : "失败"} · {row.latency_ms}ms
-                      </span>
-                      {!row.ok && row.error ? (
-                        <span className="mt-1 block break-all text-subtle">{row.error}</span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
             {debugHearing ? <AudioTracePanel /> : null}
           </div>
         </div>
@@ -1253,9 +1120,6 @@ maxAlternatives: 3`}
                 </button>
               ))}
             </div>
-            {slowEngineHint(hearingProvider) ? (
-              <p className="text-xs text-live">{slowEngineHint(hearingProvider)}</p>
-            ) : null}
             {log.filter((row) => row.route === "hear" || row.step === "hearing").length ? (
               <div className="mb-2 rounded-md bg-surface-2 px-3 py-2">
                 <p className="text-xs text-subtle">最近听力耗时</p>

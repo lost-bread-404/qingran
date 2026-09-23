@@ -3,7 +3,6 @@ import { dbSource, getSql } from "@/lib/db";
 import { newId } from "../storage";
 import {
   HEARING,
-  isHearingProvider,
   isLabEvalEngine,
   isQwenHearingModel,
   LAB_EVAL_ENGINES,
@@ -337,7 +336,7 @@ export const getHearingTurnAudio = createServerFn({ method: "POST" })
 export const runHearing = createServerFn({ method: "POST" })
   .validator((input: RunHearingInput) => input)
   .handler(async ({ data }): Promise<RunHearingOutput> => {
-    const provider = isHearingProvider(data.provider) ? data.provider : "xai";
+    const provider = "xai" as const;
     const turnId = data.turnId || newId();
     const upload_start = data.upload_start || Date.now();
     const callOpts: HearingCallOpts = {
@@ -379,7 +378,7 @@ export const runHearing = createServerFn({ method: "POST" })
             uploadMs,
             sttMs,
             correctMs: timing.correctMs,
-            engineRequested: data.provider,
+            engineRequested: provider,
             engineUsed: timing.engineUsed,
             raw: timing.raw,
             error: timing.error,
@@ -467,7 +466,7 @@ export const runHearing = createServerFn({ method: "POST" })
     const commitSha = gitCommitSha() || null;
     const promptHash = data.systemPrompt ? hashQingranPrompt(data.systemPrompt) : null;
     logHearingTurn({
-      requested: data.provider,
+      requested: provider,
       used,
       fallbackReason: engineFallback,
       audioLlmMs,
@@ -482,7 +481,7 @@ export const runHearing = createServerFn({ method: "POST" })
           uploadMs,
           sttMs,
           correctMs,
-          engineRequested: data.provider,
+          engineRequested: provider,
           engineUsed: used,
           raw: originalXai,
           error: engineErrorDetail,
@@ -512,7 +511,7 @@ export const runHearing = createServerFn({ method: "POST" })
           peakRms: data.peakRms ?? peakRms,
           capture: Boolean(data.capture || data.debugHearing),
           refusal,
-          engineRequested: data.provider,
+          engineRequested: provider,
           engineUsed: used,
           engineFallback,
           engineErrorDetail,
@@ -548,7 +547,7 @@ export const runHearing = createServerFn({ method: "POST" })
         ? scrubbed.reason
         : undefined,
       predictedTags: predicted,
-      engine_requested: data.provider,
+      engine_requested: provider,
       engine_fallback_reason: engineFallback,
       engine_error_detail: engineErrorDetail ?? undefined,
       audio_llm_ms: audioLlmMs ?? undefined,

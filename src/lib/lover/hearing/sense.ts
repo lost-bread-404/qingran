@@ -92,6 +92,20 @@ export const TONE_DEFAULTS = {
   flatZone: 0.1,
 };
 
+/** High = more ～ marks. Not stored; the two numbers are the source of truth. */
+export const WAVE_PRESETS: Record<Exclude<SenseGear, "custom">, { glideRatio: number; waveMinSec: number }> = {
+  low: { glideRatio: 0.09, waveMinSec: 0.7 },
+  mid: { glideRatio: TONE_DEFAULTS.glideRatio, waveMinSec: TONE_DEFAULTS.waveMinSec },
+  high: { glideRatio: 0.03, waveMinSec: 0.25 },
+};
+
+/** High = more ！ marks. Not stored. */
+export const BANG_PRESETS: Record<Exclude<SenseGear, "custom">, { bangPeak: number; bangDur: number }> = {
+  low: { bangPeak: 0.16, bangDur: 0.12 },
+  mid: { bangPeak: TONE_DEFAULTS.bangPeak, bangDur: TONE_DEFAULTS.bangDur },
+  high: { bangPeak: 0.04, bangDur: 0.4 },
+};
+
 export const DEFAULT_HEARING_SENSE: HearingSense = {
   recordGear: "mid",
   ...RECORD_PRESETS.mid,
@@ -180,6 +194,28 @@ export function applyRecordGear(sense: HearingSense, gear: Exclude<SenseGear, "c
 
 export function applyNoiseGear(sense: HearingSense, gear: Exclude<SenseGear, "custom">): HearingSense {
   return lockHearingSense({ ...sense, noiseGear: gear, ...NOISE_PRESETS[gear] });
+}
+
+export function waveGearFor(glideRatio: number, waveMinSec: number): SenseGear {
+  if (glideRatio === WAVE_PRESETS.low.glideRatio && waveMinSec === WAVE_PRESETS.low.waveMinSec) return "low";
+  if (glideRatio === WAVE_PRESETS.mid.glideRatio && waveMinSec === WAVE_PRESETS.mid.waveMinSec) return "mid";
+  if (glideRatio === WAVE_PRESETS.high.glideRatio && waveMinSec === WAVE_PRESETS.high.waveMinSec) return "high";
+  return "custom";
+}
+
+export function bangGearFor(bangPeak: number, bangDur: number): SenseGear {
+  if (bangPeak === BANG_PRESETS.low.bangPeak && bangDur === BANG_PRESETS.low.bangDur) return "low";
+  if (bangPeak === BANG_PRESETS.mid.bangPeak && bangDur === BANG_PRESETS.mid.bangDur) return "mid";
+  if (bangPeak === BANG_PRESETS.high.bangPeak && bangDur === BANG_PRESETS.high.bangDur) return "high";
+  return "custom";
+}
+
+export function applyWaveGear(sense: HearingSense, gear: Exclude<SenseGear, "custom">): HearingSense {
+  return lockHearingSense({ ...sense, ...WAVE_PRESETS[gear] });
+}
+
+export function applyBangGear(sense: HearingSense, gear: Exclude<SenseGear, "custom">): HearingSense {
+  return lockHearingSense({ ...sense, ...BANG_PRESETS[gear] });
 }
 
 export function withRecordFine(sense: HearingSense, patch: Partial<RecordFine>): HearingSense {

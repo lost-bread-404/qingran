@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { utteranceToneMark, type ProsodyFrame } from "../prosody.ts";
 import {
+  applyBangGear,
   applyNoiseGear,
   applyRecordGear,
+  applyWaveGear,
+  bangGearFor,
   DEFAULT_HEARING_SENSE,
   formatSenseLine,
   lockHearingSense,
   parseSenseLine,
   previewToneReplay,
   toneFromSense,
+  waveGearFor,
   withNoiseFine,
   withRecordFine,
 } from "./sense.ts";
@@ -49,6 +53,14 @@ test("a fine edit becomes custom, and matching the preset snaps back", () => {
   const loose = withNoiseFine(DEFAULT_HEARING_SENSE, { voicedMin: 0.15, noiseMinMs: 150 });
   assert.equal(loose.noiseGear, "low");
   assert.equal(applyNoiseGear(loose, "high").noiseGear, "high");
+  assert.equal(waveGearFor(DEFAULT_HEARING_SENSE.glideRatio, DEFAULT_HEARING_SENSE.waveMinSec), "mid");
+  assert.equal(bangGearFor(DEFAULT_HEARING_SENSE.bangPeak, DEFAULT_HEARING_SENSE.bangDur), "mid");
+  const waved = applyWaveGear(DEFAULT_HEARING_SENSE, "high");
+  assert.equal(waveGearFor(waved.glideRatio, waved.waveMinSec), "high");
+  assert.equal(waved.riseQuestion, DEFAULT_HEARING_SENSE.riseQuestion);
+  const banged = applyBangGear({ ...waved, glideRatio: 0.02 }, "low");
+  assert.equal(bangGearFor(banged.bangPeak, banged.bangDur), "low");
+  assert.equal(waveGearFor(banged.glideRatio, banged.waveMinSec), "custom");
 });
 
 test("old silence and voice fields fill a profile that has no sense yet", () => {

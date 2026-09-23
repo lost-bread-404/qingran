@@ -182,7 +182,7 @@ export function VoiceRoom() {
       extractContextKeyterms(context, 50),
     );
     setHearingSession({
-      provider: profile.hearingProvider,
+      provider: "xai",
       capture: profile.debugHearing,
       debugHearing: profile.debugHearing,
       nbest: profile.hearingNbest,

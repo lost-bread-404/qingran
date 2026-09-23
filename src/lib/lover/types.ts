@@ -1,4 +1,4 @@
-import { DEFAULT_HEARING_PROVIDER, isHearingProvider, type HearingProviderId } from "./hearing/config.ts";
+import { DEFAULT_HEARING_PROVIDER, type HearingProviderId } from "./hearing/config.ts";
 import { HEARING_INSTRUCTION } from "./hearing/instruction.ts";
 import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
@@ -57,7 +57,7 @@ export type Profile = {
   hearingSense: HearingSense;
   /** Per-instruction chat model. Missing keys keep the code default. */
   promptModels: Partial<Record<PromptKey, PromptModelPick>>;
-  /** Custom system text for Qwen / Gemini / self-host hearing. Empty means the built-in instruction. */
+  /** Leftover audio-LLM instruction. Live hearing is xAI + Apple and does not send this. */
   hearingInstruction: string;
 };
 
@@ -191,9 +191,7 @@ export function lockedProfile(input?: unknown): Profile {
     voiceSpeed: pickVoiceSpeed(raw),
     autoRemember: raw.autoRemember !== false,
     memoryCursor: typeof raw.memoryCursor === "string" ? raw.memoryCursor : "",
-    hearingProvider: isHearingProvider(raw.hearingProvider)
-      ? raw.hearingProvider
-      : DEFAULT_HEARING_PROVIDER,
+    hearingProvider: DEFAULT_HEARING_PROVIDER,
     debugHearing: raw.debugHearing !== false,
     captureAudio: raw.debugHearing !== false,
     hearingNbest: Boolean(raw.hearingNbest),

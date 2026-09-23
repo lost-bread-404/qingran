@@ -7,7 +7,7 @@ test("storage failure banner keeps the original error", () => {
   assert.equal(clipSaveBanner("column stt_text does not exist"), "录音没存上：column stt_text does not exist");
 });
 
-test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高级", () => {
+test("settings hearing tab is sensitivity, the live request, and labeling", () => {
   const src = readFileSync(new URL("../../../components/lover/settings-drawer.tsx", import.meta.url), "utf8");
   assert.match(src, />标注模式</);
   assert.doesNotMatch(src, />调试</);
@@ -16,7 +16,7 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.doesNotMatch(src, /to="\/record"/);
   assert.match(src, /打开标注页/);
   assert.match(src, /to="\/lab"/);
-  assert.match(src, />高级</);
+  assert.doesNotMatch(src, />高级</);
   assert.match(src, /brainListVoiceModels/);
   assert.match(src, /voiceModel:/);
   assert.match(src, /voiceEffort:/);
@@ -41,8 +41,11 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.match(api, /brainListVoiceModels/);
   assert.match(api, /listVoiceCatalog/);
   assert.match(api, /voiceModelStatsLast7d/);
-  assert.match(src, /引擎自检/);
-  assert.match(src, /hearingConnectionTest/);
+  assert.doesNotMatch(src, /引擎自检/);
+  assert.doesNotMatch(src, /hearingConnectionTest/);
+  assert.doesNotMatch(src, /听力引擎/);
+  assert.doesNotMatch(src, /HEARING_INSTRUCTION/);
+  assert.doesNotMatch(src, /发给 Qwen/);
   assert.match(src, /让她忘掉最近还没记住的对话？已经记住的事和故事线不受影响。/);
   assert.match(src, /clearArmed/);
   assert.match(src, /确定清空/);
@@ -60,20 +63,21 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.match(src, /用户消息/);
   assert.match(src, /HearingSensePanel/);
   assert.match(src, /parseSenseLine/);
-  assert.match(src, /听力引擎/);
+  assert.match(src, /这一轮带上什么/);
   assert.match(src, /识别时发出去的内容/);
   assert.match(src, /发给 xAI 的/);
   assert.match(src, /发给 Apple 的/);
   assert.match(src, /声学标签/);
-  assert.match(src, /xAI 和 Apple 不收这段/);
-  assert.match(src, /HEARING_INSTRUCTION/);
+  assert.doesNotMatch(src, /xAI 和 Apple 不收这段/);
   assert.match(src, /STT_KEYTERMS/);
   const panel = readFileSync(new URL("../../../components/lover/hearing-sense-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /听力灵敏度/);
   assert.match(panel, /恢复默认/);
-  assert.match(panel, /录音灵敏度/);
+  assert.match(panel, /噪音和轻声的识别/);
+  assert.match(panel, /轻声敏感度/);
   assert.match(panel, /说完等待/);
   assert.match(panel, /1\.5 秒/);
+  assert.match(panel, /断句/);
   assert.match(panel, /噪音过滤/);
   assert.match(panel, /人声占比/);
   assert.match(panel, /最短人声/);
@@ -85,6 +89,11 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.match(panel, /保持绝对门槛/);
   assert.match(panel, /最短有声/);
   assert.match(panel, /轻声开口门槛/);
+  assert.match(panel, /标点符号/);
+  assert.match(panel, /语气词/);
+  assert.match(panel, /具体参数/);
+  assert.match(panel, /波浪敏感度/);
+  assert.match(panel, /感叹敏感度/);
   assert.match(panel, /自动加语气符号/);
   assert.match(panel, /平缓区/);
   assert.match(panel, /用已有录音试一次/);
@@ -95,7 +104,7 @@ test("settings hearing tab is 标注模式 plus 打开标注页, engines in 高�
   assert.doesNotMatch(src, /定向录制/);
   assert.doesNotMatch(src, /hearingNbest/);
   assert.match(src, /把内心写进回复/);
-  assert.match(src, />高级</);
+  assert.doesNotMatch(src, />高级</);
   assert.match(src, /确认删除这些笔记/);
   assert.match(src, /brainListHygieneNotes/);
   assert.match(src, /brainDeleteHygieneNotes/);
