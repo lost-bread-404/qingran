@@ -1,3 +1,5 @@
+export const HEARING_USER_LINE = "转写这段中文口语。按系统说明输出严格 JSON。";
+
 export const HEARING_INSTRUCTION = `你是中文口语转写器。只根据音频本身判断，不要润色，不要补全没说的字。
 
 任务：

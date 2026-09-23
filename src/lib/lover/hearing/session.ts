@@ -23,6 +23,7 @@ export type HearingSession = {
   nightVoicedMin: number;
   nightMinMs: number;
   sense: HearingSense;
+  hearingInstruction: string;
 };
 
 const session: HearingSession = {
@@ -44,6 +45,7 @@ const session: HearingSession = {
   nightVoicedMin: DEFAULT_HEARING_SENSE.voicedMin,
   nightMinMs: DEFAULT_HEARING_SENSE.noiseMinMs,
   sense: DEFAULT_HEARING_SENSE,
+  hearingInstruction: "",
 };
 
 export function getHearingSession(): HearingSession {

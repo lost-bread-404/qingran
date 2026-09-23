@@ -17,8 +17,14 @@ import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./hearing/config";
 import { recordSttSpend, recordTtsSpend } from "./brain/spend/check";
 import { VOICE_IO } from "./brain/config";
 import { loadPrompt } from "./brain/prompts/store.ts";
+import { storedPromptModel } from "./brain/prompts/model-store.ts";
 
 const FAST_MODEL = "grok-4.20-0309-non-reasoning";
+
+async function modelForPrompt(key: string, fallback: string): Promise<string> {
+  const pick = await storedPromptModel(key);
+  return pick?.model || fallback;
+}
 
 type TtsInput = {
   text: string;
@@ -58,7 +64,7 @@ export const rememberTurn = createServerFn({ method: "POST" })
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: FAST_MODEL,
+          model: await modelForPrompt("remember", FAST_MODEL),
           temperature: 0,
           max_tokens: 120,
           response_format: { type: "json_object" },
@@ -97,7 +103,7 @@ export const rememberOverflow = createServerFn({ method: "POST" })
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: FAST_MODEL,
+          model: await modelForPrompt("overflow", FAST_MODEL),
           temperature: 0,
           max_tokens: 180,
           response_format: { type: "json_object" },
@@ -137,7 +143,7 @@ export const consolidateMemories = createServerFn({ method: "POST" })
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: FAST_MODEL,
+          model: await modelForPrompt("consolidate", FAST_MODEL),
           temperature: 0.2,
           max_tokens: 700,
           response_format: { type: "json_object" },

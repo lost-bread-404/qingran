@@ -306,5 +306,8 @@ describe("hearing schema", () => {
     assert.ok(withBoth.includes("alternatives"));
     assert.ok(withBoth.includes("对话上下文"));
     assert.ok(!base.includes("对话上下文"));
+    const custom = hearingSystemPrompt({ instruction: "只转写，不要标签。" });
+    assert.match(custom, /^只转写，不要标签。/);
+    assert.doesNotMatch(custom, /你是中文口语转写器/);
   });
 });

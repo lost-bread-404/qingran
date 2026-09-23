@@ -131,6 +131,7 @@ export async function hearUtterance(input: {
         holdToTalk: Boolean(input.holdToTalk),
         prosody: downsampleProsody(input.frames),
         senseLine,
+        hearingInstruction: session.hearingInstruction,
         toneRise: toneReading.riseRatio,
         toneGlide: toneReading.glide,
         toneFade: toneReading.fade,

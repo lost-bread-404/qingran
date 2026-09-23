@@ -1,9 +1,12 @@
 import { DEFAULT_HEARING_PROVIDER, isHearingProvider, type HearingProviderId } from "./hearing/config.ts";
+import { HEARING_INSTRUCTION } from "./hearing/instruction.ts";
 import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
 import { DEFAULT_HEARING_SENSE, lockHearingSense, type HearingSense } from "./hearing/sense.ts";
 import { SILENCE_MS } from "./vad.ts";
 import { clampHistoryWindow, HISTORY_WINDOW } from "./brain/config.ts";
+import { lockPromptModels, type PromptModelPick } from "./brain/prompts/models.ts";
+import type { PromptKey } from "./brain/prompts/catalog.ts";
 
 export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio };
 export type { HearingSense };
@@ -52,6 +55,10 @@ export type Profile = {
   nightMinMs: number;
   /** Hearing sensitivity page. Source of truth for VAD, end-wait, noise gate, and tone marks. */
   hearingSense: HearingSense;
+  /** Per-instruction chat model. Missing keys keep the code default. */
+  promptModels: Partial<Record<PromptKey, PromptModelPick>>;
+  /** Custom system text for Qwen / Gemini / self-host hearing. Empty means the built-in instruction. */
+  hearingInstruction: string;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -133,6 +140,8 @@ export const DEFAULT_PROFILE: Profile = {
   nightVoicedMin: NIGHT_VOICED_MIN,
   nightMinMs: NIGHT_MIN_MS,
   hearingSense: DEFAULT_HEARING_SENSE,
+  promptModels: {},
+  hearingInstruction: "",
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -165,6 +174,8 @@ type LooseProfile = Partial<Profile> & {
   nightVoicedMin?: number;
   nightMinMs?: number;
   hearingSense?: unknown;
+  promptModels?: unknown;
+  hearingInstruction?: unknown;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -197,6 +208,8 @@ export function lockedProfile(input?: unknown): Profile {
     nightVoicedMin: hearingSense.voicedMin,
     nightMinMs: hearingSense.noiseMinMs,
     hearingSense,
+    promptModels: lockPromptModels(raw.promptModels),
+    hearingInstruction: lockHearingInstruction(raw.hearingInstruction),
   };
 }
 
@@ -258,6 +271,13 @@ function pickVoiceEffort(raw: LooseProfile): VoiceEffort {
     return null;
   }
   return DEFAULT_VOICE_EFFORT;
+}
+
+function lockHearingInstruction(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const text = raw.replace(/\r\n/g, "\n").trim().slice(0, 8000);
+  if (!text || text === HEARING_INSTRUCTION.trim()) return "";
+  return text;
 }
 
 function pickSystemPrompt(input?: LooseProfile | null): string {

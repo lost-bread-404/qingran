@@ -195,6 +195,7 @@ export function VoiceRoom() {
       nightVoicedMin: profile.nightVoicedMin,
       nightMinMs: profile.nightMinMs,
       sense: profile.hearingSense,
+      hearingInstruction: profile.hearingInstruction,
     });
   }, [profile, messages.length, memories, replyPick, status]);
   useEffect(() => {

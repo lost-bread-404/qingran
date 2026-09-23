@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { defaultPromptModel, lockPromptModels } from "./prompts/models.ts";
 import {
   LONG_DRAIN_MS,
   MODEL_CLASSES,
@@ -22,6 +23,27 @@ import {
 
 test("model classes pass capability checks", () => {
   assert.deepEqual(validateModelClasses(), []);
+});
+
+test("each instruction defaults to its route model", () => {
+  for (const route of Object.keys(ROUTES) as Array<keyof typeof ROUTES>) {
+    const resolved = resolveRoute(route);
+    const pick = defaultPromptModel(route);
+    assert.equal(pick.model, resolved.model);
+    assert.equal(pick.effort, resolved.effort);
+  }
+  assert.equal(defaultPromptModel("experiments").model, resolveRoute("report").model);
+  assert.equal(defaultPromptModel("remember").model, "grok-4.20-0309-non-reasoning");
+  assert.equal(defaultPromptModel("remember").effort, null);
+  const locked = lockPromptModels({
+    reflect: { model: "grok-4.5", effort: "high" },
+    nope: { model: "grok-4.3", effort: "low" },
+    archive: { model: "  ", effort: "low" },
+  });
+  assert.equal(locked.reflect?.model, "grok-4.5");
+  assert.equal(locked.reflect?.effort, "high");
+  assert.equal(locked.archive, undefined);
+  assert.equal("nope" in locked, false);
 });
 
 test("route overrides class, env route beats class", () => {

@@ -174,6 +174,7 @@ export type RunHearingInput = {
   toneFade?: number | null;
   tonePeak?: number | null;
   toneMark?: string | null;
+  hearingInstruction?: string;
 };
 
 export type RunHearingOutput = {
@@ -342,6 +343,7 @@ export const runHearing = createServerFn({ method: "POST" })
     const callOpts: HearingCallOpts = {
       context: data.context,
       nbest: Boolean(data.nbest),
+      instruction: data.hearingInstruction,
     };
     const hot = hotPathHearingStt(data.extraKeyterms ?? []);
     const extraKeyterms = hot.keyterms;

@@ -5,8 +5,37 @@ import { brainPreviewPrompt } from "@/lib/lover/brain/api";
 import { isPromptKey } from "@/lib/lover/brain/prompts/catalog";
 import { parsePromptBody, serializeDoc, type PromptDoc } from "@/lib/lover/brain/prompts/doc";
 import type { PromptRole } from "@/lib/lover/brain/prompts/templates";
+import { VOICE_EFFORT_OPTIONS, type VoiceEffort } from "@/lib/lover/types";
+import { cn } from "@/lib/utils";
 
 type VersionHit = { hash: string; lastSeen: number };
+
+export type PromptModelChoice = {
+  id: string;
+  blurb: string;
+  supportsEffort: boolean;
+  stats: {
+    n: number;
+    avgMs: number | null;
+    avgTtftMs: number | null;
+    emptyRate: number | null;
+  } | null;
+};
+
+function formatVoiceMs(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  return `${Math.round(ms)}ms`;
+}
+
+function formatEmptyRate(rate: number | null): string {
+  if (rate == null || !Number.isFinite(rate)) return "—";
+  return `${Math.round(rate * 1000) / 10}%`;
+}
+
+function effortForModel(model: PromptModelChoice, current: VoiceEffort): VoiceEffort {
+  if (!model.supportsEffort) return null;
+  return current === "low" || current === "medium" || current === "high" ? current : "low";
+}
 
 export type PromptEditorItem = {
   key: string;
@@ -47,6 +76,10 @@ export function PromptStepEditor({
   onSave,
   onRestore,
   onRollback,
+  models,
+  model,
+  effort,
+  onModel,
 }: {
   item: PromptEditorItem;
   draft: string;
@@ -55,6 +88,10 @@ export function PromptStepEditor({
   onSave: () => void;
   onRestore: () => void;
   onRollback: (hash: string) => void;
+  models: PromptModelChoice[] | null;
+  model: string;
+  effort: VoiceEffort;
+  onModel: (model: string, effort: VoiceEffort) => void;
 }) {
   const doc = docOf(item.key, draft);
   const [variantId, setVariantId] = useState(doc?.variants[0]?.id ?? "main");
@@ -139,6 +176,60 @@ export function PromptStepEditor({
           </p>
         ) : null}
       </summary>
+      <details className="mt-3 rounded-md bg-bg px-3 py-2">
+        <summary className="cursor-pointer text-sm text-fg">
+          回复模型 {model}
+          {effort ? ` · ${effort}` : ""}
+        </summary>
+        <p className="mt-2 text-xs text-subtle">
+          只给这一条用。切换后下一次跑到这一条就生效。
+          {item.key === "voice" ? "每轮回复报错或空回复会自动用 grok-4.20-0309-non-reasoning 再试一次。" : ""}
+        </p>
+        <p className="mt-1 text-xs text-subtle">切换后下一句立刻生效。</p>
+        {models == null ? <p className="mt-2 text-xs text-subtle">正在拉取模型列表…</p> : null}
+        <div className="mt-2 flex flex-col gap-2">
+          {(models ?? [{ id: model, blurb: "暂无说明", supportsEffort: effort != null, stats: null }]).map((opt) => {
+            const selected = model === opt.id;
+            return (
+              <div
+                key={opt.id}
+                className={cn("rounded-md px-3 py-3", selected ? "bg-accent text-accent-fg" : "bg-bg text-muted")}
+              >
+                <button
+                  type="button"
+                  onClick={() => onModel(opt.id, effortForModel(opt, effort))}
+                  className="min-h-11 w-full text-left text-sm"
+                >
+                  <span className="block font-medium">{opt.id}</span>
+                  <span className={cn("mt-1 block text-xs", selected ? "opacity-90" : "text-subtle")}>{opt.blurb}</span>
+                  <span className={cn("mt-1 block text-[11px]", selected ? "opacity-80" : "text-subtle")}>
+                    {opt.stats && opt.stats.n > 0
+                      ? `近7天 平均 ${formatVoiceMs(opt.stats.avgMs)} · 首字 ${formatVoiceMs(opt.stats.avgTtftMs)} · 空回复 ${formatEmptyRate(opt.stats.emptyRate)} · ${opt.stats.n} 次`
+                      : "未使用"}
+                  </span>
+                </button>
+                {opt.supportsEffort ? (
+                  <div className="mt-2 grid grid-cols-3 gap-1">
+                    {VOICE_EFFORT_OPTIONS.map((next) => (
+                      <button
+                        key={next}
+                        type="button"
+                        onClick={() => onModel(opt.id, next)}
+                        className={cn(
+                          "min-h-11 rounded-md px-2 text-xs",
+                          selected && effort === next ? "bg-bg text-fg" : selected ? "bg-black/10" : "bg-surface-2",
+                        )}
+                      >
+                        {next}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </details>
       <p className="mt-2 text-[11px] text-subtle">
         一组消息，按发出去的顺序。代码只填占位符，不再在后面另接一段。{"{system_prompt}"} 仍是「人设」那一份。
       </p>

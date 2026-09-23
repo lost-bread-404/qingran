@@ -42,7 +42,7 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
   {
     key: "voice",
     name: "每轮回复",
-    blurb: "每次你说完话立刻跑，生成清然开口的那一句。用设置里选的回复模型。",
+    blurb: "每次你说完话立刻跑，生成清然开口的那一句。模型在这一条上选，下一句生效。",
   },
   {
     key: "reflect",

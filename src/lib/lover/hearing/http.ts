@@ -9,7 +9,7 @@ import {
   selfhostModel,
   type HearingProviderId,
 } from "./config.ts";
-import { HEARING_INSTRUCTION } from "./instruction.ts";
+import { HEARING_INSTRUCTION, HEARING_USER_LINE } from "./instruction.ts";
 import { NBEST_INSTRUCTION } from "./nbest.ts";
 import { looksLikeRefusal, parseHearingJson, type HearingResult } from "./schema.ts";
 import { formatEngineErrorDetail, type HearingAdapterOutcome, type HearingFailReason } from "./select.ts";
@@ -21,12 +21,15 @@ export type AdapterOutcome = HearingAdapterOutcome;
 export type HearingCallOpts = {
   context?: string;
   nbest?: boolean;
+  /** Replaces the built-in system instruction. xAI and Apple never receive this. */
+  instruction?: string;
 };
 
-const USER_PROMPT = "转写这段中文口语。按系统说明输出严格 JSON。";
+export const HEARING_USER_PROMPT = HEARING_USER_LINE;
 
 export function hearingSystemPrompt(opts?: HearingCallOpts): string {
-  const parts = [HEARING_INSTRUCTION];
+  const head = opts?.instruction?.trim() || HEARING_INSTRUCTION;
+  const parts = [head];
   if (opts?.nbest) parts.push(NBEST_INSTRUCTION);
   if (opts?.context?.trim()) parts.push(opts.context.trim());
   return parts.join("\n\n");
@@ -173,7 +176,7 @@ async function postGemini(
           role: "user",
           parts: [
             { inline_data: { mime_type: "audio/wav", data: audioBase64 } },
-            { text: USER_PROMPT },
+            { text: HEARING_USER_PROMPT },
           ],
         },
       ],
@@ -283,7 +286,7 @@ async function openaiAudioChat(input: {
       {
         role: "user",
         content: [
-          { type: "text", text: USER_PROMPT },
+          { type: "text", text: HEARING_USER_PROMPT },
           audioPart(input.audioBase64, input.audioStyle, input.dataUri),
         ],
       },

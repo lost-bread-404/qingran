@@ -12,6 +12,8 @@ import { parseUsage, settleLlmCost } from "./usage.ts";
 import { checkSpend, recordLlmSpend } from "./spend/check.ts";
 import { jobRateHit, SPEND_RATE_ERR } from "./spend/rate.ts";
 import { codeVersion, maybeWriteRawLog, xaiStoreEnabled } from "./log-refs.ts";
+import { applyPromptModel } from "./prompts/models.ts";
+import { storedPromptModel } from "./prompts/model-store.ts";
 
 export function finishReasonFromApi(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return null;
@@ -239,7 +241,9 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
   const started = Date.now();
   const apiKey = process.env.XAI_API_KEY;
   await checkModelAvailability(apiKey);
-  const resolved = applyAvailabilityFallback(resolveRoute(route));
+  const overrideKey = (input.promptKey && input.promptKey.trim()) || route;
+  const override = await storedPromptModel(overrideKey);
+  const resolved = applyAvailabilityFallback(applyPromptModel(resolveRoute(route), override));
   const fail = (note: string): CallModelResult => ({
     ok: false,
     text: "",

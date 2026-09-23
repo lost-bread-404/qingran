@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
-import { HEARING_PROVIDERS, labEngineLabel, type HearingProviderId } from "@/lib/lover/hearing/config";
+import { HEARING_PROVIDERS, HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD, labEngineLabel, type HearingProviderId } from "@/lib/lover/hearing/config";
 import { PROVIDER_ENV } from "@/lib/lover/hearing/env";
 import { hearingConnectionTest, hearingEnvStatus } from "@/lib/lover/hearing/store";
 import { slowEngineHint } from "@/lib/lover/hearing/select";
@@ -42,11 +42,13 @@ import {
   type LogRangeId,
 } from "@/lib/lover/call-log-view";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/lover/memory";
-import { PromptStepEditor, type PromptEditorItem } from "@/components/lover/prompt-step-editor";
+import { PromptStepEditor, type PromptEditorItem, type PromptModelChoice } from "@/components/lover/prompt-step-editor";
 import { HearingSensePanel } from "@/components/lover/hearing-sense-panel";
 import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
-import { DEFAULT_SYSTEM_PROMPT, VOICE_EFFORT_OPTIONS, clampHistoryWindow, formatVoiceInjectLine, isVoiceEffort, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
+import { DEFAULT_SYSTEM_PROMPT, clampHistoryWindow, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
+import { defaultPromptModel } from "@/lib/lover/brain/prompts/models";
+import { HEARING_INSTRUCTION, HEARING_USER_LINE } from "@/lib/lover/hearing/instruction";
 import { parseSenseLine } from "@/lib/lover/hearing/sense";
 import { cn } from "@/lib/utils";
 
@@ -75,25 +77,20 @@ type VoiceModelOption = {
   stats: VoiceModelStat | null;
 };
 
-function formatVoiceMs(ms: number | null): string {
-  if (ms == null || !Number.isFinite(ms)) return "—";
-  return `${Math.round(ms)}ms`;
-}
-
-function formatEmptyRate(rate: number | null): string {
-  if (rate == null || !Number.isFinite(rate)) return "—";
-  const pct = rate * 100;
-  return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
-}
-
-function formatVoiceStats(stats: VoiceModelStat | null): string {
-  if (!stats || stats.n <= 0) return "未使用";
-  return `近7天 平均 ${formatVoiceMs(stats.avgMs)} · 首字 ${formatVoiceMs(stats.avgTtftMs)} · 空回复 ${formatEmptyRate(stats.emptyRate)} · ${stats.n} 次`;
-}
-
-function effortForModel(model: VoiceModelOption, current: VoiceEffort): VoiceEffort {
-  if (!model.supportsEffort) return null;
-  return isVoiceEffort(current) ? current : "low";
+function toModelChoices(models: VoiceModelOption[]): PromptModelChoice[] {
+  return models.map((model) => ({
+    id: model.id,
+    blurb: model.blurb,
+    supportsEffort: model.supportsEffort,
+    stats: model.stats
+      ? {
+          n: model.stats.n,
+          avgMs: model.stats.avgMs,
+          avgTtftMs: model.stats.avgTtftMs,
+          emptyRate: model.stats.emptyRate,
+        }
+      : null,
+  }));
 }
 
 function withSelectedVoiceModel(
@@ -155,6 +152,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [voiceEffort, setVoiceEffort] = useState<VoiceEffort>(profile.voiceEffort);
   const [voiceModels, setVoiceModels] = useState<VoiceModelOption[] | null>(null);
   const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
+  const [promptModels, setPromptModels] = useState(profile.promptModels);
+  const [hearingInstruction, setHearingInstruction] = useState(profile.hearingInstruction);
+  const instructionTimer = useRef(0);
   const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
   const [injectMind, setInjectMind] = useState(profile.injectMind);
   const [injectMemories, setInjectMemories] = useState(profile.injectMemories);
@@ -180,6 +180,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setDebugHearing(profile.debugHearing);
     setVoiceModel(profile.voiceModel);
     setVoiceEffort(profile.voiceEffort);
+    setPromptModels(profile.promptModels);
+    setHearingInstruction(profile.hearingInstruction);
     setSense(profile.hearingSense);
     setInjectMind(profile.injectMind);
     setInjectMemories(profile.injectMemories);
@@ -292,6 +294,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       debugHearing,
       voiceModel,
       voiceEffort,
+      promptModels,
+      hearingInstruction,
       silenceMs: sense.endWaitMs,
       nightVoicedMin: sense.voicedMin,
       nightMinMs: sense.noiseMinMs,
@@ -314,10 +318,34 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     });
   }
 
-  function persistVoice(nextModel: string, nextEffort: VoiceEffort) {
-    setVoiceModel(nextModel);
-    setVoiceEffort(nextEffort);
-    persistProfile({ voiceModel: nextModel, voiceEffort: nextEffort });
+  function persistPromptModel(key: string, nextModel: string, nextEffort: VoiceEffort) {
+    if (key === "voice") {
+      setVoiceModel(nextModel);
+      setVoiceEffort(nextEffort);
+      persistProfile({ voiceModel: nextModel, voiceEffort: nextEffort });
+      return;
+    }
+    const next = { ...promptModels, [key]: { model: nextModel, effort: nextEffort } };
+    setPromptModels(next);
+    persistProfile({ promptModels: next });
+  }
+
+  function commitInstruction(next: string) {
+    setHearingInstruction(next);
+    window.clearTimeout(instructionTimer.current);
+    instructionTimer.current = window.setTimeout(() => {
+      persistProfile({ hearingInstruction: next });
+    }, 400);
+  }
+
+  function promptPick(key: string): { model: string; effort: VoiceEffort } {
+    const uiEffort = (effort: string | null): VoiceEffort =>
+      effort === "low" || effort === "medium" || effort === "high" ? effort : null;
+    if (key === "voice") return { model: voiceModel, effort: voiceEffort };
+    const saved = promptModels[key as keyof typeof promptModels];
+    if (saved) return { model: saved.model, effort: uiEffort(saved.effort) };
+    const fallback = defaultPromptModel(key);
+    return { model: fallback.model, effort: uiEffort(fallback.effort) };
   }
 
   function commitHistoryWindow(nextRaw: number) {
@@ -632,7 +660,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
             {promptItems.length === 0 ? (
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
-              promptItems.map((item) => (
+              promptItems.map((item) => {
+                const pick = promptPick(item.key);
+                return (
                 <PromptStepEditor
                   key={item.key}
                   item={item}
@@ -642,8 +672,17 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                   onSave={() => void savePromptItem(item.key)}
                   onRestore={() => void restorePromptItem(item.key)}
                   onRollback={(hash) => void rollbackPromptItem(item.key, hash)}
+                  models={
+                    voiceModels == null
+                      ? null
+                      : toModelChoices(withSelectedVoiceModel(voiceModels, voiceStats, pick.model))
+                  }
+                  model={pick.model}
+                  effort={pick.effort}
+                  onModel={(model, effort) => persistPromptModel(item.key, model, effort)}
                 />
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -913,6 +952,69 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
             <HearingSensePanel sense={sense} labPassword={labPassword} onChange={commitSense} />
+            <section className="flex flex-col gap-3">
+              <div>
+                <p className="text-sm">识别时发出去的内容</p>
+                <p className="mt-1 text-xs text-subtle">
+                  声学标签不是 xAI 或 Apple 写进字里的。它们只回你说的字。标签是字回来之后，本地按声音加上的。
+                </p>
+              </div>
+              <div className="rounded-md bg-surface-2 px-3 py-3">
+                <p className="text-sm">发给 xAI 的</p>
+                <p className="mt-1 text-xs text-subtle">
+                  转写接口不收一段说明。下面是每次原样发出去的字段，再加上你最近说过的词。没有 prompt。
+                </p>
+                <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-fg">
+{`model: ${HEARING.xai.model}
+filler_words: true
+vad_threshold: ${DEFAULT_XAI_VAD_THRESHOLD}
+${STT_KEYTERMS.map((term) => `keyterm: ${term}`).join("\n")}`}
+                </pre>
+              </div>
+              <div className="rounded-md bg-surface-2 px-3 py-3">
+                <p className="text-sm">发给 Apple 的</p>
+                <p className="mt-1 text-xs text-subtle">
+                  浏览器自带的中文识别，不收任何说明。只把听到的字拿回来，和 xAI 对一下，用来丢掉 xAI 胡说的句子。
+                </p>
+                <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-fg">
+{`lang: zh-CN
+continuous: true
+interimResults: true
+maxAlternatives: 3`}
+                </pre>
+              </div>
+              <div className="rounded-md bg-surface-2 px-3 py-3">
+                <p className="text-sm">声学标签</p>
+                <p className="mt-1 text-xs text-subtle">
+                  走 xAI 时，本地只加长短：有声短于 0.42 秒写 short，否则写 long。不加走向、气声和事件。格式是〔长短·走向·声线｜事件〕，例如〔long· · ｜〕。走向、气声、笑哭只有在用 Qwen、Gemini 或自部署时，才按下面这段说明让那个模型填。告诉清然怎么读这些标记的那段，在「指令 → 每轮回复」里，不发给识别。
+                </p>
+              </div>
+              <div>
+                <div className="mb-1 flex items-baseline justify-between gap-3">
+                  <p className="text-sm">发给 Qwen / Gemini / 自部署的说明</p>
+                  <button
+                    type="button"
+                    className="shrink-0 text-xs text-muted underline-offset-4 hover:underline"
+                    onClick={() => commitInstruction("")}
+                  >
+                    恢复默认
+                  </button>
+                </div>
+                <p className="mb-2 text-xs text-subtle">
+                  xAI 和 Apple 不收这段。改完下一句识别就用新的。用户那一句固定是：{HEARING_USER_LINE}
+                </p>
+                <Textarea
+                  value={hearingInstruction.trim() ? hearingInstruction : HEARING_INSTRUCTION}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    commitInstruction(next.trim() === HEARING_INSTRUCTION.trim() ? "" : next);
+                  }}
+                  className="min-h-64 resize-y font-mono text-xs leading-relaxed"
+                  maxLength={8000}
+                  aria-label="听力识别说明"
+                />
+              </div>
+            </section>
             <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
               <input
                 type="checkbox"
@@ -1012,64 +1114,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                       voiceInjectFromProfile({ injectMemories, injectLongterm, historyWindow }),
                     )}
                   </p>
-                </div>
-                <div>
-                  <p className="mb-2 text-sm">回复模型</p>
-                  <p className="mb-2 text-xs text-subtle">
-                    实时对话用。切换后下一句立刻生效。报错或空回复会自动用 grok-4.20-0309-non-reasoning 再试一次。
-                  </p>
-                  {voiceModels == null ? (
-                    <p className="mb-2 text-xs text-subtle">正在拉取模型列表…</p>
-                  ) : null}
-                  <div className="flex flex-col gap-2">
-                    {withSelectedVoiceModel(voiceModels ?? [], voiceStats, voiceModel).map((opt) => {
-                      const selected = voiceModel === opt.id;
-                      return (
-                        <div
-                          key={opt.id}
-                          className={cn(
-                            "rounded-md px-3 py-3",
-                            selected ? "bg-accent text-accent-fg" : "bg-bg text-muted",
-                          )}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => persistVoice(opt.id, effortForModel(opt, voiceEffort))}
-                            className="min-h-11 w-full text-left text-sm"
-                          >
-                            <span className="block font-medium">{opt.id}</span>
-                            <span className={cn("mt-1 block text-xs", selected ? "opacity-90" : "text-subtle")}>
-                              {opt.blurb}
-                            </span>
-                            <span className={cn("mt-1 block text-[11px]", selected ? "opacity-80" : "text-subtle")}>
-                              {formatVoiceStats(opt.stats)}
-                            </span>
-                          </button>
-                          {opt.supportsEffort ? (
-                            <div className="mt-2 grid grid-cols-3 gap-1">
-                              {VOICE_EFFORT_OPTIONS.map((effort) => (
-                                <button
-                                  key={effort}
-                                  type="button"
-                                  onClick={() => persistVoice(opt.id, effort)}
-                                  className={cn(
-                                    "min-h-11 rounded-md px-2 text-xs",
-                                    selected && voiceEffort === effort
-                                      ? "bg-bg text-fg"
-                                      : selected
-                                        ? "bg-black/10"
-                                        : "bg-surface-2",
-                                  )}
-                                >
-                                  {effort}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
               </div>
             </details>
