@@ -1,3 +1,5 @@
+import { MIND_NOT_SPOKEN } from "./brain/prompts/templates.ts";
+
 export type CallLogMessage = {
   role: string;
   content: string;
@@ -78,6 +80,26 @@ export function labelCallMessages(messages: Array<{ role: string; content: strin
     }
     return { role: row.role, content: row.content, label };
   });
+}
+
+export type MindSpan = { text: string; mind: boolean };
+
+/** The 【内心】 block, plus the line in front of it that says not to speak it. */
+export function splitMindHighlight(content: string): MindSpan[] {
+  const marker = "【内心】";
+  let start = content.indexOf(marker);
+  if (start < 0) return [{ text: content, mind: false }];
+  const leadAt = content.lastIndexOf(MIND_NOT_SPOKEN, start);
+  if (leadAt >= 0 && content.slice(leadAt + MIND_NOT_SPOKEN.length, start).trim() === "") start = leadAt;
+  const fromMarker = content.indexOf(marker, start);
+  const tail = content.slice(fromMarker + marker.length);
+  const next = tail.search(/\n【|\n说话要有逻辑/);
+  const end = next < 0 ? content.length : fromMarker + marker.length + next;
+  const parts: MindSpan[] = [];
+  if (start > 0) parts.push({ text: content.slice(0, start), mind: false });
+  parts.push({ text: content.slice(start, end), mind: true });
+  if (end < content.length) parts.push({ text: content.slice(end), mind: false });
+  return parts;
 }
 
 export function formatCallLogPlain(opts: {

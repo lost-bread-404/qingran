@@ -155,6 +155,8 @@ test("settings prompts tab edits catalog steps and log expand shows assembled pr
   assert.match(src, />参数与耗时</);
   assert.match(src, /记录保留 30 天/);
   assert.match(src, /loadCall/);
+  assert.match(src, /splitMindHighlight/);
+  assert.match(src, /bg-accent\/30/);
   assert.match(api, /brainListPrompts/);
   assert.match(api, /brainPreviewVoiceSlots/);
   assert.match(api, /brainSavePrompt/);

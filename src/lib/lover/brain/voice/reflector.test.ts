@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { INDEX_CORE_MAX, INDEX_RELATED_MAX } from "../config.ts";
 import { EMPTY_MIND, type IndexItem, type Mind, type PortraitRow, type Theme } from "../types.ts";
-import { coerceMind, validateMind } from "../mind-parse.ts";
+import { coerceMind, insightDirectiveReason, validateMind } from "../mind-parse.ts";
 import { assembleRelatedIndex, resolveCoreIndex } from "./retrieve.ts";
 import { buildReflectorInput } from "./reflector.ts";
 import { defaultDoc, serializeDoc } from "../prompts/doc.ts";
@@ -69,6 +69,26 @@ function pack(over: Partial<Parameters<typeof buildReflectorInput>[0]> = {}) {
     ...over,
   });
 }
+
+test("a directive insight is dropped instead of kept", () => {
+  assert.match(insightDirectiveReason("她现在不需要我推她，不要再催她学习") ?? "", /不要/);
+  assert.equal(insightDirectiveReason("她现在需要的是停下来被抱着，不是被推着往前"), null);
+  assert.match(insightDirectiveReason("我该去催她") ?? "", /该去/);
+  assert.match(insightDirectiveReason("我不应该再提学习") ?? "", /不应该/);
+  const next = validateMind(
+    { insight: "不要再推她学习", memory_ids: ["n1"] },
+    { ...EMPTY_MIND, insight: "旧的" },
+    new Set(["n1"]),
+  );
+  assert.equal(next.insight, "");
+  assert.deepEqual(next.memory_ids, []);
+  const kept = validateMind(
+    { insight: "她现在需要的是停下来被抱着，不是被推着往前", memory_ids: ["n1"] },
+    EMPTY_MIND,
+    new Set(["n1"]),
+  );
+  assert.match(kept.insight, /被抱着/);
+});
 
 test("validateMind keeps insight and drops unknown memory ids", () => {
   const next = validateMind(

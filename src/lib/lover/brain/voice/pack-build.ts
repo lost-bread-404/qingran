@@ -1,6 +1,7 @@
 import { HISTORY_WINDOW, PORTRAIT_MAX_CHARS, SESSION_GAP_MS } from "../config.ts";
 import { defaultDoc, parsePromptBody, renderPromptMessages, variantMessages } from "../prompts/doc.ts";
 import { fillTemplate } from "../prompts/fill.ts";
+import { MIND_NOT_SPOKEN } from "../prompts/templates.ts";
 import { formatClock } from "../time.ts";
 import type { Mind, Note, PortraitRow, StoredMessage, VoiceChatMessage } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
@@ -135,7 +136,7 @@ export function voiceInjectOf(parts: {
   });
 }
 
-/** Drop an empty 【内心】 block. A real insight stays, including its heading. */
+/** Drop an empty 【内心】 block, including the line that says not to speak it. A real insight stays. */
 export function omitEmptyMindBlock(text: string): string {
   const marker = "【内心】";
   const at = text.indexOf(marker);
@@ -144,8 +145,12 @@ export function omitEmptyMindBlock(text: string): string {
   const next = after.search(/\n【|说话要有逻辑/);
   const body = (next < 0 ? after : after.slice(0, next)).trim();
   if (body) return text;
+  let start = at;
+  const before = text.slice(0, at);
+  const leadAt = before.lastIndexOf(MIND_NOT_SPOKEN);
+  if (leadAt >= 0 && before.slice(leadAt + MIND_NOT_SPOKEN.length).trim() === "") start = leadAt;
   const end = next < 0 ? text.length : at + marker.length + next;
-  return `${text.slice(0, at)}${text.slice(end)}`.replace(/\n{3,}/g, "\n\n");
+  return `${text.slice(0, start)}${text.slice(end)}`.replace(/\n{3,}/g, "\n\n");
 }
 
 /** Remove the memories section entirely, heading included. */

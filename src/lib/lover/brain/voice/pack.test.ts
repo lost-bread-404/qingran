@@ -65,6 +65,7 @@ test("empty mind omits inner block but keeps the logic line", () => {
     careHint: false,
   });
   assert.doesNotMatch(tail, /【内心】/);
+  assert.doesNotMatch(tail, /不要复述/);
   assert.doesNotMatch(tail, /你深爱她/);
   assert.match(tail, /说话要有逻辑/);
   assert.match(tail, /小猫/);
@@ -164,6 +165,7 @@ test("jump does not rewrite the insight block", () => {
     jump: true,
   });
   assert.match(tail, /【内心】/);
+  assert.match(tail, /不要复述，也不要说明自己没做什么/);
   assert.match(tail, /怕自己不够好/);
   assert.doesNotMatch(tail, /刚跳到了新的话题/);
   assert.doesNotMatch(tail, /上面这条路可能不适用了/);

@@ -4,6 +4,7 @@ import {
   formatCallLogPlain,
   labelCallMessages,
   messagesFromStored,
+  splitMindHighlight,
 } from "./call-log-view.ts";
 
 test("labelCallMessages tags system, injected blocks, history, and the last user turn", () => {
@@ -41,6 +42,17 @@ test("messagesFromStored reads messages, system+user parts, and truncated previe
   const clipped = messagesFromStored({ truncated: true, preview: "cut" });
   assert.equal(clipped?.[0]?.content, "cut");
   assert.equal(messagesFromStored(null), null);
+});
+
+test("splitMindHighlight marks the inner block and the line in front of it", () => {
+  const content = "现在是晚上。\n\n这是我对她的理解，不是要我说出来的话，不要复述，也不要说明自己没做什么。\n【内心】\n她需要被抱着\n\n【可以用的记忆】\n无\n\n说话要有逻辑";
+  const parts = splitMindHighlight(content);
+  assert.equal(parts.filter((part) => part.mind).length, 1);
+  assert.match(parts.find((part) => part.mind)?.text ?? "", /【内心】/);
+  assert.match(parts.find((part) => part.mind)?.text ?? "", /不要复述/);
+  assert.match(parts.find((part) => part.mind)?.text ?? "", /被抱着/);
+  assert.doesNotMatch(parts.find((part) => part.mind)?.text ?? "", /可以用的记忆/);
+  assert.match(parts.at(-1)?.text ?? "", /说话要有逻辑/);
 });
 
 test("formatCallLogPlain includes input and output sections", () => {

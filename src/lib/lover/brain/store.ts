@@ -1616,7 +1616,7 @@ export async function appendBrainLog(row: {
 
 export async function patchBrainLog(
   id: number | null | undefined,
-  patch: { outputText?: string | null; outputRef?: string | null },
+  patch: { outputText?: string | null; outputRef?: string | null; note?: string | null },
 ): Promise<void> {
   if (!id) return;
   try {
@@ -1630,6 +1630,12 @@ export async function patchBrainLog(
     if ("outputRef" in patch) {
       params.push(patch.outputRef ?? null);
       sets.push(`output_ref = $${params.length}`);
+    }
+    if ("note" in patch && patch.note) {
+      params.push(patch.note);
+      sets.push(
+        `note = case when coalesce(note, '') = '' then $${params.length} else note || E'\\n' || $${params.length} end`,
+      );
     }
     if (!sets.length) return;
     await db.query(`update brain_log set ${sets.join(", ")} where id = $1`, params);

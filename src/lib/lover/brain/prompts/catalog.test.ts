@@ -57,9 +57,13 @@ test("reflect archive portrait defaults close the memory loop", () => {
   assert.match(defaultPrompt("portrait"), /意思相近的主题合并/);
   assert.match(defaultPrompt("archive"), /第一人称/);
   assert.match(defaultPrompt("portrait"), /第一人称/);
+  assert.match(defaultPrompt("reflect"), /只写对她的理解/);
+  assert.match(defaultPrompt("reflect"), /不要再推她学习/);
   assert.match(defaultPrompt("reflect"), /第一人称/);
+  const voice = PROMPT_CATALOG.find((s) => s.key === "voice");
+  const voiceBody = voice?.variants[0]?.messages.map((message) => message.content).join("\n") ?? "";
+  assert.match(voiceBody, /不要复述，也不要说明自己没做什么/);
   assert.match(defaultPrompt("dusk"), /第一人称/);
   assert.match(defaultPrompt("synth"), /第一人称/);
-  const voice = PROMPT_CATALOG.find((s) => s.key === "voice");
   assert.ok(voice?.placeholders.some((p) => p.token === "mind"));
 });

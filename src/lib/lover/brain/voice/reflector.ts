@@ -1,6 +1,6 @@
 import { QR_VOICE_READS_DIARY, REFLECT_WINDOW } from "../config.ts";
 import { callModel, classifyReflectFailure } from "../llm.ts";
-import { validateMind } from "../mind-parse.ts";
+import { insightDirectiveReason, validateMind } from "../mind-parse.ts";
 import {
   getMeta,
   getMind,
@@ -225,8 +225,13 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     return null;
   }
   const allowed = new Set([...coreIndex, ...relatedIndex].map((i) => i.id));
+  const rawInsight = typeof result.json.insight === "string" ? result.json.insight : "";
+  const rejected = insightDirectiveReason(rawInsight);
   const next = validateMind(result.json, old, allowed);
   next.turn_seq = turnSeq;
+  if (rejected) {
+    await patchBrainLog(result.logId, { note: rejected });
+  }
   const saved = await saveMind(next, turnSeq, { model: result.model, ms: result.ms });
   if (!saved) {
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
