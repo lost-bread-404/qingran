@@ -131,8 +131,36 @@ export const JUMP_PICK_QUERY_SLOTS = 4;
 export const HOT_FALLBACK_K = 2;
 export const MIND_MAX_CHARS = 500;
 export const PORTRAIT_MAX_CHARS = 600;
+export const PORTRAIT_ACTIVE_MAX = 12;
+export const PORTRAIT_ACTIVE_MIN = 4;
+export const PORTRAIT_ACTIVE_HARD_MAX = 40;
+export const PORTRAIT_STALE_DAYS = 14;
+export const PORTRAIT_STALE_DAYS_MIN = 3;
+export const PORTRAIT_STALE_DAYS_MAX = 90;
+export const RETRIEVE_MIN_TERMS = 1;
+export const RETRIEVE_MIN_TERMS_MIN = 1;
+export const RETRIEVE_MIN_TERMS_MAX = 6;
 export const SELF_MAX_CHARS = 300;
 export const BOND_MAX_CHARS = 200;
+
+export function clampPortraitActiveMax(value: unknown, fallback = PORTRAIT_ACTIVE_MAX): number {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(PORTRAIT_ACTIVE_MIN, Math.min(PORTRAIT_ACTIVE_HARD_MAX, Math.round(n)));
+}
+
+export function clampPortraitStaleDays(value: unknown, fallback = PORTRAIT_STALE_DAYS): number {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(PORTRAIT_STALE_DAYS_MIN, Math.min(PORTRAIT_STALE_DAYS_MAX, Math.round(n)));
+}
+
+/** How many non-filler words a keyword hit must share before it is injected. */
+export function clampRetrieveMinTerms(value: unknown, fallback = RETRIEVE_MIN_TERMS): number {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(RETRIEVE_MIN_TERMS_MIN, Math.min(RETRIEVE_MIN_TERMS_MAX, Math.round(n)));
+}
 
 export const LAG_MAX = 3;
 export const FINDING_MIN_N11 = 4;

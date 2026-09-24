@@ -707,10 +707,12 @@ function wakeIdle() {
   for (const waiter of waiters) waiter();
 }
 
+export function isPlaybackActive(): boolean {
+  return !(ended && inFlight === 0 && sampleQueue.length === 0 && liveSources.size === 0);
+}
+
 export function whenPlaybackIdle(): Promise<void> {
-  if (ended && inFlight === 0 && sampleQueue.length === 0 && liveSources.size === 0) {
-    return Promise.resolve();
-  }
+  if (!isPlaybackActive()) return Promise.resolve();
   return new Promise((resolve) => idleWaiters.push(resolve));
 }
 

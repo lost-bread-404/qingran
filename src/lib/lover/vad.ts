@@ -11,8 +11,42 @@ export const VOICE_SPIKE_MS = 80;
 export const LISTEN_WARMUP_MS = 380;
 /** First 500ms after getUserMedia: iOS mic is often still muted/silent. */
 export const CALL_START_WARMUP_MS = 500;
-/** After Qingran finishes speaking, ignore VAD starts for this long. */
+/** After Qingran finishes speaking, ignore VAD starts and floor updates for this long. */
 export const POST_QINGRAN_MS = 300;
+export const FLOOR_FREEZE_TAIL_MS = POST_QINGRAN_MS;
+/** Noise floor is not allowed to climb past this. Lower floors still fall. */
+export const NOISE_FLOOR_CAP = 0.02;
+
+export function clampNoiseFloorCap(value: unknown, fallback = NOISE_FLOOR_CAP): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const stepped = Math.round(n * 1000) / 1000;
+  return Math.min(0.045, Math.max(0.006, stepped));
+}
+
+export function shouldTrackNoiseFloor(input: {
+  qingranSpeaking: boolean;
+  quietForMs: number;
+  tailMs?: number;
+}): boolean {
+  if (input.qingranSpeaking) return false;
+  return input.quietForMs >= (input.tailMs ?? FLOOR_FREEZE_TAIL_MS);
+}
+
+/** Playback itself, not the React "speaking" flag: the flag lands a frame late and one loud frame slams the floor. */
+export function floorUpdateAllowed(input: {
+  playbackActive: boolean;
+  msSincePlayback: number;
+  qingranStatusSpeaking: boolean;
+  msSinceStatusQuiet: number;
+  tailMs?: number;
+}): boolean {
+  return shouldTrackNoiseFloor({
+    qingranSpeaking: input.playbackActive || input.qingranStatusSpeaking,
+    quietForMs: Math.min(input.msSincePlayback, input.msSinceStatusQuiet),
+    tailMs: input.tailMs,
+  });
+}
 
 /** Production start: low enough for a murmur. Noise is rejected later by voiced ratio, not by loudness. */
 export const START_FLOOR_MIN = 0.004;
@@ -67,10 +101,15 @@ export function clampFloor(value: number) {
   return Math.min(0.045, Math.max(0.004, value));
 }
 
-export function nextFloor(floor: number, rms: number, speaking: boolean) {
-  if (!speaking) return clampFloor(floor * 0.94 + rms * 0.06);
-  if (rms < floor * 1.2) return clampFloor(floor * 0.88 + rms * 0.12);
-  return floor;
+export function nextFloor(floor: number, rms: number, speaking: boolean, cap = NOISE_FLOOR_CAP) {
+  const limit = clampNoiseFloorCap(cap);
+  const next = !speaking
+    ? clampFloor(floor * 0.94 + rms * 0.06)
+    : rms < floor * 1.2
+      ? clampFloor(floor * 0.88 + rms * 0.12)
+      : floor;
+  if (next > floor && next > limit) return Math.min(Math.max(floor, limit), next);
+  return next;
 }
 
 export function startThreshold(floor: number, debug = false, cuts?: VadCuts | null) {

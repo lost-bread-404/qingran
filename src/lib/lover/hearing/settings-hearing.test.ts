@@ -95,6 +95,8 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.match(panel, /aria-label=\{label\}/);
   assert.match(panel, /起始绝对门槛/);
   assert.match(panel, /保持绝对门槛/);
+  assert.match(panel, /底噪上限/);
+  assert.match(panel, /不把扬声器的声音学进去/);
   assert.match(panel, /最短有声/);
   assert.match(panel, /轻声开口门槛/);
   assert.match(panel, /标点符号/);
@@ -247,7 +249,7 @@ test("voice room shows labeled count, volume meter, and writes final_text back",
   assert.match(src, /result.toneNote/);
   assert.match(src, /initialNoise=\{confirmNoise\}/);
   assert.match(src, /micActionForConfirmPanel/);
-  assert.match(src, /qingranSpeaking: status === "speaking" \|\| status === "thinking"/);
+  assert.match(src, /qingranSpeaking: isPlaybackActive\(\) \|\| status === "thinking" \|\| busyRef\.current/);
   assert.match(src, /POST_QINGRAN_MS/);
   assert.match(src, /setConfirmStt\(result\.xaiText\)/);
   assert.match(src, /UNRECOGNIZED_TEXT/);

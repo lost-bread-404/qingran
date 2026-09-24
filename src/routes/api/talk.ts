@@ -213,6 +213,7 @@ export const Route = createFileRoute("/api/talk")({
                   injectLongterm: ctx.inject.longterm,
                   historyWindow: ctx.inject.history,
                   injectLine: formatVoiceInjectLine(ctx.inject),
+                  recentPhrases: ctx.recentPhrases,
                 },
                 reply: {
                   text: display,

@@ -43,6 +43,7 @@ export type TurnTraceInput = {
     injectLongterm?: boolean;
     historyWindow?: number;
     injectLine?: string;
+    recentPhrases?: string[];
   };
   reply?: {
     text?: string;

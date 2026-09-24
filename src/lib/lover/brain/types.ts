@@ -38,14 +38,25 @@ export const EMPTY_MIND: Mind = {
   memory_ids: [],
 };
 
+export type PortraitKind = "trait" | "episode" | "seed";
+export type PortraitStatus = "active" | "stale" | "superseded";
+
 export type PortraitRow = {
   id: string;
   topic: string;
   body: string;
-  status: "active" | "dormant";
+  status: PortraitStatus;
+  kind: PortraitKind;
   evidenceIds: string[];
   lastSeen: number;
+  lastSupportedAt: number;
+  supportCount: number;
   updatedAt: number;
+  /** Filled for the settings page. Not stored. */
+  evidenceCount?: number;
+  evidenceFrom?: string | null;
+  evidenceTo?: string | null;
+  retireReason?: string | null;
 };
 
 export type BrainMeta = {

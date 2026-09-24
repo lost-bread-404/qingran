@@ -1,15 +1,10 @@
 import { getSql } from "../../db.ts";
 import { now } from "./clock.ts";
+import { DROP_PORTRAIT_TOPICS } from "./portrait-kind.ts";
 import { getMeta, listNotes, patchMeta, resetMind, bumpNotesVersion, pgTextArray } from "./store.ts";
 import type { Note, Subject } from "./types.ts";
 
-export const DROP_PORTRAIT_TOPICS = [
-  "整夜陪伴承诺",
-  "整夜陪伴",
-  "噩梦安抚",
-  "任务激励与主导",
-  "林泽前的占有展示",
-];
+export { DROP_PORTRAIT_TOPICS };
 
 export const QINGRAN_SELF_NOTE_DAY = "2026-09-21";
 
@@ -84,7 +79,6 @@ export async function ensureMemoryHygiene(): Promise<void> {
   const meta = await getMeta();
   if (meta.hygieneMemoryLoopAt) return;
   try {
-    await sweepNamedPortraits();
     await resetMind();
     await patchMeta({ hygieneMemoryLoopAt: now() });
   } catch (err) {

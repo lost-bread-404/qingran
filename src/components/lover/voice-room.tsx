@@ -26,6 +26,7 @@ import {
   stopPlayback,
   unlockPlayback,
   whenPlaybackIdle,
+  isPlaybackActive,
 } from "@/lib/lover/playback";
 import {
   appendRoomMessage,
@@ -48,6 +49,7 @@ import { newId } from "@/lib/lover/storage";
 import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import { warmBrain } from "@/lib/lover/brain/warm-client";
+import { brainNoteCallStuck } from "@/lib/lover/brain/api";
 import { classifyTalkException, TALK_FAIL, talkExceptionHint } from "@/lib/lover/talk-fail";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { stripAcousticTags } from "@/lib/lover/hearing/tags";
@@ -134,6 +136,8 @@ export function VoiceRoom() {
   const confirmWasOpenRef = useRef(false);
   const confirmOpenRef = useRef(false);
   const skipAutoPlayRef = useRef(false);
+  const statusRef = useRef<SessionStatus>("idle");
+  const editingRef = useRef(false);
   const [undoConfirmId, setUndoConfirmId] = useState<string | null>(null);
   const undoTimerRef = useRef(0);
   const [audioLog, setAudioLog] = useState("");
@@ -374,32 +378,45 @@ export function VoiceRoom() {
   }
 
   const playFull = useCallback(async (id: string, speech: string, turn: number) => {
-    if (profileRef.current.muted) return;
+    if (profileRef.current.muted) {
+      resumeCallListen(turn);
+      return;
+    }
     speakingIdRef.current = id;
     stopPlayback();
     setStatus("speaking");
     void unlockPlayback();
     void resumeAudio();
     if (callActiveRef.current) deafenRef.current();
-    let clip = spokenCacheRef.current.get(id);
-    if (clip && !streamAudioCovers([clip.bytes], stripSpeechTags(speech))) {
-      spokenCacheRef.current.delete(id);
-      clip = undefined;
+    let released = false;
+    try {
+      let clip = spokenCacheRef.current.get(id);
+      if (clip && !streamAudioCovers([clip.bytes], stripSpeechTags(speech))) {
+        spokenCacheRef.current.delete(id);
+        clip = undefined;
+      }
+      if (!clip) {
+        const spoken = await speakAsLover({
+          data: { text: speech, speed: profileRef.current.voiceSpeed },
+        });
+        if (!spoken.ok || turn !== turnRef.current) return;
+        clip = { bytes: base64ToBytes(spoken.audioBase64), mimeType: spoken.mimeType };
+        spokenCacheRef.current.set(id, clip);
+      }
+      const ok = await playMp3Bytes(clip.bytes, clip.mimeType);
+      if (turn !== turnRef.current) return;
+      if (speakingIdRef.current === id) speakingIdRef.current = null;
+      if (!ok) setBanner("声音被浏览器拦住了，点喇叭再听。");
+      setStatus((s) => (s === "speaking" ? "idle" : s));
+      resumeCallListen(turn);
+      released = true;
+    } finally {
+      if (!released && turn === turnRef.current && callActiveRef.current) {
+        if (speakingIdRef.current === id) speakingIdRef.current = null;
+        setStatus((s) => (s === "speaking" ? "idle" : s));
+        resumeCallListen(turn);
+      }
     }
-    if (!clip) {
-      const spoken = await speakAsLover({
-        data: { text: speech, speed: profileRef.current.voiceSpeed },
-      });
-      if (!spoken.ok || turn !== turnRef.current) return;
-      clip = { bytes: base64ToBytes(spoken.audioBase64), mimeType: spoken.mimeType };
-      spokenCacheRef.current.set(id, clip);
-    }
-    const ok = await playMp3Bytes(clip.bytes, clip.mimeType);
-    if (turn !== turnRef.current) return;
-    if (speakingIdRef.current === id) speakingIdRef.current = null;
-    if (!ok) setBanner("声音被浏览器拦住了，点喇叭再听。");
-    setStatus((s) => (s === "speaking" ? "idle" : s));
-    resumeCallListen(turn);
   }, []);
 
   const cycleVoiceSpeed = () => {
@@ -442,7 +459,10 @@ export function VoiceRoom() {
     ) => {
       const tagged = sayRaw.trim();
       if (!tagged) return;
-      if ((opts?.skipQingran || opts?.nightNoise) && !getHearingSession().debugHearing) return;
+      if ((opts?.skipQingran || opts?.nightNoise) && !getHearingSession().debugHearing) {
+        if (callActiveRef.current) hearRef.current();
+        return;
+      }
       const say = stripHearingMarkup(tagged).trim() || tagged;
       const at = Date.now();
       const injectLine = formatVoiceInjectLine(voiceInjectFromProfile(profileRef.current));
@@ -490,6 +510,7 @@ export function VoiceRoom() {
         if (opts.voiceTurnId) {
           void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: "" } });
         }
+        if (callActiveRef.current) hearRef.current();
         return;
       }
       if (!opts?.existingUser && busyRef.current) return;
@@ -754,6 +775,14 @@ export function VoiceRoom() {
 
   const call = useCall({
     prompt: profile.systemPrompt,
+    isGenerating: () => statusRef.current === "thinking" || busyRef.current,
+    isLabeling: () => confirmOpenRef.current || editingRef.current,
+    onStuck: ({ phase, deaf }) => {
+      setStatus((s) => (s === "speaking" || s === "thinking" ? "idle" : s));
+      const prev = getHearingSession().floorQuietAt;
+      if (!Number.isFinite(prev)) setHearingSession({ floorQuietAt: performance.now() });
+      void brainNoteCallStuck({ data: { phase, deaf } });
+    },
     onUtterance: async (heard: HeardUtterance) => {
       if (heard.saveError) setBanner(clipSaveBanner(heard.saveError));
       await sendTurn(heard.text, {
@@ -767,6 +796,9 @@ export function VoiceRoom() {
       });
     },
   });
+
+  statusRef.current = status;
+  editingRef.current = Boolean(editingId);
 
   useEffect(() => {
     callActiveRef.current = call.active;
@@ -785,12 +817,21 @@ export function VoiceRoom() {
       panelOpen: open,
       wasOpen: confirmWasOpenRef.current,
       callActive: call.active,
-      qingranSpeaking: status === "speaking" || status === "thinking",
+      qingranSpeaking: isPlaybackActive() || status === "thinking" || busyRef.current,
     });
     confirmWasOpenRef.current = open;
     if (action === "deafen") call.deafen();
     else if (action === "hear") call.hear();
   }, [confirmId, call.active, call.deafen, call.hear, status]);
+
+  useEffect(() => {
+    if (status === "speaking") {
+      setHearingSession({ floorQuietAt: Number.POSITIVE_INFINITY });
+      return;
+    }
+    const prev = getHearingSession().floorQuietAt;
+    if (!Number.isFinite(prev)) setHearingSession({ floorQuietAt: performance.now() });
+  }, [status]);
 
   useEffect(() => {
     if (!confirmId) {
@@ -1190,7 +1231,7 @@ export function VoiceRoom() {
           ? "她在想"
           : status === "speaking"
             ? "清然在说"
-            : "你说，说完停两秒"
+            : `你说，说完停两秒 · phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
     : status === "thinking"
       ? "正在想"
       : "";
@@ -1366,7 +1407,10 @@ export function VoiceRoom() {
                 const plan = planOpenConfirmPanel();
                 skipAutoPlayRef.current = plan.skipAutoPlay;
                 confirmOpenRef.current = true;
-                if (plan.stopPlayback) stopPlayback();
+                if (plan.stopPlayback) {
+                  stopPlayback();
+                  setStatus((s) => (s === "speaking" ? "idle" : s));
+                }
                 setConfirmError(null);
                 setConfirmId(id);
               }}
@@ -1447,10 +1491,10 @@ export function VoiceRoom() {
                 <p className="min-h-4 max-w-xs text-center text-xs text-subtle">
                   {call.active
                     ? status === "speaking"
-                      ? "点按钮挂断"
+                      ? `点按钮挂断 · phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
                       : call.phase === "speaking-you"
-                        ? `在听 ${call.listenSec} 秒 · 音量 ${call.rms.toFixed(3)} / 保持 ${call.hold.toFixed(3)}`
-                        : "通话中"
+                        ? `在听 ${call.listenSec} 秒 · phase ${call.phase} · 音量 ${call.rms.toFixed(3)} / 保持 ${call.hold.toFixed(3)} · 底噪 ${call.noiseFloor.toFixed(3)}`
+                        : `phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
                     : recording
                       ? voice.interim.trim() || "松开发送"
                       : transcribing
@@ -1518,6 +1562,8 @@ export function VoiceRoom() {
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           profile={profile}
+          callPhase={call.active ? call.phase : null}
+          callDeaf={call.deaf}
           onSave={(next) => setProfile(lockedProfile(next))}
           onClearChat={() => {
             setMessages([]);

@@ -53,10 +53,13 @@ test("reflect archive portrait defaults close the memory loop", () => {
   assert.match(defaultPrompt("reflect"), /必须用中文/);
   assert.match(defaultPrompt("archive"), /清然承诺/);
   assert.match(defaultPrompt("archive"), /同一承诺不重复记录/);
-  assert.match(defaultPrompt("portrait"), /稳定理解/);
+  assert.match(defaultPrompt("portrait"), /跨越多次/);
+  assert.match(defaultPrompt("portrait"), /不同日期/);
+  assert.match(defaultPrompt("portrait"), /关系阶段/);
   assert.match(defaultPrompt("portrait"), /意思相近的主题合并/);
   assert.match(defaultPrompt("archive"), /第一人称/);
   assert.match(defaultPrompt("portrait"), /第一人称/);
+  assert.match(defaultPrompt("portrait"), /设定/);
   assert.match(defaultPrompt("reflect"), /只写对她的理解/);
   assert.match(defaultPrompt("reflect"), /不要再推她学习/);
   assert.match(defaultPrompt("reflect"), /第一人称/);

@@ -1,6 +1,6 @@
 import { mergeEditedUserBody } from "../../message-markup.ts";
 import { voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
-import { SESSION_GAP_MS } from "../config.ts";
+import { SESSION_GAP_MS, HISTORY_WINDOW_MAX } from "../config.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import {
   getDay,
@@ -30,6 +30,7 @@ import {
   type VoiceInputChars,
   type VoicePackParts,
 } from "./pack-build.ts";
+import { assistantReplyTexts, recentPhrasesFromHistory } from "./recent-phrases.ts";
 
 export {
   buildTail,
@@ -68,6 +69,7 @@ export type HotContext = {
   promptKey: string;
   promptHash: string;
   inject: VoiceInjectFlags;
+  recentPhrases: string[];
 };
 
 export async function loadHotContext(input: {
@@ -112,11 +114,11 @@ export async function loadHotContext(input: {
   const picked = await pickHotNotes(
     !injectMind || mindStale ? [] : mind.memory_ids ?? [],
     input.text,
-    { jump: jumped.jump },
+    { jump: jumped.jump, minTerms: input.profile.retrieveMinTerms },
   );
   const notes = picked.notes;
   const pickedIds = picked.mindIds;
-  const fallbackIds = picked.queryIds;
+  const fallbackIds: string[] = [];
   let careHint = false;
   if (process.env.QR_CARE_CHECKIN === "true") {
     const day = localDay(input.nowMs, input.timeZone);
@@ -128,6 +130,11 @@ export async function loadHotContext(input: {
   }
 
   const clockText = formatClock(input.nowMs, input.timeZone);
+  let phraseHistory = history;
+  if (assistantReplyTexts(history).length < 8) {
+    phraseHistory = await listHistoryWindow(input.userMsgId, HISTORY_WINDOW_MAX);
+  }
+  const recentPhrases = recentPhrasesFromHistory(phraseHistory);
   const tail = buildTail({
     clock: clockText,
     mind: tailMind,
@@ -138,6 +145,7 @@ export async function loadHotContext(input: {
     stale: false,
     jump: jumped.jump,
     inject,
+    recentPhrases,
   });
 
   const longterm = renderVoiceLongterm(meta.selfSummary, meta.bondSummary, portrait);
@@ -163,6 +171,7 @@ export async function loadHotContext(input: {
     injectMemories: inject.memories,
     injectLongterm: inject.longterm,
     historyWindow: inject.history,
+    recentPhrases,
   };
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(charter.trim() || "你就是清然。正在和 Rosie 语音通话。"),
@@ -223,6 +232,7 @@ export async function loadHotContext(input: {
     promptKey: loaded.key,
     promptHash: loaded.hash,
     inject,
+    recentPhrases,
   };
 }
 

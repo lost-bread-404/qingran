@@ -97,8 +97,11 @@ test("rebuild matches captured voice/reflect/archive bodies after later mutation
       topic: "安慰",
       body: "别讲道理",
       status: "active",
+      kind: "trait",
       evidenceIds: [],
       lastSeen: t0,
+      lastSupportedAt: t0,
+      supportCount: 1,
       updatedAt: t0,
     });
 
@@ -158,7 +161,7 @@ test("rebuild matches captured voice/reflect/archive bodies after later mutation
     });
     const ctxCare = await voiceTurn(t1, "论文一个字都没写，今天过得乱七八糟", "u:care");
     assert.equal(ctxCare.careHint, true);
-    assert.ok(ctxCare.fallbackIds.length || ctxCare.pickedIds.length);
+    assert.equal(ctxCare.fallbackIds.length, 0);
 
     const t2 = t1 + SESSION_GAP_MS + 60_000;
     setClock(() => t2);
@@ -177,8 +180,11 @@ test("rebuild matches captured voice/reflect/archive bodies after later mutation
       topic: "安慰",
       body: "完全改了",
       status: "active",
+      kind: "trait",
       evidenceIds: [],
       lastSeen: t2,
+      lastSupportedAt: t2,
+      supportCount: 1,
       updatedAt: t2,
     });
     await iso.sql.query(`update qingran_profile set data = data || '{"systemPrompt":"新的人设"}'::jsonb where id = 1`);

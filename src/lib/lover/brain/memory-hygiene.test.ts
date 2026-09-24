@@ -70,7 +70,7 @@ test("hygiene notes are Qingran-subject recaps after the cutoff, not Rosie facts
   );
 });
 
-test("ensureMemoryHygiene sweeps named portraits, clears mind, and runs once", async () => {
+test("ensureMemoryHygiene clears mind once and does not delete portraits", async () => {
   const iso = await openIsolatedSql();
   try {
     await upsertPortrait({
@@ -78,8 +78,11 @@ test("ensureMemoryHygiene sweeps named portraits, clears mind, and runs once", a
       topic: DROP_PORTRAIT_TOPICS[0]!,
       body: "清然答应整夜陪她",
       status: "active",
+      kind: "trait",
       evidenceIds: [],
       lastSeen: 1,
+      lastSupportedAt: 1,
+      supportCount: 1,
       updatedAt: 1,
     });
     await upsertPortrait({
@@ -87,14 +90,17 @@ test("ensureMemoryHygiene sweeps named portraits, clears mind, and runs once", a
       topic: "被安慰的方式",
       body: "别讲道理",
       status: "active",
+      kind: "trait",
       evidenceIds: [],
       lastSeen: 1,
+      lastSupportedAt: 1,
+      supportCount: 1,
       updatedAt: 1,
     });
     await saveMind({ ...EMPTY_MIND, turn_seq: 9, insight: "旧洞察" }, 9);
     await ensureMemoryHygiene();
     const portraits = await listPortrait();
-    assert.equal(portraits.some((p) => p.topic === DROP_PORTRAIT_TOPICS[0]), false);
+    assert.equal(portraits.some((p) => p.topic === DROP_PORTRAIT_TOPICS[0]), true);
     assert.equal(portraits.some((p) => p.id === "p-keep"), true);
     const mind = await getMind();
     assert.equal(mind.turn_seq, 0);

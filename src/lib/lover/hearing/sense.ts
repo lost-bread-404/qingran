@@ -7,7 +7,7 @@ import {
   type StoredProsody,
   type ToneThresholds,
 } from "../prosody.ts";
-import { clampEndWaitMs, clampMaxUtteranceMs, MAX_UTTERANCE_MS } from "../vad.ts";
+import { clampEndWaitMs, clampMaxUtteranceMs, clampNoiseFloorCap, MAX_UTTERANCE_MS, NOISE_FLOOR_CAP } from "../vad.ts";
 import type { VadCuts } from "../vad.ts";
 
 export type SenseGear = "low" | "mid" | "high" | "custom";
@@ -35,6 +35,8 @@ export type HearingSense = {
   voicedClarity: number;
   /** A run of human pitch at least this long is speech even when the ratio is low. */
   pitchHoldMs: number;
+  /** Ambient floor is not allowed to climb past this. Qingran's own voice is not learned into it. */
+  floorCap: number;
   toneOn: boolean;
   riseQuestion: number;
   glideRatio: number;
@@ -121,6 +123,7 @@ export const DEFAULT_HEARING_SENSE: HearingSense = {
   ...NOISE_PRESETS.mid,
   voicedClarity: 0.58,
   pitchHoldMs: 200,
+  floorCap: NOISE_FLOOR_CAP,
   ...TONE_DEFAULTS,
 };
 
@@ -180,6 +183,7 @@ export function lockHearingSense(
   const noiseMinMs = clampNightMinMs(src.noiseMinMs ?? legacy?.noiseMinMs);
   const voicedClarity = clampVoicedClarity(src.voicedClarity);
   const pitchHoldMs = clampPitchHoldMs(src.pitchHoldMs);
+  const floorCap = clampNoiseFloorCap(src.floorCap);
   const endWaitMs = clampEndWaitMs(src.endWaitMs ?? legacy?.endWaitMs);
   const maxUtteranceMs = clampMaxUtteranceMs(src.maxUtteranceMs);
   return {
@@ -192,6 +196,7 @@ export function lockHearingSense(
     noiseMinMs,
     voicedClarity,
     pitchHoldMs,
+    floorCap,
     toneOn: src.toneOn === true,
     riseQuestion: num(src.riseQuestion, TONE_DEFAULTS.riseQuestion, 1, 2, 0.01),
     glideRatio: num(src.glideRatio, TONE_DEFAULTS.glideRatio, 0, 0.3, 0.005),

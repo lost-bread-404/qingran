@@ -137,7 +137,12 @@ export function useVoiceInput({ lang, prompt }: Options) {
         getHearingSession().sense.voicedClarity,
       );
       framesRef.current.push(frame);
-      noiseFloorRef.current = nextFloor(noiseFloorRef.current, frame.rms, true);
+      noiseFloorRef.current = nextFloor(
+        noiseFloorRef.current,
+        frame.rms,
+        true,
+        getHearingSession().sense.floorCap,
+      );
       const cuts = recordCuts(getHearingSession().sense);
       const cut = holdThreshold(noiseFloorRef.current, false, cuts);
       setLevel(Math.min(1, frame.rms * 8));

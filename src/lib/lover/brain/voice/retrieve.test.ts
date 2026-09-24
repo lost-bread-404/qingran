@@ -8,7 +8,7 @@ import { EMPTY_MIND } from "../types.ts";
 import { openIsolatedSql } from "../eval-db.ts";
 import { setClock } from "../clock.ts";
 import { sha256Text } from "../log-refs.ts";
-import { getCoreIndexItems, pickHotNotes, resetRetrieveCache, resolveCoreIndex } from "./retrieve.ts";
+import { getCoreIndexItems, getMemoryIndex, contentMatchCount, pickHotNotes, resetRetrieveCache, resolveCoreIndex } from "./retrieve.ts";
 import { buildReflectorInput } from "./reflector.ts";
 
 test("Chinese tokenizer emits bigrams plus latin words", () => {
@@ -81,7 +81,14 @@ function note(id: string, text: string): Note {
   };
 }
 
-test("pickHotNotes always searches the utterance even when mind gives 6 ids", async () => {
+test("content matches ignore filler words", () => {
+  assert.equal(contentMatchCount(["今晚", "火锅"]), 1);
+  assert.equal(contentMatchCount(["她说", "说今", "今天"]), 0);
+  assert.equal(contentMatchCount(["citadel"]), 1);
+  assert.equal(contentMatchCount(["电影", "电影"]), 1);
+});
+
+test("pickHotNotes keeps mind notes and only adds content matches", async () => {
   const iso = await openIsolatedSql();
   try {
     const mindNotes = [
@@ -95,6 +102,8 @@ test("pickHotNotes always searches the utterance even when mind gives 6 ids", as
     const queryNotes = [
       note("q1", "五道口那家火锅她说过下次想再去吃"),
       note("q2", "新上的那部电影她收藏了，想找天一起看"),
+      note("tonight", "答应今晚早点睡"),
+      note("filler", "她说今天有点累"),
     ];
     for (const n of [...mindNotes, ...queryNotes]) await upsertNote(n);
     await bumpNotesVersion();
@@ -105,20 +114,24 @@ test("pickHotNotes always searches the utterance even when mind gives 6 ids", as
       "今晚想吃火锅然后去看电影",
       { jump: false },
     );
-    assert.ok(picked.queryIds.length >= 2, `queryIds=${picked.queryIds.join(",")}`);
-    assert.ok(
-      picked.queryIds.includes("q1") || picked.notes.some((n) => n.id === "q1"),
-      "firepot note should be in query path",
-    );
-    assert.ok(picked.notes.length <= 6);
-    assert.ok(picked.mindIds.length <= 4);
-    assert.equal(picked.queryIds.length, picked.queryScores.length);
+    assert.deepEqual(picked.queryIds.slice().sort(), ["q1", "q2"]);
+    assert.equal(picked.queryIds.includes("tonight"), false);
+    assert.equal(picked.queryIds.includes("filler"), false);
+    assert.equal(picked.queryScores.length, 2);
+    assert.deepEqual(picked.mindIds, ["m1", "m2", "m3", "m4"]);
+    assert.equal(picked.notes.length, 6);
+    const strict = await pickHotNotes(mindNotes.map((n) => n.id), "今晚想吃火锅然后去看电影", {
+      jump: false,
+      minTerms: 2,
+    });
+    assert.deepEqual(strict.queryIds, []);
+    assert.deepEqual(strict.mindIds, ["m1", "m2", "m3", "m4"]);
   } finally {
     await iso.close();
   }
 });
 
-test("pickHotNotes jump path takes more query slots and fills a short mind", async () => {
+test("pickHotNotes jump path adds strong keyword hits and skips filler", async () => {
   const iso = await openIsolatedSql();
   try {
     await upsertNote(note("only-mind", "她论文还是一个字都没写"));
@@ -126,13 +139,15 @@ test("pickHotNotes jump path takes more query slots and fills a short mind", asy
     await upsertNote(note("q-movie", "新上的那部电影她收藏了，想找天一起看"));
     await upsertNote(note("q-walk", "她想去中央公园散步吹吹风"));
     await upsertNote(note("q-cake", "那家巴斯克蛋糕她上次说还想再买"));
+    await upsertNote(note("q-filler", "她说今天有点累"));
     await bumpNotesVersion();
     resetRetrieveCache();
 
     const picked = await pickHotNotes(["only-mind"], "今晚吃火锅看电影再买蛋糕去公园", { jump: true });
-    assert.ok(picked.mindIds.includes("only-mind"));
-    assert.ok(picked.queryIds.length >= 2);
-    assert.ok(picked.notes.length <= 6);
+    assert.deepEqual(picked.mindIds, ["only-mind"]);
+    assert.deepEqual(picked.queryIds.slice().sort(), ["q-cake", "q-hotpot", "q-movie", "q-walk"]);
+    assert.equal(picked.queryIds.includes("q-filler"), false);
+    assert.equal(picked.notes.length, 5);
   } finally {
     await iso.close();
   }
@@ -180,8 +195,11 @@ test("MiniSearch matches tags and aliases via searchText without putting them in
     await upsertNote(withAlias);
     await bumpNotesVersion();
     resetRetrieveCache();
+    const { mini } = await getMemoryIndex();
+    assert.ok(mini.search("citadel superday").some((hit) => String(hit.id) === "alias-n"));
     const picked = await pickHotNotes([], "citadel superday", { jump: false });
-    assert.ok(picked.queryIds.includes("alias-n") || picked.notes.some((n) => n.id === "alias-n"));
+    assert.deepEqual(picked.queryIds, ["alias-n"]);
+    assert.deepEqual(picked.notes.map((n) => n.id), ["alias-n"]);
     assert.equal(
       formatIndexLine({
         id: "alias-n",

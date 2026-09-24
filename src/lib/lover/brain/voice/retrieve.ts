@@ -7,6 +7,7 @@ import {
   PICK_MAX,
   PICK_MIND_SLOTS,
   PICK_QUERY_SLOTS,
+  clampRetrieveMinTerms,
 } from "../config.ts";
 import {
   bumpRecall,
@@ -23,6 +24,28 @@ import type { IndexItem, Note } from "../types.ts";
 export { tokenizeMemory, formatIndexLine };
 
 export const FALLBACK_MIN_SCORE = 0.3;
+
+/** Time and glue words. One of these is not a real match. */
+const CONTENT_TERM_STOP = new Set([
+  "她说", "说今", "今天", "今晚", "明天", "昨天", "现在", "然后",
+  "这个", "那个", "什么", "怎么", "我们", "你们", "他们", "自己",
+  "一个", "没有", "不是", "就是", "可以", "觉得", "知道", "时候",
+  "因为", "所以", "还是", "已经", "但是", "如果", "真的", "可能",
+  "应该", "有点", "一下", "一点", "这样", "那样", "以后", "之前",
+]);
+
+/** Distinct content words among the terms MiniSearch says matched. */
+export function contentMatchCount(terms: readonly string[] | undefined): number {
+  const seen = new Set<string>();
+  for (const raw of terms ?? []) {
+    const term = String(raw).toLowerCase();
+    if (!term || CONTENT_TERM_STOP.has(term)) continue;
+    const latin = /^[a-z0-9]+$/.test(term);
+    if (latin ? term.length < 3 : [...term].length !== 2) continue;
+    seen.add(term);
+  }
+  return seen.size;
+}
 
 export type HotPick = {
   notes: Note[];
@@ -165,14 +188,13 @@ export async function getRelatedIndexItems(query: string, coreIds: Set<string>):
 export async function pickHotNotes(
   mindIds: string[],
   query: string,
-  opts: { jump: boolean; dry?: boolean },
+  opts: { jump: boolean; dry?: boolean; minTerms?: number },
 ): Promise<HotPick> {
-  const N = opts.jump ? JUMP_PICK_MIND_SLOTS : PICK_MIND_SLOTS;
-  const M = opts.jump ? JUMP_PICK_QUERY_SLOTS : PICK_QUERY_SLOTS;
-
+  const minTerms = clampRetrieveMinTerms(opts.minTerms);
+  const mindSlots = opts.jump ? JUMP_PICK_MIND_SLOTS : PICK_MIND_SLOTS;
+  const querySlots = opts.jump ? JUMP_PICK_QUERY_SLOTS : PICK_QUERY_SLOTS;
   const mindNotes = (await listNotesByIds(mindIds)).filter((n) => n.status === "active");
-  const mindActive = mindNotes.map((n) => n.id);
-  const mindPart = mindActive.slice(0, N);
+  const mindPart = mindNotes.map((n) => n.id).slice(0, Math.min(mindSlots, PICK_MAX));
   const mindPartSet = new Set(mindPart);
 
   let queryHits: Array<{ id: string; score: number }> = [];
@@ -180,37 +202,38 @@ export async function pickHotNotes(
     const { mini } = await getMemoryIndex();
     queryHits = mini
       .search(query)
-      .filter((h) => (Number(h.score) || 0) >= FALLBACK_MIN_SCORE && !mindPartSet.has(String(h.id)))
-      .map((h) => ({ id: String(h.id), score: Number(h.score) || 0 }));
+      .map((hit) => ({
+        id: String(hit.id),
+        score: Number(hit.score) || 0,
+        terms: contentMatchCount(hit.terms),
+      }))
+      .filter((hit) => hit.terms >= minTerms && !mindPartSet.has(hit.id))
+      .sort((a, b) => b.terms - a.terms || b.score - a.score || a.id.localeCompare(b.id))
+      .map(({ id, score }) => ({ id, score }));
   }
-  const queryPart = queryHits.slice(0, M);
 
-  const picked: string[] = [...mindPart];
+  const picked = [...mindPart];
   const seen = new Set(picked);
   const queryIds: string[] = [];
   const queryScores: number[] = [];
-
-  const pushQuery = (hit: { id: string; score: number }) => {
-    if (picked.length >= PICK_MAX || seen.has(hit.id)) return;
+  for (const hit of queryHits) {
+    if (picked.length >= PICK_MAX || queryIds.length >= querySlots || seen.has(hit.id)) continue;
     picked.push(hit.id);
     seen.add(hit.id);
     queryIds.push(hit.id);
     queryScores.push(hit.score);
-  };
-
-  for (const hit of queryPart) pushQuery(hit);
+  }
 
   const fetched = (await listNotesByIds(picked)).filter((n) => n.status === "active");
   const byId = new Map(fetched.map((n) => [n.id, n]));
-  const notes = picked.map((id) => byId.get(id)).filter((n): n is Note => Boolean(n)).slice(0, PICK_MAX);
-  const keep = new Set(notes.map((n) => n.id));
+  const notes = picked.map((id) => byId.get(id)).filter((n): n is Note => Boolean(n));
   if (!opts.dry) await bumpRecall(notes.map((n) => n.id));
-  const queryIdSet = new Set(queryIds);
+  const kept = new Set(notes.map((n) => n.id));
   return {
     notes,
-    mindIds: notes.filter((n) => !queryIdSet.has(n.id)).map((n) => n.id),
-    queryIds: queryIds.filter((id) => keep.has(id)),
-    queryScores: queryScores.filter((_, i) => keep.has(queryIds[i]!)),
+    mindIds: notes.filter((n) => mindPartSet.has(n.id)).map((n) => n.id),
+    queryIds: queryIds.filter((id) => kept.has(id)),
+    queryScores: queryScores.filter((_, i) => kept.has(queryIds[i]!)),
   };
 }
 

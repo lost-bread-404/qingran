@@ -24,12 +24,13 @@ import {
 import { hearUtterance } from "@/lib/lover/hear";
 import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { logCallAudio } from "@/lib/lover/call-audio-log";
+import { callListenStuck, CALL_STUCK_MS } from "@/lib/lover/call-phase";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { recordCuts } from "@/lib/lover/hearing/sense";
 import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
 import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
 import { attachPcmTap, peakRms, peakTimedRms, PRE_ROLL_SEC, pushTimedRms, wavFromTap, type PcmTap, type TimedRms } from "@/lib/lover/pcm-tap";
-import { keepPlaybackAlive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
+import { keepPlaybackAlive, isPlaybackActive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
@@ -43,6 +44,7 @@ import {
   holdThreshold,
   isSpeechStart,
   nextFloor,
+  floorUpdateAllowed,
   shouldEndUtterance,
   startThreshold,
   VOICE_SPIKE_MS,
@@ -55,9 +57,12 @@ const FFT_SIZE = 2048;
 type Options = {
   onUtterance: (heard: HeardUtterance) => Promise<void>;
   prompt?: string;
+  isGenerating?: () => boolean;
+  isLabeling?: () => boolean;
+  onStuck?: (info: { phase: string; deaf: boolean }) => void;
 };
 
-export function useCall({ onUtterance, prompt }: Options) {
+export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck }: Options) {
   const [active, setActive] = useState(false);
   const [phase, setPhase] = useState<CallPhase>("idle");
   const [level, setLevel] = useState(0);
@@ -65,6 +70,8 @@ export function useCall({ onUtterance, prompt }: Options) {
   const [listenSec, setListenSec] = useState(0);
   const [rmsNow, setRmsNow] = useState(0);
   const [holdNow, setHoldNow] = useState(0);
+  const [deaf, setDeaf] = useState(true);
+  const [noiseFloor, setNoiseFloor] = useState(0.008);
   const [error, setError] = useState<string | null>(null);
 
   const liveRef = useRef(false);
@@ -88,6 +95,9 @@ export function useCall({ onUtterance, prompt }: Options) {
   const ctxRef = useRef<AudioContext | null>(null);
   const onUtteranceRef = useRef(onUtterance);
   const promptRef = useRef(prompt ?? "");
+  const isGeneratingRef = useRef(isGenerating);
+  const isLabelingRef = useRef(isLabeling);
+  const onStuckRef = useRef(onStuck);
   const noiseFloorRef = useRef(0.008);
   const triggerFloorRef = useRef(0.008);
   const hearAtRef = useRef(0);
@@ -103,6 +113,13 @@ export function useCall({ onUtterance, prompt }: Options) {
   const nativeHangupRef = useRef(false);
   const speechStartWallRef = useRef(0);
   const heartbeatRef = useRef(0);
+  const recognizingRef = useRef(false);
+  /** performance.now() when playback last stopped. Infinity while audio is going out. */
+  const playbackIdleAtRef = useRef(0);
+
+  isGeneratingRef.current = isGenerating;
+  isLabelingRef.current = isLabeling;
+  onStuckRef.current = onStuck;
 
   useEffect(() => {
     onUtteranceRef.current = onUtterance;
@@ -114,6 +131,10 @@ export function useCall({ onUtterance, prompt }: Options) {
   const setPhaseBoth = (next: CallPhase) => {
     phaseRef.current = next;
     setPhase(next);
+  };
+  const setDeafBoth = (next: boolean) => {
+    deafRef.current = next;
+    setDeaf(next);
   };
 
   const teardownMedia = useCallback(() => {
@@ -162,11 +183,12 @@ export function useCall({ onUtterance, prompt }: Options) {
     setListenSec(0);
     setRmsNow(0);
     setHoldNow(0);
+    setNoiseFloor(0.008);
   }, []);
 
   const hangup = useCallback(() => {
     liveRef.current = false;
-    deafRef.current = true;
+    setDeafBoth(true);
     setActive(false);
     setPhaseBoth("idle");
     stopCallHold();
@@ -285,80 +307,89 @@ export function useCall({ onUtterance, prompt }: Options) {
   }, []);
 
   const flushUtterance = useCallback(async () => {
-    if (phaseRef.current !== "speaking-you") return;
+    if (phaseRef.current !== "speaking-you" || !liveRef.current) return;
     const endpoint_fired = Date.now();
     const silenceWaitMs = Math.max(0, Math.round(performance.now() - lastVoiceRef.current));
     setPhaseBoth("transcribing");
-    deafRef.current = true;
-    await new Promise((resolve) => window.setTimeout(resolve, 180));
-    const liveText = (finalTextRef.current || interimRef.current).trim();
-    const frames = framesRef.current.slice();
-    const samples = (await pcmTapRef.current?.stop()) ?? new Float32Array(0);
-    const sampleRate = ctxRef.current?.sampleRate ?? 48000;
-    const wav = wavFromTap(samples, sampleRate);
-    const fallback = wav ? null : await collectRecording();
-    if (wav) {
-      try {
-        recorderRef.current?.state === "recording" && recorderRef.current.stop();
-      } catch {
-        /* ignore */
-      }
-    }
-    recorderRef.current = null;
-    chunksRef.current = [];
-    if (!liveRef.current) return;
-    finalTextRef.current = "";
-    interimRef.current = "";
-    lastTextAtRef.current = 0;
-
-    let heard: HeardUtterance | null = null;
-    try {
-      heard = await hearUtterance({
-        wav,
-        fallback,
-        liveText,
-        frames,
-        prompt: promptRef.current,
-        speech_start: speechStartWallRef.current,
-        endpoint_fired,
-        peakRms: peakRms(samples, sampleRate) || frames.reduce((max, frame) => Math.max(max, frame.rms), 0),
-        vadFloor: triggerFloorRef.current,
-        hearToTriggerMs: hearToTriggerRef.current ?? undefined,
-        prerollPeakRms: prerollPeakRef.current ?? undefined,
-        silenceWaitMs,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "";
-      if (isQuotaHint(message)) {
-        setError(QUOTA_HINT);
-        deafRef.current = false;
-        setMicEnabled(streamRef.current, true);
-        listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
-        setPhaseBoth("listening");
+    setDeafBoth(true);
+    recognizingRef.current = true;
+    const leaveTranscribing = () => {
+      recognizingRef.current = false;
+      if (!liveRef.current) {
+        if (phaseRef.current === "transcribing") setPhaseBoth("idle");
         return;
       }
-    }
-    if (!liveRef.current) return;
-    if (heard?.saveError) setError(clipSaveBanner(heard.saveError));
-    if (!heard?.text) {
-      if (!getHearingSession().debugHearing) setError("我没听清，再说一遍。");
-      deafRef.current = false;
+      if (phaseRef.current !== "transcribing") return;
+      setDeafBoth(false);
       setMicEnabled(streamRef.current, true);
       listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
       setPhaseBoth("listening");
-      return;
-    }
-    if (!heard.saveError) setError(null);
-    setPhaseBoth("listening");
+    };
     try {
-      await onUtteranceRef.current(heard);
-    } catch {
-      if (liveRef.current) {
-        deafRef.current = false;
-        setMicEnabled(streamRef.current, true);
-        listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
-        setPhaseBoth("listening");
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+      const liveText = (finalTextRef.current || interimRef.current).trim();
+      const frames = framesRef.current.slice();
+      const samples = (await pcmTapRef.current?.stop()) ?? new Float32Array(0);
+      const sampleRate = ctxRef.current?.sampleRate ?? 48000;
+      const wav = wavFromTap(samples, sampleRate);
+      const fallback = wav ? null : await collectRecording();
+      if (wav) {
+        try {
+          recorderRef.current?.state === "recording" && recorderRef.current.stop();
+        } catch {
+          /* ignore */
+        }
       }
+      recorderRef.current = null;
+      chunksRef.current = [];
+      if (!liveRef.current) return;
+      finalTextRef.current = "";
+      interimRef.current = "";
+      lastTextAtRef.current = 0;
+
+      let heard: HeardUtterance | null = null;
+      try {
+        heard = await hearUtterance({
+          wav,
+          fallback,
+          liveText,
+          frames,
+          prompt: promptRef.current,
+          speech_start: speechStartWallRef.current,
+          endpoint_fired,
+          peakRms: peakRms(samples, sampleRate) || frames.reduce((max, frame) => Math.max(max, frame.rms), 0),
+          vadFloor: triggerFloorRef.current,
+          hearToTriggerMs: hearToTriggerRef.current ?? undefined,
+          prerollPeakRms: prerollPeakRef.current ?? undefined,
+          silenceWaitMs,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "";
+        if (isQuotaHint(message)) {
+          setError(QUOTA_HINT);
+          return;
+        }
+      }
+      if (!liveRef.current) return;
+      if (heard?.saveError) setError(clipSaveBanner(heard.saveError));
+      if (!heard?.text) {
+        if (!getHearingSession().debugHearing && !heard?.saveError) setError("我没听清，再说一遍。");
+        return;
+      }
+      if (!heard.saveError) setError(null);
+      setPhaseBoth("listening");
+      try {
+        await onUtteranceRef.current(heard);
+      } catch {
+        if (liveRef.current) {
+          setDeafBoth(false);
+          setMicEnabled(streamRef.current, true);
+          listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
+          setPhaseBoth("listening");
+        }
+      }
+    } finally {
+      leaveTranscribing();
     }
   }, [collectRecording]);
 
@@ -383,12 +414,29 @@ export function useCall({ onUtterance, prompt }: Options) {
       const cuts = recordCuts(session.sense);
       const rms = frame.rms;
       pushTimedRms(prerollLevelsRef.current, { t: now, rms }, PRE_ROLL_SEC * 1000);
-      noiseFloorRef.current = nextFloor(noiseFloorRef.current, rms, speaking);
+      const playingBack = isPlaybackActive();
+      if (playingBack) playbackIdleAtRef.current = Number.POSITIVE_INFINITY;
+      else if (!Number.isFinite(playbackIdleAtRef.current)) playbackIdleAtRef.current = now;
+      const msSincePlayback = Number.isFinite(playbackIdleAtRef.current) ? now - playbackIdleAtRef.current : 0;
+      const statusAt = session.floorQuietAt;
+      const statusSpeaking = !Number.isFinite(statusAt);
+      const msSinceStatusQuiet = statusSpeaking ? 0 : now - statusAt;
+      if (
+        floorUpdateAllowed({
+          playbackActive: playingBack,
+          msSincePlayback,
+          qingranStatusSpeaking: statusSpeaking,
+          msSinceStatusQuiet,
+        })
+      ) {
+        noiseFloorRef.current = nextFloor(noiseFloorRef.current, rms, speaking, session.sense.floorCap);
+      }
       const floor = noiseFloorRef.current;
       const rising = isSpeechStart(rms, floor, frame.clarity, frame.bright, false, cuts);
       const cut = speaking ? holdThreshold(floor, false, cuts) : startThreshold(floor, false, cuts);
       setLevel(Math.min(1, rms * 8));
       setThreshold(Math.min(1, cut * 8));
+      setNoiseFloor(floor);
       if (speaking) {
         setListenSec(Math.max(0, Math.floor((now - speechStartRef.current) / 1000)));
         setRmsNow(rms);
@@ -573,8 +621,10 @@ export function useCall({ onUtterance, prompt }: Options) {
       return;
     }
     liveRef.current = true;
-    deafRef.current = false;
+    setDeafBoth(false);
     noiseFloorRef.current = 0.008;
+    playbackIdleAtRef.current = 0;
+    setNoiseFloor(0.008);
     hearAtRef.current = performance.now();
     listenReadyAtRef.current = hearAtRef.current + CALL_START_WARMUP_MS;
     setActive(true);
@@ -604,7 +654,7 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   const deafen = useCallback(() => {
     if (!liveRef.current) return;
-    deafRef.current = true;
+    setDeafBoth(true);
     logCallAudio("deafen");
     speechRiseAtRef.current = 0;
     if (phaseRef.current === "transcribing") return;
@@ -627,7 +677,7 @@ export function useCall({ onUtterance, prompt }: Options) {
 
   const hear = useCallback(() => {
     if (!liveRef.current) return;
-    deafRef.current = false;
+    setDeafBoth(false);
     setMicEnabled(streamRef.current, true);
     setPhaseBoth("listening");
     finalTextRef.current = "";
@@ -717,7 +767,14 @@ export function useCall({ onUtterance, prompt }: Options) {
       setPhaseBoth("listening");
     }
 
-    if (!deafRef.current) {
+    const blocked =
+      isPlaybackActive() ||
+      recognizingRef.current ||
+      Boolean(isGeneratingRef.current?.()) ||
+      Boolean(isLabelingRef.current?.());
+    if (!blocked && (deafRef.current || phaseRef.current !== "listening")) {
+      hear();
+    } else if (!deafRef.current) {
       setMicEnabled(streamRef.current, true);
       listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
       startSpeechRec();
@@ -729,7 +786,42 @@ export function useCall({ onUtterance, prompt }: Options) {
     } catch {
       /* ignore */
     }
-  }, [tick]);
+  }, [tick, hear]);
+
+  useEffect(() => {
+    if (!active) return;
+    let since = 0;
+    let reported = false;
+    const id = window.setInterval(() => {
+      if (!liveRef.current) return;
+      const playing = isPlaybackActive();
+      const generating = Boolean(isGeneratingRef.current?.());
+      const recognizing = recognizingRef.current;
+      const labeling = Boolean(isLabelingRef.current?.());
+      const phaseNow = phaseRef.current;
+      const deafNow = deafRef.current;
+      const elapsed = since ? performance.now() - since : 0;
+      const state = { phase: phaseNow, deaf: deafNow, playing, generating, recognizing, labeling };
+      if (!callListenStuck({ ...state, stuckForMs: CALL_STUCK_MS })) {
+        since = 0;
+        reported = false;
+        return;
+      }
+      if (!since) {
+        since = performance.now();
+        return;
+      }
+      if (!callListenStuck({ ...state, stuckForMs: elapsed }) || reported) return;
+      reported = true;
+      try {
+        onStuckRef.current?.({ phase: phaseNow, deaf: deafNow });
+      } catch {
+        /* ignore */
+      }
+      hear();
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [active, hear]);
 
   useEffect(() => {
     if (!active) return;
@@ -770,6 +862,8 @@ export function useCall({ onUtterance, prompt }: Options) {
     listenSec,
     rms: rmsNow,
     hold: holdNow,
+    deaf,
+    noiseFloor,
     error,
     start,
     hangup,

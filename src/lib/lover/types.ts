@@ -4,11 +4,11 @@ import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
 import { DEFAULT_HEARING_SENSE, lockHearingSense, type HearingSense } from "./hearing/sense.ts";
 import { SILENCE_MS } from "./vad.ts";
-import { clampHistoryWindow, HISTORY_WINDOW } from "./brain/config.ts";
+import { clampHistoryWindow, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms, HISTORY_WINDOW, PORTRAIT_ACTIVE_MAX, PORTRAIT_STALE_DAYS, RETRIEVE_MIN_TERMS } from "./brain/config.ts";
 import { lockPromptModels, type PromptModelPick } from "./brain/prompts/models.ts";
 import type { PromptKey } from "./brain/prompts/catalog.ts";
 
-export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio };
+export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms };
 export type { HearingSense };
 
 export type VoiceId = "eve";
@@ -61,6 +61,12 @@ export type Profile = {
   hearingInstruction: string;
   /** Fixed words sent to xAI as keyterm. Recent dialogue terms are added on top. */
   sttKeyterms: string[];
+  /** Active portrait rows kept in the reply. 4–40, default 12. Relationship stage is extra. */
+  portraitActiveMax: number;
+  /** Days without corroboration before an active portrait row goes stale. 3–90, default 14. */
+  portraitStaleDays: number;
+  /** Content words a retrieved note must share with this turn. 1–6, default 1. Filler words do not count. */
+  retrieveMinTerms: number;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -145,6 +151,9 @@ export const DEFAULT_PROFILE: Profile = {
   promptModels: {},
   hearingInstruction: "",
   sttKeyterms: lockSttKeyterms(undefined),
+  portraitActiveMax: PORTRAIT_ACTIVE_MAX,
+  portraitStaleDays: PORTRAIT_STALE_DAYS,
+  retrieveMinTerms: RETRIEVE_MIN_TERMS,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -180,6 +189,9 @@ type LooseProfile = Partial<Profile> & {
   promptModels?: unknown;
   hearingInstruction?: unknown;
   sttKeyterms?: unknown;
+  portraitActiveMax?: number;
+  portraitStaleDays?: number;
+  retrieveMinTerms?: number;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -213,6 +225,9 @@ export function lockedProfile(input?: unknown): Profile {
     promptModels: lockPromptModels(raw.promptModels),
     hearingInstruction: lockHearingInstruction(raw.hearingInstruction),
     sttKeyterms: lockSttKeyterms(raw.sttKeyterms),
+    portraitActiveMax: clampPortraitActiveMax(raw.portraitActiveMax),
+    portraitStaleDays: clampPortraitStaleDays(raw.portraitStaleDays),
+    retrieveMinTerms: clampRetrieveMinTerms(raw.retrieveMinTerms),
   };
 }
 

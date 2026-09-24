@@ -9,6 +9,7 @@ import {
   type PromptSpec,
 } from "./catalog.ts";
 import { defaultDoc, parsePromptBody, serializeDoc, type PromptDoc } from "./doc.ts";
+import { ensureVoiceRecentPhrases } from "./templates.ts";
 
 export type PromptVersionHit = {
   hash: string;
@@ -44,6 +45,7 @@ function materialize(key: PromptKey, raw: string | null): { body: string; doc: P
       for (const message of variant.messages) {
         message.content = stripAcousticGuide(message.content);
       }
+      ensureVoiceRecentPhrases(variant.messages);
     }
   }
   const body = serializeDoc(doc);

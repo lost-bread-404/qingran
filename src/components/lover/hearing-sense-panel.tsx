@@ -279,6 +279,17 @@ export function HearingSensePanel({
             onChange={(minVoicedMs) => onChange(withRecordFine(sense, { minVoicedMs }))}
           />
         </Fines>
+        <Fine
+          label="底噪上限"
+          value={sense.floorCap}
+          def={DEFAULT_HEARING_SENSE.floorCap}
+          min={0.006}
+          max={0.045}
+          step={0.001}
+          digits={3}
+          hint="底噪不会再被抬过这个。清然说话的时候，以及她说完后的 0.3 秒，底噪先冻住，不把扬声器的声音学进去。调低，吵一点的房间里轻声仍能开口。"
+          onChange={(floorCap) => onChange({ ...sense, floorCap })}
+        />
 
         <GearSlider
           label="噪音过滤"

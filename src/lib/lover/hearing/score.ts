@@ -20,6 +20,7 @@ export type ScoreClip = {
   predictedTags?: AcousticTags | null;
   goldTags?: Partial<AcousticTags> | null;
   tagsTouched?: TagKey[] | null;
+  vadFloor?: number | null;
 };
 
 export type WorstClip = {
@@ -35,6 +36,7 @@ export type WorstClip = {
   predictedTags?: AcousticTags | null;
   goldTags?: Partial<AcousticTags> | null;
   tagsTouched?: TagKey[] | null;
+  vadFloor?: number | null;
 };
 
 export type HearingScore = {
@@ -54,6 +56,8 @@ export type HearingScore = {
   hallucinationByReason: { apple_empty: number; short_quiet: number };
   engineUse: EngineUseStats;
   worst: WorstClip[];
+  /** Oldest → newest, so a climbing floor reads left to right. */
+  recentFloors: Array<{ id: string; createdAt: string; vadFloor: number }>;
 };
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -102,9 +106,15 @@ export function scoreHearing(
       predictedTags: clip.predictedTags,
       goldTags: clip.goldTags,
       tagsTouched: clip.tagsTouched,
+      vadFloor: clip.vadFloor ?? null,
     }))
     .sort((a, b) => b.cer - a.cer || a.id.localeCompare(b.id))
     .slice(0, 20);
+  const recentFloors = rows
+    .filter((clip) => typeof clip.vadFloor === "number" && Number.isFinite(clip.vadFloor))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+    .slice(-12)
+    .map((clip) => ({ id: clip.id, createdAt: clip.createdAt, vadFloor: clip.vadFloor as number }));
 
   return {
     clipN: rows.length,
@@ -130,6 +140,7 @@ export function scoreHearing(
     },
     engineUse: input.engineUse ?? emptyEngineUse(),
     worst,
+    recentFloors,
   };
 }
 

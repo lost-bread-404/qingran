@@ -908,6 +908,7 @@ export const hearingLabScore = createServerFn({ method: "POST" })
           predictedTags: parseAcousticTags(row.predicted_tags),
           goldTags: parsePartialAcousticTags(row.gold_tags),
           tagsTouched: parseTagKeys(row.tags_touched),
+          vadFloor: row.vad_floor == null ? null : Number(row.vad_floor),
         })),
         { window, hallucinationN, hallucinationByReason, engineUse },
       );

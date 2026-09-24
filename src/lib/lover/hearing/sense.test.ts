@@ -38,6 +38,7 @@ test("default sense stays the mid gear after a round trip", () => {
   assert.equal(locked.toneOn, false);
   assert.equal(locked.voicedClarity, 0.58);
   assert.equal(locked.pitchHoldMs, 200);
+  assert.equal(locked.floorCap, 0.02);
   assert.equal(locked.riseQuestion, 1.18);
   assert.equal(locked.flatZone, 0.1);
   assert.equal(formatSenseLine(locked), "录音：中 · 等待：1.5s · 噪音：中 · 语气：关");

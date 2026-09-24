@@ -24,6 +24,9 @@ import {
   brainSaveLongLayer,
   brainSaveNote,
   brainSavePrompt,
+  brainSetPortraitStatus,
+  brainDeletePortrait,
+  brainSaveSeedPortrait,
   brainSyncHistoryWindow,
 } from "@/lib/lover/brain/api";
 import type { BrainLogRow, Mind, Note, PortraitRow, Subject } from "@/lib/lover/brain/types";
@@ -44,7 +47,7 @@ import { PromptStepEditor, type PromptEditorItem, type PromptModelChoice } from 
 import { HearingSensePanel } from "@/components/lover/hearing-sense-panel";
 import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
-import { DEFAULT_SYSTEM_PROMPT, clampHistoryWindow, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
+import { DEFAULT_SYSTEM_PROMPT, clampHistoryWindow, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
 import { defaultPromptModel } from "@/lib/lover/brain/prompts/models";
 import { parseSenseLine } from "@/lib/lover/hearing/sense";
 import { cn } from "@/lib/utils";
@@ -110,15 +113,24 @@ function withSelectedVoiceModel(
   return list.map((model) => ({ ...model, stats: model.stats ?? byStats.get(model.id) ?? null }));
 }
 
+function fmtPortraitTime(ms: number): string {
+  if (!ms) return "—";
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   profile: Profile;
+  callPhase?: string | null;
+  callDeaf?: boolean;
   onSave: (next: Profile) => void;
   onClearChat: () => void;
 };
 
-export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearChat }: Props) {
+export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, callDeaf = false, onSave, onClearChat }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
   const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
   const [labPassword, setLabPassword] = useState("");
@@ -134,11 +146,14 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
   const [self, setSelf] = useState("");
   const [bond, setBond] = useState("");
   const [portrait, setPortrait] = useState<PortraitRow[]>([]);
+  const [portraitView, setPortraitView] = useState<"active" | "stale" | "superseded">("active");
+  const [portraitActiveMax, setPortraitActiveMax] = useState(String(profile.portraitActiveMax));
+  const [portraitStaleDays, setPortraitStaleDays] = useState(String(profile.portraitStaleDays));
+  const [seedDrafts, setSeedDrafts] = useState<Record<string, { topic: string; body: string }>>({});
+  const [retrieveMinTerms, setRetrieveMinTerms] = useState(String(profile.retrieveMinTerms));
   const [mind, setMind] = useState<Mind | null>(null);
   const [log, setLog] = useState<BrainLogRow[]>([]);
   const [busy, setBusy] = useState(false);
-  const [newTopic, setNewTopic] = useState("");
-  const [newBody, setNewBody] = useState("");
   const [dbWarn, setDbWarn] = useState(false);
   const [clearArmed, setClearArmed] = useState(false);
   const [voiceModel, setVoiceModel] = useState(profile.voiceModel);
@@ -179,6 +194,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setInjectMemories(profile.injectMemories);
     setInjectLongterm(profile.injectLongterm);
     setHistoryWindow(profile.historyWindow);
+    setPortraitActiveMax(String(profile.portraitActiveMax));
+    setPortraitStaleDays(String(profile.portraitStaleDays));
+    setRetrieveMinTerms(String(profile.retrieveMinTerms));
+    setPortraitView("active");
     setKeytermDraft(profile.sttKeyterms.join("\n"));
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setTab("prompt");
@@ -264,6 +283,13 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setSelf(layer.self);
     setBond(layer.bond);
     setPortrait(layer.portrait);
+    setSeedDrafts(
+      Object.fromEntries(
+        layer.portrait
+          .filter((row) => row.kind === "seed")
+          .map((row) => [row.id, { topic: row.topic, body: row.body }]),
+      ),
+    );
     setMind(layer.mind);
     setLog(layer.log);
     void brainListHygieneNotes()
@@ -297,6 +323,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
       injectLongterm,
       historyWindow,
       sttKeyterms: lockSttKeyterms(keytermDraft.split("\n")),
+      portraitActiveMax: clampPortraitActiveMax(portraitActiveMax),
+      portraitStaleDays: clampPortraitStaleDays(portraitStaleDays),
+      retrieveMinTerms: clampRetrieveMinTerms(retrieveMinTerms),
       ...patch,
     });
   }
@@ -476,11 +505,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     setBusy(true);
     try {
       await brainSaveLongLayer({
-        data: {
-          self,
-          bond,
-          portrait: portrait.map((p) => ({ id: p.id, topic: p.topic, body: p.body })),
-        },
+        data: { self, bond },
       });
     } finally {
       setBusy(false);
@@ -533,24 +558,36 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
     }
   }
 
-  async function addPortraitRow() {
-    const topic = newTopic.trim();
-    const body = newBody.trim();
-    if (!topic || !body) return;
-    setPortrait((rows) => [
-      ...rows,
-      {
-        id: `p:${Date.now()}`,
-        topic,
-        body,
-        status: "active",
-        evidenceIds: [],
-        lastSeen: Date.now(),
-        updatedAt: Date.now(),
-      },
-    ]);
-    setNewTopic("");
-    setNewBody("");
+  async function markPortraitStale(id: string) {
+    setBusy(true);
+    try {
+      await brainSetPortraitStatus({ data: { id, status: "stale" } });
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removePortrait(id: string) {
+    setBusy(true);
+    try {
+      await brainDeletePortrait({ data: { id } });
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveSeed(id: string) {
+    const draft = seedDrafts[id];
+    if (!draft) return;
+    setBusy(true);
+    try {
+      await brainSaveSeedPortrait({ data: { id, topic: draft.topic, body: draft.body } });
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!open) return null;
@@ -652,6 +689,24 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
                   }}
                 />
                 <span className="text-sm">记忆</span>
+              </label>
+              <label className="flex flex-col gap-1 px-1 pb-1">
+                <span className="text-sm">关键词至少对上几个实词</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={6}
+                  value={retrieveMinTerms}
+                  onChange={(e) => setRetrieveMinTerms(e.target.value)}
+                  onBlur={() => {
+                    const n = clampRetrieveMinTerms(retrieveMinTerms);
+                    setRetrieveMinTerms(String(n));
+                    persistProfile({ retrieveMinTerms: n });
+                  }}
+                />
+                <span className="text-xs text-subtle">
+                  默认 1。对上「火锅」或「论文」就带；今晚、今天这种词不算。对不上就不补。调高更严。内心选中的照常带。
+                </span>
               </label>
               <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
                 <input
@@ -904,44 +959,155 @@ export function SettingsDrawer({ open, onOpenChange, profile, onSave, onClearCha
               <span className="text-xs text-subtle">我们</span>
               <Textarea value={bond} onChange={(e) => setBond(e.target.value)} maxLength={200} className="min-h-24" />
             </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-2">
+                <span className="text-xs text-subtle">使用中最多几条</span>
+                <Input
+                  type="number"
+                  min={4}
+                  max={40}
+                  value={portraitActiveMax}
+                  onChange={(e) => setPortraitActiveMax(e.target.value)}
+                  onBlur={() => {
+                    const n = clampPortraitActiveMax(portraitActiveMax);
+                    setPortraitActiveMax(String(n));
+                    persistProfile({ portraitActiveMax: n });
+                  }}
+                />
+              </label>
+              <label className="flex flex-col gap-2">
+                <span className="text-xs text-subtle">几天没印证就过期</span>
+                <Input
+                  type="number"
+                  min={3}
+                  max={90}
+                  value={portraitStaleDays}
+                  onChange={(e) => setPortraitStaleDays(e.target.value)}
+                  onBlur={() => {
+                    const n = clampPortraitStaleDays(portraitStaleDays);
+                    setPortraitStaleDays(String(n));
+                    persistProfile({ portraitStaleDays: n });
+                  }}
+                />
+              </label>
+            </div>
+            <p className="text-xs text-subtle">
+              右上角保存只记下「我自己」和「我们」。过期和已推翻的不会写进回复。关系阶段和设定不占上面的条数，设定也不会过期。
+            </p>
+            <div className="flex flex-col gap-2">
+              <span className="text-xs text-subtle">设定</span>
+              <p className="text-xs text-subtle">
+                从故事线来的人物、世界观和称呼。生成画像时会带上，但不会改它们。只有你能改。
+              </p>
+              {portrait.filter((row) => row.kind === "seed").length === 0 ? (
+                <p className="text-sm text-subtle">还没有设定。</p>
+              ) : (
+                portrait
+                  .filter((row) => row.kind === "seed")
+                  .map((p) => {
+                    const draft = seedDrafts[p.id] ?? { topic: p.topic, body: p.body };
+                    return (
+                      <div key={p.id} className="rounded-md bg-surface-2 p-3">
+                        <Input
+                          value={draft.topic}
+                          maxLength={40}
+                          onChange={(e) =>
+                            setSeedDrafts((cur) => ({ ...cur, [p.id]: { ...draft, topic: e.target.value } }))
+                          }
+                        />
+                        <Textarea
+                          value={draft.body}
+                          maxLength={2000}
+                          onChange={(e) =>
+                            setSeedDrafts((cur) => ({ ...cur, [p.id]: { ...draft, body: e.target.value } }))
+                          }
+                          className="mt-2 min-h-24"
+                        />
+                        <div className="mt-2 flex gap-2">
+                          <Button type="button" variant="outline" disabled={busy} onClick={() => void saveSeed(p.id)}>
+                            保存这条
+                          </Button>
+                          <Button type="button" variant="outline" disabled={busy} onClick={() => void removePortrait(p.id)}>
+                            删除
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
             <div className="flex flex-col gap-2">
               <span className="text-xs text-subtle">我眼中的她</span>
-              {portrait.map((p) => (
-                <div key={p.id} className="rounded-md bg-surface-2 p-3">
-                  <Input
-                    value={p.topic}
-                    onChange={(e) =>
-                      setPortrait((rows) =>
-                        rows.map((r) => (r.id === p.id ? { ...r, topic: e.target.value } : r)),
-                      )
+              <div className="flex gap-2">
+                {(
+                  [
+                    ["active", "使用中"],
+                    ["stale", "过期"],
+                    ["superseded", "已推翻"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setPortraitView(id)}
+                    className={
+                      portraitView === id
+                        ? "rounded-md bg-accent px-3 py-1.5 text-sm text-accent-fg"
+                        : "rounded-md bg-surface-2 px-3 py-1.5 text-sm text-muted"
                     }
-                    className="mb-2"
-                  />
-                  <Textarea
-                    value={p.body}
-                    onChange={(e) =>
-                      setPortrait((rows) =>
-                        rows.map((r) => (r.id === p.id ? { ...r, body: e.target.value } : r)),
-                      )
-                    }
-                    maxLength={80}
-                    className="min-h-16"
-                  />
-                </div>
-              ))}
-              <div className="flex flex-col gap-2">
-                <Input value={newTopic} onChange={(e) => setNewTopic(e.target.value)} placeholder="主题，如 被安慰的方式" />
-                <Textarea
-                  value={newBody}
-                  onChange={(e) => setNewBody(e.target.value)}
-                  placeholder="她是怎样的"
-                  maxLength={80}
-                  className="min-h-16"
-                />
-                <Button type="button" variant="outline" onClick={addPortraitRow}>
-                  加上一条
-                </Button>
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
+              {portrait.filter((row) => row.kind !== "seed" && row.status === portraitView).length === 0 ? (
+                <p className="text-sm text-subtle">这一栏还没有。</p>
+              ) : (
+                portrait
+                  .filter((row) => row.kind !== "seed" && row.status === portraitView)
+                  .map((p) => (
+                    <div key={p.id} className="rounded-md bg-surface-2 p-3">
+                      <p className="text-sm font-medium">
+                        {p.topic}
+                        {p.topic === "关系阶段" ? " · 固定" : ""}
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{p.body}</p>
+                      <p className="mt-2 text-xs text-subtle">
+                        {p.kind === "episode" ? "具体事件" : "稳定特点"}
+                        {" · "}
+                        依据 {p.evidenceCount ?? p.evidenceIds.length} 条
+                        {p.evidenceFrom ? ` · ${p.evidenceFrom}` : ""}
+                        {p.evidenceTo && p.evidenceTo !== p.evidenceFrom ? ` – ${p.evidenceTo}` : ""}
+                      </p>
+                      <p className="text-xs text-subtle">
+                        印证 {p.supportCount} 次 · 最近 {fmtPortraitTime(p.lastSupportedAt)}
+                      </p>
+                      {p.retireReason ? (
+                        <p className="mt-1 text-xs text-subtle">建议退出：{p.retireReason}</p>
+                      ) : null}
+                      <div className="mt-2 flex gap-2">
+                        {p.status === "active" ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => void markPortraitStale(p.id)}
+                          >
+                            置为过期
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => void removePortrait(p.id)}
+                        >
+                          删除
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+              )}
             </div>
           </div>
         </div>
@@ -1081,6 +1247,9 @@ maxAlternatives: 3`}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <p className="text-xs text-subtle">
+              {callPhase ? `通话 phase ${callPhase}${callDeaf ? " · 麦关" : ""}` : "当前不在通话"}
+            </p>
+            <p className="text-xs text-subtle">
               占用 {formatDbBytes(dbSize?.totalBytes ?? null)}
               {dbSize?.limitMb ? ` / ${dbSize.limitMb} MB` : ""}
               {" · "}记录保留 30 天
@@ -1179,6 +1348,9 @@ maxAlternatives: 3`}
                       ) : null}
                       {senseLine ? <p className="mt-1 text-subtle">{senseLine}</p> : null}
                       {injectLine ? <p className="mt-1 text-subtle">{injectLine}</p> : null}
+                      {row.note?.includes("状态卡住已恢复") ? (
+                        <p className="mt-1 text-live">{row.note}</p>
+                      ) : null}
                       {failLine ? <p className="mt-1 text-live">{failLine}</p> : null}
                     </summary>
                     <div className="mt-3 flex flex-col gap-3">

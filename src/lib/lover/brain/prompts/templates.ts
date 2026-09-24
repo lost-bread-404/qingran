@@ -52,6 +52,17 @@ ${FIRST_PERSON}
 export const MIND_NOT_SPOKEN =
   "这是我对她的理解，不是要我说出来的话，不要复述，也不要说明自己没做什么。";
 
+/** Editable sentence in the reply template. Empty {recent_phrases} drops the whole paragraph. */
+export const RECENT_PHRASE_PARAGRAPH =
+  "这些话你最近说过：{recent_phrases}。不要再重复这些句子；场景没变就不用再描述一次动作。";
+
+export function ensureVoiceRecentPhrases(messages: PromptMessage[]): void {
+  if (messages.some((message) => message.content.includes("{recent_phrases}"))) return;
+  const host = messages.find((message) => message.content.includes("说话要有逻辑"));
+  if (!host) return;
+  host.content = `${host.content.replace(/\s+$/, "")}\n\n${RECENT_PHRASE_PARAGRAPH}`;
+}
+
 const ARCHIVE_SYSTEM = `你是一个中立、细心的记录员，为 Rosie 和清然的对话写观察笔记。笔记会同时用于：清然记住和理解 Rosie；Rosie 的被动日记（分析她的状态和规律）。
 
 写什么：
@@ -80,8 +91,15 @@ text 里的具体承诺写成「我承诺今晚一点前陪你写完这章」，
 
 const PORTRAIT_SYSTEM = `你是清然。{system_prompt} 就是你写「我眼中的她」时的立场。portrait 是你带着爱写下的理解，善意解读，不写成指责或缺点清单。
 
-只写稳定理解：长期是怎样的人、反复出现的需要和怕什么。不要写你最近做了什么、答应了什么、怎么哄或主导。
-生成前先对照【旧的我眼中的她】：意思相近的主题合并到旧主题，不要新开一条。没有新的稳定理解就输出空的 portrait_ops。
+只写跨越多次、多天才能看出的、对她这个人的理解：她怎么反应、她需要什么、什么让她不安、她怎么恢复、她嘴上说的和心里想的差在哪。这条理解要能改变下次怎么回应她。
+
+不写某天发生了什么、某次承诺、某次互动的细节、你自己做过什么。那些归笔记。
+
+每条必须有至少 2 条不同日期的依据（evidence_ids）。凑不够就不写。宁可少写。
+
+先复核【旧的我眼中的她】：还成立且这次又被印证 → verdict=support，沿用旧 id；不再成立 → verdict=supersede；意思相近的主题合并到旧主题，不要新开一条。没有新的跨时间理解就不要新开。kind 只用 trait，不要写 episode。人物、世界观和称呼是设定，不在这张表里。不要改写设定，也不要新开和设定同名的一条。
+
+另外必须写 relationship：最近这段时间关系是什么状态、和之前比变化在哪。这一条叫「关系阶段」，每次都写，不放进 portrait_ops。
 
 ${FIRST_PERSON}`;
 
@@ -218,6 +236,10 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
           "care",
           "只有打开关怀检查、今天日记还没覆盖、并且这轮还没问过时，才是换行加上那句「如果时机自然…」。否则是空字符串。",
         ),
+        ph(
+          "recent_phrases",
+          "最近 8 条清然回复里，去掉标点和语气词后不少于 6 字、并且至少出现在 2 条里的句子或短语，最多 8 条。没有重复时是空字符串，模板里包含它的那一段整段不发送。",
+        ),
         ph("user_text", "这一句 Rosie 刚说的话。"),
       ],
       messages: [
@@ -235,7 +257,9 @@ ${MIND_NOT_SPOKEN}
 【可以用的记忆】
 {memories}
 
-说话要有逻辑：观点有依据，前后一致。旁白和对话都用「你」称呼对方，用「我」称呼自己，不要改成第三人称。{care}`),
+说话要有逻辑：观点有依据，前后一致。旁白和对话都用「你」称呼对方，用「我」称呼自己，不要改成第三人称。{care}
+
+${RECENT_PHRASE_PARAGRAPH}`),
         user("{user_text}"),
       ],
     },
@@ -335,20 +359,31 @@ ${MIND_NOT_SPOKEN}
       label: "画像",
       placeholders: [
         SYSTEM_PROMPT,
-        ph("old_portrait", "旧的画像，每行 id|主题|正文。没有则是「（没有）」。"),
+        ph(
+          "old_portrait",
+          "还在使用和已过期的画像。每行 id|状态|kind|印证次数|最近印证日|主题|正文|证据 id。已推翻的不在这里。没有则是「（没有）」。",
+        ),
         ph("old_self", "旧的「我自己」。没有则是「（没有）」。"),
         ph("old_bond", "旧的「我们」。没有则是「（没有）」。"),
-        ph("qingran_notes", "当天 subject 为 qingran 的笔记，只给 self_summary 用。每行 id|text。没有则是「（没有）」。"),
+        ph(
+          "notes",
+          "最近 30 天的笔记摘要，最多 100 条。每行 id|日期|subject|text。没有则是「（没有）」。",
+        ),
+        ph("conversation", "最近的对话。每行 日期|你或我|正文。没有则是「（没有）」。"),
+        ph("qingran_notes", "这 30 天里 subject 为 qingran 的笔记，只给 self_summary 用。每行 id|text。没有则是「（没有）」。"),
         ph(
           "rosie_notes",
-          "当天 subject 为 rosie，或 subject 为 us 且来自 Rosie 的笔记。每行 id|subject|text。没有则是「（没有）」。",
+          "这 30 天里 subject 为 rosie，或 subject 为 us 且来自她的笔记。每行 id|subject|text。没有则是「（没有）」。",
         ),
       ],
       messages: [
         system(PORTRAIT_SYSTEM),
-        user(`输出 portrait_ops（按自由 topic upsert，evidence_ids 必须是存在的笔记 id）、self_summary（≤300字，第一人称，只依据清然笔记和旧 summary，不编造重大经历）、bond_summary（≤200字：称呼、梗、共同时刻、未兑现约定）。
-先对照旧主题，意思相近的合并，不要新开。只写稳定理解。不要写你最近做了什么。
-portrait 正文、self_summary、bond_summary 都用清然的第一人称：Rosie 称「你」，自己称「我」。
+        user(`输出 portrait_ops、relationship、self_summary（≤300字，第一人称，只依据清然笔记和旧 summary，不编造重大经历）、bond_summary（≤200字：称呼、梗、共同时刻）。
+
+portrait_ops 每项：id（旧条用旧 id，新条留空）、topic、body（≤80字）、kind（trait）、evidence_ids（至少两个不同日期的笔记 id）、verdict（support / supersede / new）。
+relationship：body（≤160字，最近这段关系是什么状态、和之前比变化在哪）、evidence_ids。
+凑不够两个不同日期就不写。不写某一次的事。宁可少写。
+portrait 正文、relationship、self_summary、bond_summary 都用清然的第一人称：Rosie 称「你」，自己称「我」。
 
 【旧的我眼中的她】
 {old_portrait}
@@ -359,10 +394,16 @@ portrait 正文、self_summary、bond_summary 都用清然的第一人称：Rosi
 【旧的我们】
 {old_bond}
 
+【最近 30 天的笔记】
+{notes}
+
+【最近的对话】
+{conversation}
+
 【清然自己的笔记】（只用于 self_summary）
 {qingran_notes}
 
-【关于 Rosie 的笔记】
+【关于她的笔记】
 {rosie_notes}`),
       ],
     },

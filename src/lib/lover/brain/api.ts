@@ -20,7 +20,10 @@ import {
   listFindings,
   listIntentions,
   listNotes,
+  listNotesByIds,
   listPortrait,
+  deletePortrait,
+  setPortraitStatus,
   listReports,
   listThemes,
   listThemeWeeks,
@@ -36,8 +39,11 @@ import {
   upsertPortrait,
   listJobStatus,
   voiceModelStatsLast7d,
+  appendBrainLog,
 } from "./store.ts";
 import type { JobType, Lens, Note, Subject } from "./types.ts";
+import { isStorySeedPortrait } from "./portrait-kind.ts";
+import { portraitRetireReason } from "./voice/portrait-life.ts";
 import { askDiary } from "./diary/ask.ts";
 import { evaluateIfDue, startExperiment } from "./diary/experiments.ts";
 import { safetyFlag } from "./diary/stats.ts";
@@ -243,7 +249,25 @@ export const brainGetLongLayer = createServerFn({ method: "GET" }).handler(async
     getMind(),
     listBrainLog(80),
   ]);
-  return { portrait, self: meta.selfSummary, bond: meta.bondSummary, mind, log };
+  const evidenceIds = [...new Set(portrait.flatMap((row) => row.evidenceIds))];
+  const notes = await listNotesByIds(evidenceIds);
+  const days = new Map(notes.map((note) => [note.id, note.localDay]));
+  return {
+    portrait: portrait.map((row) => {
+      const known = row.evidenceIds.map((id) => days.get(id)).filter((day): day is string => Boolean(day)).sort();
+      return {
+        ...row,
+        evidenceCount: row.evidenceIds.length,
+        evidenceFrom: known[0] ?? null,
+        evidenceTo: known.at(-1) ?? null,
+        retireReason: portraitRetireReason(row, days),
+      };
+    }),
+    self: meta.selfSummary,
+    bond: meta.bondSummary,
+    mind,
+    log,
+  };
 });
 
 export const brainListHygieneNotes = createServerFn({ method: "GET" }).handler(async () => {
@@ -279,14 +303,23 @@ export const brainListLogs = createServerFn({ method: "POST" })
     });
   });
 
+export const brainNoteCallStuck = createServerFn({ method: "POST" })
+  .validator((input: { phase: string; deaf?: boolean }) => input)
+  .handler(async ({ data }) => {
+    const phase = String(data.phase || "unknown").slice(0, 40);
+    const note = `状态卡住已恢复 phase=${phase}${data.deaf ? " deaf" : ""}`;
+    await appendBrainLog({
+      step: "call:stuck",
+      ok: true,
+      note,
+      route: "voice",
+      raw: note,
+    });
+    return { ok: true as const };
+  });
+
 export const brainSaveLongLayer = createServerFn({ method: "POST" })
-  .validator(
-    (input: {
-      self?: string;
-      bond?: string;
-      portrait?: Array<{ id: string; topic: string; body: string }>;
-    }) => input,
-  )
+  .validator((input: { self?: string; bond?: string }) => input)
   .handler(async ({ data }) => {
     if (data.self != null || data.bond != null) {
       await patchMeta({
@@ -294,20 +327,44 @@ export const brainSaveLongLayer = createServerFn({ method: "POST" })
         ...(data.bond != null ? { bondSummary: data.bond.slice(0, 200) } : {}),
       });
     }
-    if (data.portrait) {
-      const ts = now();
-      for (const p of data.portrait) {
-        await upsertPortrait({
-          id: p.id,
-          topic: p.topic.slice(0, 40),
-          body: p.body.slice(0, 80),
-          status: "active",
-          evidenceIds: [],
-          lastSeen: ts,
-          updatedAt: ts,
-        });
-      }
-    }
+    return { ok: true as const };
+  });
+
+export const brainSetPortraitStatus = createServerFn({ method: "POST" })
+  .validator((input: { id: string; status: "stale" | "active" | "superseded" }) => input)
+  .handler(async ({ data }) => {
+    const rows = await listPortrait();
+    const cur = rows.find((row) => row.id === data.id);
+    if (cur && isStorySeedPortrait(cur)) return { ok: false as const, error: "seed" as const };
+    const status = data.status === "active" || data.status === "superseded" ? data.status : "stale";
+    await setPortraitStatus(String(data.id), status);
+    return { ok: true as const };
+  });
+
+export const brainSaveSeedPortrait = createServerFn({ method: "POST" })
+  .validator((input: { id: string; topic: string; body: string }) => input)
+  .handler(async ({ data }) => {
+    const rows = await listPortrait();
+    const cur = rows.find((row) => row.id === data.id);
+    if (!cur || !isStorySeedPortrait(cur)) return { ok: false as const };
+    const topic = data.topic.replace(/\s+/g, " ").trim().slice(0, 40);
+    const body = data.body.replace(/\s+/g, " ").trim().slice(0, 2000);
+    if (!topic || !body) return { ok: false as const };
+    await upsertPortrait({
+      ...cur,
+      topic,
+      body,
+      kind: "seed",
+      status: "active",
+      updatedAt: now(),
+    });
+    return { ok: true as const };
+  });
+
+export const brainDeletePortrait = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    await deletePortrait(String(data.id));
     return { ok: true as const };
   });
 

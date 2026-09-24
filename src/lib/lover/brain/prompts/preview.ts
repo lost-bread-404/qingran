@@ -2,7 +2,7 @@ import { getSql } from "../../../db.ts";
 import { isNightNoiseBody } from "../../message-markup.ts";
 import { voiceInjectFromProfile } from "../../types.ts";
 import { now } from "../clock.ts";
-import { HISTORY_WINDOW, QR_VOICE_READS_DIARY, REFLECT_WINDOW } from "../config.ts";
+import { HISTORY_WINDOW, HISTORY_WINDOW_MAX, QR_VOICE_READS_DIARY, REFLECT_WINDOW } from "../config.ts";
 import { currentArchiveVars } from "../archivist.ts";
 import { buildReportData } from "../diary/report.ts";
 import {
@@ -25,8 +25,9 @@ import { formatClock, localDay } from "../time.ts";
 import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
-import { portraitVars } from "../voice/nightly.ts";
+import { portraitInputVars } from "../voice/nightly.ts";
 import { buildVoiceMessages, formatMemories, voiceFacingSlots, voiceHistoryMessages } from "../voice/pack-build.ts";
+import { formatRecentPhrases, recentPhrasesFromHistory } from "../voice/recent-phrases.ts";
 import { formatReflectConversation, reflectVars, type ReflectorParts } from "../voice/reflector.ts";
 import { getCoreIndexItems, getRelatedIndexItems } from "../voice/retrieve.ts";
 import type { Finding } from "../types.ts";
@@ -74,6 +75,10 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
     historyWindow: typeof profile.historyWindow === "number" ? profile.historyWindow : HISTORY_WINDOW,
   });
   const history = await listHistoryWindow(null, inject.history);
+  const phraseHistory =
+    inject.history >= HISTORY_WINDOW_MAX ? history : await listHistoryWindow(null, HISTORY_WINDOW_MAX);
+  const recentPhrases = recentPhrasesFromHistory(phraseHistory);
+  const phraseText = formatRecentPhrases(recentPhrases);
   const ids = mind.memory_ids ?? [];
   let notes = ids.length ? (await listNotesByIds(ids)).filter((note) => note.status === "active") : [];
   if (!notes.length) notes = (await listNotes({ status: "active", limit: 6 })).slice(0, 6);
@@ -103,6 +108,7 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
     nowMs: now(),
     voiceTemplate: body,
     inject,
+    recentPhrases,
   });
   return {
     slots: {
@@ -113,9 +119,10 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
       care: "",
       user_text: "在吗",
       history_messages: historyText,
+      recent_phrases: phraseText || "（没有重复。这一段不会出现在发给模型的内容里）",
     },
     messages,
-    note: "没有正在说的这一句，用户消息用「在吗」占位。记忆、画像、内心是发给回复模型前的文本，库里原文没改。",
+    note: "没有正在说的这一句，用户消息用「在吗」占位。记忆、画像、内心是发给回复模型前的文本，库里原文没改。最近说过的句子来自最近 8 条清然回复。",
   };
 }
 
@@ -188,23 +195,7 @@ async function reflectSlots(): Promise<Record<string, string>> {
 }
 
 async function portraitSlots(): Promise<Record<string, string>> {
-  const meta = await getMeta();
-  const tz = resolveTz(meta.timeZone);
-  const day = localDay(now(), tz);
-  const [charter, portrait, notes] = await Promise.all([
-    getProfilePrompt(),
-    listPortrait(),
-    listNotes({ fromDay: day, toDay: day, status: "active", limit: 80 }),
-  ]);
-  const relevant = notes.filter((note) => note.subject === "rosie" || note.subject === "us" || note.subject === "qingran");
-  return portraitVars({
-    charter,
-    oldPortrait: portrait,
-    selfSummary: meta.selfSummary,
-    bondSummary: meta.bondSummary,
-    qingranNotes: relevant.filter((note) => note.subject === "qingran"),
-    rosieNotes: relevant.filter((note) => note.subject === "rosie" || (note.subject === "us" && note.fromRosie)),
-  });
+  return portraitInputVars();
 }
 
 async function todayContext() {
@@ -226,7 +217,7 @@ async function slotsFor(key: PromptKey, variantId: string): Promise<{ slots: Rec
   }
   if (key === "reflect") return { slots: await reflectSlots(), note: "这是这一刻会写进内心的材料。" };
   if (key === "archive") return { slots: await currentArchiveVars(), note: "用当前滑出窗口的那一批。没有待归档时是空的。" };
-  if (key === "portrait") return { slots: await portraitSlots(), note: "用今天的笔记和现在的画像。" };
+  if (key === "portrait") return { slots: await portraitSlots(), note: "用最近 30 天的笔记、现在的画像和最近的对话。" };
   if (key === "dusk") {
     const { day, messages, notes, intentions } = await todayContext();
     const rosie = messages.filter((message) => message.role === "user").map((message) => message.text).join("\n").slice(0, 3000);

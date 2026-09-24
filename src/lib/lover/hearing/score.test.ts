@@ -55,6 +55,18 @@ test("score card CER, exact match, noise rate, and worst-20 order", () => {
   assert.equal(scored.cerLive !== null, true);
 });
 
+test("recent floors stay in time order and drop clips that have none", () => {
+  const scored = scoreHearing([
+    clip({ id: "b", createdAt: "2026-09-02T00:00:00.000Z", vadFloor: 0.02 }),
+    clip({ id: "a", createdAt: "2026-09-01T00:00:00.000Z", vadFloor: 0.008 }),
+    clip({ id: "c", createdAt: "2026-09-03T00:00:00.000Z", vadFloor: null }),
+  ]);
+  assert.deepEqual(
+    scored.recentFloors.map((row) => row.vadFloor),
+    [0.008, 0.02],
+  );
+});
+
 test("Apple live_text all empty is 无数据 with empty rate 1", () => {
   const scored = scoreHearing([
     clip({ id: "e", goldText: "嗯", finalText: "嗯", liveText: "" }),

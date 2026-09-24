@@ -282,6 +282,7 @@ export type LabeledClipRow = {
   tonePeak: number | null;
   toneMark: string | null;
   senseLine: string | null;
+  vadFloor: number | null;
 };
 
 export async function listLabeledClipRows(sql: Sql, page = 1) {
@@ -316,6 +317,7 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
     tone_peak: number | null;
     tone_mark: string | null;
     sense_line: string | null;
+    vad_floor: number | null;
   }>(
     `select id, turn_id, final_text, gold_text, gold_source,
             noise_only, literal_mismatch, tone_note, gold_at::text as gold_at,
@@ -323,7 +325,8 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
             hear_to_trigger_ms, preroll_peak_rms,
             duration_ms, voiced_ratio, f0_min_hz, f0_max_hz,
             voiced_ms, voice_num, voice_den, voice_noise,
-            tone_rise, tone_glide, tone_fade, tone_peak, tone_mark, sense_line
+            tone_rise, tone_glide, tone_fade, tone_peak, tone_mark, sense_line,
+            vad_floor
      from qingran_hearing_clips
      where gold_source is not null
      order by coalesce(gold_at, created_at) desc, id desc
@@ -364,6 +367,7 @@ export async function listLabeledClipRows(sql: Sql, page = 1) {
         tonePeak: row.tone_peak == null ? null : Number(row.tone_peak),
         toneMark: row.tone_mark,
         senseLine: row.sense_line,
+        vadFloor: row.vad_floor == null ? null : Number(row.vad_floor),
       }),
     ),
     total: Number(count[0]?.n) || 0,
@@ -474,11 +478,12 @@ export async function listScoreClipRows(sql: Sql) {
     predicted_tags: unknown;
     gold_tags: unknown;
     tags_touched: string[] | null;
+    vad_floor: number | null;
   }>(
     `select id, created_at::text as created_at,
             final_text, xai_text, live_text, gold_text, gold_source, stt_text, hearing_text,
             noise_only, utterance_emotion, literal_mismatch, tone_note, turn_id,
-            predicted_tags, gold_tags, tags_touched
+            predicted_tags, gold_tags, tags_touched, vad_floor
      from qingran_hearing_clips
      order by created_at desc`,
   );

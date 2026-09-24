@@ -28,8 +28,11 @@ const portrait = (topic: string, id = topic): PortraitRow => ({
   topic,
   body: `${topic}的样子`,
   status: "active",
+  kind: "trait",
   evidenceIds: [],
   lastSeen: 0,
+  lastSupportedAt: 0,
+  supportCount: 1,
   updatedAt: 0,
 });
 

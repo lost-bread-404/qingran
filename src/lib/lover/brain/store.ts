@@ -24,13 +24,16 @@ import type {
   Mind,
   Note,
   NoteStatus,
+  PortraitKind,
   PortraitRow,
+  PortraitStatus,
   StoredMessage,
   Subject,
   Theme,
 } from "./types.ts";
 import { EMPTY_META } from "./types.ts";
 import { coerceMind } from "./mind-parse.ts";
+import { portraitKindOf } from "./portrait-kind.ts";
 
 export { similar };
 
@@ -777,34 +780,71 @@ export async function listIndexNotes(): Promise<IndexItem[]> {
 export async function listPortrait(): Promise<PortraitRow[]> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>("select * from qr_portrait order by last_seen desc");
-  return rows.map((r) => ({
-    id: String(r.id),
-    topic: String(r.topic),
-    body: String(r.body),
-    status: r.status === "dormant" ? "dormant" : "active",
-    evidenceIds: fromPgArray(r.evidence_ids),
-    lastSeen: asInt(r.last_seen),
-    updatedAt: asInt(r.updated_at),
-  }));
+  return rows.map(rowPortrait);
 }
 
 export async function upsertPortrait(row: PortraitRow): Promise<void> {
   const db = await getSql();
+  const kind = portraitKindOf(row);
+  const lastSupportedAt = row.lastSupportedAt || row.updatedAt || row.lastSeen;
+  const supportCount = row.supportCount >= 1 ? Math.round(row.supportCount) : 1;
   await db.query(
-    `insert into qr_portrait (id, topic, body, status, evidence_ids, last_seen, updated_at)
-     values ($1,$2,$3,$4,$5::text[],$6,$7)
+    `insert into qr_portrait (
+       id, topic, body, status, kind, evidence_ids, last_seen, last_supported_at, support_count, updated_at
+     )
+     values ($1,$2,$3,$4,$5,$6::text[],$7,$8,$9,$10)
      on conflict (id) do update set
-       topic = excluded.topic, body = excluded.body, status = excluded.status,
-       evidence_ids = excluded.evidence_ids, last_seen = excluded.last_seen, updated_at = excluded.updated_at`,
-    [row.id, row.topic, row.body, row.status, pgTextArray(row.evidenceIds), row.lastSeen, row.updatedAt],
+       topic = excluded.topic, body = excluded.body, status = excluded.status, kind = excluded.kind,
+       evidence_ids = excluded.evidence_ids, last_seen = excluded.last_seen,
+       last_supported_at = excluded.last_supported_at, support_count = excluded.support_count,
+       updated_at = excluded.updated_at`,
+    [
+      row.id,
+      row.topic,
+      row.body,
+      row.status,
+      kind,
+      pgTextArray(row.evidenceIds),
+      row.lastSeen,
+      lastSupportedAt,
+      supportCount,
+      row.updatedAt,
+    ],
   );
 }
 
-export async function dormantOldPortrait(now: number): Promise<void> {
+export async function setPortraitStatus(id: string, status: PortraitStatus): Promise<void> {
   const db = await getSql();
-  await db.query(`update qr_portrait set status = 'dormant' where status = 'active' and last_seen < $1`, [
-    now - 45 * 86_400_000,
-  ]);
+  const next: PortraitStatus = status === "stale" || status === "superseded" ? status : "active";
+  await db.query(`update qr_portrait set status = $2, updated_at = $3 where id = $1`, [id, next, now()]);
+}
+
+export async function deletePortrait(id: string): Promise<void> {
+  const db = await getSql();
+  await db.query(`delete from qr_portrait where id = $1`, [id]);
+}
+
+function rowPortrait(r: Record<string, unknown>): PortraitRow {
+  const updatedAt = asInt(r.updated_at);
+  const lastSeen = asInt(r.last_seen);
+  const status: PortraitStatus =
+    r.status === "stale" || r.status === "dormant"
+      ? "stale"
+      : r.status === "superseded"
+        ? "superseded"
+        : "active";
+  return {
+    id: String(r.id),
+    topic: String(r.topic),
+    body: String(r.body),
+    status,
+    kind: portraitKindOf({ id: String(r.id), topic: String(r.topic), kind: r.kind == null ? undefined : String(r.kind) }),
+    evidenceIds: fromPgArray(r.evidence_ids),
+    lastSeen,
+    lastSupportedAt: asInt(r.last_supported_at) || updatedAt || lastSeen,
+    supportCount: Math.max(1, asInt(r.support_count, 1)),
+    updatedAt,
+  };
 }
 
 export function emptyDay(day: string): DayLog {
@@ -1770,10 +1810,14 @@ export async function listBrainLog(limit = 50, filter?: BrainLogFilter): Promise
   }));
 }
 
-export async function getProfilePrompt(): Promise<string> {
+export async function getProfileData(): Promise<unknown> {
   const db = await getSql();
   const rows = await db.query<{ data: unknown }>("select data from qingran_profile where id = 1");
-  const data = asJson<Record<string, unknown>>(rows[0]?.data, {});
+  return rows[0]?.data ?? {};
+}
+
+export async function getProfilePrompt(): Promise<string> {
+  const data = asJson<Record<string, unknown>>(await getProfileData(), {});
   const direct = typeof data.systemPrompt === "string" ? data.systemPrompt.trim() : "";
   return direct || "你就是清然。正在和 Rosie 语音通话。";
 }

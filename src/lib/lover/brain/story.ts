@@ -80,8 +80,11 @@ export async function importStorySeed(data: StorySeed = loadStorySeed()): Promis
       topic: row.topic,
       body: row.body,
       status: "active",
+      kind: "seed",
       evidenceIds: [],
       lastSeen: ts,
+      lastSupportedAt: ts,
+      supportCount: 1,
       updatedAt: ts,
     };
     await upsertPortrait(portrait);

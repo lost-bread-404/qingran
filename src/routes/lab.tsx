@@ -411,6 +411,11 @@ function HearingLabPage() {
               ))}
             </div>
             <ScoreCard score={score} />
+            {score?.recentFloors.length ? (
+              <p className="mt-3 text-xs leading-relaxed text-subtle">
+                最近底噪 {score.recentFloors.map((row) => row.vadFloor.toFixed(3)).join(" → ")}
+              </p>
+            ) : null}
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -471,6 +476,7 @@ function HearingLabPage() {
                       {row.literalMismatch ? " · 字面≠意思" : ""}
                       {row.toneNote ? ` · ${row.toneNote}` : ""}
                       {row.noiseOnly ? " · 噪音" : ""}
+                      {row.vadFloor != null ? ` · 底噪 ${row.vadFloor.toFixed(3)}` : ""}
                     </p>
                     <p className="mt-1 text-sm">识别 {row.hyp || "（空）"}</p>
                     <p className="text-sm text-muted">正确 {row.gold || "（空）"}</p>
@@ -529,6 +535,7 @@ function HearingLabPage() {
                       {row.toneNote ? ` · ${row.toneNote}` : ""}
                       {row.hearToTriggerMs != null ? ` · 接话 ${row.hearToTriggerMs}ms` : ""}
                       {row.prerollPeakRms != null ? ` · 前1.5秒峰值 ${row.prerollPeakRms.toFixed(3)}` : ""}
+                      {row.vadFloor != null ? ` · 底噪 ${row.vadFloor.toFixed(3)}` : ""}
                       {` · ${formatClipVoiceLine(row)}`}
                       {` · ${formatToneReadingLine(row)}`}
                       {row.senseLine ? ` · ${row.senseLine}` : ""}
