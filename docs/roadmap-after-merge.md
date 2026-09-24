@@ -1,5 +1,7 @@
 # 清然：合并之后要做的事（Roadmap）
 
+> 2026-09-24：brain v3 的阶段 1–3 已在 `main`。结构、表、热路径字段和偏差写在 [brain-v3.md](brain-v3.md)。下面第 2、3、5 节里「删消息 / 用 mind 字段 / 回复检索笔记」的描述已经过时，以 brain-v3 为准。主动发消息还没做。
+
 > 整理自 2026-09-19 与 Claude 的讨论。当前在做：`feat/simple-hearing-eval`（语音 eval 这一轮）。
 > 本文件只列「语音这一轮完成之后」的事。每项标注依赖关系和待决定事项。
 
@@ -27,7 +29,7 @@
 
 ## 2. 消息保留
 
-- [ ] main 的 `room.ts` 只保留最近 240 条消息（`offset 240` 删除更早的）。与「长期保留使用记录、以后分析」的目标冲突。合并时改为不删除，或者归档而不是删除。
+- [x] `room.ts` 的 240 是读取窗口和备份切片，不是 DELETE。`retention.ts` / `dedupe-replies.ts` 也不删 `qingran_messages`、不截断正文。清掉的对话用 `forgotten_at` 标，行还在。
 
 ## 3. 理解 Rosie（最核心的智能问题）
 
@@ -60,7 +62,9 @@
 
 ## 5. 记忆检索
 
-现状（cm）：候选池过滤（bond，或 subject=rosie 且重要性 ≥3）→ 打分 `重要性 + 2·e^(−天数/14) + 0.5·min(被调用次数,4) + bond 加分` → 核心索引 60 条 + 相关索引 30 条（MiniSearch 中文两字切词关键词搜索）→ Reflector 挑 id → 实时回复最多 6 条完整笔记 + portrait。
+现状（v3）：清然不再从笔记里检索。回复和 reflect 读一份 Dossier（启用前暂时还是 self / bond / portrait）。日记仍用 archive → notes。原文检索（pgvector，先摘要再翻原文）等攒 3–6 个月再做，见 [brain-v3.md](brain-v3.md)。
+
+下面是合并讨论时的旧方案，不再按这个做：
 
 - [ ] **Hybrid 检索**：embedding 语义检索 + 关键词搜索混合排序（解决「面试焦虑」找不到「找实习压力」这类问题）。
 - [ ] 放宽过滤：低重要性笔记不再完全排除，只降低排序。

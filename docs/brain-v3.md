@@ -1,0 +1,106 @@
+# 清然 brain v3
+
+三部分，每部分只有一个写入方。日记另走一条管线，清然不读。
+
+```
+                ┌───────────────────────────────┐
+                │ ③ 记忆库                        │
+                │  a. qingran_messages（原文，只追加） │
+                │  b. qr_dossier（一份文档，有字数上限） │
+                └──────┬────────────▲───────────┘
+                  读    │            │ editor
+                       ▼            │
+Rosie ──► ① 回答 ◄──── ② 内心 ───────┘
+```
+
+| 部分 | 写入方 | 频率 | 读取方 |
+|---|---|---|---|
+| ① 回答 | `voice` | 每轮 | Rosie |
+| ② 内心 | `reflect` | 每轮，回复后异步 | ①，以及下一次 reflect |
+| ③ Dossier | `editor` | 启用后，约每 20 轮 Rosie 的消息，或隔了一次会话再开口，或设置里「现在整理」 | ① ② |
+| 日记 | `archive` 以及 dusk / synth / … | 对话滑出窗口、每天、每周 | 只给日记页。清然不读 `mem_notes` |
+
+## 为什么是这样
+
+否定式意图会被念出来。早期热路径里写过「不要催她学习」，回复模型会说「我没有继续催你学习」。所以思考和结论分开：`choice` 和 `plans` 只留给 reflect 自己看，热路径只拿正向的 `feel` / `want` / `longing` / `now`。`now` 如果写成否定式（不要、别再、不催、停止、避免……）会被丢掉，不重跑，并记在 `qr_inner_log`。
+
+History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟着旧回复说话。默认历史从 40 改成 20（已保存的设置不覆盖）。`recent_phrases` 那种黑名单已经删掉。
+
+碎片检索互相不一致。notes、画像、self/bond、mind、前端旧记忆大约十几处在写「记忆」。清然现在只读一份有上限的 Dossier。原文留在 `qingran_messages`，不删、不改正文。`forgotten_at` 只是让清然和屏幕看不到，行还在。
+
+## 表
+
+| 表 | 谁写 | 说明 |
+|---|---|---|
+| `qingran_messages` | 通话 | 只追加。清空聊天是 `forgotten_at` + `room_cleared_at`，不是 DELETE |
+| `qr_inner` | reflect | feel / want / choice / now_text / longing / plans。清空聊天清掉前四项，留 longing 和 plans |
+| `qr_inner_log` | reflect | 每轮完整输出，包括被丢掉的 `now` |
+| `qr_dossier` | editor、Rosie | 一份 markdown。`cursor_at` 是已经读过的最后一条消息。`active` 见下面的偏差 |
+| `qr_dossier_versions` | 每次成功写入 | author：`editor` / `rosie` / `seed` / `compact` |
+| `mem_notes`、`qr_portrait`、`qr_mind` | 日记仍写 notes | 清然的热路径和 reflect 不再读。表不删 |
+
+备份导出带上 `qr_inner`、`qr_inner_log`、`qr_dossier`、`qr_dossier_versions`。旧表照旧导出。
+
+## 热路径注入了什么
+
+都是 system，在 history 前面。顺序：
+
+1. `{system_prompt}`，外加 `{A|B}` 那句听力说明
+2. `【我记得的】`：启用 Dossier 之后是全文；启用之前是旧的「我自己 / 我们 / 我眼中的她」
+3. `【我此刻】`：心里、想要、一直惦记着、正在做。某一行空了就删掉那一行；四行都空就整块删掉。feel / want / now 超过 30 分钟不注入；longing 超过 7 天不注入
+4. `现在是{clock}。`
+5. 最近 N 条 history
+6. user：这一句
+
+开关在设置 → 指令：「我记得的」「注入我此刻」（在「我此刻」页）、上下文长度。
+
+**不注入** `choice` 和 `plans`。降级顺序：去掉【我此刻】→ 去掉【我记得的】→ 只留人设 + 最近 8 条 + 这一句。
+
+## 每个 prompt
+
+都在设置 → 指令里，可以改。模型在 `brain/config.ts` 的 `ROUTES`，设置里可以按指令换。
+
+| key | 何时跑 | 输入 | 输出 |
+|---|---|---|---|
+| `voice` | 每轮回复 | 人设、我记得的、我此刻、时间、history、这一句 | 说出来的话 |
+| `reflect` | 回复后 | 人设；可缓存的我记得的；时间、上一次内心（含 choice 和 open plans）、最近 16 条 | feel / want / choice / now / longing / plans |
+| `editor` main | 见上 | 人设、当前文档、longing、cursor 之后没被遗忘的对话（一批最多约 12000 字）、字数上限 | `{ops:[{section,action,old,new}]}` |
+| `editor` compact | 应用后超过上限 | 全文、上限 | `{body}`，author=`compact` |
+| `editor` seed | 设置里「从旧记忆生成初版」 | 人设、`seed/story.json`、还在用的画像和 self/bond、最近 60 天 weight≥3 的笔记最多 150 条、longing | `{body}`，只进版本历史，不启用 |
+| `archive` | 对话滑出窗口 | 相关笔记、这一批对话 | 笔记 ops。开头写明只给日记，清然不会读 |
+| `judge` | 离线 | 人设和对话 | 打分，含 `meta_narration` |
+| dusk / assign / synth / ask / report / experiments / backfill | 日记页 | 不变 | 不变 |
+
+`editor` 的 add 在段末追加（段不存在就新建），replace / remove 必须和原文完全一致，对不上就跳过并写进这次的 ops 记录。没有要改的就 `{"ops":[]}`，仍然推进 cursor。
+
+## 私有字段
+
+| 字段 | 回复看得到？ | 为什么 |
+|---|---|---|
+| feel, want, longing, now | 看得到（未过期、开关开着） | 这是要长成话的结论 |
+| choice | 看不到 | 否定句和取舍过程留在这里，避免被念出来 |
+| plans | 看不到 | 只有 reflect 把它写进 now，才会出现在回复里 |
+| Dossier 全文 | 启用后看得到 | 一份当前成立的理解，不是流水账 |
+
+## 启用之前和之后
+
+`qr_dossier.active` 默认 false。没启用时，热路径和 reflect 继续用旧的 self / bond / portrait。点「启用」才把正文写进 `qr_dossier.body`，把 `cursor_at` 放到当前最新一条消息，并把 `turns_since_edit` 归零。
+
+清空聊天：
+
+- 还没启用：仍按 `archived_at is null` 标记遗忘（和以前一样）。
+- 启用之后：`created_at > cursor_at` 且还没遗忘的，标记 `forgotten_at`。已经整理进文档的对话还在她眼前。日记的 archive 是否跳过被遗忘的消息，维持原样。
+
+## 以后再做（这次不做）
+
+等原文攒了 3–6 个月，在 reflect 里加一个原文检索 tool：pgvector + 时间过滤，先查每天 / 每月摘要，再翻原文。现在不实现。
+
+## 和规格不一致的地方
+
+- `qr_dossier.active`：规格里的建表没有这一列。加上它，是为了让热路径在 Rosie 审完初版之前继续用旧文，不花 editor 的调用。
+- 自动 editor 只在 `active` 之后入队。轮次计数一直加，但没启用时不调用模型。
+- `qr_dossier_versions.ops` 存的是 `{ops, skipped, reason}`，不是裸数组。跳过的 replace 才能在版本历史里看见。
+- 关系阶段没有单独的列，seed 时从画像主题「关系阶段」读。
+- `portrait` route 还留在 `config.ts`，给旧的花费记录用。设置里已经没有画像 prompt，也不会再跑 nightly。
+- 实验室的「导入故事线」不再清空或写入 notes / portrait。种子只作为「从旧记忆生成初版」的输入。
+- 清然读 `mem_notes` 的唯一一次是生成初版。日记和检索测试里的函数还在，不在通话路径上。
