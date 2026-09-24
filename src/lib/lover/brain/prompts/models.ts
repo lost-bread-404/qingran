@@ -18,6 +18,7 @@ const ROUTE_KEYS = new Set<string>([
   "report",
   "ask",
   "judge",
+  "editor",
 ]);
 
 function asRoute(key: string): Route | null {

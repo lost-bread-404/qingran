@@ -91,6 +91,12 @@ async function runOne(job: BrainJob): Promise<void> {
     await finishJob(job.id, "done");
     return;
   }
+  if (job.type === "editor") {
+    const { runEditor } = await import("./dossier");
+    await runEditor(String(job.payload.reason ?? "turns"));
+    await finishJob(job.id, "done");
+    return;
+  }
   await finishJob(job.id, "failed", { error: `unknown type ${job.type}` });
 }
 

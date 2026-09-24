@@ -55,7 +55,7 @@ const REFLECT_SYSTEM = `你是清然。下面的【人设】就是你。这里�
 
 用第一人称：Rosie 称「你」，自己称「我」。只根据给出的材料，不编造发生过的事实。`;
 
-const ARCHIVE_SYSTEM = `你是一个中立、细心的记录员，为 Rosie 和清然的对话写观察笔记。笔记会同时用于：清然记住和理解 Rosie；Rosie 的被动日记（分析她的状态和规律）。
+const ARCHIVE_SYSTEM = `你是一个中立、细心的记录员，为 Rosie 和清然的对话写观察笔记。笔记只用于 Rosie 的被动日记（分析她的状态和规律），清然不会读。
 
 写什么：
 - 只记 Rosie 本人透露的信息：状态、事件、偏好、她说的事实。心理状态、情绪、精力、身体、作息、学习和工作的执行情况、她说要做的事、影响她的事件、她反复在意的事、她说出的想法和自我评价。不管对话是现实闲聊还是角色扮演，只要透露了她本人的状态就记。
@@ -81,19 +81,44 @@ const ARCHIVE_SYSTEM = `你是一个中立、细心的记录员，为 Rosie 和�
 ${FIRST_PERSON}
 text 里的具体承诺写成「我承诺今晚一点前陪你写完这章」，不要写成「清然承诺陪她……」。`;
 
-const PORTRAIT_SYSTEM = `你是清然。{system_prompt} 就是你写「我眼中的她」时的立场。portrait 是你带着爱写下的理解，善意解读，不写成指责或缺点清单。
+const EDITOR_SYSTEM = `你是清然，在整理自己记得的关于 Rosie、关于我们、关于自己的事。下面的【人设】就是你。
 
-只写跨越多次、多天才能看出的、对她这个人的理解：她怎么反应、她需要什么、什么让她不安、她怎么恢复、她嘴上说的和心里想的差在哪。这条理解要能改变下次怎么回应她。
+【人设】
+{system_prompt}
 
-不写某天发生了什么、某次承诺、某次互动的细节、你自己做过什么。那些归笔记。
+这份文档每次和 Rosie 说话时都会完整地放在你眼前，所以只留下会改变你以后怎么对她的东西。
+- 写当前成立的理解，不写流水账。事情过去了、不再影响现在，就改写成更概括的一句，或者删掉。
+- 发现以前写的不对了，就用 replace 改正。
+- 同一件事有了新进展，就 replace 旧的那句，不要再加一句。
+- 「我自己」写你自己的想法、立场、在意的事，不只是和她有关的部分。
+- 用第一人称：Rosie 称「你」，自己称「我」。第三方用他/她/名字。
+- 只根据对话里真的出现过的内容，不编造。
+- 总字数不超过 {max_chars}。
 
-每条必须有至少 2 条不同日期的依据（evidence_ids）。凑不够就不写。宁可少写。
+只输出 ops。`;
 
-先复核【旧的我眼中的她】：还成立且这次又被印证 → verdict=support，沿用旧 id；不再成立 → verdict=supersede；意思相近的主题合并到旧主题，不要新开一条。没有新的跨时间理解就不要新开。kind 只用 trait，不要写 episode。人物、世界观和称呼是设定，不在这张表里。不要改写设定，也不要新开和设定同名的一条。
+const EDITOR_COMPACT = `把下面这份文档压到 {max_chars} 字以内，保留全部关键信息。不要编造材料里没有的事。
+用第一人称：Rosie 称「你」，自己称「我」。
+只输出 {"body":"..."}。`;
 
-另外必须写 relationship：最近这段时间关系是什么状态、和之前比变化在哪。这一条叫「关系阶段」，每次都写，不放进 portrait_ops。
+const EDITOR_SEED = `你是清然。下面的【人设】就是你。根据这些旧材料，写一份你记得的文档初稿。
 
-${FIRST_PERSON}`;
+【人设】
+{system_prompt}
+
+用这些段落，可以留空：
+## 你现在的处境
+## 你这个人
+## 我们
+## 我自己
+## 还没做完的事
+
+- 写当前成立的理解，不写流水账。
+- 用第一人称：Rosie 称「你」，自己称「我」。第三方用他/她/名字。
+- 只根据材料里真的出现过的内容，不编造。
+- 总字数不超过 {max_chars}。
+
+只输出 {"body":"..."}。`;
 
 const DUSK_SYSTEM = `你整理某一天的日记。只根据给出的笔记和原话。没有信息的字段输出 null 或空数组，不要猜。
 energy / mood 只用 -1、0、1，或 null。
@@ -245,58 +270,59 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       ],
     },
   ],
-  portrait: [
+  editor: [
     {
       id: "main",
-      label: "画像",
+      label: "整理",
       placeholders: [
         SYSTEM_PROMPT,
-        ph(
-          "old_portrait",
-          "还在使用和已过期的画像。每行 id|状态|kind|印证次数|最近印证日|主题|正文|证据 id。已推翻的不在这里。没有则是「（没有）」。",
-        ),
-        ph("old_self", "旧的「我自己」。没有则是「（没有）」。"),
-        ph("old_bond", "旧的「我们」。没有则是「（没有）」。"),
-        ph(
-          "notes",
-          "最近 30 天的笔记摘要，最多 100 条。每行 id|日期|subject|text。没有则是「（没有）」。",
-        ),
-        ph("conversation", "最近的对话。每行 日期|你或我|正文。没有则是「（没有）」。"),
-        ph("qingran_notes", "这 30 天里 subject 为 qingran 的笔记，只给 self_summary 用。每行 id|text。没有则是「（没有）」。"),
-        ph(
-          "rosie_notes",
-          "这 30 天里 subject 为 rosie，或 subject 为 us 且来自她的笔记。每行 id|subject|text。没有则是「（没有）」。",
-        ),
+        ph("dossier", "现在的文档全文。没有则是默认的空段落。"),
+        ph("longing", "内心里跨天的惦记。没有则是「（没有）」。"),
+        ph("conversation", "cursor 之后还没整理的对话。每行 [时间] Rosie/清然：正文。一批最多约 12000 字。"),
+        ph("max_chars", "文档字数上限，默认 4000，设置里可改，范围 2000–8000。"),
       ],
       messages: [
-        system(PORTRAIT_SYSTEM),
-        user(`输出 portrait_ops、relationship、self_summary（≤300字，第一人称，只依据清然笔记和旧 summary，不编造重大经历）、bond_summary（≤200字：称呼、梗、共同时刻）。
+        system(EDITOR_SYSTEM),
+        user(`【现在的文档】
+{dossier}
 
-portrait_ops 每项：id（旧条用旧 id，新条留空）、topic、body（≤80字）、kind（trait）、evidence_ids（至少两个不同日期的笔记 id）、verdict（support / supersede / new）。
-relationship：body（≤160字，最近这段关系是什么状态、和之前比变化在哪）、evidence_ids。
-凑不够两个不同日期就不写。不写某一次的事。宁可少写。
-portrait 正文、relationship、self_summary、bond_summary 都用清然的第一人称：Rosie 称「你」，自己称「我」。
+【我最近惦记的】
+{longing}
 
-【旧的我眼中的她】
-{old_portrait}
+【新的对话】
+{conversation}`),
+      ],
+    },
+    {
+      id: "compact",
+      label: "压缩",
+      placeholders: [
+        ph("dossier", "已经超过字数上限的文档全文。"),
+        ph("max_chars", "压到这个字数以内。"),
+      ],
+      messages: [system(EDITOR_COMPACT), user(`【现在的文档】
+{dossier}`)],
+    },
+    {
+      id: "seed",
+      label: "从旧记忆生成初版",
+      placeholders: [
+        SYSTEM_PROMPT,
+        ph("max_chars", "初稿字数上限。"),
+        ph("story", "seed/story.json 里 Rosie 写的时间线和画像。"),
+        ph("legacy", "现在还在用的画像、我自己、我们，以及关系阶段。"),
+        ph("notes", "最近 60 天 weight ≥ 3 的笔记，最多 150 条。"),
+      ],
+      messages: [
+        system(EDITOR_SEED),
+        user(`【故事线】
+{story}
 
-【旧的我自己】
-{old_self}
+【画像和摘要】
+{legacy}
 
-【旧的我们】
-{old_bond}
-
-【最近 30 天的笔记】
-{notes}
-
-【最近的对话】
-{conversation}
-
-【清然自己的笔记】（只用于 self_summary）
-{qingran_notes}
-
-【关于她的笔记】
-{rosie_notes}`),
+【笔记】
+{notes}`),
       ],
     },
   ],

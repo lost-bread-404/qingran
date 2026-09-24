@@ -1,8 +1,7 @@
-import { Check, Pencil, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD, lockSttKeyterms } from "@/lib/lover/hearing/config";
@@ -11,25 +10,15 @@ import { formatCallAudioLogLines, subscribeCallAudioLog } from "@/lib/lover/call
 import {
   brainGetCallLog,
   brainGetDbSize,
-  brainGetLongLayer,
-  brainListHygieneNotes,
-  brainDeleteHygieneNotes,
   brainListLogs,
-  brainListNotes,
   brainListPrompts,
   brainListVoiceModels,
-  brainResetMind,
   brainRestorePrompt,
   brainRollbackPrompt,
-  brainSaveLongLayer,
-  brainSaveNote,
   brainSavePrompt,
-  brainSetPortraitStatus,
-  brainDeletePortrait,
-  brainSaveSeedPortrait,
   brainSyncHistoryWindow,
 } from "@/lib/lover/brain/api";
-import type { BrainLogRow, InnerState, Note, PortraitRow, Subject } from "@/lib/lover/brain/types";
+import type { BrainLogRow } from "@/lib/lover/brain/types";
 import { parseVoiceInputCharsLine } from "@/lib/lover/brain/voice/pack-build";
 import {
   formatCallLogPlain,
@@ -42,17 +31,18 @@ import {
   type CallLogMessage,
   type LogRangeId,
 } from "@/lib/lover/call-log-view";
-import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/lover/memory";
 import { PromptStepEditor, type PromptEditorItem, type PromptModelChoice } from "@/components/lover/prompt-step-editor";
 import { HearingSensePanel } from "@/components/lover/hearing-sense-panel";
 import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
-import { DEFAULT_SYSTEM_PROMPT, clampHistoryWindow, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
+import { DossierPanel } from "@/components/lover/dossier-panel";
+import { InnerNowPanel } from "@/components/lover/inner-now-panel";
+import { DEFAULT_SYSTEM_PROMPT, clampHistoryWindow, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
 import { defaultPromptModel } from "@/lib/lover/brain/prompts/models";
 import { parseSenseLine } from "@/lib/lover/hearing/sense";
 import { cn } from "@/lib/utils";
 
-type Tab = "prompt" | "prompts" | "notes" | "portrait" | "mind" | "log" | "hearing";
+type Tab = "prompt" | "prompts" | "dossier" | "inner" | "log" | "hearing";
 
 type PromptItem = PromptEditorItem;
 
@@ -113,13 +103,6 @@ function withSelectedVoiceModel(
   return list.map((model) => ({ ...model, stats: model.stats ?? byStats.get(model.id) ?? null }));
 }
 
-function fmtPortraitTime(ms: number): string {
-  if (!ms) return "—";
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -136,25 +119,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
   const [labPassword, setLabPassword] = useState("");
   const [tab, setTab] = useState<Tab>("prompt");
   const [openPrompt, setOpenPrompt] = useState<string | null>(null);
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [query, setQuery] = useState("");
-  const [subject, setSubject] = useState<Subject | "">("");
-  const [newFact, setNewFact] = useState("");
-  const [newAt, setNewAt] = useState(() => toDatetimeLocal(Date.now()));
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState("");
-  const [self, setSelf] = useState("");
-  const [bond, setBond] = useState("");
-  const [portrait, setPortrait] = useState<PortraitRow[]>([]);
-  const [portraitView, setPortraitView] = useState<"active" | "stale" | "superseded">("active");
-  const [portraitActiveMax, setPortraitActiveMax] = useState(String(profile.portraitActiveMax));
-  const [portraitStaleDays, setPortraitStaleDays] = useState(String(profile.portraitStaleDays));
-  const [seedDrafts, setSeedDrafts] = useState<Record<string, { topic: string; body: string }>>({});
-  const [retrieveMinTerms, setRetrieveMinTerms] = useState(String(profile.retrieveMinTerms));
-  const [inner, setInner] = useState<InnerState | null>(null);
   const [log, setLog] = useState<BrainLogRow[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [dbWarn, setDbWarn] = useState(false);
   const [clearArmed, setClearArmed] = useState(false);
   const [voiceModel, setVoiceModel] = useState(profile.voiceModel);
   const [voiceEffort, setVoiceEffort] = useState<VoiceEffort>(profile.voiceEffort);
@@ -170,7 +135,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
   const [callKitBackground, setCallKitBackground] = useState(profile.callKitBackground);
   const [keytermDraft, setKeytermDraft] = useState(profile.sttKeyterms.join("\n"));
   const historySyncRef = useRef(0);
-  const [hygieneNotes, setHygieneNotes] = useState<Array<{ id: string; text: string; subject: string; localDay: string }>>([]);
   const [promptItems, setPromptItems] = useState<PromptItem[]>([]);
   const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({});
   const [promptBusy, setPromptBusy] = useState<string | null>(null);
@@ -196,10 +160,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
     setInjectLongterm(profile.injectLongterm);
     setHistoryWindow(profile.historyWindow);
     setCallKitBackground(profile.callKitBackground);
-    setPortraitActiveMax(String(profile.portraitActiveMax));
-    setPortraitStaleDays(String(profile.portraitStaleDays));
-    setRetrieveMinTerms(String(profile.retrieveMinTerms));
-    setPortraitView("active");
     setKeytermDraft(profile.sttKeyterms.join("\n"));
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setTab("prompt");
@@ -207,10 +167,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
     setPromptDrafts({});
     setPromptError(null);
     setCallById({});
-    setEditingId(null);
-    setNewAt(toDatetimeLocal(Date.now()));
     setClearArmed(false);
-    void refresh();
     void brainListVoiceModels()
       .then((res) => {
         setVoiceModels(res.models);
@@ -276,35 +233,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
     };
   }, [open, tab, logRoute, logRange]);
 
-  async function refresh() {
-    const [noteRes, layer] = await Promise.all([
-      brainListNotes({ data: { q: query || undefined, subject: subject || undefined } }),
-      brainGetLongLayer(),
-    ]);
-    setNotes(noteRes);
-    setSelf(layer.self);
-    setBond(layer.bond);
-    setPortrait(layer.portrait);
-    setSeedDrafts(
-      Object.fromEntries(
-        layer.portrait
-          .filter((row) => row.kind === "seed")
-          .map((row) => [row.id, { topic: row.topic, body: row.body }]),
-      ),
-    );
-    setInner(layer.inner ?? layer.mind);
-    setLog(layer.log);
-    void brainListHygieneNotes()
-      .then((rows) => setHygieneNotes(rows as Array<{ id: string; text: string; subject: string; localDay: string }>))
-      .catch(() => setHygieneNotes([]));
-    void brainGetDbSize()
-      .then((s) => {
-        setDbWarn(Boolean(s.warn));
-        setDbSize({ totalBytes: s.totalBytes ?? null, limitMb: s.limitMb, warn: Boolean(s.warn) });
-      })
-      .catch(() => setDbWarn(false));
-  }
-
   function persistProfile(patch: Partial<Profile>) {
     onSave({
       ...profile,
@@ -326,9 +254,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
       historyWindow,
       callKitBackground,
       sttKeyterms: lockSttKeyterms(keytermDraft.split("\n")),
-      portraitActiveMax: clampPortraitActiveMax(portraitActiveMax),
-      portraitStaleDays: clampPortraitStaleDays(portraitStaleDays),
-      retrieveMinTerms: clampRetrieveMinTerms(retrieveMinTerms),
       ...patch,
     });
   }
@@ -504,103 +429,13 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
     }
   }
 
-  async function saveLong() {
-    setBusy(true);
-    try {
-      await brainSaveLongLayer({
-        data: { self, bond },
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function addNote() {
-    const text = newFact.replace(/\s+/g, " ").trim();
-    if (!text) return;
-    setBusy(true);
-    try {
-      await brainSaveNote({
-        data: {
-          text,
-          happenedAt: fromDatetimeLocal(newAt),
-          subject: "us",
-          lens: ["bond", "diary"],
-        },
-      });
-      setNewFact("");
-      setNewAt(toDatetimeLocal(Date.now()));
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveNoteEdit(id: string) {
-    const text = editDraft.replace(/\s+/g, " ").trim();
-    if (!text) return;
-    setBusy(true);
-    try {
-      await brainSaveNote({ data: { id, text } });
-      setEditingId(null);
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function archiveNote(id: string) {
-    const note = notes.find((n) => n.id === id);
-    if (!note) return;
-    setBusy(true);
-    try {
-      await brainSaveNote({ data: { id, text: note.text, archive: true } });
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function markPortraitStale(id: string) {
-    setBusy(true);
-    try {
-      await brainSetPortraitStatus({ data: { id, status: "stale" } });
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function removePortrait(id: string) {
-    setBusy(true);
-    try {
-      await brainDeletePortrait({ data: { id } });
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveSeed(id: string) {
-    const draft = seedDrafts[id];
-    if (!draft) return;
-    setBusy(true);
-    try {
-      await brainSaveSeedPortrait({ data: { id, topic: draft.topic, body: draft.body } });
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (!open) return null;
 
   const tabs: Array<[Tab, string]> = [
     ["prompt", "人设"],
     ["prompts", "指令"],
-    ["notes", "笔记"],
-    ["portrait", "画像"],
-    ["mind", "内心"],
+    ["dossier", "我记得的"],
+    ["inner", "我此刻"],
     ["hearing", "听力"],
     ["log", "记录"],
   ];
@@ -621,14 +456,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
         </button>
         <div className="min-w-0 flex-1">
           <p className="font-display text-lg font-medium tracking-tight">清然</p>
-          <p className="text-xs text-subtle">人设、笔记、她眼里的你们。</p>
+          <p className="text-xs text-subtle">人设、我记得的、我此刻。</p>
         </div>
         {tab === "prompt" || tab === "hearing" ? (
           <Button type="button" size="pill" onClick={savePrompt}>
-            保存
-          </Button>
-        ) : tab === "portrait" ? (
-          <Button type="button" size="pill" disabled={busy} onClick={() => void saveLong()}>
             保存
           </Button>
         ) : null}
@@ -670,7 +501,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
             className="min-h-0 flex-1 resize-none font-mono leading-relaxed"
             placeholder="写给模型的 system prompt"
           />
-          <p className="mt-2 text-xs text-subtle">笔记会另外附上，不用写进这段。其他步骤的指令在「指令」页。</p>
+          <p className="mt-2 text-xs text-subtle">「我记得的」会另外附上，不用写进这段。其他步骤的指令在「指令」页。</p>
         </div>
       ) : tab === "prompts" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
@@ -749,342 +580,42 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
             )}
           </div>
         </div>
-      ) : tab === "notes" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
-          <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-            <BrainBackupPanel />
-            {hygieneNotes.length ? (
-              <div className="rounded-md bg-surface-2 px-3 py-3">
-                <p className="text-sm">这些笔记像是在记清然自己的行为，不是 Rosie 透露的事。</p>
-                <ul className="mt-2 flex flex-col gap-2">
-                  {hygieneNotes.map((row) => (
-                    <li key={row.id} className="text-sm leading-relaxed">
-                      <span className="text-subtle">{row.localDay} · {row.subject}</span>
-                      <span className="mt-0.5 block">{row.text}</span>
-                    </li>
-                  ))}
-                </ul>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="mt-3 min-h-11"
-                  disabled={busy}
-                  onClick={() => {
-                    setBusy(true);
-                    void brainDeleteHygieneNotes({ data: { ids: hygieneNotes.map((row) => row.id) } })
-                      .then(() => refresh())
-                      .finally(() => setBusy(false));
-                  }}
-                >
-                  确认删除这些笔记
+      ) : tab === "dossier" ? (
+        <DossierPanel
+          maxChars={profile.dossierMaxChars}
+          onMaxChars={(n) => persistProfile({ dossierMaxChars: n })}
+          footer={
+            <>
+              <BrainBackupPanel />
+              <LogoutButton />
+              {!clearArmed ? (
+                <Button variant="outline" onClick={() => setClearArmed(true)}>
+                  清空聊天
                 </Button>
-              </div>
-            ) : null}
-            {dbWarn ? (
-              <p className="text-sm text-live">数据库已用超过 70%，请到日记「系统档案」查看容量。</p>
-            ) : null}
-            <a href="/diary#spend" className="text-sm text-subtle underline-offset-2 hover:underline">
-              费用
-            </a>
-            <LogoutButton />
-            <div className="flex gap-2">
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜笔记"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void refresh();
-                }}
-              />
-              <select
-                value={subject}
-                onChange={(e) => setSubject(e.target.value as Subject | "")}
-                className="h-11 rounded-md bg-surface-2 px-2 text-sm text-fg"
-              >
-                <option value="">全部</option>
-                <option value="rosie">Rosie</option>
-                <option value="qingran">清然</option>
-                <option value="us">我们</option>
-              </select>
-              <Button type="button" variant="outline" onClick={() => void refresh()}>
-                筛
-              </Button>
-            </div>
-            <form
-              className="flex flex-col gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void addNote();
-              }}
-            >
-              <Textarea
-                value={newFact}
-                onChange={(e) => {
-                  setNewFact(e.target.value);
-                  keepCaretVisible(e.currentTarget);
-                }}
-                onSelect={(e) => keepCaretVisible(e.currentTarget)}
-                onFocus={(e) => {
-                  const box = e.currentTarget;
-                  window.setTimeout(() => keepCaretVisible(box), 50);
-                }}
-                placeholder="记下大事"
-                maxLength={120}
-                className="min-h-24 resize-none"
-              />
-              <div className="flex gap-2">
-                <Input type="datetime-local" value={newAt} onChange={(e) => setNewAt(e.target.value)} />
-                <Button type="submit" size="pill" disabled={!newFact.trim() || busy}>
-                  记下
-                </Button>
-              </div>
-            </form>
-            {notes.length === 0 ? (
-              <p className="text-sm text-subtle">还没有笔记。通话里会慢慢记下来。</p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {notes.map((n) => (
-                  <li key={n.id} className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
-                    {editingId === n.id ? (
-                      <Input
-                        autoFocus
-                        value={editDraft}
-                        onChange={(e) => setEditDraft(e.target.value)}
-                        className="flex-1"
-                      />
-                    ) : (
-                      <span className="flex-1 leading-relaxed">
-                        <span className="mr-2 text-xs text-subtle">{n.localDay.slice(5)}</span>
-                        {n.text}
-                        {n.tags.length ? (
-                          <span className="mt-1 block text-xs text-subtle">{n.tags.join(" · ")}</span>
-                        ) : null}
-                      </span>
-                    )}
-                    {editingId === n.id ? (
-                      <button
-                        type="button"
-                        aria-label="好"
-                        onClick={() => void saveNoteEdit(n.id)}
-                        className="mt-0.5 text-subtle hover:text-fg"
-                      >
-                        <Check className="size-4" />
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        aria-label="改"
-                        onClick={() => {
-                          setEditingId(n.id);
-                          setEditDraft(n.text);
-                        }}
-                        className="mt-0.5 text-subtle hover:text-fg"
-                      >
-                        <Pencil className="size-4" />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      aria-label="归档"
-                      onClick={() => void archiveNote(n.id)}
-                      className="mt-0.5 text-subtle hover:text-fg"
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm text-subtle">
+                    清然只忘掉还没整理进「我记得的」的最近对话。已经写进文档的事还在。聊天记录本身不会删。启用之前，忘掉的是还没记成笔记的最近对话。
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => {
+                        onClearChat();
+                        setClearArmed(false);
+                      }}
                     >
-                      <X className="size-4" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {!clearArmed ? (
-              <Button variant="outline" onClick={() => setClearArmed(true)}>
-                只清屏幕
-              </Button>
-            ) : (
-              <div className="flex flex-col gap-2">
-                <p className="text-sm text-subtle">
-                  让她忘掉最近还没记住的对话？已经记住的事和故事线不受影响。
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={() => {
-                      onClearChat();
-                      setClearArmed(false);
-                    }}
-                  >
-                    确定清空
-                  </Button>
-                  <Button variant="outline" onClick={() => setClearArmed(false)}>
-                    取消
-                  </Button>
+                      确定清空
+                    </Button>
+                    <Button variant="outline" onClick={() => setClearArmed(false)}>
+                      取消
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : tab === "portrait" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
-          <div className="mx-auto flex w-full max-w-md flex-col gap-5">
-            <label className="flex flex-col gap-2">
-              <span className="text-xs text-subtle">我自己</span>
-              <Textarea value={self} onChange={(e) => setSelf(e.target.value)} maxLength={300} className="min-h-28" />
-            </label>
-            <label className="flex flex-col gap-2">
-              <span className="text-xs text-subtle">我们</span>
-              <Textarea value={bond} onChange={(e) => setBond(e.target.value)} maxLength={200} className="min-h-24" />
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="flex flex-col gap-2">
-                <span className="text-xs text-subtle">使用中最多几条</span>
-                <Input
-                  type="number"
-                  min={4}
-                  max={40}
-                  value={portraitActiveMax}
-                  onChange={(e) => setPortraitActiveMax(e.target.value)}
-                  onBlur={() => {
-                    const n = clampPortraitActiveMax(portraitActiveMax);
-                    setPortraitActiveMax(String(n));
-                    persistProfile({ portraitActiveMax: n });
-                  }}
-                />
-              </label>
-              <label className="flex flex-col gap-2">
-                <span className="text-xs text-subtle">几天没印证就过期</span>
-                <Input
-                  type="number"
-                  min={3}
-                  max={90}
-                  value={portraitStaleDays}
-                  onChange={(e) => setPortraitStaleDays(e.target.value)}
-                  onBlur={() => {
-                    const n = clampPortraitStaleDays(portraitStaleDays);
-                    setPortraitStaleDays(String(n));
-                    persistProfile({ portraitStaleDays: n });
-                  }}
-                />
-              </label>
-            </div>
-            <p className="text-xs text-subtle">
-              右上角保存只记下「我自己」和「我们」。过期和已推翻的不会写进回复。关系阶段和设定不占上面的条数，设定也不会过期。
-            </p>
-            <div className="flex flex-col gap-2">
-              <span className="text-xs text-subtle">设定</span>
-              <p className="text-xs text-subtle">
-                从故事线来的人物、世界观和称呼。生成画像时会带上，但不会改它们。只有你能改。
-              </p>
-              {portrait.filter((row) => row.kind === "seed").length === 0 ? (
-                <p className="text-sm text-subtle">还没有设定。</p>
-              ) : (
-                portrait
-                  .filter((row) => row.kind === "seed")
-                  .map((p) => {
-                    const draft = seedDrafts[p.id] ?? { topic: p.topic, body: p.body };
-                    return (
-                      <div key={p.id} className="rounded-md bg-surface-2 p-3">
-                        <Input
-                          value={draft.topic}
-                          maxLength={40}
-                          onChange={(e) =>
-                            setSeedDrafts((cur) => ({ ...cur, [p.id]: { ...draft, topic: e.target.value } }))
-                          }
-                        />
-                        <Textarea
-                          value={draft.body}
-                          maxLength={2000}
-                          onChange={(e) =>
-                            setSeedDrafts((cur) => ({ ...cur, [p.id]: { ...draft, body: e.target.value } }))
-                          }
-                          className="mt-2 min-h-24"
-                        />
-                        <div className="mt-2 flex gap-2">
-                          <Button type="button" variant="outline" disabled={busy} onClick={() => void saveSeed(p.id)}>
-                            保存这条
-                          </Button>
-                          <Button type="button" variant="outline" disabled={busy} onClick={() => void removePortrait(p.id)}>
-                            删除
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })
               )}
-            </div>
-            <div className="flex flex-col gap-2">
-              <span className="text-xs text-subtle">我眼中的她</span>
-              <div className="flex gap-2">
-                {(
-                  [
-                    ["active", "使用中"],
-                    ["stale", "过期"],
-                    ["superseded", "已推翻"],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setPortraitView(id)}
-                    className={
-                      portraitView === id
-                        ? "rounded-md bg-accent px-3 py-1.5 text-sm text-accent-fg"
-                        : "rounded-md bg-surface-2 px-3 py-1.5 text-sm text-muted"
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {portrait.filter((row) => row.kind !== "seed" && row.status === portraitView).length === 0 ? (
-                <p className="text-sm text-subtle">这一栏还没有。</p>
-              ) : (
-                portrait
-                  .filter((row) => row.kind !== "seed" && row.status === portraitView)
-                  .map((p) => (
-                    <div key={p.id} className="rounded-md bg-surface-2 p-3">
-                      <p className="text-sm font-medium">
-                        {p.topic}
-                        {p.topic === "关系阶段" ? " · 固定" : ""}
-                      </p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{p.body}</p>
-                      <p className="mt-2 text-xs text-subtle">
-                        {p.kind === "episode" ? "具体事件" : "稳定特点"}
-                        {" · "}
-                        依据 {p.evidenceCount ?? p.evidenceIds.length} 条
-                        {p.evidenceFrom ? ` · ${p.evidenceFrom}` : ""}
-                        {p.evidenceTo && p.evidenceTo !== p.evidenceFrom ? ` – ${p.evidenceTo}` : ""}
-                      </p>
-                      <p className="text-xs text-subtle">
-                        印证 {p.supportCount} 次 · 最近 {fmtPortraitTime(p.lastSupportedAt)}
-                      </p>
-                      {p.retireReason ? (
-                        <p className="mt-1 text-xs text-subtle">建议退出：{p.retireReason}</p>
-                      ) : null}
-                      <div className="mt-2 flex gap-2">
-                        {p.status === "active" ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={busy}
-                            onClick={() => void markPortraitStale(p.id)}
-                          >
-                            置为过期
-                          </Button>
-                        ) : null}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() => void removePortrait(p.id)}
-                        >
-                          删除
-                        </Button>
-                      </div>
-                    </div>
-                  ))
-              )}
-            </div>
-          </div>
-        </div>
-      ) : tab === "mind" ? (
+            </>
+          }
+        />
+      ) : tab === "inner" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
             <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
@@ -1103,42 +634,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
                 <span className="block text-xs text-subtle">关掉就不把心里、想要、惦记和正在做放进回复。取舍和计划本来就不会放进去。</span>
               </span>
             </label>
-            {inner && (inner.feel || inner.want || inner.choice || inner.now || inner.longing || inner.plans.length) ? (
-              <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                <p>心里：{inner.feel || "（空）"}</p>
-                <p>想要：{inner.want || "（空）"}</p>
-                <p>取舍：{inner.choice || "（空）"}</p>
-                <p>正在做：{inner.now || "（空）"}</p>
-                <p>惦记：{inner.longing || "（空）"}</p>
-                {inner.plans.filter((plan) => plan.status === "open").length ? (
-                  <div className="mt-2">
-                    <p>还开着的计划：</p>
-                    {inner.plans
-                      .filter((plan) => plan.status === "open")
-                      .map((plan) => (
-                        <p key={plan.id}>
-                          {plan.what}
-                          {plan.trigger ? ` · ${plan.trigger}` : ""}
-                        </p>
-                      ))}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <p className="text-sm text-subtle">还没有写下这一轮的心思。</p>
-            )}
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                void brainResetMind()
-                  .then(() => refresh())
-                  .finally(() => setBusy(false));
-              }}
-            >
-              清空这一轮的心思
-            </Button>
+            <InnerNowPanel />
           </div>
         </div>
       ) : tab === "hearing" ? (

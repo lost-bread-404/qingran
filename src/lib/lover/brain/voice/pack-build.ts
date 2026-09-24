@@ -24,18 +24,22 @@ function portraitBlock(rows: PortraitRow[]): string {
   return text;
 }
 
-/** Self / bond / portrait, as stored. Phase 3 replaces this with the dossier body. */
+/** Self / bond / portrait, as stored. Used only until Rosie enables the dossier. */
 export function dossierSections(selfSummary: string, bondSummary: string, portrait: PortraitRow[]): string {
   const self = selfSummary.trim() || "（还在过自己的日子）";
   const bond = bondSummary.trim() || "（还在一点点建立）";
   return `【我自己】\n${self}\n【我们】\n${bond}\n【我眼中的她】\n${portraitBlock(portrait)}`;
 }
 
-export function renderVoiceLongterm(selfSummary: string, bondSummary: string, portrait: PortraitRow[]): string {
+export function renderDossierBlock(dossier: string): string {
   const template = variantMessages(defaultDoc("voice"), "main").find((message) => message.content.includes("{dossier}"));
   return fillTemplate(template?.content ?? "【我记得的】\n{dossier}", {
-    dossier: dossierSections(selfSummary, bondSummary, portrait),
+    dossier: dossier.trim() || "（还没有）",
   });
+}
+
+export function renderVoiceLongterm(selfSummary: string, bondSummary: string, portrait: PortraitRow[]): string {
+  return renderDossierBlock(dossierSections(selfSummary, bondSummary, portrait));
 }
 
 export const VOICE_THIN_HISTORY = 8;

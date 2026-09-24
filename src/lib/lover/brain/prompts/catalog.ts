@@ -12,7 +12,7 @@ export type PromptKey =
   | "voice"
   | "reflect"
   | "archive"
-  | "portrait"
+  | "editor"
   | "dusk"
   | "assign"
   | "synth"
@@ -52,9 +52,9 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
     blurb: "对话滑出窗口时写观察笔记。用日常档。",
   },
   {
-    key: "portrait",
-    name: "画像",
-    blurb: "每天整理「我眼中的她」「我自己」和「我们」。用分析档。",
+    key: "editor",
+    name: "整理记忆",
+    blurb: "大约每 20 轮，或隔了一段时间再开口时，把新对话收进「我记得的」。也可以手动现在整理。",
   },
   {
     key: "dusk",

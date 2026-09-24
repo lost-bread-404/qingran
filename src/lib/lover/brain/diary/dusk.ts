@@ -16,7 +16,6 @@ import { afterBoundary, localDay, overnightValue, previousIsoWeek, previousMonth
 import { resolveTz } from "../tz.ts";
 import type { DayLog } from "../types.ts";
 import { archiveDaySync } from "../archivist.ts";
-import { updatePortraitSelfBond } from "../voice/nightly.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { applyIntentionOps, type IntentionOp } from "./intentions.ts";
@@ -306,7 +305,6 @@ export async function runDusk(
     });
   }
 
-  await updatePortraitSelfBond(day, jobId);
   await recomputeStats();
   await writeDailyDigest(day);
   await warmupCoreIndex();

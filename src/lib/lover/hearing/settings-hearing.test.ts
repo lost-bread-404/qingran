@@ -48,7 +48,7 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.doesNotMatch(src, /听力引擎/);
   assert.doesNotMatch(src, /HEARING_INSTRUCTION/);
   assert.doesNotMatch(src, /发给 Qwen/);
-  assert.match(src, /让她忘掉最近还没记住的对话？已经记住的事和故事线不受影响。/);
+  assert.match(src, /清然只忘掉还没整理进「我记得的」的最近对话/);
   assert.match(src, /clearArmed/);
   assert.match(src, /确定清空/);
   assert.match(src, /logFailFirstLine/);
@@ -115,9 +115,11 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.doesNotMatch(src, /hearingNbest/);
   assert.match(src, /注入我此刻/);
   assert.doesNotMatch(src, />高级</);
-  assert.match(src, /确认删除这些笔记/);
-  assert.match(src, /brainListHygieneNotes/);
-  assert.match(src, /brainDeleteHygieneNotes/);
+  assert.match(src, /DossierPanel/);
+  assert.match(src, /清空聊天/);
+  const dossier = readFileSync(new URL("../../../components/lover/dossier-panel.tsx", import.meta.url), "utf8");
+  assert.match(dossier, /从旧记忆生成初版/);
+  assert.match(dossier, /现在整理/);
   assert.match(src, /injectMind/);
   assert.doesNotMatch(src, />记忆</);
   assert.match(src, />我记得的</);
@@ -473,7 +475,7 @@ test("confirm panel and settings drawer follow visualViewport and keep the caret
   assert.match(settings, /top: viewport\.offsetTop/);
   assert.match(settings, /height: viewport\.height/);
   assert.match(settings, /写给模型的 system prompt/);
-  assert.match(settings, /记下大事/);
+  assert.match(settings, /keepCaretVisible/);
 });
 
 test("flag sheet can cancel without recording", () => {

@@ -7,9 +7,10 @@ import { formatClock } from "../time.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { ensureMemoryHygiene } from "../memory-hygiene.ts";
+import { getDossier } from "../dossier.ts";
 import {
   buildTail,
-  dossierSections,
+  renderDossierBlock,
   renderVoiceLongterm,
   voiceInputChars,
   voiceMessagesForStrip,
@@ -91,12 +92,14 @@ export async function loadHotContext(input: {
   await ensureMemoryHygiene();
 
   const inject = voiceInjectFromProfile(input.profile);
-  const [history, inner, portrait, meta] = await Promise.all([
+  const [history, inner, dossierRow] = await Promise.all([
     listHistoryWindow(input.userMsgId, inject.history),
     getInner(),
-    listPortrait(),
-    getMeta(),
+    getDossier(),
   ]);
+  const legacy = dossierRow.active
+    ? null
+    : await Promise.all([getMeta(), listPortrait()]).then(([meta, portrait]) => ({ meta, portrait }));
 
   const injected = momentForVoice(inner, input.nowMs, inject.moment);
   const mindAgeMs = inner.updated_at ? input.nowMs - inner.updated_at : 0;
@@ -105,7 +108,9 @@ export async function loadHotContext(input: {
   const clockText = formatClock(input.nowMs, input.timeZone);
   const moment = { feel: injected.feel, want: injected.want, now: injected.now, longing: injected.longing };
   const tail = buildTail({ clock: clockText, moment, inject });
-  const longterm = renderVoiceLongterm(meta.selfSummary, meta.bondSummary, portrait);
+  const longterm = dossierRow.active
+    ? renderDossierBlock(dossierRow.body)
+    : renderVoiceLongterm(legacy!.meta.selfSummary, legacy!.meta.bondSummary, legacy!.portrait);
   const charter = input.profile.systemPrompt;
   const loaded = await loadPrompt("voice");
   const parts: VoicePackParts = {
@@ -118,9 +123,9 @@ export async function loadHotContext(input: {
     timeZone: input.timeZone,
     nowMs: input.nowMs,
     voiceTemplate: loaded.body,
-    selfSummary: meta.selfSummary,
-    bondSummary: meta.bondSummary,
-    portrait,
+    selfSummary: dossierRow.active ? undefined : legacy!.meta.selfSummary,
+    bondSummary: dossierRow.active ? undefined : legacy!.meta.bondSummary,
+    portrait: dossierRow.active ? undefined : legacy!.portrait,
     injectMoment: inject.moment,
     injectDossier: inject.dossier,
     historyWindow: inject.history,
@@ -199,9 +204,10 @@ export async function loadVoicePerspective(): Promise<{
   now: string;
   longing: string;
 }> {
-  const [meta, portrait, inner] = await Promise.all([getMeta(), listPortrait(), getInner()]);
+  const { dossierTextForModel } = await import("../dossier.ts");
+  const inner = await getInner();
   return {
-    dossier: dossierSections(meta.selfSummary, meta.bondSummary, portrait),
+    dossier: await dossierTextForModel(),
     feel: inner.feel,
     want: inner.want,
     now: inner.now,

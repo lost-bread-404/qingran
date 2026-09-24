@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { noteRosieTurn } from "@/lib/lover/brain/dossier";
 import { enqueueArchiveIfNeeded } from "@/lib/lover/brain/archivist";
 import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } from "@/lib/lover/brain/config";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
@@ -211,6 +212,7 @@ export const Route = createFileRoute("/api/talk")({
               });
 
               await enqueue("reflect", `reflect:${userCreatedAt}`, { turnSeq: userCreatedAt });
+              await noteRosieTurn(userCreatedAt);
               await enqueueArchiveIfNeeded(userCreatedAt, ctx.inject.history);
               await enqueuePeriodicIfDue(nowMs, timeZone);
               await runInBackground(() => drainJobs(LONG_DRAIN_MS));

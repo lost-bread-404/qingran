@@ -24,7 +24,6 @@ import {
   type ReplyFlagRow,
 } from "@/lib/lover/hearing/store";
 import {
-  importStoryLine,
   listStoryMemory,
   previewStorySeed,
 } from "@/lib/lover/brain/story";
@@ -142,8 +141,6 @@ function HearingLabPage() {
   const [storyPortrait, setStoryPortrait] = useState<
     Array<{ id: string; topic: string; body: string; status: string }>
   >([]);
-  const [importArmed, setImportArmed] = useState(false);
-  const [importBusy, setImportBusy] = useState(false);
   const [feedbackRows, setFeedbackRows] = useState<TurnFeedbackRow[]>([]);
   const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null);
   const [feedbackTag, setFeedbackTag] = useState<ReplyDownTag | null>(null);
@@ -753,58 +750,23 @@ function HearingLabPage() {
               <section className="rounded-md bg-surface-2 px-3 py-3">
                 <p className="mb-2 font-display text-lg">导入故事线</p>
                 <p className="text-sm text-muted">
-                  会清空现有 mem_notes、mem_history、qr_portrait、qr_mind，再写入仓库里的种子文件。聊天记录和 system prompt 不动。
+                  故事线不再写入笔记和画像。到设置里「从旧记忆生成初版」。这里只显示种子里有多少条。
                 </p>
-                {!importArmed ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="mt-3"
-                    onClick={async () => {
-                      const preview = await previewStorySeed({ data: { password } });
-                      if (!preview.ok) {
-                        setStatus(preview.error);
-                        return;
-                      }
-                      setStatus(`种子 ${preview.notes} 条事件 · ${preview.portrait} 条画像。再点一次才会清空并导入。`);
-                      setImportArmed(true);
-                    }}
-                  >
-                    导入故事线
-                  </Button>
-                ) : (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      className="min-h-11"
-                      disabled={importBusy}
-                      onClick={async () => {
-                        setImportBusy(true);
-                        try {
-                          const next = await importStoryLine({
-                            data: { password, confirm: "清空并导入" },
-                          });
-                          if (!next.ok) {
-                            setStatus(next.error);
-                            return;
-                          }
-                          setImportArmed(false);
-                          setStatus(`已导入 ${next.notes} 条事件、${next.portrait} 条画像。`);
-                          await loadMemory();
-                        } catch (err) {
-                          setStatus(err instanceof Error ? err.message : String(err));
-                        } finally {
-                          setImportBusy(false);
-                        }
-                      }}
-                    >
-                      {importBusy ? "正在导入…" : "确认清空并导入"}
-                    </Button>
-                    <Button type="button" variant="outline" onClick={() => setImportArmed(false)}>
-                      取消
-                    </Button>
-                  </div>
-                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-3"
+                  onClick={async () => {
+                    const preview = await previewStorySeed({ data: { password } });
+                    if (!preview.ok) {
+                      setStatus(preview.error);
+                      return;
+                    }
+                    setStatus(`种子里有 ${preview.notes} 条事件、${preview.portrait} 条画像。不再写入笔记和画像。到设置里「从旧记忆生成初版」。`);
+                  }}
+                >
+                  看种子有多少
+                </Button>
               </section>
               <section>
                 <p className="mb-2 font-display text-lg">画像</p>

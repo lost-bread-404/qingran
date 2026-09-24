@@ -4,11 +4,11 @@ import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
 import { DEFAULT_HEARING_SENSE, lockHearingSense, type HearingSense } from "./hearing/sense.ts";
 import { SILENCE_MS } from "./vad.ts";
-import { clampHistoryWindow, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms, HISTORY_WINDOW, PORTRAIT_ACTIVE_MAX, PORTRAIT_STALE_DAYS, RETRIEVE_MIN_TERMS } from "./brain/config.ts";
+import { clampHistoryWindow, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms, clampDossierMaxChars, HISTORY_WINDOW, PORTRAIT_ACTIVE_MAX, PORTRAIT_STALE_DAYS, RETRIEVE_MIN_TERMS } from "./brain/config.ts";
 import { lockPromptModels, type PromptModelPick } from "./brain/prompts/models.ts";
 import type { PromptKey } from "./brain/prompts/catalog.ts";
 
-export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms };
+export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms, clampDossierMaxChars };
 export type { HearingSense };
 
 export type VoiceId = "eve";
@@ -69,6 +69,8 @@ export type Profile = {
   retrieveMinTerms: number;
   /** iOS only. When on, a phone call uses CallKit so it survives background and the lock screen. */
   callKitBackground: boolean;
+  /** Dossier character cap. 2000–8000, default 4000. */
+  dossierMaxChars: number;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -157,6 +159,7 @@ export const DEFAULT_PROFILE: Profile = {
   portraitStaleDays: PORTRAIT_STALE_DAYS,
   retrieveMinTerms: RETRIEVE_MIN_TERMS,
   callKitBackground: false,
+  dossierMaxChars: 4000,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -196,6 +199,7 @@ type LooseProfile = Partial<Profile> & {
   portraitStaleDays?: number;
   retrieveMinTerms?: number;
   callKitBackground?: boolean;
+  dossierMaxChars?: number;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -233,6 +237,7 @@ export function lockedProfile(input?: unknown): Profile {
     portraitStaleDays: clampPortraitStaleDays(raw.portraitStaleDays),
     retrieveMinTerms: clampRetrieveMinTerms(raw.retrieveMinTerms),
     callKitBackground: raw.callKitBackground === true,
+    dossierMaxChars: clampDossierMaxChars(raw.dossierMaxChars),
   };
 }
 

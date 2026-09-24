@@ -263,6 +263,29 @@ export async function appendInnerLog(entry: {
   );
 }
 
+export async function listInnerLogs(limit = 20): Promise<Array<{
+  id: number;
+  turnSeq: number;
+  createdAt: number;
+  data: import("./turn-trace.ts").JsonValue | null;
+  model: string | null;
+  ms: number | null;
+}>> {
+  const db = await getSql();
+  const rows = await db.query<Record<string, unknown>>(
+    `select id, turn_seq, created_at, data, model, ms from qr_inner_log order by id desc limit $1`,
+    [limit],
+  );
+  return rows.map((row) => ({
+    id: Number(row.id),
+    turnSeq: Number(row.turn_seq),
+    createdAt: Number(row.created_at),
+    data: row.data == null ? null : (JSON.parse(JSON.stringify(row.data)) as import("./turn-trace.ts").JsonValue),
+    model: row.model ? String(row.model) : null,
+    ms: row.ms == null ? null : Number(row.ms),
+  }));
+}
+
 export async function saveInner(
   inner: InnerState,
   expectedTurn: number,
@@ -319,6 +342,23 @@ export async function getRoomClearedAt(): Promise<number> {
 
 export async function forgetUnarchivedMessages(at: number): Promise<number> {
   const db = await getSql();
+  const dossier = await db.query<{ active: boolean; cursor_at: number }>(
+    "select active, cursor_at from qr_dossier where id = 1",
+  );
+  const active = asBool(dossier[0]?.active);
+  const cursor = Number(dossier[0]?.cursor_at ?? 0) || 0;
+  if (active) {
+    const rows = await db.query<{ n: number }>(
+      `with u as (
+         update qingran_messages
+         set forgotten_at = $1
+         where created_at > $2 and forgotten_at is null
+         returning id
+       ) select count(*)::int as n from u`,
+      [at, cursor],
+    );
+    return asInt(rows[0]?.n);
+  }
   const rows = await db.query<{ n: number }>(
     `with u as (
        update qingran_messages

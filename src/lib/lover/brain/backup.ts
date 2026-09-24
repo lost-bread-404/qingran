@@ -488,6 +488,59 @@ export const BACKUP_TABLES: TableSpec[] = [
       ["last_seen", "int"],
     ],
   },
+  {
+    name: "qr_inner",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["feel", "text"],
+      ["want", "text"],
+      ["choice", "text"],
+      ["now_text", "text"],
+      ["longing", "text"],
+      ["plans", "json"],
+      ["turn_seq", "int"],
+      ["updated_at", "int"],
+      ["longing_updated_at", "int"],
+    ],
+  },
+  {
+    name: "qr_inner_log",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["turn_seq", "int"],
+      ["created_at", "int"],
+      ["data", "json"],
+      ["model", "text"],
+      ["ms", "int"],
+    ],
+  },
+  {
+    name: "qr_dossier",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["body", "text"],
+      ["cursor_at", "int"],
+      ["turns_since_edit", "int"],
+      ["updated_at", "int"],
+      ["version", "int"],
+      ["active", "bool"],
+    ],
+  },
+  {
+    name: "qr_dossier_versions",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["version", "int"],
+      ["body", "text"],
+      ["author", "text"],
+      ["ops", "json"],
+      ["created_at", "int"],
+    ],
+  },
 ];
 
 const TABLE_BY_NAME = new Map(BACKUP_TABLES.map((t) => [t.name, t]));

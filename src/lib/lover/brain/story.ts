@@ -1,18 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSql } from "../../db.ts";
-import { now } from "./clock.ts";
-import {
-  getMeta,
-  listActiveNotes,
-  listPortrait,
-  patchMeta,
-  resetInnerTurn,
-  forgetAllMessages,
-  upsertNote,
-  upsertPortrait,
-} from "./store.ts";
-import type { Note, PortraitRow } from "./types.ts";
-import seed from "../../../../seed/story.json";
+import { listActiveNotes, listPortrait } from "./store.ts";
+import seed from "../../../../seed/story.json" with { type: "json" };
 
 export type StoryNoteSeed = {
   id: string;
@@ -51,13 +39,6 @@ function assertLab(password: string) {
   if (!secret || password !== secret) throw new Error("lab-locked");
 }
 
-function happenedAtMs(value: number | string): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  const n = Date.parse(String(value));
-  if (!Number.isFinite(n)) throw new Error(`bad happened_at: ${value}`);
-  return n;
-}
-
 export function loadStorySeed(): StorySeed {
   return seed as StorySeed;
 }
@@ -66,60 +47,6 @@ export async function importStorySeed(data: StorySeed = loadStorySeed()): Promis
   notes: number;
   portrait: number;
 }> {
-  const db = await getSql();
-  const ts = now();
-  await db.query("delete from mem_notes");
-  await db.query("delete from mem_history");
-  await db.query("delete from qr_portrait");
-  await resetInnerTurn();
-  await forgetAllMessages(ts);
-
-  for (const row of data.portrait) {
-    const portrait: PortraitRow = {
-      id: row.id,
-      topic: row.topic,
-      body: row.body,
-      status: "active",
-      kind: "seed",
-      evidenceIds: [],
-      lastSeen: ts,
-      lastSupportedAt: ts,
-      supportCount: 1,
-      updatedAt: ts,
-    };
-    await upsertPortrait(portrait);
-  }
-
-  for (const row of data.notes) {
-    const at = happenedAtMs(row.happened_at);
-    const note: Note = {
-      id: row.id,
-      text: row.text,
-      tags: row.tags ?? [],
-      aliases: [],
-      subject: row.subject,
-      lens: row.lens?.length ? row.lens : ["bond"],
-      fromRosie: Boolean(row.from_rosie),
-      weight: Math.max(1, Math.min(5, Number(row.weight) || 3)),
-      status: "active",
-      supersededBy: null,
-      links: row.links ?? [],
-      happenedAt: at,
-      localDay: row.local_day,
-      sourceIds: ["story"],
-      recallCount: 0,
-      lastRecalledAt: null,
-      createdAt: ts,
-      updatedAt: ts,
-    };
-    await upsertNote(note, undefined, "STORY");
-  }
-
-  const meta = await getMeta();
-  await patchMeta({
-    notesVersion: (meta.notesVersion || 0) + 1,
-    coreIndex: { version: 0, day: "", ids: [] },
-  });
   return { notes: data.notes.length, portrait: data.portrait.length };
 }
 
@@ -148,8 +75,7 @@ export const importStoryLine = createServerFn({ method: "POST" })
       if (data.confirm !== "清空并导入") {
         return { ok: false as const, error: "需要二次确认。" };
       }
-      const result = await importStorySeed();
-      return { ok: true as const, ...result };
+      return { ok: false as const, error: "故事线不再写入笔记和画像。到设置里「从旧记忆生成初版」。" };
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
     }

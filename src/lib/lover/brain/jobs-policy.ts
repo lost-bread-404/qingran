@@ -1,7 +1,7 @@
 import { ROUTES, type Route } from "./config.ts";
 import type { JobType } from "./types.ts";
 
-export const LONG_JOBS = new Set<JobType>(["reflect", "synth", "report"]);
+export const LONG_JOBS = new Set<JobType>(["reflect", "synth", "report", "editor"]);
 
 export function timeoutFor(type: JobType): number {
   const route = (type === "backfill" ? "backfill" : type) as Route;

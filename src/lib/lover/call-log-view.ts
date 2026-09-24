@@ -8,6 +8,7 @@ export const LOG_ROUTE_FILTERS = [
   ["voice", "voice"],
   ["reflect", "reflect"],
   ["archive", "archive"],
+  ["editor", "editor"],
   ["dusk", "dusk"],
   ["portrait", "portrait"],
   ["assign", "assign"],

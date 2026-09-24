@@ -22,10 +22,10 @@ import { formatClock, localDay } from "../time.ts";
 import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
-import { portraitInputVars } from "../voice/nightly.ts";
-import { buildVoiceMessages, dossierSections, voiceHistoryMessages } from "../voice/pack-build.ts";
+import { buildVoiceMessages, renderDossierBlock, voiceHistoryMessages } from "../voice/pack-build.ts";
 import { formatReflectConversation, reflectVars } from "../voice/reflector.ts";
 import { formatOldInner, momentForVoice } from "../mind-parse.ts";
+import { dossierTextForModel, getDossier } from "../dossier.ts";
 
 export type PromptPreview = {
   variantId: string;
@@ -72,16 +72,18 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
   const history = await listHistoryWindow(null, inject.history);
   const clock = formatClock(now(), tz);
   const moment = momentForVoice(inner, now(), inject.moment);
-  const dossier = dossierSections(meta.selfSummary, meta.bondSummary, portrait);
+  const dossierRow = await getDossier();
+  const dossier = await dossierTextForModel();
   const historyText =
     voiceHistoryMessages(history, inject.history)
       .map((message) => `${message.role === "user" ? "user" : "assistant"}：${message.content}`)
       .join("\n") || "（没有对话）";
   const messages = buildVoiceMessages({
     charter,
-    selfSummary: meta.selfSummary,
-    bondSummary: meta.bondSummary,
-    portrait,
+    selfSummary: dossierRow.active ? undefined : meta.selfSummary,
+    bondSummary: dossierRow.active ? undefined : meta.bondSummary,
+    portrait: dossierRow.active ? undefined : portrait,
+    longtermOverride: dossierRow.active ? renderDossierBlock(dossier) : null,
     history,
     userText: "在吗",
     moment,
@@ -108,26 +110,36 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
 }
 
 async function reflectSlots(): Promise<Record<string, string>> {
-  const [meta, history, portrait, charter, inner] = await Promise.all([
-    getMeta(),
+  const [history, charter, inner, dossier] = await Promise.all([
     listHistoryWindow(null, REFLECT_WINDOW),
-    listPortrait(),
     getProfilePrompt(),
     getInner(),
+    dossierTextForModel(),
   ]);
+  const meta = await getMeta();
   const tz = resolveTz(meta.timeZone);
   const at = now();
   return reflectVars({
     charter,
-    dossier: dossierSections(meta.selfSummary, meta.bondSummary, portrait),
+    dossier,
     clock: formatClock(at, tz),
     oldInner: formatOldInner(inner, at),
     conversation: formatReflectConversation(history, tz),
   });
 }
 
-async function portraitSlots(): Promise<Record<string, string>> {
-  return portraitInputVars();
+async function editorSlots(): Promise<Record<string, string>> {
+  const [dossier, inner, charter] = await Promise.all([dossierTextForModel(), getInner(), getProfilePrompt()]);
+  return {
+    system_prompt: charter,
+    dossier: dossier || "（还没有）",
+    longing: inner.longing.trim() || "（没有）",
+    conversation: "（要等这次整理才有）",
+    max_chars: "4000",
+    story: "（要等这次生成才有）",
+    legacy: "（要等这次生成才有）",
+    notes: "（要等这次生成才有）",
+  };
 }
 
 async function todayContext() {
@@ -149,7 +161,7 @@ async function slotsFor(key: PromptKey, variantId: string): Promise<{ slots: Rec
   }
   if (key === "reflect") return { slots: await reflectSlots(), note: "这是这一刻会写进内心的材料。" };
   if (key === "archive") return { slots: await currentArchiveVars(), note: "用当前滑出窗口的那一批。没有待归档时是空的。" };
-  if (key === "portrait") return { slots: await portraitSlots(), note: "用最近 30 天的笔记、现在的画像和最近的对话。" };
+  if (key === "editor") return { slots: await editorSlots(), note: "整理时会带上还没读过的对话。这里先给出文档和惦记。" };
   if (key === "dusk") {
     const { day, messages, notes, intentions } = await todayContext();
     const rosie = messages.filter((message) => message.role === "user").map((message) => message.text).join("\n").slice(0, 3000);

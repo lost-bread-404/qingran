@@ -43,7 +43,6 @@ import {
 } from "./store.ts";
 import type { JobType, Lens, Note, Subject } from "./types.ts";
 import { isStorySeedPortrait } from "./portrait-kind.ts";
-import { portraitRetireReason } from "./voice/portrait-life.ts";
 import { askDiary } from "./diary/ask.ts";
 import { evaluateIfDue, startExperiment } from "./diary/experiments.ts";
 import { safetyFlag } from "./diary/stats.ts";
@@ -260,7 +259,7 @@ export const brainGetLongLayer = createServerFn({ method: "GET" }).handler(async
         evidenceCount: row.evidenceIds.length,
         evidenceFrom: known[0] ?? null,
         evidenceTo: known.at(-1) ?? null,
-        retireReason: portraitRetireReason(row, days),
+        retireReason: null,
       };
     }),
     self: meta.selfSummary,

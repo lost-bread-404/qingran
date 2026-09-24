@@ -75,7 +75,8 @@ export type Route =
   | "synth"
   | "report"
   | "ask"
-  | "judge";
+  | "judge"
+  | "editor";
 
 export const ROUTES: Record<
   Route,
@@ -92,6 +93,7 @@ export const ROUTES: Record<
   report: { cls: "DEEP_THINKER", effort: "medium", timeoutMs: 120_000, maxOutput: 12_000 },
   ask: { cls: "AGENT", timeoutMs: 90_000, maxOutput: 8_000 },
   judge: { cls: "DEEP_THINKER", timeoutMs: 120_000, maxOutput: 8_000 },
+  editor: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 8_000 },
 };
 
 export const VOICE_IO = {
@@ -116,6 +118,15 @@ export function clampHistoryWindow(value: unknown, fallback = HISTORY_WINDOW): n
   return Math.max(HISTORY_WINDOW_MIN, Math.min(HISTORY_WINDOW_MAX, Math.round(n)));
 }
 export const REFLECT_WINDOW = 16;
+export const DOSSIER_MAX_CHARS = 4000;
+export const DOSSIER_MAX_CHARS_MIN = 2000;
+export const DOSSIER_MAX_CHARS_MAX = 8000;
+
+export function clampDossierMaxChars(value: unknown, fallback = DOSSIER_MAX_CHARS): number {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(DOSSIER_MAX_CHARS_MIN, Math.min(DOSSIER_MAX_CHARS_MAX, Math.round(n)));
+}
 export const ARCHIVE_BATCH_MAX = 40;
 export const ARCHIVE_MIN_OVERFLOW = 8;
 export const SESSION_GAP_MS = 30 * 60_000;

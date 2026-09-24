@@ -34,4 +34,8 @@ export const IMPORT_ORDER = [
   "spend_monthly",
   "qr_prompts",
   "qr_prompt_versions",
+  "qr_inner",
+  "qr_inner_log",
+  "qr_dossier",
+  "qr_dossier_versions",
 ] as const;

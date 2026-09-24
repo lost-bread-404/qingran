@@ -7,7 +7,6 @@ import {
   getMeta,
   getProfilePrompt,
   listHistoryWindow,
-  listPortrait,
   patchBrainLog,
   saveInner,
   saveInnerPlans,
@@ -22,7 +21,7 @@ import { resolveTz } from "../tz.ts";
 import type { InnerState, StoredMessage } from "../types.ts";
 import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { loadPrompt } from "../prompts/store.ts";
-import { dossierSections } from "./pack-build.ts";
+import { dossierTextForModel } from "../dossier.ts";
 
 const INNER_SCHEMA = {
   name: "inner",
@@ -112,14 +111,13 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Inn
   if (expired.dropped.length) await saveInnerPlans(expired.plans);
   const old: InnerState = { ...loadedInner, plans: expired.plans };
 
-  const [meta, history, portrait, systemPrompt] = await Promise.all([
+  const [meta, history, systemPrompt, dossier] = await Promise.all([
     getMeta(),
     listHistoryWindow(null, REFLECT_WINDOW),
-    listPortrait(),
     getProfilePrompt(),
+    dossierTextForModel(),
   ]);
   const tz = resolveTz(meta.timeZone);
-  const dossier = dossierSections(meta.selfSummary, meta.bondSummary, portrait);
   const convo = formatReflectConversation(history, tz);
   const clockText = formatClock(at, tz);
   const oldInnerText = formatOldInner(old, at);
