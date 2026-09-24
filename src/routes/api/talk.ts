@@ -188,31 +188,20 @@ export const Route = createFileRoute("/api/talk")({
                   injectLine: formatVoiceInjectLine(ctx.inject),
                 }),
               });
-              const selectedIds = [...ctx.pickedIds, ...ctx.queryIds];
               await recordTurnTrace({
                 turnId: replyId,
                 userMsgId,
                 turnSeq: userCreatedAt,
-                retrieve: {
-                  selected: selectedIds,
-                  fallback: ctx.fallbackIds,
-                  queryIds: ctx.queryIds,
-                  queryScores: ctx.queryScores,
-                  jump: ctx.jump,
-                  reasons: selectedIds.map((id) =>
-                    ctx.pickedIds.includes(id) ? "mind" : ctx.jump ? "fallback" : "keyword",
-                  ),
-                },
                 live: {
-                  notes: ctx.tail,
                   historyCount: ctx.historyIds.length,
                   promptHash: ctx.charterHash,
                   model: streamResult.model,
                   ms: totalMs,
-                  injectMemories: ctx.inject.memories,
-                  injectLongterm: ctx.inject.longterm,
+                  injectMoment: ctx.inject.moment,
+                  injectDossier: ctx.inject.dossier,
                   historyWindow: ctx.inject.history,
                   injectLine: formatVoiceInjectLine(ctx.inject),
+                  inner: ctx.injected,
                 },
                 reply: {
                   text: display,

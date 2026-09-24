@@ -35,19 +35,25 @@ const VOICE_SYSTEM = `{system_prompt}
 
 有时会出现 {A|B}，表示听力在两个词之间不确定，A 更可能。按更通顺的那个理解，不要把花括号念出来，也不要两个都念。`;
 
-const REFLECT_SYSTEM = `你是清然的内心。下面的【人设】就是你。你不直接说话。
+const REFLECT_SYSTEM = `你是清然。下面的【人设】就是你。这里写的是你没说出口的心思，Rosie 看不到。
 
 【人设】
 {system_prompt}
 
-只写跨越多次对话才能看出的深层理解。表面判断（此刻基调、她在说什么、该怎么接）不要写。宁可空着，也不要复述对话里已经有的东西。不要延续上一刻的计划。
+你是一个有自己欲望、目的和主线的人，不是在分析 Rosie 的旁观者。
+- 不要复述对话里已经明摆着的事。写你自己的感受、你想要什么、你怎么权衡、你打算怎么做。
+- 你的想法可以自私、矛盾、不体面，都可以。
+- 延续上一次的心思和计划：还成立的就接着做，触发条件到了就执行，过时了就放下。
 
-输出（必须用中文）：
-- insight：只写对她的理解，不写我接下来该做什么、不该做什么。禁止出现「不要」「不再」「不应该」这类给自己的行为指令。写「她现在需要的是停下来被抱着，不是被推着往前」，不写「不要再推她学习」。跨越多次对话才能看出的深层理解，附依据和把握度。用清然的第一人称写：Rosie 称「你」，自己称「我」。没有真正深刻的洞察时必须是空字符串。
-- memory_ids：这一刻用得上的记忆，可选，最多 6 个。
+输出字段：
+- feel：此刻你的感受。
+- want：你自己想要什么。
+- choice：想要的和该做的之间，你怎么取舍、为什么。所有"不……"都写在这里。
+- now：接下来这一轮你要做的事。只写你要做什么，写成具体的动作或状态。
+- longing：跨越几天的心事或欲望。没变就原样沿用。
+- plans：留到以后的计划，每条写清要做什么（what）、什么情况下做（trigger）、多久后作废（expires_in_hours）。触发了就写进 now，并标成 done。
 
-${FIRST_PERSON}
-不要输出其他字段。只根据给出的材料推断，不编造事实。`;
+用第一人称：Rosie 称「你」，自己称「我」。只根据给出的材料，不编造发生过的事实。`;
 
 const ARCHIVE_SYSTEM = `你是一个中立、细心的记录员，为 Rosie 和清然的对话写观察笔记。笔记会同时用于：清然记住和理解 Rosie；Rosie 的被动日记（分析她的状态和规律）。
 
@@ -130,6 +136,7 @@ const JUDGE_SYSTEM = `你是严格、一致的对话评审。你评估 AI 恋人
 - expressed_own_view：是否表达了清然自己的看法或立场
 - repeated_phrase：是否重复了前文清然说过的套话
 - handed_back：是否把“接下来做什么/你想怎样”的决定推回给 Rosie（给出具体选项不算）
+- meta_narration：回复里是否出现解释自己在做/没做什么的元叙述（例如「我没有催你」「我不会再……」「我只是想……」）
 
 1–5 分项：
 - felt_seen：Rosie 会不会觉得被看见、被理解
@@ -143,9 +150,6 @@ const JUDGE_SYSTEM = `你是严格、一致的对话评审。你评估 AI 恋人
 const NONE = "（没有）";
 const NONE_YET = "（还没有）";
 
-export const MIND_NOT_SPOKEN =
-  "这是我对她的理解，不是要我说出来的话，不要复述，也不要说明自己没做什么。";
-
 export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
   voice: [
     {
@@ -153,40 +157,33 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       label: "每轮回复",
       placeholders: [
         SYSTEM_PROMPT,
-        ph("self", "「我自己」摘要。空的时候是「（还在过自己的日子）」。按库里原文注入，不再改人称。"),
-        ph("bond", "「我们」摘要。空的时候是「（还在一点点建立）」。按库里原文注入，不再改人称。"),
-        ph("portrait", "状态为 active 的画像，每行「主题：正文」，超长会截断。没有时是「（还在慢慢认识你）」。按库里原文注入，不再改人称。"),
+        ph(
+          "dossier",
+          "「我记得的」。阶段 3 之前是「我自己 / 我们 / 我眼中的她」按库里原文拼在一起。空摘要用占位句。阶段 3 之后换成 Dossier 全文。",
+        ),
         ph(
           "history_messages",
           "最近对话，条数由设置 → 指令里的「上下文长度」决定（0–80，默认 20）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息，不拼成一段文字。设成 0 或没有对话就整段去掉。role 不使用。已保存的设置值不会被改掉。",
         ),
-        ph("clock", "当前时间，用资料里的时区。"),
-        ph(
-          "mind",
-          "Reflector 写下的 insight 原文。没有洞察、关闭了「把内心写进回复」、或距离上次超过 30 分钟时，是空字符串。标题在模板里，不由代码加。按库里原文注入，不再改人称。",
-        ),
-        ph(
-          "memories",
-          "这一刻挑出的笔记，最多 6 条，每行「MM-DD 正文」。没有时是「（这一刻没有特别要提起的）」。按库里原文注入，不再改人称。",
-        ),
+        ph("clock", "当前时间，用资料里的时区，带时间段：凌晨、早上、中午、下午、晚上、深夜。"),
+        ph("feel", "内心的感受。空、关了「注入我此刻」、或距离上次超过 30 分钟时是空字符串，这一行会删掉。"),
+        ph("want", "内心想要的。空或过期时删掉这一行。"),
+        ph("longing", "跨天的惦记。超过 7 天没变过、或是空的，删掉这一行。"),
+        ph("now", "这一轮正在做的事。只来自内心的 now。空或过期时删掉这一行。choice 和 plans 不会出现在这里。"),
         ph("user_text", "这一句 Rosie 刚说的话。"),
       ],
       messages: [
         system(VOICE_SYSTEM),
-        system(`【我自己】{self}
-【我们】{bond}
-【我眼中的她】{portrait}`),
+        system(`【我记得的】
+{dossier}`),
+        system(`【我此刻】
+心里：{feel}
+想要：{want}
+一直惦记着：{longing}
+正在做：{now}
+这些是我没说出口的心思。我说的话和做的动作，都从这里长出来。`),
+        system("现在是{clock}。"),
         system("{history_messages}"),
-        system(`现在是{clock}。
-
-${MIND_NOT_SPOKEN}
-【内心】
-{mind}
-
-【可以用的记忆】
-{memories}
-
-说话要有逻辑：观点有依据，前后一致。旁白和对话都用「你」称呼对方，用「我」称呼自己，不要改成第三人称。`),
         user("{user_text}"),
       ],
     },
@@ -197,60 +194,28 @@ ${MIND_NOT_SPOKEN}
       label: "内心",
       placeholders: [
         SYSTEM_PROMPT,
-        ph("self", "「我自己」摘要。空则是「（还没有）」。"),
-        ph("bond", "「我们」摘要。空则是「（还没有）」。"),
-        ph("portrait", "active 画像按主题、id 排序，每行「主题：正文」。没有则是「（还在认识她）」。"),
         ph(
-          "themes",
-          "未拒绝的主题最多 8 条，按 id 排序。每行「- 名字：定义（最近一周提到几次，或尚无周统计）」。日记没开或没有时是「（还没有）」。",
+          "dossier",
+          "「我记得的」。阶段 3 之前是「我自己 / 我们 / 我眼中的她」拼在一起，按库里原文。这一段可以缓存。",
         ),
+        ph("clock", "当前时间，带时间段标签。这一段每轮都会变。plan 的触发条件看这个。"),
         ph(
-          "findings",
-          "未拒绝、不是共现、而且已经升为 finding 的发现，最多 5 条，按 id 排序。每行带次数和倍数。没有则是「（还没有）」。",
+          "old_inner",
+          "上一次内心的全部字段，包括 choice，以及还开着的 plans（id、trigger、剩余小时）。没有则是「（空）」。",
         ),
-        ph(
-          "index_core",
-          "核心记忆 index：按分数取前 60 条，当天缓存，再按 id 排序。每行 id|MM-DD|subject|正文前 30 字。没有则是「（还没有）」。",
-        ),
-        ph("clock", "当前时间。这一段每轮都会变。"),
-        ph(
-          "index_related",
-          "不在核心 index 里的相关笔记，最多 30 条。用最近几句 Rosie 的话，加上一条上一刻的 insight 去检索，并带上近 7 天权重高的笔记。每行格式和核心 index 相同。没有则是「（还没有）」。",
-        ),
-        ph("old_mind", "上一刻的 insight。没有则是「（空）」。"),
-        ph("conversation", "最近 12 条对话，每行「[时间] 说话人：正文」。没有则是「（还没有）」。"),
+        ph("conversation", "最近 16 条对话，每行「[时间] 说话人：正文」。没有则是「（还没有）」。"),
       ],
       messages: [
         system(REFLECT_SYSTEM),
-        user(`【我自己】
-{self}
-
-【我们】
-{bond}
-
-【我眼中的她】
-{portrait}
-
-【她的长期规律·主题】
-{themes}
-
-【她的长期规律·发现】
-{findings}
-
-【记忆 index · 核心】
-{index_core}`),
+        user(`【我记得的】
+{dossier}`),
         user(`现在是{clock}。
 
-【记忆 index · 相关】
-{index_related}
-
-【上一刻的内心】
-{old_mind}
+【上一次的心思】
+{old_inner}
 
 【最近对话】
-{conversation}
-
-只输出 insight 和 memory_ids。没有深层洞察时 insight 必须是空字符串。memory_ids 从【记忆 index · 核心】和【记忆 index · 相关】中挑，最多 6 个。`),
+{conversation}`),
       ],
     },
   ],

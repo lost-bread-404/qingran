@@ -1,28 +1,16 @@
 import { mergeEditedUserBody } from "../../message-markup.ts";
 import { voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
-import { SESSION_GAP_MS } from "../config.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
-import {
-  getMessage,
-  getMeta,
-  getMind,
-  listHistoryWindow,
-  listNotes,
-  listNotesByIds,
-  listPortrait,
-  upsertMessage,
-} from "../store.ts";
+import { getInner, getMessage, getMeta, listHistoryWindow, listPortrait, upsertMessage } from "../store.ts";
+import { momentForVoice } from "../mind-parse.ts";
 import { formatClock } from "../time.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
-import { EMPTY_MIND } from "../types.ts";
-import { pickHotNotes } from "./retrieve.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { ensureMemoryHygiene } from "../memory-hygiene.ts";
 import {
   buildTail,
-  formatMemories,
+  dossierSections,
   renderVoiceLongterm,
-  voiceFacingSlots,
   voiceInputChars,
   voiceMessagesForStrip,
   type VoiceInputChars,
@@ -37,6 +25,14 @@ export {
   voiceMessagesForStrip,
 } from "./pack-build.ts";
 export type { VoiceInputChars, VoicePackParts, VoiceStrip } from "./pack-build.ts";
+
+export type InjectedInner = {
+  feel: string;
+  want: string;
+  now: string;
+  longing: string;
+  stale: { moment: boolean; longing: boolean };
+};
 
 export type HotContext = {
   messages: VoiceChatMessage[];
@@ -66,6 +62,7 @@ export type HotContext = {
   promptKey: string;
   promptHash: string;
   inject: VoiceInjectFlags;
+  injected: InjectedInner;
 };
 
 export async function loadHotContext(input: {
@@ -94,41 +91,20 @@ export async function loadHotContext(input: {
   await ensureMemoryHygiene();
 
   const inject = voiceInjectFromProfile(input.profile);
-  const [history, mind, portrait, meta] = await Promise.all([
+  const [history, inner, portrait, meta] = await Promise.all([
     listHistoryWindow(input.userMsgId, inject.history),
-    getMind(),
+    getInner(),
     listPortrait(),
     getMeta(),
   ]);
 
-  const liveMind = mind.turn_seq ? mind : EMPTY_MIND;
-  const mindAgeMs = liveMind.updated_at ? input.nowMs - liveMind.updated_at : 0;
-  const mindStale = Boolean(liveMind.updated_at) && mindAgeMs > SESSION_GAP_MS;
-  const injectMind = input.profile.injectMind !== false;
-  const tailMind = !injectMind || mindStale || !liveMind.insight.trim() ? EMPTY_MIND : liveMind;
-  const picked = await pickHotNotes(
-    !injectMind || mindStale ? [] : mind.memory_ids ?? [],
-    input.text,
-    { minTerms: input.profile.retrieveMinTerms },
-  );
-  const notes = picked.notes;
-  const pickedIds = picked.mindIds;
-  const fallbackIds: string[] = [];
+  const injected = momentForVoice(inner, input.nowMs, inject.moment);
+  const mindAgeMs = inner.updated_at ? input.nowMs - inner.updated_at : 0;
+  const mindStale = injected.stale.moment;
   const careHint = false;
-
   const clockText = formatClock(input.nowMs, input.timeZone);
-  const tail = buildTail({
-    clock: clockText,
-    mind: tailMind,
-    notes,
-    timeZone: input.timeZone,
-    careHint,
-    nowMs: input.nowMs,
-    stale: false,
-    jump: false,
-    inject,
-  });
-
+  const moment = { feel: injected.feel, want: injected.want, now: injected.now, longing: injected.longing };
+  const tail = buildTail({ clock: clockText, moment, inject });
   const longterm = renderVoiceLongterm(meta.selfSummary, meta.bondSummary, portrait);
   const charter = input.profile.systemPrompt;
   const loaded = await loadPrompt("voice");
@@ -137,20 +113,16 @@ export async function loadHotContext(input: {
     longterm,
     history,
     userText: input.text,
-    mind: tailMind,
-    notes,
+    moment,
     clockText,
     timeZone: input.timeZone,
-    careHint,
     nowMs: input.nowMs,
-    mindStale,
-    jump: false,
     voiceTemplate: loaded.body,
     selfSummary: meta.selfSummary,
     bondSummary: meta.bondSummary,
     portrait,
-    injectMemories: inject.memories,
-    injectLongterm: inject.longterm,
+    injectMoment: inject.moment,
+    injectDossier: inject.dossier,
     historyWindow: inject.history,
   };
   const [charterHash, longtermHash] = await Promise.all([
@@ -160,18 +132,17 @@ export async function loadHotContext(input: {
 
   const messages = voiceMessagesForStrip(parts, "none");
   const inputChars = voiceInputChars(parts);
-
   const historyIds = history.map((m) => m.id);
   const refs: VoiceRefs = {
     charterHash,
     longtermHash,
     historyIds,
-    mindTurnSeq: liveMind.turn_seq,
+    mindTurnSeq: inner.turn_seq,
     mindStale,
-    pickedIds,
-    fallbackIds,
-    queryIds: picked.queryIds,
-    queryScores: picked.queryScores,
+    pickedIds: [],
+    fallbackIds: [],
+    queryIds: [],
+    queryScores: [],
     jump: false,
     jumpScore: 0,
     careHint,
@@ -179,8 +150,12 @@ export async function loadHotContext(input: {
     userMsgId: input.userMsgId,
     timeZone: input.timeZone,
     mindAgeMs,
-    injectMemories: inject.memories,
-    injectLongterm: inject.longterm,
+    injectLongterm: inject.dossier,
+    injectMoment: inject.moment,
+    momentFeel: moment.feel,
+    momentWant: moment.want,
+    momentNow: moment.now,
+    momentLonging: moment.longing,
     historyWindow: inject.history,
   };
 
@@ -191,13 +166,13 @@ export async function loadHotContext(input: {
     sessionId: user.sessionId,
     user,
     tail,
-    mindTurnSeq: liveMind.turn_seq,
+    mindTurnSeq: inner.turn_seq,
     mindAgeMs,
     mindStale,
-    pickedIds,
-    fallbackIds,
-    queryIds: picked.queryIds,
-    queryScores: picked.queryScores,
+    pickedIds: [],
+    fallbackIds: [],
+    queryIds: [],
+    queryScores: [],
     jump: false,
     jumpScore: 0,
     careHint,
@@ -212,33 +187,24 @@ export async function loadHotContext(input: {
     promptKey: loaded.key,
     promptHash: loaded.hash,
     inject,
+    injected,
   };
 }
 
-/** What the reply model would see for the five slots. Does not write or bump recall. */
+/** What the reply would be given for the dossier and the public inner fields. */
 export async function loadVoicePerspective(): Promise<{
-  self: string;
-  bond: string;
-  portrait: string;
-  mind: string;
-  memories: string;
+  dossier: string;
+  feel: string;
+  want: string;
+  now: string;
+  longing: string;
 }> {
-  const [meta, portrait, mind] = await Promise.all([getMeta(), listPortrait(), getMind()]);
-  const ids = mind.memory_ids ?? [];
-  let notes = ids.length ? (await listNotesByIds(ids)).filter((note) => note.status === "active") : [];
-  if (!notes.length) notes = await listNotes({ status: "active", limit: 6 });
-  const slots = voiceFacingSlots({
-    selfSummary: meta.selfSummary,
-    bondSummary: meta.bondSummary,
-    portrait,
-    mind: mind.insight,
-    memories: formatMemories(notes, meta.timeZone || "UTC"),
-  });
+  const [meta, portrait, inner] = await Promise.all([getMeta(), listPortrait(), getInner()]);
   return {
-    self: slots.self,
-    bond: slots.bond,
-    portrait: slots.portrait,
-    mind: slots.mind || "（还没有。回复里不会放【内心】）",
-    memories: slots.memories,
+    dossier: dossierSections(meta.selfSummary, meta.bondSummary, portrait),
+    feel: inner.feel,
+    want: inner.want,
+    now: inner.now,
+    longing: inner.longing,
   };
 }

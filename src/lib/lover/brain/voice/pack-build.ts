@@ -1,10 +1,8 @@
-import { HISTORY_WINDOW, PORTRAIT_MAX_CHARS, SESSION_GAP_MS } from "../config.ts";
+import { HISTORY_WINDOW, PORTRAIT_MAX_CHARS } from "../config.ts";
 import { defaultDoc, parsePromptBody, renderPromptMessages, variantMessages } from "../prompts/doc.ts";
 import { fillTemplate } from "../prompts/fill.ts";
-import { MIND_NOT_SPOKEN } from "../prompts/templates.ts";
-import { formatClock } from "../time.ts";
+import type { MomentText } from "../mind-parse.ts";
 import type { Mind, Note, PortraitRow, StoredMessage, VoiceChatMessage } from "../types.ts";
-import { EMPTY_MIND } from "../types.ts";
 import { isNightNoiseBody, modelFacingText } from "../../message-markup.ts";
 import {
   formatVoiceInjectLine,
@@ -15,9 +13,7 @@ import {
 export { formatVoiceInjectLine };
 export type { VoiceInjectFlags };
 
-function mindIsEmpty(mind: Mind): boolean {
-  return !mind.insight.trim();
-}
+export const EMPTY_MOMENT: MomentText = { feel: "", want: "", now: "", longing: "" };
 
 function portraitBlock(rows: PortraitRow[]): string {
   const active = rows.filter((r) => r.status === "active");
@@ -28,123 +24,82 @@ function portraitBlock(rows: PortraitRow[]): string {
   return text;
 }
 
-function faceVoice(text: string): string {
-  return text;
-}
-
-/** Text of the five reply slots. Injected as stored; names are not rewritten. Empty mind stays empty. */
-export function voiceFacingSlots(input: {
-  selfSummary?: string;
-  bondSummary?: string;
-  portrait?: PortraitRow[];
-  mind?: string;
-  memories?: string;
-}): { self: string; bond: string; portrait: string; mind: string; memories: string } {
-  return {
-    self: faceVoice(input.selfSummary?.trim() || "（还在过自己的日子）"),
-    bond: faceVoice(input.bondSummary?.trim() || "（还在一点点建立）"),
-    portrait: faceVoice(input.portrait ? portraitBlock(input.portrait) : "（还在慢慢认识她）"),
-    mind: input.mind?.trim() ? faceVoice(input.mind.trim()) : "",
-    memories: faceVoice(input.memories?.trim() || "（这一刻没有特别要提起的）"),
-  };
+/** Self / bond / portrait, as stored. Phase 3 replaces this with the dossier body. */
+export function dossierSections(selfSummary: string, bondSummary: string, portrait: PortraitRow[]): string {
+  const self = selfSummary.trim() || "（还在过自己的日子）";
+  const bond = bondSummary.trim() || "（还在一点点建立）";
+  return `【我自己】\n${self}\n【我们】\n${bond}\n【我眼中的她】\n${portraitBlock(portrait)}`;
 }
 
 export function renderVoiceLongterm(selfSummary: string, bondSummary: string, portrait: PortraitRow[]): string {
-  const slots = voiceFacingSlots({ selfSummary, bondSummary, portrait });
-  const template = variantMessages(defaultDoc("voice"), "main").find((message) => message.content.includes("{portrait}"));
-  return fillTemplate(template?.content ?? "【我自己】{self}\n【我们】{bond}\n【我眼中的她】{portrait}", {
-    self: slots.self,
-    bond: slots.bond,
-    portrait: slots.portrait,
+  const template = variantMessages(defaultDoc("voice"), "main").find((message) => message.content.includes("{dossier}"));
+  return fillTemplate(template?.content ?? "【我记得的】\n{dossier}", {
+    dossier: dossierSections(selfSummary, bondSummary, portrait),
   });
 }
 
-export function formatMemories(notes: Note[], timeZone: string): string {
-  if (!notes.length) return "（这一刻没有特别要提起的）";
-  return notes
-    .map((n) => {
-      const md = n.localDay.slice(5) || formatClock(n.happenedAt, timeZone).slice(0, 10);
-      return `${md} ${n.text}`;
-    })
-    .join("\n");
-}
-
 export const VOICE_THIN_HISTORY = 8;
-export type VoiceStrip = "none" | "mind" | "notes" | "thin";
-export const VOICE_STRIPS: VoiceStrip[] = ["none", "mind", "notes", "thin"];
+export type VoiceStrip = "none" | "moment" | "dossier" | "thin";
+export const VOICE_STRIPS: VoiceStrip[] = ["none", "moment", "dossier", "thin"];
 
 export type VoicePackParts = {
   charter: string;
   longterm: string;
   history: StoredMessage[];
   userText: string;
-  mind: Mind;
-  notes: Note[];
+  moment: MomentText;
   clockText: string;
   timeZone: string;
-  careHint: boolean;
   nowMs: number;
-  mindStale: boolean;
-  jump: boolean;
   voiceTemplate?: string;
   selfSummary?: string;
   bondSummary?: string;
   portrait?: PortraitRow[];
-  injectMemories?: boolean;
-  injectLongterm?: boolean;
+  injectMoment?: boolean;
+  injectDossier?: boolean;
   historyWindow?: number;
+  /** Legacy rebuild only. Notes are not injected on the live path. */
+  showMemories?: boolean;
+  mindText?: string;
+  memoriesText?: string;
 };
 
 export type VoiceInputChars = {
   system: number;
-  mind: number;
-  notes: number;
+  moment: number;
+  dossier: number;
   history: number;
   user: number;
 };
 
 const FALLBACK_CHARTER = "你就是清然。正在和 Rosie 语音通话。";
-
-export function voiceMindText(opts: {
-  mind: Mind;
-  nowMs?: number;
-  stale?: boolean;
-}): string {
-  const mindAge = (opts.nowMs ?? 0) - (opts.mind.updated_at ?? 0);
-  const stale =
-    opts.stale ??
-    (!mindIsEmpty(opts.mind) && Boolean(opts.nowMs) && Boolean(opts.mind.updated_at) && mindAge > SESSION_GAP_MS);
-  if (mindIsEmpty(opts.mind) || stale) return "";
-  return opts.mind.insight.trim();
-}
+const MOMENT_FIELD = /\{(feel|want|longing|now)\}/;
+const DOSSIER_TOKEN = /\{(?:dossier|self|bond|portrait)\}/;
+const OTHER_VOICE_TOKEN = /\{(?:system_prompt|user_text|history_messages|clock|feel|want|longing|now|mind|memories)\}/;
 
 export function voiceInjectOf(parts: {
-  injectMemories?: boolean;
-  injectLongterm?: boolean;
+  injectMoment?: boolean;
+  injectDossier?: boolean;
   historyWindow?: number;
 }): VoiceInjectFlags {
   return voiceInjectFromProfile({
-    injectMemories: parts.injectMemories !== false,
-    injectLongterm: parts.injectLongterm !== false,
+    injectMind: parts.injectMoment !== false,
+    injectLongterm: parts.injectDossier !== false,
     historyWindow: parts.historyWindow ?? HISTORY_WINDOW,
   });
 }
 
-/** Drop an empty 【内心】 block, including the line that says not to speak it. A real insight stays. */
+/** Drop an empty 【内心】 block left by an older saved voice template. */
 export function omitEmptyMindBlock(text: string): string {
   const marker = "【内心】";
   const at = text.indexOf(marker);
   if (at < 0) return text;
   const after = text.slice(at + marker.length);
-  const next = after.search(/\n【|说话要有逻辑/);
+  const next = after.search(/\n【/);
   const body = (next < 0 ? after : after.slice(0, next)).trim();
   if (body) return text;
-  let start = at;
-  const before = text.slice(0, at);
-  const leadAt = before.lastIndexOf(MIND_NOT_SPOKEN);
-  if (leadAt >= 0 && before.slice(leadAt + MIND_NOT_SPOKEN.length).trim() === "") start = leadAt;
   const end = next < 0 ? text.length : at + marker.length + next;
-  return `${text.slice(0, start)}${text.slice(end)}`.replace(/\n{3,}/g, "\n\n");
+  return `${text.slice(0, at)}${text.slice(end)}`.replace(/\n{3,}/g, "\n\n");
 }
 
 /** Remove the memories section entirely, heading included. */
@@ -153,24 +108,29 @@ export function omitMemoryBlock(text: string): string {
   const at = text.indexOf(marker);
   if (at < 0) return text;
   const after = text.slice(at + marker.length);
-  const next = after.search(/\n说话要有逻辑|\n【/);
+  const next = after.search(/\n【/);
   const end = next < 0 ? text.length : at + marker.length + next;
   return `${text.slice(0, at)}${text.slice(end)}`.replace(/\n{3,}/g, "\n\n");
 }
 
-function polishVoiceSystem(content: string, inject: VoiceInjectFlags): string {
-  let next = content;
-  if (!inject.memories) next = omitMemoryBlock(next);
-  next = omitEmptyMindBlock(next);
-  return next;
+function withoutDossierMessage<T extends { content: string }>(messages: T[], inject: VoiceInjectFlags): T[] {
+  if (inject.dossier) return messages;
+  return messages.filter((message) => !(DOSSIER_TOKEN.test(message.content) && !OTHER_VOICE_TOKEN.test(message.content)));
 }
 
-const LONGTERM_TOKEN = /\{(?:self|bond|portrait)\}/;
-const OTHER_VOICE_TOKEN = /\{(?:system_prompt|user_text|history_messages|clock|mind|memories)\}/;
-
-function withoutLongtermMessage<T extends { content: string }>(messages: T[], inject: VoiceInjectFlags): T[] {
-  if (inject.longterm) return messages;
-  return messages.filter((message) => !(LONGTERM_TOKEN.test(message.content) && !OTHER_VOICE_TOKEN.test(message.content)));
+function prepareMomentTemplate(content: string, moment: MomentText, enabled: boolean): string {
+  if (!content.includes("【我此刻】") && !MOMENT_FIELD.test(content)) return content;
+  const values: Record<string, string> = moment;
+  const any = ["feel", "want", "longing", "now"].some((key) => values[key]?.trim());
+  if (!enabled || !any) return "";
+  return content
+    .split("\n")
+    .filter((line) => {
+      const hit = line.match(MOMENT_FIELD);
+      if (!hit) return true;
+      return Boolean(values[hit[1]!]?.trim());
+    })
+    .join("\n");
 }
 
 export function voiceHistoryMessages(
@@ -182,9 +142,9 @@ export function voiceHistoryMessages(
     .filter((message) => !isNightNoiseBody(message.text))
     .slice(-limit)
     .map((message) => ({
-    role: message.role === "assistant" ? "assistant" : "user",
-    content: modelFacingText(message.text),
-  }));
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: modelFacingText(message.text),
+    }));
 }
 
 function voiceDoc(template?: string) {
@@ -206,55 +166,54 @@ export function systemCharter(charter: string, template?: string): string {
 
 function voiceVars(parts: {
   charter: string;
-  selfSummary?: string;
-  bondSummary?: string;
-  portrait?: PortraitRow[];
+  dossier: string;
   clock: string;
-  mind: string;
-  memories: string;
+  moment: MomentText;
   userText: string;
-  inject: VoiceInjectFlags;
+  mindText: string;
+  memoriesText: string;
 }): Record<string, string> {
-  const longterm = parts.inject.longterm;
-  const slots = voiceFacingSlots({
-    selfSummary: parts.selfSummary,
-    bondSummary: parts.bondSummary,
-    portrait: parts.portrait,
-    mind: parts.mind,
-    memories: parts.memories,
-  });
   return {
     system_prompt: parts.charter.trim() || FALLBACK_CHARTER,
-    self: longterm ? slots.self : "",
-    bond: longterm ? slots.bond : "",
-    portrait: longterm ? slots.portrait : "",
+    dossier: parts.dossier,
+    self: "",
+    bond: "",
+    portrait: "",
     clock: parts.clock,
-    mind: slots.mind,
-    memories: parts.inject.memories ? slots.memories : "",
+    feel: parts.moment.feel.trim(),
+    want: parts.moment.want.trim(),
+    longing: parts.moment.longing.trim(),
+    now: parts.moment.now.trim(),
+    mind: parts.mindText,
+    memories: parts.memoriesText,
     user_text: parts.userText,
   };
 }
 
 export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip): VoiceChatMessage[] {
   const inject = voiceInjectOf(parts);
-  const mind = strip === "none" ? parts.mind : EMPTY_MIND;
-  const notes = strip === "none" || strip === "mind" ? parts.notes : [];
+  const moment = strip === "none" ? parts.moment : EMPTY_MOMENT;
+  const dossierOn = strip === "none" || strip === "moment";
+  const useStoredLongterm = Boolean(parts.longterm) && !parts.selfSummary && !parts.bondSummary && !parts.portrait?.length;
   const rendered = buildVoiceMessages({
     charter: parts.charter,
     selfSummary: parts.selfSummary,
     bondSummary: parts.bondSummary,
     portrait: parts.portrait,
+    longtermOverride: useStoredLongterm ? parts.longterm : null,
     history: parts.history,
     userText: parts.userText,
-    mind,
-    notes,
+    moment,
     clock: parts.clockText,
-    timeZone: parts.timeZone,
-    careHint: parts.careHint,
-    nowMs: parts.nowMs,
-    stale: strip === "none" ? parts.mindStale : false,
     voiceTemplate: parts.voiceTemplate,
-    inject,
+    showMemories: parts.showMemories === true && (strip === "none" || strip === "moment"),
+    mindText: strip === "none" ? parts.mindText : "",
+    memoriesText: strip === "none" || strip === "moment" ? parts.memoriesText : "",
+    inject: {
+      moment: inject.moment && strip === "none",
+      dossier: inject.dossier && dossierOn,
+      history: inject.history,
+    },
   });
   if (strip !== "thin") return rendered;
   const head = rendered.find((message) => message.role === "system") ?? {
@@ -270,69 +229,75 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
 
 export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
   const inject = voiceInjectOf(parts);
-  const mind = faceVoice(voiceMindText({ mind: parts.mind, nowMs: parts.nowMs, stale: parts.mindStale }));
   const history = voiceHistoryMessages(parts.history, inject.history);
+  const moment = inject.moment
+    ? [parts.moment.feel, parts.moment.want, parts.moment.now, parts.moment.longing].filter((line) => line.trim()).join("\n")
+    : "";
+  const dossier = inject.dossier
+    ? parts.longterm || dossierSections(parts.selfSummary ?? "", parts.bondSummary ?? "", parts.portrait ?? [])
+    : "";
   return {
     system: systemCharter(parts.charter, parts.voiceTemplate).length,
-    mind: mind.length,
-    notes: inject.memories && parts.notes.length ? faceVoice(formatMemories(parts.notes, parts.timeZone)).length : 0,
+    moment: moment.length,
+    dossier: dossier.length,
     history: history.reduce((n, m) => n + m.content.length, 0),
     user: parts.userText.length,
   };
 }
 
 export function formatVoiceInputCharsLine(c: VoiceInputChars): string {
-  return `chars system=${c.system} mind=${c.mind} notes=${c.notes} history=${c.history} user=${c.user}`;
+  return `chars system=${c.system} moment=${c.moment} dossier=${c.dossier} history=${c.history} user=${c.user}`;
 }
 
 export function parseVoiceInputCharsLine(note: string | null | undefined): VoiceInputChars | null {
-  const m = (note ?? "").match(/chars system=(\d+) mind=(\d+) notes=(\d+) history=(\d+) user=(\d+)/);
-  if (!m) return null;
+  const text = note ?? "";
+  const next = text.match(/chars system=(\d+) moment=(\d+) dossier=(\d+) history=(\d+) user=(\d+)/);
+  if (next) {
+    return {
+      system: Number(next[1]),
+      moment: Number(next[2]),
+      dossier: Number(next[3]),
+      history: Number(next[4]),
+      user: Number(next[5]),
+    };
+  }
+  const old = text.match(/chars system=(\d+) mind=(\d+) notes=(\d+) history=(\d+) user=(\d+)/);
+  if (!old) return null;
   return {
-    system: Number(m[1]),
-    mind: Number(m[2]),
-    notes: Number(m[3]),
-    history: Number(m[4]),
-    user: Number(m[5]),
+    system: Number(old[1]),
+    moment: Number(old[2]),
+    dossier: Number(old[3]),
+    history: Number(old[4]),
+    user: Number(old[5]),
   };
 }
 
 export function stripLabel(strip: VoiceStrip): string {
-  if (strip === "mind") return "去掉了 mind";
-  if (strip === "notes") return "去掉了 mind 和记忆笔记";
+  if (strip === "moment") return "去掉了【我此刻】";
+  if (strip === "dossier") return "去掉了【我此刻】和【我记得的】";
   if (strip === "thin") return "只保留 system prompt、最近 8 条对话和用户消息";
   return "未裁剪";
 }
 
 export function buildTail(opts: {
   clock: string;
-  mind: Mind;
-  notes: Note[];
-  timeZone: string;
-  careHint: boolean;
-  nowMs?: number;
-  stale?: boolean;
-  jump?: boolean;
+  moment?: MomentText;
   inject?: VoiceInjectFlags;
 }): string {
-  const inject = partsInject(opts.inject);
-  const template = variantMessages(defaultDoc("voice"), "main").find(
-    (message) => message.content.includes("{memories}") && message.content.includes("{clock}"),
-  );
-  const slots = voiceFacingSlots({
-    mind: voiceMindText(opts),
-    memories: formatMemories(opts.notes, opts.timeZone),
-  });
-  const filled = fillTemplate(template?.content ?? "", {
-    clock: opts.clock,
-    mind: slots.mind,
-    memories: inject.memories ? slots.memories : "",
-  });
-  return polishVoiceSystem(filled, inject);
+  const inject = opts.inject ?? { moment: true, dossier: true, history: HISTORY_WINDOW };
+  const moment = opts.moment ?? EMPTY_MOMENT;
+  const template = variantMessages(defaultDoc("voice"), "main").find((message) => message.content.includes("【我此刻】"));
+  const clock = variantMessages(defaultDoc("voice"), "main").find((message) => message.content.includes("{clock}"));
+  const momentText = prepareMomentTemplate(template?.content ?? "", moment, inject.moment);
+  const filledMoment = momentText
+    ? fillTemplate(momentText, { feel: moment.feel, want: moment.want, longing: moment.longing, now: moment.now })
+    : "";
+  const filledClock = fillTemplate(clock?.content ?? "现在是{clock}。", { clock: opts.clock });
+  return [filledMoment, filledClock].filter(Boolean).join("\n\n");
 }
 
 function partsInject(inject?: VoiceInjectFlags): VoiceInjectFlags {
-  return inject ?? { memories: true, longterm: true, history: HISTORY_WINDOW };
+  return inject ?? { moment: true, dossier: true, history: HISTORY_WINDOW };
 }
 
 export function buildVoiceMessages(opts: {
@@ -343,46 +308,49 @@ export function buildVoiceMessages(opts: {
   longtermOverride?: string | null;
   history: StoredMessage[];
   userText: string;
-  mind?: Mind;
-  notes?: Note[];
+  moment?: MomentText;
   clock?: string;
   timeZone?: string;
-  careHint?: boolean;
-  nowMs?: number;
-  stale?: boolean;
   voiceTemplate?: string;
   inject?: VoiceInjectFlags;
+  showMemories?: boolean;
+  mindText?: string;
+  memoriesText?: string;
+  /** Rebuild of an older saved template may still pass these. */
+  mind?: Mind;
+  notes?: Note[];
 }): VoiceChatMessage[] {
   const inject = partsInject(opts.inject);
   const doc = voiceDoc(opts.voiceTemplate);
   let messages = variantMessages(doc, "main").map((message) => ({ ...message }));
-  messages = withoutLongtermMessage(messages, inject);
-  if (inject.longterm && opts.longtermOverride != null) {
-    const idx = messages.findIndex((message) => /\{self\}|\{bond\}|\{portrait\}/.test(message.content));
+  messages = withoutDossierMessage(messages, inject);
+  if (inject.dossier && opts.longtermOverride != null) {
+    const idx = messages.findIndex(
+      (message) => DOSSIER_TOKEN.test(message.content) && !OTHER_VOICE_TOKEN.test(message.content),
+    );
     if (idx >= 0) messages[idx] = { role: "system", content: opts.longtermOverride };
   }
-  const mind = voiceMindText({
-    mind: opts.mind ?? EMPTY_MIND,
-    nowMs: opts.nowMs,
-    stale: opts.stale,
+  const moment = opts.moment ?? EMPTY_MOMENT;
+  const dossier = opts.longtermOverride != null ? "" : dossierSections(opts.selfSummary ?? "", opts.bondSummary ?? "", opts.portrait ?? []);
+  const vars = voiceVars({
+    charter: opts.charter,
+    dossier,
+    clock: opts.clock ?? "",
+    moment,
+    userText: opts.userText,
+    mindText: opts.mindText ?? opts.mind?.insight ?? "",
+    memoriesText: opts.showMemories ? opts.memoriesText ?? "" : "",
   });
-  return renderPromptMessages(
-    messages,
-    voiceVars({
-      charter: opts.charter,
-      selfSummary: opts.selfSummary,
-      bondSummary: opts.bondSummary,
-      portrait: opts.portrait,
-      clock: opts.clock ?? "",
-      mind,
-      memories: formatMemories(opts.notes ?? [], opts.timeZone ?? "UTC"),
-      userText: opts.userText,
-      inject,
-    }),
-    voiceHistoryMessages(opts.history, inject.history),
-  )
-    .map((message) =>
-      message.role === "system" ? { ...message, content: polishVoiceSystem(message.content, inject) } : message,
-    )
+  messages = messages
+    .map((message) => ({ ...message, content: prepareMomentTemplate(message.content, moment, inject.moment) }))
+    .filter((message) => message.content.trim());
+  return renderPromptMessages(messages, vars, voiceHistoryMessages(opts.history, inject.history))
+    .map((message) => {
+      if (message.role !== "system") return message;
+      let content = message.content;
+      if (!opts.showMemories) content = omitMemoryBlock(content);
+      content = omitEmptyMindBlock(content);
+      return { ...message, content };
+    })
     .filter((message) => message.role !== "system" || message.content.trim());
 }

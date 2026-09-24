@@ -44,7 +44,7 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
   {
     key: "reflect",
     name: "内心",
-    blurb: "每轮回复后在后台跑，只写跨越多次对话才能看出的深层理解。没有深刻洞察时会空着。用偏快、低思考的那档。",
+    blurb: "每轮回复后在后台跑。写下感受、想要、取舍、这一轮要做的事、惦记和计划。回复只看感受、想要、惦记和正在做。",
   },
   {
     key: "archive",

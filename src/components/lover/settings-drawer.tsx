@@ -29,7 +29,7 @@ import {
   brainSaveSeedPortrait,
   brainSyncHistoryWindow,
 } from "@/lib/lover/brain/api";
-import type { BrainLogRow, Mind, Note, PortraitRow, Subject } from "@/lib/lover/brain/types";
+import type { BrainLogRow, InnerState, Note, PortraitRow, Subject } from "@/lib/lover/brain/types";
 import { parseVoiceInputCharsLine } from "@/lib/lover/brain/voice/pack-build";
 import {
   formatCallLogPlain,
@@ -151,7 +151,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
   const [portraitStaleDays, setPortraitStaleDays] = useState(String(profile.portraitStaleDays));
   const [seedDrafts, setSeedDrafts] = useState<Record<string, { topic: string; body: string }>>({});
   const [retrieveMinTerms, setRetrieveMinTerms] = useState(String(profile.retrieveMinTerms));
-  const [mind, setMind] = useState<Mind | null>(null);
+  const [inner, setInner] = useState<InnerState | null>(null);
   const [log, setLog] = useState<BrainLogRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [dbWarn, setDbWarn] = useState(false);
@@ -290,7 +290,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
           .map((row) => [row.id, { topic: row.topic, body: row.body }]),
       ),
     );
-    setMind(layer.mind);
+    setInner(layer.inner ?? layer.mind);
     setLog(layer.log);
     void brainListHygieneNotes()
       .then((rows) => setHygieneNotes(rows as Array<{ id: string; text: string; subject: string; localDay: string }>))
@@ -677,37 +677,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
             </p>
             <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
               <p className="px-1 pt-1 text-sm">这一轮带上什么</p>
-              <p className="px-1 pb-1 text-xs text-subtle">只影响开口那一句。关掉记忆后检索照常跑，只是不带进去。</p>
-              <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
-                <input
-                  type="checkbox"
-                  checked={injectMemories}
-                  onChange={(e) => {
-                    const next = e.target.checked;
-                    setInjectMemories(next);
-                    persistProfile({ injectMemories: next });
-                  }}
-                />
-                <span className="text-sm">记忆</span>
-              </label>
-              <label className="flex flex-col gap-1 px-1 pb-1">
-                <span className="text-sm">关键词至少对上几个实词</span>
-                <Input
-                  type="number"
-                  min={1}
-                  max={6}
-                  value={retrieveMinTerms}
-                  onChange={(e) => setRetrieveMinTerms(e.target.value)}
-                  onBlur={() => {
-                    const n = clampRetrieveMinTerms(retrieveMinTerms);
-                    setRetrieveMinTerms(String(n));
-                    persistProfile({ retrieveMinTerms: n });
-                  }}
-                />
-                <span className="text-xs text-subtle">
-                  默认 1。对上「火锅」或「论文」就带；今晚、今天这种词不算。对不上就不补。调高更严。内心选中的照常带。
-                </span>
-              </label>
+            <p className="text-xs text-subtle">只影响开口那一句。</p>
               <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
                 <input
                   type="checkbox"
@@ -718,7 +688,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
                     persistProfile({ injectLongterm: next });
                   }}
                 />
-                <span className="text-sm">长期记忆</span>
+                <span className="text-sm">我记得的</span>
               </label>
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
@@ -737,7 +707,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
                 />
                 <p className="text-xs text-subtle">
                   {formatVoiceInjectLine(
-                    voiceInjectFromProfile({ injectMemories, injectLongterm, historyWindow }),
+                    voiceInjectFromProfile({ injectMind, injectLongterm, historyWindow }),
                   )}
                 </p>
               </div>
@@ -1126,14 +1096,33 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
                 }}
               />
               <span>
-                <span className="block text-sm">把内心写进回复</span>
-                <span className="block text-xs text-subtle">关掉就只靠对话历史、记忆和人设，方便对比。</span>
+                <span className="block text-sm">注入我此刻</span>
+                <span className="block text-xs text-subtle">关掉就不把心里、想要、惦记和正在做放进回复。取舍和计划本来就不会放进去。</span>
               </span>
             </label>
-            {mind?.insight ? (
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">{mind.insight}</p>
+            {inner && (inner.feel || inner.want || inner.choice || inner.now || inner.longing || inner.plans.length) ? (
+              <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                <p>心里：{inner.feel || "（空）"}</p>
+                <p>想要：{inner.want || "（空）"}</p>
+                <p>取舍：{inner.choice || "（空）"}</p>
+                <p>正在做：{inner.now || "（空）"}</p>
+                <p>惦记：{inner.longing || "（空）"}</p>
+                {inner.plans.filter((plan) => plan.status === "open").length ? (
+                  <div className="mt-2">
+                    <p>还开着的计划：</p>
+                    {inner.plans
+                      .filter((plan) => plan.status === "open")
+                      .map((plan) => (
+                        <p key={plan.id}>
+                          {plan.what}
+                          {plan.trigger ? ` · ${plan.trigger}` : ""}
+                        </p>
+                      ))}
+                  </div>
+                ) : null}
+              </div>
             ) : (
-              <p className="text-sm text-subtle">还没有深层洞察。没有真正看懂的东西时会空着。</p>
+              <p className="text-sm text-subtle">还没有写下这一轮的心思。</p>
             )}
             <Button
               variant="outline"
@@ -1145,7 +1134,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
                   .finally(() => setBusy(false));
               }}
             >
-              重置内心
+              清空这一轮的心思
             </Button>
           </div>
         </div>
@@ -1457,7 +1446,7 @@ function logClock(at: number): string {
 function logInputChars(row: BrainLogRow): string {
   const split = parseVoiceInputCharsLine(row.note);
   const parts = split
-    ? `system ${split.system} · mind ${split.mind} · 记忆笔记 ${split.notes} · 对话历史 ${split.history} · 用户消息 ${split.user}`
+    ? `system ${split.system} · 我此刻 ${split.moment} · 我记得的 ${split.dossier} · 对话历史 ${split.history} · 用户消息 ${split.user}`
     : "";
   if (parts && row.inputChars != null) return `${row.inputChars}（${parts}）`;
   if (parts) return parts;

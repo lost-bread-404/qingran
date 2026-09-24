@@ -232,30 +232,33 @@ export function lockedProfile(input?: unknown): Profile {
 }
 
 export type VoiceInjectFlags = {
-  memories: boolean;
-  longterm: boolean;
+  moment: boolean;
+  dossier: boolean;
   history: number;
 };
 
 export function voiceInjectFromProfile(profile: {
-  injectMemories?: boolean;
+  injectMind?: boolean;
   injectLongterm?: boolean;
   historyWindow?: number;
 }): VoiceInjectFlags {
   return {
-    memories: profile.injectMemories !== false,
-    longterm: profile.injectLongterm !== false,
+    moment: profile.injectMind !== false,
+    dossier: profile.injectLongterm !== false,
     history: clampHistoryWindow(profile.historyWindow),
   };
 }
 
 export function formatVoiceInjectLine(flags: VoiceInjectFlags): string {
-  return `记忆：${flags.memories ? "开" : "关"} · 长期：${flags.longterm ? "开" : "关"} · 历史：${flags.history}`;
+  return `我此刻：${flags.moment ? "开" : "关"} · 我记得的：${flags.dossier ? "开" : "关"} · 历史：${flags.history}`;
 }
 
 export function parseVoiceInjectLine(note: string | null | undefined): string | null {
-  const found = (note ?? "").match(/记忆：[开关] · 长期：[开关] · 历史：\d{1,2}/);
-  return found?.[0] ?? null;
+  const text = note ?? "";
+  const next = text.match(/我此刻：[开关] · 我记得的：[开关] · 历史：\d{1,2}/);
+  if (next) return next[0];
+  const old = text.match(/记忆：[开关] · 长期：[开关] · 历史：\d{1,2}/);
+  return old?.[0] ?? null;
 }
 
 export function applyMemoryCursor(messages: ChatMessage[], cursor: string): ChatMessage[] {

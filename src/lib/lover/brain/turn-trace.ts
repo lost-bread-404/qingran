@@ -2,7 +2,7 @@ import { getSql } from "../../db.ts";
 import { gitCommitSha } from "../hearing/eval-meta.ts";
 import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
 import { listNotesByIds, fromPgArray, pgTextArray } from "./store.ts";
-import type { Mind } from "./types.ts";
+import type { InnerState } from "./types.ts";
 
 export const TRACE_FIELD_LIMIT = 100 * 1024;
 
@@ -39,10 +39,17 @@ export type TurnTraceInput = {
     promptHash?: string | null;
     model?: string | null;
     ms?: number | null;
-    injectMemories?: boolean;
-    injectLongterm?: boolean;
+    injectMoment?: boolean;
+    injectDossier?: boolean;
     historyWindow?: number;
     injectLine?: string;
+    inner?: {
+      feel: string;
+      want: string;
+      now: string;
+      longing: string;
+      stale: { moment: boolean; longing: boolean };
+    };
   };
   reply?: {
     text?: string;
@@ -172,14 +179,14 @@ export async function recordTurnTrace(input: TurnTraceInput): Promise<void> {
 
 export async function patchTurnTraceReflector(opts: {
   turnSeq: number;
-  mind: Mind | null;
+  inner: InnerState | null;
   model?: string | null;
   ms?: number | null;
 }): Promise<void> {
   try {
     const db = await getSql();
     const packed = clipTraceValue({
-      mind: opts.mind,
+      inner: opts.inner,
       model: opts.model ?? null,
       ms: opts.ms ?? null,
     });

@@ -20,12 +20,12 @@ function attempt(partial: Partial<VoiceAttemptNote> & Pick<VoiceAttemptNote, "st
 }
 
 test("formatVoiceLogNote records which strip succeeded and the char split", () => {
-  const chars = { system: 10, mind: 20, notes: 30, history: 40, user: 5 };
+  const chars = { system: 10, moment: 20, dossier: 30, history: 40, user: 5 };
   const note = formatVoiceLogNote({
     attempts: [
       attempt({ strip: "none" }),
       attempt({
-        strip: "mind",
+        strip: "moment",
         chars: 8,
         ms: 800,
         promptTokens: 80,
@@ -35,16 +35,16 @@ test("formatVoiceLogNote records which strip succeeded and the char split", () =
         message: null,
       }),
     ],
-    usedStrip: "mind",
+    usedStrip: "moment",
     chars,
     failed: false,
   });
-  assert.match(note, /第2次成功，去掉了 mind/);
+  assert.match(note, /第2次成功，去掉了【我此刻】/);
   assert.match(note, /model_fallback=no/);
   assert.match(note, /status=200 finish_reason=stop usage prompt_tokens=80 completion_tokens=6/);
-  assert.match(note, /chars system=10 mind=20 notes=30 history=40 user=5/);
+  assert.match(note, /chars system=10 moment=20 dossier=30 history=40 user=5/);
   assert.match(note, /try1 未裁剪 empty/);
-  assert.match(note, /try2 去掉了 mind ok/);
+  assert.match(note, /try2 去掉了【我此刻】 ok/);
   assert.match(note, /events=\(none\)/);
   assert.deepEqual(parseVoiceInputCharsLine(note), chars);
 });
@@ -53,12 +53,12 @@ test("formatVoiceLogNote failed empty keeps the fail line first", () => {
   const note = formatVoiceLogNote({
     attempts: [
       attempt({ strip: "none", otherEvents: '{"choices":[{"delta":{"role":"assistant"}}]}' }),
-      attempt({ strip: "mind" }),
-      attempt({ strip: "notes" }),
+      attempt({ strip: "moment" }),
+      attempt({ strip: "dossier" }),
       attempt({ strip: "thin" }),
     ],
     usedStrip: "thin",
-    chars: { system: 1, mind: 2, notes: 3, history: 4, user: 5 },
+    chars: { system: 1, moment: 2, dossier: 3, history: 4, user: 5 },
     failed: true,
     failMessage: "她没说出话（空回复）",
     injectLine: "记忆：关 · 长期：开 · 历史：20",
@@ -96,7 +96,7 @@ test("formatVoiceLogNote records model fallback and per-try ttft", () => {
       }),
     ],
     usedStrip: "none",
-    chars: { system: 10, mind: 20, notes: 30, history: 40, user: 5 },
+    chars: { system: 10, moment: 20, dossier: 30, history: 40, user: 5 },
     failed: false,
     modelFallback: {
       from: "primary-model/low",

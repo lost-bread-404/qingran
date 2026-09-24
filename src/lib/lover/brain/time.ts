@@ -1,8 +1,17 @@
 import { DAY_BOUNDARY_HOUR, SESSION_GAP_MS } from "./config.ts";
 
+export function dayPartLabel(hour: number): string {
+  if (hour < 5) return "凌晨";
+  if (hour < 11) return "早上";
+  if (hour < 14) return "中午";
+  if (hour < 18) return "下午";
+  if (hour < 23) return "晚上";
+  return "深夜";
+}
+
 export function formatClock(nowMs: number, timeZone: string): string {
   try {
-    return new Intl.DateTimeFormat("zh-CN", {
+    const base = new Intl.DateTimeFormat("zh-CN", {
       timeZone,
       year: "numeric",
       weekday: "short",
@@ -12,6 +21,7 @@ export function formatClock(nowMs: number, timeZone: string): string {
       minute: "2-digit",
       hour12: false,
     }).format(new Date(nowMs));
+    return `${base}（${dayPartLabel(zonedParts(nowMs, timeZone).hour)}）`;
   } catch {
     return new Date(nowMs).toISOString();
   }

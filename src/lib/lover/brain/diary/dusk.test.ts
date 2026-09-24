@@ -56,7 +56,7 @@ test("empty library plus one today-message only spends reflect", async () => {
     );
     const duskJobs = jobs.filter((j) => j.type === "dusk");
     assert.equal(duskJobs.length, 0, JSON.stringify(duskJobs));
-    assert.ok(mock.calls.every((n) => n === "mind" || n === "chat"), mock.calls.join(","));
+    assert.ok(mock.calls.every((n) => n === "inner" || n === "mind" || n === "chat"), mock.calls.join(","));
   } finally {
     mock.restore();
     setClock(null);

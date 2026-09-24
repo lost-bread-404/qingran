@@ -22,6 +22,8 @@ import type {
   JobType,
   Lens,
   Mind,
+  InnerPlan,
+  InnerState,
   Note,
   NoteStatus,
   PortraitKind,
@@ -31,7 +33,7 @@ import type {
   Subject,
   Theme,
 } from "./types.ts";
-import { EMPTY_META } from "./types.ts";
+import { EMPTY_INNER, EMPTY_META } from "./types.ts";
 import { coerceMind } from "./mind-parse.ts";
 import { portraitKindOf } from "./portrait-kind.ts";
 
@@ -199,6 +201,114 @@ export async function resetMind(): Promise<void> {
   );
 }
 
+function parsePlans(raw: unknown): InnerPlan[] {
+  const value = typeof raw === "string" ? JSON.parse(raw) : raw;
+  if (!Array.isArray(value)) return [];
+  const plans: InnerPlan[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const status = row.status === "done" || row.status === "dropped" ? row.status : "open";
+    if (typeof row.id !== "string" || !row.id) continue;
+    plans.push({
+      id: row.id,
+      what: typeof row.what === "string" ? row.what : "",
+      trigger: typeof row.trigger === "string" ? row.trigger : "",
+      expires_at: asInt(row.expires_at),
+      status,
+    });
+  }
+  return plans;
+}
+
+function rowToInner(row: Record<string, unknown> | undefined): InnerState {
+  if (!row) return { ...EMPTY_INNER, plans: [] };
+  return {
+    feel: String(row.feel ?? ""),
+    want: String(row.want ?? ""),
+    choice: String(row.choice ?? ""),
+    now: String(row.now_text ?? ""),
+    longing: String(row.longing ?? ""),
+    plans: parsePlans(row.plans),
+    turn_seq: asInt(row.turn_seq),
+    updated_at: asInt(row.updated_at),
+    longing_updated_at: asInt(row.longing_updated_at),
+  };
+}
+
+export async function getInner(): Promise<InnerState> {
+  const db = await getSql();
+  const rows = await db.query<Record<string, unknown>>(
+    `select feel, want, choice, now_text, longing, plans, turn_seq, updated_at, longing_updated_at
+     from qr_inner where id = 1`,
+  );
+  return rowToInner(rows[0]);
+}
+
+export async function saveInnerPlans(plans: InnerPlan[]): Promise<void> {
+  const db = await getSql();
+  await db.query(`update qr_inner set plans = $1::jsonb where id = 1`, [JSON.stringify(plans)]);
+}
+
+export async function appendInnerLog(entry: {
+  turnSeq: number;
+  data: unknown;
+  model?: string | null;
+  ms?: number | null;
+}): Promise<void> {
+  const db = await getSql();
+  await db.query(
+    `insert into qr_inner_log (turn_seq, created_at, data, model, ms) values ($1,$2,$3::jsonb,$4,$5)`,
+    [entry.turnSeq, now(), JSON.stringify(entry.data ?? {}), entry.model ?? null, entry.ms ?? null],
+  );
+}
+
+export async function saveInner(
+  inner: InnerState,
+  expectedTurn: number,
+  meta?: { model?: string; ms?: number; log?: unknown },
+): Promise<boolean> {
+  const db = await getSql();
+  const rows = await db.query<{ id: number }>(
+    `update qr_inner
+     set feel = $1, want = $2, choice = $3, now_text = $4, longing = $5, plans = $6::jsonb,
+         turn_seq = $7, updated_at = $8, longing_updated_at = $9
+     where id = 1 and turn_seq < $7
+     returning id`,
+    [
+      inner.feel,
+      inner.want,
+      inner.choice,
+      inner.now,
+      inner.longing,
+      JSON.stringify(inner.plans),
+      expectedTurn,
+      inner.updated_at,
+      inner.longing_updated_at,
+    ],
+  );
+  if (meta?.log !== undefined) {
+    await appendInnerLog({
+      turnSeq: expectedTurn,
+      data: meta.log,
+      model: meta.model,
+      ms: meta.ms,
+    });
+  }
+  return rows.length > 0;
+}
+
+/** Clear this turn's private fields. Longing and plans stay. */
+export async function resetInnerTurn(): Promise<void> {
+  const db = await getSql();
+  await db.query(
+    `update qr_inner
+     set feel = '', want = '', choice = '', now_text = '', turn_seq = 0, updated_at = $1
+     where id = 1`,
+    [now()],
+  );
+}
+
 export async function getRoomClearedAt(): Promise<number> {
   const db = await getSql();
   const rows = await db.query<{ room_cleared_at: number | null }>(
@@ -250,7 +360,7 @@ export async function clearRecentConversation(): Promise<void> {
   const ts = now();
   await setRoomClearedAt(ts);
   await forgetUnarchivedMessages(ts);
-  await resetMind();
+  await resetInnerTurn();
 }
 
 function rowMessage(r: Record<string, unknown>): StoredMessage {

@@ -47,9 +47,10 @@ test("removed memory prompts are not in the catalog", () => {
 });
 
 test("reflect archive portrait defaults close the memory loop", () => {
-  assert.match(defaultPrompt("reflect"), /宁可空着/);
-  assert.match(defaultPrompt("reflect"), /不要延续上一刻的计划/);
-  assert.match(defaultPrompt("reflect"), /必须用中文/);
+  assert.match(defaultPrompt("reflect"), /有自己欲望/);
+  assert.match(defaultPrompt("reflect"), /plans/);
+  assert.match(defaultPrompt("reflect"), /第一人称/);
+  assert.doesNotMatch(defaultPrompt("reflect"), /不要延续上一刻的计划/);
   assert.match(defaultPrompt("archive"), /清然承诺/);
   assert.match(defaultPrompt("archive"), /同一承诺不重复记录/);
   assert.match(defaultPrompt("portrait"), /跨越多次/);
@@ -59,13 +60,15 @@ test("reflect archive portrait defaults close the memory loop", () => {
   assert.match(defaultPrompt("archive"), /第一人称/);
   assert.match(defaultPrompt("portrait"), /第一人称/);
   assert.match(defaultPrompt("portrait"), /设定/);
-  assert.match(defaultPrompt("reflect"), /只写对她的理解/);
-  assert.match(defaultPrompt("reflect"), /不要再推她学习/);
-  assert.match(defaultPrompt("reflect"), /第一人称/);
+  assert.match(defaultPrompt("reflect"), /所有"不……"都写在这里/);
   const voice = PROMPT_CATALOG.find((s) => s.key === "voice");
   const voiceBody = voice?.variants[0]?.messages.map((message) => message.content).join("\n") ?? "";
-  assert.match(voiceBody, /不要复述，也不要说明自己没做什么/);
+  assert.match(voiceBody, /【我此刻】/);
+  assert.match(voiceBody, /【我记得的】/);
+  assert.doesNotMatch(voiceBody, /不要复述/);
   assert.match(defaultPrompt("dusk"), /第一人称/);
   assert.match(defaultPrompt("synth"), /第一人称/);
-  assert.ok(voice?.placeholders.some((p) => p.token === "mind"));
+  assert.ok(voice?.placeholders.some((p) => p.token === "feel"));
+  assert.ok(voice?.placeholders.some((p) => p.token === "dossier"));
+  assert.equal(voice?.placeholders.some((p) => p.token === "mind"), false);
 });

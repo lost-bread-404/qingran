@@ -4,8 +4,7 @@ import { codeVersion, getBlockByHash, getCharterByHash, type ArchiveRefs, type R
 import { fromPgArray, getMeta } from "./store.ts";
 import { resolveTz } from "./tz.ts";
 import { coerceMind } from "./mind-parse.ts";
-import { EMPTY_MIND, type IndexItem, type Mind, type Note, type StoredMessage } from "./types.ts";
-import { noteAsIndex } from "./voice/retrieve.ts";
+import { EMPTY_MIND, type Mind, type Note, type StoredMessage } from "./types.ts";
 import { voiceInjectFromProfile } from "../types.ts";
 import { buildVoiceMessages } from "./voice/pack-build.ts";
 import { buildArchivistMessages } from "./archivist.ts";
@@ -200,27 +199,36 @@ export async function rebuildVoiceMessages(turnSeq: number): Promise<RebuildResu
   if (refs.mindTurnSeq && !mind) warnings.push("内心记录缺失");
   const liveMind = mind ?? EMPTY_MIND;
   const tz = resolveTz(refs.timeZone || (await getMeta()).timeZone);
-  const nowMs = (liveMind.updated_at ?? 0) + (refs.mindAgeMs || 0);
   const voiceBody = await promptBody(log?.promptHash ?? null, "voice");
+  const hasMoment = refs.momentFeel != null || refs.momentWant != null || refs.momentNow != null || refs.momentLonging != null;
   const inject = voiceInjectFromProfile({
-    injectMemories: refs.injectMemories !== false,
+    injectMind: hasMoment ? refs.injectMoment !== false : true,
     injectLongterm: refs.injectLongterm !== false,
     historyWindow: refs.historyWindow,
   });
+  const moment = hasMoment
+    ? {
+        feel: refs.momentFeel ?? "",
+        want: refs.momentWant ?? "",
+        now: refs.momentNow ?? "",
+        longing: refs.momentLonging ?? "",
+      }
+    : { feel: "", want: "", now: "", longing: "" };
   const messages = buildVoiceMessages({
     charter: charter ?? "",
     longtermOverride: block?.text ?? null,
     history,
     userText: user?.text ?? "",
-    mind: liveMind,
-    notes,
+    moment,
     clock: refs.clockText,
     timeZone: tz,
-    careHint: Boolean(refs.careHint),
-    nowMs,
-    stale: Boolean(refs.mindStale),
     voiceTemplate: voiceBody,
     inject,
+    showMemories: refs.injectMemories !== false && !hasMoment,
+    mindText: refs.mindStale ? "" : (liveMind.insight ?? ""),
+    memoriesText: notes.map((n) => n.text).join("\n"),
+    mind: liveMind,
+    notes,
   });
   return { messages, warnings };
 }
@@ -236,24 +244,15 @@ export async function rebuildReflectorInput(turnSeq: number): Promise<RebuildRes
   if (refs.charterHash && !charter) warnings.push("人设快照缺失");
   const block = refs.blockBHash ? await getBlockByHash(refs.blockBHash) : null;
   if (refs.blockBHash && !block) warnings.push("长期块快照缺失");
-  const relatedNotes = await notesInOrder(refs.relatedIds ?? [], t, warnings);
-  const relatedIndex: IndexItem[] = relatedNotes.map((n) => noteAsIndex(n));
   const recent = await messagesInOrder(refs.recentMessageIds ?? [], t, warnings);
-  const oldMind = refs.oldMindTurnSeq ? await loadMindAt(refs.oldMindTurnSeq) : EMPTY_MIND;
-  if (refs.oldMindTurnSeq && !oldMind) warnings.push("内心记录缺失");
   const tz = resolveTz(refs.timeZone);
+  const oldInnerText = typeof refs.oldInnerText === "string" ? refs.oldInnerText : "（空）";
   const packed = buildReflectorInput(
     {
       charter: charter ?? "",
-      selfSummary: "",
-      bondSummary: "",
-      portrait: [],
-      themes: [],
-      findings: [],
-      coreIndex: [],
+      dossier: "",
       clock: refs.clockText,
-      relatedIndex,
-      oldMind: oldMind ?? EMPTY_MIND,
+      oldInner: oldInnerText,
       conversation: formatReflectConversation(recent, tz),
     },
     await promptBody(log.promptHash, "reflect"),

@@ -1,23 +1,20 @@
 import { getSql } from "../../../db.ts";
-import { isNightNoiseBody } from "../../message-markup.ts";
 import { voiceInjectFromProfile } from "../../types.ts";
 import { now } from "../clock.ts";
-import { HISTORY_WINDOW, QR_VOICE_READS_DIARY, REFLECT_WINDOW } from "../config.ts";
+import { HISTORY_WINDOW, REFLECT_WINDOW } from "../config.ts";
 import { currentArchiveVars } from "../archivist.ts";
 import { buildReportData } from "../diary/report.ts";
 import {
   getMeta,
-  getMind,
+  getInner,
   getProfilePrompt,
   listDays,
   listFactors,
   listFindings,
   listHistoryWindow,
   listNotes,
-  listNotesByIds,
   listPortrait,
   listThemes,
-  listThemeWeeks,
   messagesOnDay,
   openIntentions,
 } from "../store.ts";
@@ -26,10 +23,9 @@ import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
 import { portraitInputVars } from "../voice/nightly.ts";
-import { buildVoiceMessages, formatMemories, voiceFacingSlots, voiceHistoryMessages } from "../voice/pack-build.ts";
-import { formatReflectConversation, reflectVars, type ReflectorParts } from "../voice/reflector.ts";
-import { getCoreIndexItems, getRelatedIndexItems } from "../voice/retrieve.ts";
-import type { Finding } from "../types.ts";
+import { buildVoiceMessages, dossierSections, voiceHistoryMessages } from "../voice/pack-build.ts";
+import { formatReflectConversation, reflectVars } from "../voice/reflector.ts";
+import { formatOldInner, momentForVoice } from "../mind-parse.ts";
 
 export type PromptPreview = {
   variantId: string;
@@ -60,31 +56,23 @@ async function profileData(): Promise<Record<string, unknown>> {
 }
 
 async function voicePreview(body: string | undefined): Promise<Omit<PromptPreview, "variantId">> {
-  const [meta, portrait, mind, charter, profile] = await Promise.all([
+  const [meta, portrait, inner, charter, profile] = await Promise.all([
     getMeta(),
     listPortrait(),
-    getMind(),
+    getInner(),
     getProfilePrompt(),
     profileData(),
   ]);
   const tz = resolveTz(meta.timeZone);
   const inject = voiceInjectFromProfile({
-    injectMemories: profile.injectMemories !== false,
+    injectMind: profile.injectMind !== false,
     injectLongterm: profile.injectLongterm !== false,
     historyWindow: typeof profile.historyWindow === "number" ? profile.historyWindow : HISTORY_WINDOW,
   });
   const history = await listHistoryWindow(null, inject.history);
-  const ids = mind.memory_ids ?? [];
-  let notes = ids.length ? (await listNotesByIds(ids)).filter((note) => note.status === "active") : [];
-  if (!notes.length) notes = (await listNotes({ status: "active", limit: 6 })).slice(0, 6);
   const clock = formatClock(now(), tz);
-  const facing = voiceFacingSlots({
-    selfSummary: meta.selfSummary,
-    bondSummary: meta.bondSummary,
-    portrait,
-    mind: mind.insight,
-    memories: formatMemories(notes, tz),
-  });
+  const moment = momentForVoice(inner, now(), inject.moment);
+  const dossier = dossierSections(meta.selfSummary, meta.bondSummary, portrait);
   const historyText =
     voiceHistoryMessages(history, inject.history)
       .map((message) => `${message.role === "user" ? "user" : "assistant"}：${message.content}`)
@@ -96,92 +84,44 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
     portrait,
     history,
     userText: "在吗",
-    mind,
-    notes,
+    moment,
     clock,
     timeZone: tz,
-    nowMs: now(),
     voiceTemplate: body,
     inject,
   });
   return {
     slots: {
-      ...facing,
-      mind: facing.mind || "（空，这一轮不会放【内心】）",
+      dossier,
+      feel: moment.feel,
+      want: moment.want,
+      longing: moment.longing,
+      now: moment.now,
       system_prompt: charter,
       clock,
       user_text: "在吗",
       history_messages: historyText,
     },
     messages,
-    note: "没有正在说的这一句，用户消息用「在吗」占位。记忆、画像、内心是发给回复模型前的文本，库里原文没改。",
+    note: "没有正在说的这一句，用户消息用「在吗」占位。档案和内心是发给回复模型前的文本，库里原文没改。",
   };
 }
 
-function findingLine(f: Finding, nameOf: (id: string) => string): string {
-  return f.kind === "recovery"
-    ? `- 「${nameOf(f.outcomeId)}」期间出现「${nameOf(f.antecedentId)}」后，常在 1–2 天内好转（${f.n11} 次）`
-    : `- 「${nameOf(f.antecedentId)}」之后${f.lag ? ` ${f.lag} 天内` : "当天"}常出现「${nameOf(f.outcomeId)}」（${f.n11} 次，是平时的 ${f.lift.toFixed(1)} 倍）`;
-}
-
 async function reflectSlots(): Promise<Record<string, string>> {
-  const [meta, history, portrait, charter, mind] = await Promise.all([
+  const [meta, history, portrait, charter, inner] = await Promise.all([
     getMeta(),
     listHistoryWindow(null, REFLECT_WINDOW),
     listPortrait(),
     getProfilePrompt(),
-    getMind(),
+    getInner(),
   ]);
   const tz = resolveTz(meta.timeZone);
-  const day = localDay(now(), tz);
-  const coreIndex = await getCoreIndexItems(day);
-  const coreIds = new Set(coreIndex.map((item) => item.id));
-  const rosieLast = history
-    .filter((message) => message.role === "user" && !isNightNoiseBody(message.text))
-    .slice(-4)
-    .map((message) => message.text);
-  const relatedIndex = await getRelatedIndexItems([...rosieLast, mind.insight].filter(Boolean).join("\n"), coreIds);
-  const themesPacked: ReflectorParts["themes"] = [];
-  const findingsPacked: Array<{ id: string; line: string }> = [];
-  if (QR_VOICE_READS_DIARY) {
-    const [themes, findings, weeks, factors] = await Promise.all([
-      listThemes(true),
-      listFindings(),
-      listThemeWeeks(),
-      listFactors(false),
-    ]);
-    const factorName = new Map(factors.map((factor) => [factor.id, factor.name]));
-    const nameOf = (id: string) => factorName.get(id) ?? id;
-    const weekMap = new Map<string, string>();
-    for (const week of weeks.slice().sort((a, b) => b.week.localeCompare(a.week))) {
-      if (!weekMap.has(week.themeId)) weekMap.set(week.themeId, `${week.week} 提到 ${week.mentions} 次`);
-    }
-    for (const theme of themes
-      .filter((row) => row.userFeedback !== "rejected")
-      .slice()
-      .sort((a, b) => a.id.localeCompare(b.id))
-      .slice(0, 8)) {
-      themesPacked.push({ ...theme, weekHint: weekMap.get(theme.id) });
-    }
-    for (const finding of findings
-      .filter((row) => row.userFeedback !== "rejected" && row.kind !== "cooccur" && row.tier === "finding")
-      .slice()
-      .sort((a, b) => a.id.localeCompare(b.id))
-      .slice(0, 5)) {
-      findingsPacked.push({ id: finding.id, line: findingLine(finding, nameOf) });
-    }
-  }
+  const at = now();
   return reflectVars({
     charter,
-    selfSummary: meta.selfSummary,
-    bondSummary: meta.bondSummary,
-    portrait,
-    themes: themesPacked,
-    findings: findingsPacked,
-    coreIndex,
-    clock: formatClock(now(), tz),
-    relatedIndex,
-    oldMind: mind,
+    dossier: dossierSections(meta.selfSummary, meta.bondSummary, portrait),
+    clock: formatClock(at, tz),
+    oldInner: formatOldInner(inner, at),
     conversation: formatReflectConversation(history, tz),
   });
 }

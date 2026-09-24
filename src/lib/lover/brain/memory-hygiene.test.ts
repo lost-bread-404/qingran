@@ -12,8 +12,8 @@ import {
   listQingranSelfNotes,
   sweepNamedPortraits,
 } from "./memory-hygiene.ts";
-import { EMPTY_MIND, type Note } from "./types.ts";
-import { getMeta, getMind, listPortrait, saveMind, upsertNote, upsertPortrait } from "./store.ts";
+import { EMPTY_INNER, type Note } from "./types.ts";
+import { getInner, getMeta, listPortrait, saveInner, upsertNote, upsertPortrait } from "./store.ts";
 
 function note(partial: Partial<Note> & Pick<Note, "id" | "text">): Note {
   return {
@@ -97,22 +97,36 @@ test("ensureMemoryHygiene clears mind once and does not delete portraits", async
       supportCount: 1,
       updatedAt: 1,
     });
-    await saveMind({ ...EMPTY_MIND, turn_seq: 9, insight: "旧洞察" }, 9);
+    await saveInner(
+      {
+        ...EMPTY_INNER,
+        feel: "旧心思",
+        longing: "还惦记着",
+        plans: [{ id: "p1", what: "以后问", trigger: "她提起", expires_at: 9, status: "open" }],
+        turn_seq: 9,
+        updated_at: 9,
+        longing_updated_at: 4,
+      },
+      9,
+    );
     await ensureMemoryHygiene();
     const portraits = await listPortrait();
     assert.equal(portraits.some((p) => p.topic === DROP_PORTRAIT_TOPICS[0]), true);
     assert.equal(portraits.some((p) => p.id === "p-keep"), true);
-    const mind = await getMind();
-    assert.equal(mind.turn_seq, 0);
-    assert.equal(mind.insight, "");
+    const inner = await getInner();
+    assert.equal(inner.turn_seq, 0);
+    assert.equal(inner.feel, "");
+    assert.equal(inner.longing, "还惦记着");
+    assert.equal(inner.plans[0]?.id, "p1");
     const meta = await getMeta();
     assert.ok(meta.hygieneMemoryLoopAt);
 
-    await saveMind({ ...EMPTY_MIND, turn_seq: 11, insight: "新洞察" }, 11);
+    await saveInner({ ...inner, feel: "新心思", turn_seq: 11, updated_at: 11 }, 11);
     await ensureMemoryHygiene();
-    const kept = await getMind();
+    const kept = await getInner();
     assert.equal(kept.turn_seq, 11);
-    assert.equal(kept.insight, "新洞察");
+    assert.equal(kept.feel, "新心思");
+    assert.equal(kept.longing, "还惦记着");
   } finally {
     await iso.close();
   }

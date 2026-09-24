@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { INDEX_CORE_MAX, INDEX_RELATED_MAX } from "../config.ts";
-import { EMPTY_MIND, type IndexItem, type Mind, type PortraitRow, type Theme } from "../types.ts";
+import { EMPTY_MIND, type IndexItem } from "../types.ts";
 import { coerceMind, insightDirectiveReason, validateMind } from "../mind-parse.ts";
 import { assembleRelatedIndex, resolveCoreIndex } from "./retrieve.ts";
 import { buildReflectorInput } from "./reflector.ts";
@@ -23,51 +23,12 @@ function item(id: string, extra: Partial<IndexItem> = {}): IndexItem {
   };
 }
 
-const portrait = (topic: string, id = topic): PortraitRow => ({
-  id,
-  topic,
-  body: `${topic}的样子`,
-  status: "active",
-  kind: "trait",
-  evidenceIds: [],
-  lastSeen: 0,
-  lastSupportedAt: 0,
-  supportCount: 1,
-  updatedAt: 0,
-});
-
-const theme = (id: string, name: string): Theme => ({
-  id,
-  name,
-  definition: `${name}的定义`,
-  version: 1,
-  status: "active",
-  mergedInto: null,
-  parentId: null,
-  userFeedback: null,
-  createdAt: 0,
-  updatedAt: 0,
-});
-
 function pack(over: Partial<Parameters<typeof buildReflectorInput>[0]> = {}) {
-  const mind: Mind = {
-    ...EMPTY_MIND,
-    insight: "她怕自己不够好",
-  };
   return buildReflectorInput({
     charter: "你就是清然。",
-    selfSummary: "我在医学院。",
-    bondSummary: "叫她小猫。",
-    portrait: [portrait("安慰", "p2"), portrait("压力", "p1")],
-    themes: [theme("t-b", "论文"), theme("t-a", "睡眠")],
-    findings: [
-      { id: "f-b", line: "- 「熬夜」之后常出现「启动困难」" },
-      { id: "f-a", line: "- 「运动」之后常好转" },
-    ],
-    coreIndex: [item("n2"), item("n1")],
+    dossier: "【我自己】\n我在医学院。\n【我们】\n叫她小猫。",
     clock: "2026/9/14周一 23:10",
-    relatedIndex: [item("n9")],
-    oldMind: mind,
+    oldInner: "feel：她怕自己不够好",
     conversation: "Rosie：又到十一点了",
     ...over,
   });
@@ -104,11 +65,7 @@ test("validateMind keeps insight and drops unknown memory ids", () => {
 });
 
 test("empty insight clears the mind instead of filling from previous", () => {
-  const next = validateMind(
-    { insight: "  ", memory_ids: [] },
-    { ...EMPTY_MIND, insight: "旧洞察" },
-    new Set(),
-  );
+  const next = validateMind({ insight: "  ", memory_ids: [] }, { ...EMPTY_MIND, insight: "旧洞察" }, new Set());
   assert.equal(next.insight, "");
   assert.deepEqual(next.memory_ids, []);
 });
@@ -120,11 +77,7 @@ test("validateMind clips insight without ellipsis", () => {
 });
 
 test("coerceMind keeps insight and drops leftover fields from old rows", () => {
-  const mind = coerceMind(
-    { insight: "深层", memory_ids: ["n1"], rosie_now: "表面", intent: "接话" },
-    3,
-    9,
-  );
+  const mind = coerceMind({ insight: "深层", memory_ids: ["n1"], rosie_now: "表面", intent: "接话" }, 3, 9);
   assert.equal(mind.insight, "深层");
   assert.deepEqual(mind.memory_ids, ["n1"]);
   assert.equal(mind.turn_seq, 3);
@@ -133,72 +86,47 @@ test("coerceMind keeps insight and drops leftover fields from old rows", () => {
   assert.equal("intent" in mind, false);
 });
 
-test("same day same notes: A and B byte-identical, C changes", () => {
-  const a = pack({ clock: "2026/9/14周一 23:10", conversation: "Rosie：第一句", oldMind: { ...EMPTY_MIND, insight: "a" } });
-  const b = pack({ clock: "2026/9/14周一 23:40", conversation: "Rosie：第二句", oldMind: { ...EMPTY_MIND, insight: "b" } });
+test("same day dossier: A and B byte-identical, C changes", () => {
+  const a = pack({ clock: "2026/9/14周一 23:10", conversation: "Rosie：第一句", oldInner: "feel：a" });
+  const b = pack({ clock: "2026/9/14周一 23:40", conversation: "Rosie：第二句", oldInner: "feel：b" });
   assert.equal(a.system, b.system);
   assert.equal(a.stable, b.stable);
   assert.notEqual(a.turn, b.turn);
 });
 
-test("A and B omit clock, old mind, and recent conversation", () => {
+test("A and B omit clock, old inner, and recent conversation", () => {
   const p = pack();
   for (const s of [p.system, p.stable]) {
     assert.equal(s.includes("2026/9/14周一 23:10"), false);
     assert.equal(s.includes("她怕自己不够好"), false);
     assert.equal(s.includes("Rosie：又到十一点了"), false);
-    assert.equal(s.includes("turn_seq"), false);
   }
   assert.match(p.turn, /2026\/9\/14周一 23:10/);
   assert.match(p.turn, /她怕自己不够好/);
   assert.match(p.turn, /Rosie：又到十一点了/);
-  assert.match(p.turn, /没有深层洞察时 insight 必须是空字符串/);
-  assert.match(p.system, /不要延续上一刻的计划/);
-  assert.match(p.system, /宁可空着/);
-});
-
-test("portrait themes findings core index sort is deterministic", () => {
-  const p = pack();
-  const portraitPos = p.stable.indexOf("压力：");
-  const comfortPos = p.stable.indexOf("安慰：");
-  assert.ok(portraitPos >= 0 && comfortPos > portraitPos);
-  const sleepPos = p.stable.indexOf("睡眠");
-  const paperPos = p.stable.indexOf("论文");
-  assert.ok(sleepPos >= 0 && paperPos > sleepPos);
-  const fa = p.stable.indexOf("运动");
-  const fb = p.stable.indexOf("熬夜");
-  assert.ok(fa >= 0 && fb > fa);
-  const n1 = p.stable.indexOf("n1|");
-  const n2 = p.stable.indexOf("n2|");
-  assert.ok(n1 >= 0 && n2 > n1);
-  assert.match(p.stable, /【她的长期规律·主题】/);
-  assert.match(p.stable, /【记忆 index · 核心】/);
-  assert.doesNotMatch(p.stable, /只输出 insight/);
+  assert.match(p.stable, /【我记得的】/);
+  assert.match(p.system, /有自己欲望/);
+  assert.doesNotMatch(p.system, /不要延续上一刻的计划/);
+  assert.doesNotMatch(p.turn, /不要复述/);
 });
 
 test("reflect user text comes from the template, not a hardcoded block", () => {
   const doc = defaultDoc("reflect");
   const variant = doc.variants[0];
   if (!variant) throw new Error("missing reflect variant");
-  variant.messages[1] = { role: "user", content: "自定义稳定 {self}" };
+  variant.messages[1] = { role: "user", content: "自定义稳定 {dossier}" };
   const packed = buildReflectorInput(
     {
       charter: "你就是清然。",
-      selfSummary: "我在医学院。",
-      bondSummary: "",
-      portrait: [],
-      themes: [],
-      findings: [],
-      coreIndex: [],
+      dossier: "我在医学院。",
       clock: "现在",
-      relatedIndex: [],
-      oldMind: EMPTY_MIND,
+      oldInner: "（空）",
       conversation: "",
     },
     serializeDoc(doc),
   );
   assert.equal(packed.stable, "自定义稳定 我在医学院。");
-  assert.match(packed.turn, /只输出 insight 和 memory_ids/);
+  assert.match(packed.turn, /【上一次的心思】/);
   assert.doesNotMatch(packed.stable, /【我自己】/);
 });
 

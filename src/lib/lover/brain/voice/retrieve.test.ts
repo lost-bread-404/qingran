@@ -4,7 +4,6 @@ import MiniSearch from "minisearch";
 import { formatIndexLine, tokenizeMemory } from "../text.ts";
 import { bumpNotesVersion, listIndexNotes, patchMeta, upsertNote } from "../store.ts";
 import type { Note } from "../types.ts";
-import { EMPTY_MIND } from "../types.ts";
 import { openIsolatedSql } from "../eval-db.ts";
 import { setClock } from "../clock.ts";
 import { sha256Text } from "../log-refs.ts";
@@ -232,17 +231,12 @@ test("archive without dusk does not change reflector block B", async () => {
     assert.ok(first.length >= 1);
     const parts = {
       charter: "你就是清然。",
-      selfSummary: "医学院",
-      bondSummary: "小猫",
-      portrait: [],
-      themes: [],
-      findings: [],
+      dossier: "【我自己】\n医学院\n【我们】\n小猫",
       clock: "x",
-      relatedIndex: [],
-      oldMind: EMPTY_MIND,
+      oldInner: "（空）",
       conversation: "hi",
     };
-    const hash1 = sha256Text(buildReflectorInput({ ...parts, coreIndex: first }).stable);
+    const hash1 = sha256Text(buildReflectorInput(parts).stable);
 
     await upsertNote(note("new-today", "今晚她说想吃火锅，这是今天新归档的"));
     await bumpNotesVersion();
@@ -253,7 +247,7 @@ test("archive without dusk does not change reflector block B", async () => {
     );
     assert.equal(second.some((i) => i.id === "new-today"), false);
     const hash2 = sha256Text(
-      buildReflectorInput({ ...parts, coreIndex: second, clock: "later", conversation: "bye" }).stable,
+      buildReflectorInput({ ...parts, clock: "later", conversation: "bye" }).stable,
     );
     assert.equal(hash2, hash1);
   } finally {

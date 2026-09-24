@@ -123,12 +123,22 @@ async function mockReply(name: string, input: string): Promise<unknown> {
     }
     return { ops };
   }
-  if (name === "mind") {
-    const last = [...input.matchAll(/Rosie[^：:\n]*[：:]\s*(.+)/g)].pop()?.[1] ?? "";
-    const ids = [...input.matchAll(/^([\w:-]+)\|/gm)].map((m) => m[1]).slice(0, 3);
+  if (name === "inner" || name === "mind") {
+    if (name === "mind") {
+      const last = [...input.matchAll(/Rosie[^：:\n]*[：:]\s*(.+)/g)].pop()?.[1] ?? "";
+      const ids = [...input.matchAll(/^([\w:-]+)\|/gm)].map((m) => m[1]).slice(0, 3);
+      return {
+        insight: last ? "她把累说成懒，其实是怕自己不够好" : "",
+        memory_ids: ids,
+      };
+    }
     return {
-      insight: last ? "她把累说成懒，其实是怕自己不够好" : "",
-      memory_ids: ids,
+      feel: "想靠近一点",
+      want: "想被她靠着",
+      choice: "先听她说完，不把话题转走",
+      now: "听她把今天说完",
+      longing: "想陪她把这周过完",
+      plans: [],
     };
   }
   if (name === "day_log") {
@@ -172,7 +182,7 @@ globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
   };
   const name = body.text?.format?.name ?? "voice";
   const input = (body.input ?? body.messages ?? []).map((m) => m.content).join("\n");
-  if (name === "mind" && Array.isArray(body.input)) {
+  if ((name === "inner" || name === "mind") && Array.isArray(body.input)) {
     const A = body.input.find((m) => m.role === "system")?.content ?? "";
     const users = body.input.filter((m) => m.role === "user");
     const B = users[0]?.content ?? "";
@@ -258,10 +268,14 @@ async function main() {
       await enqueuePeriodicIfDue(t.at, TZ);
       const ran = await drainJobs(LONG_DRAIN_MS);
       show("slow path 执行的 job 数", ran);
-      const mind = await S.getMind();
-      show("Reflector 写入的 mind", {
-        insight: mind.insight,
-        memory_ids: mind.memory_ids,
+      const inner = await S.getInner();
+      show("Reflector 写入的内心", {
+        feel: inner.feel,
+        want: inner.want,
+        choice: inner.choice,
+        now: inner.now,
+        longing: inner.longing,
+        plans: inner.plans.filter((plan) => plan.status === "open").map((plan) => plan.id),
       });
       (result.turns as unknown[]).push({
         i: i + 1,
@@ -272,8 +286,8 @@ async function main() {
         mindStale: ctx.mindStale,
       });
       if (i === 4) {
-        if (/【内心】/.test(tail?.content ?? "")) {
-          failures.push("1.5 stale insight was injected");
+        if (/【我此刻】/.test(tail?.content ?? "") && ctx.mindStale) {
+          failures.push("stale moment was injected");
         }
       }
     }

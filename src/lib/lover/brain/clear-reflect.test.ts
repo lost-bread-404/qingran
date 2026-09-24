@@ -7,17 +7,17 @@ import {
   claimJob,
   clearRecentConversation,
   finishReflectJob,
-  getMind,
+  getInner,
   listHistoryWindow,
   listRecentMessages,
   markArchived,
-  saveMind,
+  saveInner,
   sql,
   upsertMessage,
   upsertNote,
   upsertReflectJob,
 } from "./store.ts";
-import { EMPTY_MIND, type Note } from "./types.ts";
+import { EMPTY_INNER, type InnerPlan, type Note } from "./types.ts";
 
 const TZ = "America/New_York";
 
@@ -58,7 +58,28 @@ test("clear keeps archived notes and only forgets unarchived turns", async () =>
     setClock(() => t1);
     await upsertMessage({ id: "new-u", role: "user", text: "刚说的", createdAt: t1, timeZone: TZ });
     await upsertMessage({ id: "new-a", role: "assistant", text: "还没归档", createdAt: t1 + 1, timeZone: TZ });
-    await saveMind({ ...EMPTY_MIND, turn_seq: t1, insight: "刚说的" }, t1);
+    const keptPlan: InnerPlan = {
+      id: "p1",
+      what: "明天早上问她睡得怎么样",
+      trigger: "她醒来",
+      expires_at: tClear + 86_400_000,
+      status: "open",
+    };
+    await saveInner(
+      {
+        ...EMPTY_INNER,
+        feel: "刚说的",
+        want: "想抱",
+        choice: "先听",
+        now: "听她说",
+        longing: "一直惦记",
+        plans: [keptPlan],
+        turn_seq: t1,
+        updated_at: t1,
+        longing_updated_at: t0,
+      },
+      t1,
+    );
 
     setClock(() => tClear);
     await clearRecentConversation();
@@ -67,9 +88,15 @@ test("clear keeps archived notes and only forgets unarchived turns", async () =>
     assert.equal(screen.length, 0);
     const history = await listHistoryWindow(null, 40);
     assert.equal(history.length, 0);
-    const mind = await getMind();
-    assert.equal(mind.turn_seq, 0);
-    assert.equal(mind.insight, "");
+    const inner = await getInner();
+    assert.equal(inner.turn_seq, 0);
+    assert.equal(inner.feel, "");
+    assert.equal(inner.want, "");
+    assert.equal(inner.choice, "");
+    assert.equal(inner.now, "");
+    assert.equal(inner.longing, "一直惦记");
+    assert.equal(inner.plans[0]?.id, "p1");
+    assert.equal(inner.plans[0]?.status, "open");
 
     const rows = await (await sql()).query<{ id: string; forgotten_at: number | null; archived_at: number | null }>(
       `select id, forgotten_at, archived_at from qingran_messages order by id`,

@@ -1,7 +1,7 @@
 import { getSql } from "../../db.ts";
 import { now } from "./clock.ts";
 import { DROP_PORTRAIT_TOPICS } from "./portrait-kind.ts";
-import { getMeta, listNotes, patchMeta, resetMind, bumpNotesVersion, pgTextArray } from "./store.ts";
+import { getMeta, listNotes, patchMeta, resetInnerTurn, bumpNotesVersion, pgTextArray } from "./store.ts";
 import type { Note, Subject } from "./types.ts";
 
 export { DROP_PORTRAIT_TOPICS };
@@ -79,7 +79,7 @@ export async function ensureMemoryHygiene(): Promise<void> {
   const meta = await getMeta();
   if (meta.hygieneMemoryLoopAt) return;
   try {
-    await resetMind();
+    await resetInnerTurn();
     await patchMeta({ hygieneMemoryLoopAt: now() });
   } catch (err) {
     console.error("[hygiene] failed", err);

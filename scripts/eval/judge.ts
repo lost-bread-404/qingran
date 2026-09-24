@@ -18,6 +18,7 @@ export type QingranScores = {
   expressed_own_view: 0 | 1;
   repeated_phrase: 0 | 1;
   handed_back: 0 | 1;
+  meta_narration: 0 | 1;
   felt_seen: number;
   logic: number;
   agency: number;
@@ -34,6 +35,7 @@ const BINARY = [
   "expressed_own_view",
   "repeated_phrase",
   "handed_back",
+  "meta_narration",
 ] as const;
 
 const SCALE = [

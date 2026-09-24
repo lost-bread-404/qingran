@@ -26,6 +26,11 @@ export type VoiceRefs = {
   mindAgeMs: number;
   injectMemories?: boolean;
   injectLongterm?: boolean;
+  injectMoment?: boolean;
+  momentFeel?: string;
+  momentWant?: string;
+  momentNow?: string;
+  momentLonging?: string;
   historyWindow?: number;
 };
 
@@ -34,6 +39,7 @@ export type ReflectRefs = {
   blockBHash: string;
   relatedIds: string[];
   oldMindTurnSeq: number;
+  oldInnerText?: string;
   recentMessageIds: string[];
   clockText: string;
   timeZone: string;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { EMPTY_MIND } from "../types.ts";
+import { EMPTY_MOMENT } from "./pack-build.ts";
 import { classifyVoiceModelFallback, runVoiceWithFallback, type VoiceStreamFn } from "./voice-fallback.ts";
 import type { VoicePackParts } from "./pack-build.ts";
 import type { TalkStreamEvent, TalkStreamResult } from "../../stream-talk.ts";
@@ -14,18 +14,10 @@ function parts(): VoicePackParts {
     longterm: "【我自己】医学生",
     history: [],
     userText: "在吗",
-    mind: {
-      ...EMPTY_MIND,
-      turn_seq: 1,
-      insight: "她把累说成懒，其实是怕自己不够好",
-    },
-    notes: [],
+    moment: { ...EMPTY_MOMENT, now: "听她把今天说完" },
     clockText: "星期二 21:00",
     timeZone: "UTC",
-    careHint: false,
     nowMs: 1,
-    mindStale: false,
-    jump: false,
   };
 }
 
@@ -158,12 +150,12 @@ test("both models empty then strip mind on primary", async () => {
   const out = await run(stream, (e) => forwarded.push(e));
   assert.equal(out.failed, false);
   assert.equal(out.speech, "在");
-  assert.equal(out.usedStrip, "mind");
+  assert.equal(out.usedStrip, "moment");
   assert.equal(out.attempts.length, 3);
   assert.deepEqual(models, ["primary-model", "safety-model", "primary-model"]);
-  assert.match(bodies[0]!, /【内心】/);
-  assert.match(bodies[1]!, /【内心】/);
-  assert.doesNotMatch(bodies[2]!, /【内心】/);
+  assert.match(bodies[0]!, /【我此刻】/);
+  assert.match(bodies[1]!, /【我此刻】/);
+  assert.doesNotMatch(bodies[2]!, /【我此刻】/);
   assert.equal(forwarded.some((e) => e.t === "err"), false);
 });
 
@@ -180,7 +172,7 @@ test("primary empty then safety http still strips mind on primary", async () => 
   };
   const out = await run(stream);
   assert.equal(out.failed, false);
-  assert.equal(out.usedStrip, "mind");
+  assert.equal(out.usedStrip, "moment");
   assert.equal(out.modelFallback?.reason, "empty");
   assert.deepEqual(models, ["primary-model", "safety-model", "primary-model"]);
 });
@@ -196,7 +188,7 @@ test("same model skip safety and only strip content", async () => {
   };
   const out = await run(stream, () => undefined, { primary, safety: primary });
   assert.equal(out.failed, false);
-  assert.equal(out.usedStrip, "mind");
+  assert.equal(out.usedStrip, "moment");
   assert.equal(out.modelFallback, null);
   assert.deepEqual(models, ["primary-model", "primary-model"]);
   assert.deepEqual(flags, [true, true]);

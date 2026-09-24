@@ -44,15 +44,14 @@ test("messagesFromStored reads messages, system+user parts, and truncated previe
   assert.equal(messagesFromStored(null), null);
 });
 
-test("splitMindHighlight marks the inner block and the line in front of it", () => {
-  const content = "现在是晚上。\n\n这是我对她的理解，不是要我说出来的话，不要复述，也不要说明自己没做什么。\n【内心】\n她需要被抱着\n\n【可以用的记忆】\n无\n\n说话要有逻辑";
+test("splitMindHighlight marks the moment block", () => {
+  const content = "现在是晚上。\n\n【我此刻】\n心里：想抱着你\n这些是我没说出口的心思。我说的话和做的动作，都从这里长出来。\n\n【我记得的】\n无";
   const parts = splitMindHighlight(content);
   assert.equal(parts.filter((part) => part.mind).length, 1);
-  assert.match(parts.find((part) => part.mind)?.text ?? "", /【内心】/);
-  assert.match(parts.find((part) => part.mind)?.text ?? "", /不要复述/);
-  assert.match(parts.find((part) => part.mind)?.text ?? "", /被抱着/);
-  assert.doesNotMatch(parts.find((part) => part.mind)?.text ?? "", /可以用的记忆/);
-  assert.match(parts.at(-1)?.text ?? "", /说话要有逻辑/);
+  assert.match(parts.find((part) => part.mind)?.text ?? "", /【我此刻】/);
+  assert.match(parts.find((part) => part.mind)?.text ?? "", /想抱着你/);
+  assert.match(parts.find((part) => part.mind)?.text ?? "", /没说出口/);
+  assert.doesNotMatch(parts.find((part) => part.mind)?.text ?? "", /我记得的/);
 });
 
 test("formatCallLogPlain includes input and output sections", () => {

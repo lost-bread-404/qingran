@@ -7,7 +7,7 @@ import {
   bumpNotesVersion,
   getDay,
   getMeta,
-  getMind,
+  getInner,
   getNote,
   getReport,
   getTheme,
@@ -31,7 +31,7 @@ import {
   notesForDay,
   notesForTheme,
   patchMeta,
-  resetMind,
+  resetInnerTurn,
   setFactorFeedback,
   setFindingFeedback,
   setThemeFeedback,
@@ -246,7 +246,7 @@ export const brainGetLongLayer = createServerFn({ method: "GET" }).handler(async
   const [portrait, meta, mind, log] = await Promise.all([
     listPortrait(),
     getMeta(),
-    getMind(),
+    getInner(),
     listBrainLog(80),
   ]);
   const evidenceIds = [...new Set(portrait.flatMap((row) => row.evidenceIds))];
@@ -266,6 +266,7 @@ export const brainGetLongLayer = createServerFn({ method: "GET" }).handler(async
     self: meta.selfSummary,
     bond: meta.bondSummary,
     mind,
+    inner: mind,
     log,
   };
 });
@@ -369,7 +370,7 @@ export const brainDeletePortrait = createServerFn({ method: "POST" })
   });
 
 export const brainResetMind = createServerFn({ method: "POST" }).handler(async () => {
-  await resetMind();
+  await resetInnerTurn();
   return { ok: true as const };
 });
 

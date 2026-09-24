@@ -38,6 +38,41 @@ export const EMPTY_MIND: Mind = {
   memory_ids: [],
 };
 
+export type InnerPlanStatus = "open" | "done" | "dropped";
+
+export type InnerPlan = {
+  id: string;
+  what: string;
+  trigger: string;
+  expires_at: number;
+  status: InnerPlanStatus;
+};
+
+/** Private inner state. The reply sees feel / want / now / longing only. */
+export type InnerState = {
+  feel: string;
+  want: string;
+  choice: string;
+  now: string;
+  longing: string;
+  plans: InnerPlan[];
+  turn_seq: number;
+  updated_at: number;
+  longing_updated_at: number;
+};
+
+export const EMPTY_INNER: InnerState = {
+  feel: "",
+  want: "",
+  choice: "",
+  now: "",
+  longing: "",
+  plans: [],
+  turn_seq: 0,
+  updated_at: 0,
+  longing_updated_at: 0,
+};
+
 export type PortraitKind = "trait" | "episode" | "seed";
 export type PortraitStatus = "active" | "stale" | "superseded";
 

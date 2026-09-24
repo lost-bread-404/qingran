@@ -6,7 +6,7 @@ import {
   listActiveNotes,
   listPortrait,
   patchMeta,
-  resetMind,
+  resetInnerTurn,
   forgetAllMessages,
   upsertNote,
   upsertPortrait,
@@ -71,7 +71,7 @@ export async function importStorySeed(data: StorySeed = loadStorySeed()): Promis
   await db.query("delete from mem_notes");
   await db.query("delete from mem_history");
   await db.query("delete from qr_portrait");
-  await resetMind();
+  await resetInnerTurn();
   await forgetAllMessages(ts);
 
   for (const row of data.portrait) {

@@ -115,10 +115,14 @@ export function clampHistoryWindow(value: unknown, fallback = HISTORY_WINDOW): n
   if (!Number.isFinite(n)) return fallback;
   return Math.max(HISTORY_WINDOW_MIN, Math.min(HISTORY_WINDOW_MAX, Math.round(n)));
 }
-export const REFLECT_WINDOW = 12;
+export const REFLECT_WINDOW = 16;
 export const ARCHIVE_BATCH_MAX = 40;
 export const ARCHIVE_MIN_OVERFLOW = 8;
 export const SESSION_GAP_MS = 30 * 60_000;
+/** longing stays in the reply for a week after the text last changed. */
+export const LONGING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const PLAN_OPEN_MAX = 5;
+export const PLAN_MAX_HOURS = 72;
 export const INDEX_MAX_ITEMS = 150;
 export const INDEX_CORE_MAX = 60; // 放在 Reflector B 段（可缓存）
 export const INDEX_RELATED_MAX = 30; // 放在 Reflector C 段（每轮变化）

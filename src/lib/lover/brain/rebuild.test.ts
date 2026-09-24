@@ -72,7 +72,7 @@ test("rebuild matches captured voice/reflect/archive bodies after later mutation
     };
     assert.equal(body.store, false);
     const name = body.text?.format?.name ?? "";
-    if (name === "mind") captured.reflect.push(JSON.stringify(body.input ?? []));
+    if (name === "inner" || name === "mind") captured.reflect.push(JSON.stringify(body.input ?? []));
     if (name === "archive_ops") captured.archive.push(JSON.stringify(body.input ?? []));
     const lastUser = [...(body.input ?? [])].reverse().find((m) => m.role === "user")?.content ?? "";
     const ids = [...lastUser.matchAll(/^([\w:-]+)\|/gm)].map((m) => m[1]!).slice(0, 3);
