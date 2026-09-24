@@ -67,6 +67,8 @@ export type Profile = {
   portraitStaleDays: number;
   /** Content words a retrieved note must share with this turn. 1–6, default 1. Filler words do not count. */
   retrieveMinTerms: number;
+  /** iOS only. When on, a phone call uses CallKit so it survives background and the lock screen. */
+  callKitBackground: boolean;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -154,6 +156,7 @@ export const DEFAULT_PROFILE: Profile = {
   portraitActiveMax: PORTRAIT_ACTIVE_MAX,
   portraitStaleDays: PORTRAIT_STALE_DAYS,
   retrieveMinTerms: RETRIEVE_MIN_TERMS,
+  callKitBackground: false,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -192,6 +195,7 @@ type LooseProfile = Partial<Profile> & {
   portraitActiveMax?: number;
   portraitStaleDays?: number;
   retrieveMinTerms?: number;
+  callKitBackground?: boolean;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -228,6 +232,7 @@ export function lockedProfile(input?: unknown): Profile {
     portraitActiveMax: clampPortraitActiveMax(raw.portraitActiveMax),
     portraitStaleDays: clampPortraitStaleDays(raw.portraitStaleDays),
     retrieveMinTerms: clampRetrieveMinTerms(raw.retrieveMinTerms),
+    callKitBackground: raw.callKitBackground === true,
   };
 }
 

@@ -167,6 +167,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
   const [injectMemories, setInjectMemories] = useState(profile.injectMemories);
   const [injectLongterm, setInjectLongterm] = useState(profile.injectLongterm);
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
+  const [callKitBackground, setCallKitBackground] = useState(profile.callKitBackground);
   const [keytermDraft, setKeytermDraft] = useState(profile.sttKeyterms.join("\n"));
   const historySyncRef = useRef(0);
   const [hygieneNotes, setHygieneNotes] = useState<Array<{ id: string; text: string; subject: string; localDay: string }>>([]);
@@ -194,6 +195,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
     setInjectMemories(profile.injectMemories);
     setInjectLongterm(profile.injectLongterm);
     setHistoryWindow(profile.historyWindow);
+    setCallKitBackground(profile.callKitBackground);
     setPortraitActiveMax(String(profile.portraitActiveMax));
     setPortraitStaleDays(String(profile.portraitStaleDays));
     setRetrieveMinTerms(String(profile.retrieveMinTerms));
@@ -322,6 +324,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
       injectMemories,
       injectLongterm,
       historyWindow,
+      callKitBackground,
       sttKeyterms: lockSttKeyterms(keytermDraft.split("\n")),
       portraitActiveMax: clampPortraitActiveMax(portraitActiveMax),
       portraitStaleDays: clampPortraitStaleDays(portraitStaleDays),
@@ -1141,6 +1144,24 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
       ) : tab === "hearing" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
+            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={callKitBackground}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setCallKitBackground(next);
+                  persistProfile({ callKitBackground: next });
+                }}
+              />
+              <span>
+                <span className="block text-sm">切到后台也继续通话</span>
+                <span className="block text-xs text-subtle">
+                  开启后会显示系统通话界面，锁屏或切到其他 app 也不会断。
+                </span>
+              </span>
+            </label>
             <HearingSensePanel
               sense={sense}
               labPassword={labPassword}

@@ -60,9 +60,11 @@ type Options = {
   isGenerating?: () => boolean;
   isLabeling?: () => boolean;
   onStuck?: (info: { phase: string; deaf: boolean }) => void;
+  /** iOS CallKit. Off by default so the call stays on Qingran's page. */
+  callKitBackground?: boolean;
 };
 
-export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck }: Options) {
+export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck, callKitBackground }: Options) {
   const [active, setActive] = useState(false);
   const [phase, setPhase] = useState<CallPhase>("idle");
   const [level, setLevel] = useState(0);
@@ -111,6 +113,8 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const interimRef = useRef("");
   const framesRef = useRef<ProsodyFrame[]>([]);
   const nativeHangupRef = useRef(false);
+  const callKitRef = useRef(Boolean(callKitBackground));
+  callKitRef.current = Boolean(callKitBackground);
   const speechStartWallRef = useRef(0);
   const heartbeatRef = useRef(0);
   const recognizingRef = useRef(false);
@@ -199,7 +203,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
       /* ignore */
     }
     wakeLockRef.current = null;
-    if (!nativeHangupRef.current) nativeEndCall();
+    if (!nativeHangupRef.current) nativeEndCall(callKitRef.current);
     if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
     heartbeatRef.current = 0;
   }, [teardownMedia]);
@@ -592,7 +596,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const start = useCallback(async () => {
     if (liveRef.current) return;
     setError(null);
-    nativeStartCall();
+    nativeStartCall(callKitRef.current);
     void unlockPlayback();
     try {
       const stream = await acquireMicFromGesture();
@@ -619,7 +623,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
         }
       }
     } catch (err) {
-      nativeEndCall();
+      nativeEndCall(callKitRef.current);
       setError(micFailHint(err));
       hangup();
       return;

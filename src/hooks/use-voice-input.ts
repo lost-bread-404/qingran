@@ -22,6 +22,7 @@ import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
 import { holdThreshold, nextFloor } from "@/lib/lover/vad";
 import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
+import { nativePrepareHoldToTalk } from "@/lib/lover/native-shell";
 
 export type VoiceInputStatus = "idle" | "recording" | "transcribing";
 
@@ -169,6 +170,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
     try {
       if (recorderSupported) {
+        nativePrepareHoldToTalk();
         const stream = await acquireMicFromGesture();
         if (session !== sessionRef.current) return;
         mediaRef.current = stream;

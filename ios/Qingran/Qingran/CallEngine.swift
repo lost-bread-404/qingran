@@ -17,7 +17,6 @@ final class CallEngine: NSObject, ObservableObject {
 
   override init() {
     let config = CXProviderConfiguration()
-    config.localizedName = QingranConfig.displayName
     config.supportsVideo = false
     config.maximumCallGroups = 1
     config.maximumCallsPerCallGroup = 1
@@ -35,7 +34,7 @@ final class CallEngine: NSObject, ObservableObject {
       try session.setCategory(
         .playAndRecord,
         mode: .voiceChat,
-        options: [.allowBluetooth, .defaultToSpeaker]
+        options: [.allowBluetoothHFP, .defaultToSpeaker]
       )
       try session.setActive(true, options: [])
     } catch {

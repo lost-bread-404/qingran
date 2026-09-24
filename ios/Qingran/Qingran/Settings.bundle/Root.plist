@@ -12,7 +12,7 @@
 			<key>Title</key>
 			<string>清然网页</string>
 			<key>FooterText</key>
-			<string>改完后请完全关掉清然再打开。必须是你正在用的那个 grok.me 地址，记忆才还在。</string>
+			<string>改完后请完全关掉清然再打开。默认 qingran.app。</string>
 		</dict>
 		<dict>
 			<key>Type</key>

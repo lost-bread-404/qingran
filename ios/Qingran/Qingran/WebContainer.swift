@@ -104,6 +104,8 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       CallEngine.shared.startCall()
     case "endCall":
       CallEngine.shared.endCallFromWeb()
+    case "prepareAudio":
+      CallEngine.shared.prepareAudioSession()
     case "changeURL":
       DispatchQueue.main.async { self.onChangeURL() }
     default:
@@ -180,20 +182,9 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     window.QingranNative = {
       present: true,
       startCall: function () { post('startCall'); },
-      endCall: function () { post('endCall'); }
+      endCall: function () { post('endCall'); },
+      prepareAudio: function () { post('prepareAudio'); }
     };
-    try {
-      var devices = navigator.mediaDevices;
-      if (devices && devices.getUserMedia) {
-        var orig = devices.getUserMedia.bind(devices);
-        devices.getUserMedia = function (constraints) {
-          try {
-            if (constraints && constraints.audio) post('startCall');
-          } catch (e) {}
-          return orig(constraints);
-        };
-      }
-    } catch (e) {}
   })();
   """
 }

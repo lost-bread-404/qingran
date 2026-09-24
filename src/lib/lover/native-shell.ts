@@ -2,12 +2,25 @@ export type NativeBridge = {
   present?: boolean;
   startCall?: () => void;
   endCall?: () => void;
+  prepareAudio?: () => void;
 };
 
 declare global {
   interface Window {
     QingranNative?: NativeBridge;
   }
+}
+
+export type NativeCallStart = "startCall" | "prepareAudio";
+export type NativeCallEnd = "endCall" | "none";
+
+/** CallKit only when Rosie turned on background calls. Otherwise just arm the audio session. */
+export function nativeCallPlan(callKitBackground: boolean): {
+  callStart: NativeCallStart;
+  callEnd: NativeCallEnd;
+} {
+  if (callKitBackground) return { callStart: "startCall", callEnd: "endCall" };
+  return { callStart: "prepareAudio", callEnd: "none" };
 }
 
 export function isNativeShell() {
@@ -20,22 +33,44 @@ export function isNativeShell() {
   }
 }
 
-export function nativeStartCall() {
-  if (!isNativeShell()) return;
+function post(fn: ((bridge: NativeBridge) => void) | null) {
+  if (!isNativeShell() || !fn) return;
   try {
-    window.QingranNative?.startCall?.();
+    const bridge = window.QingranNative;
+    if (bridge) fn(bridge);
   } catch {
     /* web */
   }
 }
 
-export function nativeEndCall() {
-  if (!isNativeShell()) return;
-  try {
-    window.QingranNative?.endCall?.();
-  } catch {
-    /* web */
-  }
+export function nativePrepareAudio() {
+  post((bridge) => bridge.prepareAudio?.());
+}
+
+export function nativeStartCall(callKitBackground: boolean) {
+  const plan = nativeCallPlan(callKitBackground);
+  if (plan.callStart === "startCall") post((bridge) => bridge.startCall?.());
+  else nativePrepareAudio();
+}
+
+export function nativeEndCall(callKitBackground: boolean) {
+  const plan = nativeCallPlan(callKitBackground);
+  if (plan.callEnd === "none") return;
+  post((bridge) => bridge.endCall?.());
+}
+
+let holdAudioPrepared = false;
+
+/** First push-to-talk of this page posts prepareAudio. Later holds do not. */
+export function nativePrepareHoldToTalk() {
+  if (holdAudioPrepared) return false;
+  holdAudioPrepared = true;
+  nativePrepareAudio();
+  return true;
+}
+
+export function resetNativeHoldPrep() {
+  holdAudioPrepared = false;
 }
 
 export function listenNativeHangup(onHangup: () => void) {
