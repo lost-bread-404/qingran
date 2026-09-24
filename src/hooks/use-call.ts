@@ -156,7 +156,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
     }
     pcmTapRef.current = null;
     try {
-      recorderRef.current?.state === "recording" && recorderRef.current.stop();
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     } catch {
       /* ignore */
     }
@@ -290,7 +290,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
 
   const abortUtterance = useCallback(() => {
     try {
-      recorderRef.current?.state === "recording" && recorderRef.current.stop();
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     } catch {
       /* ignore */
     }
@@ -335,7 +335,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
       const fallback = wav ? null : await collectRecording();
       if (wav) {
         try {
-          recorderRef.current?.state === "recording" && recorderRef.current.stop();
+          if (recorderRef.current?.state === "recording") recorderRef.current.stop();
         } catch {
           /* ignore */
         }
@@ -496,16 +496,20 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
         }
       }
     } else if (phaseRef.current === "speaking-you") {
-      shouldEndUtterance({
-        now,
-        startAt: speechStartRef.current,
-        lastVoiceAt: lastVoiceRef.current,
-        voiced: false,
-        hasText: Boolean((finalTextRef.current || interimRef.current).trim()),
-        lastTextAt: lastTextAtRef.current,
-        silenceMs: getHearingSession().silenceMs,
-        maxUtteranceMs: getHearingSession().sense.maxUtteranceMs,
-      }) && void flushUtterance();
+      if (
+        shouldEndUtterance({
+          now,
+          startAt: speechStartRef.current,
+          lastVoiceAt: lastVoiceRef.current,
+          voiced: false,
+          hasText: Boolean((finalTextRef.current || interimRef.current).trim()),
+          lastTextAt: lastTextAtRef.current,
+          silenceMs: getHearingSession().silenceMs,
+          maxUtteranceMs: getHearingSession().sense.maxUtteranceMs,
+        })
+      ) {
+        void flushUtterance();
+      }
     }
     rafRef.current = requestAnimationFrame(tick);
   }, [abortUtterance, beginUtterance, flushUtterance]);
@@ -661,7 +665,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
     void pcmTapRef.current?.stop();
     if (phaseRef.current === "speaking-you") {
       try {
-        recorderRef.current?.state === "recording" && recorderRef.current.stop();
+        if (recorderRef.current?.state === "recording") recorderRef.current.stop();
       } catch {
         /* ignore */
       }
@@ -758,7 +762,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
 
     if (phaseRef.current === "speaking-you") {
       try {
-        recorderRef.current?.state === "recording" && recorderRef.current.stop();
+        if (recorderRef.current?.state === "recording") recorderRef.current.stop();
       } catch {
         /* ignore */
       }

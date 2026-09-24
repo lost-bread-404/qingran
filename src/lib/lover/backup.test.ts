@@ -124,7 +124,7 @@ test("migrates legacy voiceChat into voiceModel and voiceEffort", () => {
   assert.equal(lockedProfile().voiceEffort, "low");
   assert.equal(lockedProfile().injectMemories, true);
   assert.equal(lockedProfile().injectLongterm, true);
-  assert.equal(lockedProfile().historyWindow, 40);
+  assert.equal(lockedProfile().historyWindow, 20);
   assert.equal(lockedProfile({ injectMemories: false, injectLongterm: false, historyWindow: 0 }).historyWindow, 0);
   assert.equal(lockedProfile({ historyWindow: 99 }).historyWindow, 80);
   assert.equal(lockedProfile({ injectMemories: false }).injectMemories, false);

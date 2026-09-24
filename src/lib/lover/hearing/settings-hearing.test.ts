@@ -507,7 +507,7 @@ test("hold-to-talk teardown releases the mic; call hangup does too; deafen does 
 
 test("idle hide/show does not write the audio session or grab the mic", () => {
   const src = readFileSync(new URL("../../../components/lover/voice-room.tsx", import.meta.url), "utf8");
-  const bg = src.slice(src.indexOf("onBackground:"), src.indexOf("async function sweepOverflow"));
+  const bg = src.slice(src.indexOf("onBackground:"), src.indexOf("function resumeCallListen"));
   assert.match(bg, /callActiveRef\.current/);
   assert.match(bg, /stopPlayback/);
   assert.doesNotMatch(bg, /acquireMic/);

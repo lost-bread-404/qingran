@@ -40,11 +40,10 @@ test("catalog blurbs do not name a model id", () => {
   }
 });
 
-test("remember overflow consolidate expose their placeholders", () => {
-  assert.match(defaultPrompt("remember"), /\{memories\}/);
-  assert.match(defaultPrompt("remember"), /\{stretch\}/);
-  assert.match(defaultPrompt("overflow"), /\{overflow\}/);
-  assert.match(defaultPrompt("consolidate"), /\{clock\}/);
+test("removed memory prompts are not in the catalog", () => {
+  assert.equal(promptKeys().includes("remember" as never), false);
+  assert.equal(promptKeys().includes("overflow" as never), false);
+  assert.equal(promptKeys().includes("consolidate" as never), false);
 });
 
 test("reflect archive portrait defaults close the memory loop", () => {

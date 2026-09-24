@@ -13,7 +13,6 @@ import { useCall } from "@/hooks/use-call";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { base64ToBytes, concatBytes } from "@/lib/lover/audio";
-import { addManualMemory, mergeFacts, replaceMemories, updateMemory } from "@/lib/lover/memory";
 import { collapseReplyVariants, dropIncompleteReplies, skipsQingran, unselectedReplyIds } from "@/lib/lover/pair-messages";
 import { planInterruptQingran } from "@/lib/lover/interrupt";
 import {
@@ -33,13 +32,11 @@ import {
   clearRoomMessages,
   deleteRoomMessages,
   loadRoom,
-  markRoomMessagesScanned,
   restoreRoomBackup,
-  saveRoomMemories,
   saveRoomProfile,
   updateRoomMessage,
 } from "@/lib/lover/room";
-import { consolidateMemories, rememberOverflow, speakAsLover } from "@/lib/lover/server";
+import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { buildHearingContext, extractContextKeyterms, lastDialogueTurns, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
 import { extractTfIdfTerms } from "@/lib/lover/hearing/keyterms";
@@ -79,7 +76,6 @@ import {
   lockedProfile,
   voiceInjectFromProfile,
   type ChatMessage,
-  type Memory,
   type Profile,
   type SessionStatus,
 } from "@/lib/lover/types";
@@ -98,7 +94,6 @@ function lastUserSay(messages: ChatMessage[]): ChatMessage | null {
 export function VoiceRoom() {
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [memories, setMemories] = useState<Memory[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [draft, setDraft] = useState("");
@@ -111,14 +106,12 @@ export function VoiceRoom() {
   const [confirmBusy, setConfirmBusy] = useState(false);
   const busyRef = useRef(false);
   const turnRef = useRef(0);
-  const memoriesRef = useRef<Memory[]>([]);
   const profileRef = useRef(profile);
   const chatRef = useRef<ChatMessage[]>([]);
   const userWriteRef = useRef<Promise<unknown>>(Promise.resolve());
   const settingsOpenRef = useRef(false);
   const holdingRef = useRef(false);
   const finishingHoldRef = useRef(false);
-  const rememberLockRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const pendingIdsRef = useRef(new Set<string>());
   const inflightRef = useRef<{ id: string; createdAt: number; text: string } | null>(null);
@@ -181,10 +174,7 @@ export function VoiceRoom() {
       .map((m) => ({ role: m.role, text: m.text }));
     const context = buildHearingContext(contextTurns);
     const extraKeyterms = mergeKeyterms(
-      extractTfIdfTerms(
-        [{ text: profile.systemPrompt }, ...memoriesRef.current.map((m) => ({ text: m.text }))],
-        50,
-      ),
+      extractTfIdfTerms([{ text: profile.systemPrompt }], 50),
       extractContextKeyterms(context, 50),
     );
     setHearingSession({
@@ -204,10 +194,7 @@ export function VoiceRoom() {
       hearingInstruction: profile.hearingInstruction,
       sttKeyterms: profile.sttKeyterms,
     });
-  }, [profile, messages.length, memories, replyPick, status]);
-  useEffect(() => {
-    memoriesRef.current = memories;
-  }, [memories]);
+  }, [profile, messages.length, replyPick, status]);
   useEffect(() => {
     chatRef.current = messages;
   }, [messages]);
@@ -240,7 +227,6 @@ export function VoiceRoom() {
         if (cancelled) return;
         setProfile(lockedProfile(room.profile));
         setMessages(room.messages);
-        setMemories(room.memories);
         setHydrated(true);
       })
       .catch(() => {
@@ -282,19 +268,6 @@ export function VoiceRoom() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const timer = window.setTimeout(() => {
-      void saveRoomMemories({ data: memories });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [hydrated, memories]);
-
-  useEffect(() => {
-    if (!hydrated || !profile.autoRemember) return;
-    void sweepOverflow();
-  }, [hydrated, messages.length, profile.autoRemember, profile.memoryCursor, profile.historyWindow]);
-
-  useEffect(() => {
-    if (!hydrated) return;
     const timer = window.setInterval(() => {
       if (busyRef.current || settingsOpenRef.current || holdingRef.current || callActiveRef.current) {
         return;
@@ -320,53 +293,6 @@ export function VoiceRoom() {
       stopLife();
     };
   }, []);
-
-  async function sweepOverflow() {
-    if (rememberLockRef.current || !profileRef.current.autoRemember) return;
-    rememberLockRef.current = true;
-    try {
-      while (profileRef.current.autoRemember) {
-        const chat = chatRef.current;
-        const overflowAt = Math.max(0, chat.length - profileRef.current.historyWindow);
-        if (overflowAt === 0) break;
-        const overflow = chat.slice(0, overflowAt).filter((m) => !m.scanned);
-        if (overflow.length < 10) break;
-        const batch = overflow.slice(0, 24);
-        const result = await rememberOverflow({
-          data: {
-            overflow: batch,
-            lookahead: chat.slice(overflowAt, overflowAt + 10),
-            memories: memoriesRef.current,
-          },
-        });
-        if (!result.consumedIds.length) break;
-        const marked = new Set(result.consumedIds);
-        const nextChat = chatRef.current.map((m) =>
-          marked.has(m.id) ? { ...m, scanned: true } : m,
-        );
-        chatRef.current = nextChat;
-        setMessages(nextChat);
-        void markRoomMessagesScanned({ data: { ids: result.consumedIds } });
-        const cursor = result.consumedIds[result.consumedIds.length - 1];
-        if (cursor) {
-          const nextProfile = lockedProfile({ ...profileRef.current, memoryCursor: cursor });
-          profileRef.current = nextProfile;
-          setProfile(nextProfile);
-        }
-        if (result.fact) {
-          const nextMem = mergeFacts(
-            memoriesRef.current,
-            [result.fact],
-            result.at || Date.now(),
-          );
-          memoriesRef.current = nextMem;
-          setMemories(nextMem);
-        }
-      }
-    } finally {
-      rememberLockRef.current = false;
-    }
-  }
 
   function resumeCallListen(turn: number) {
     if (!callActiveRef.current) return;

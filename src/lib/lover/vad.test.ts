@@ -177,7 +177,7 @@ test("steady room noise does not hold the turn open", () => {
     holdCountsAsSpeech({ rms, floor, hz: 0, clarity: 0.12, clarityCut: 0.58 }),
     false,
   );
-  let lastVoiceAt = 400;
+  const lastVoiceAt = 400;
   let now = 400;
   let ended = false;
   for (let i = 0; i < 60; i += 1) {

@@ -86,9 +86,10 @@ export async function dedupeDuplicateAssistantReplies(): Promise<{ dropped: numb
   if (!pairs.length) return { dropped: 0, pairs };
   await rewriteMessageRefs(pairs);
   const db = await getSql();
-  await db.query(`delete from qingran_messages where id = any($1::text[])`, [
-    pgTextArray(pairs.map((p) => p.dropId)),
-  ]);
+  await db.query(
+    `update qingran_messages set forgotten_at = coalesce(forgotten_at, $2) where id = any($1::text[]) and forgotten_at is null`,
+    [pgTextArray(pairs.map((p) => p.dropId)), now()],
+  );
   return { dropped: pairs.length, pairs };
 }
 

@@ -1,9 +1,8 @@
 import { mergeEditedUserBody } from "../../message-markup.ts";
 import { voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
-import { SESSION_GAP_MS, HISTORY_WINDOW_MAX } from "../config.ts";
+import { SESSION_GAP_MS } from "../config.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import {
-  getDay,
   getMessage,
   getMeta,
   getMind,
@@ -13,11 +12,10 @@ import {
   listPortrait,
   upsertMessage,
 } from "../store.ts";
-import { formatClock, localDay } from "../time.ts";
+import { formatClock } from "../time.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { EMPTY_MIND } from "../types.ts";
 import { pickHotNotes } from "./retrieve.ts";
-import { topicJump } from "./jump.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { ensureMemoryHygiene } from "../memory-hygiene.ts";
 import {
@@ -30,7 +28,6 @@ import {
   type VoiceInputChars,
   type VoicePackParts,
 } from "./pack-build.ts";
-import { assistantReplyTexts, recentPhrasesFromHistory } from "./recent-phrases.ts";
 
 export {
   buildTail,
@@ -69,7 +66,6 @@ export type HotContext = {
   promptKey: string;
   promptHash: string;
   inject: VoiceInjectFlags;
-  recentPhrases: string[];
 };
 
 export async function loadHotContext(input: {
@@ -110,31 +106,17 @@ export async function loadHotContext(input: {
   const mindStale = Boolean(liveMind.updated_at) && mindAgeMs > SESSION_GAP_MS;
   const injectMind = input.profile.injectMind !== false;
   const tailMind = !injectMind || mindStale || !liveMind.insight.trim() ? EMPTY_MIND : liveMind;
-  const jumped = topicJump(input.text, tailMind);
   const picked = await pickHotNotes(
     !injectMind || mindStale ? [] : mind.memory_ids ?? [],
     input.text,
-    { jump: jumped.jump, minTerms: input.profile.retrieveMinTerms },
+    { minTerms: input.profile.retrieveMinTerms },
   );
   const notes = picked.notes;
   const pickedIds = picked.mindIds;
   const fallbackIds: string[] = [];
-  let careHint = false;
-  if (process.env.QR_CARE_CHECKIN === "true") {
-    const day = localDay(input.nowMs, input.timeZone);
-    const log = await getDay(day);
-    const asked = history.some(
-      (m) => m.role === "assistant" && /今天过得|睡得如何|睡得好/.test(m.text),
-    );
-    careHint = Boolean(log && log.coverage !== "ok" && !asked);
-  }
+  const careHint = false;
 
   const clockText = formatClock(input.nowMs, input.timeZone);
-  let phraseHistory = history;
-  if (assistantReplyTexts(history).length < 8) {
-    phraseHistory = await listHistoryWindow(input.userMsgId, HISTORY_WINDOW_MAX);
-  }
-  const recentPhrases = recentPhrasesFromHistory(phraseHistory);
   const tail = buildTail({
     clock: clockText,
     mind: tailMind,
@@ -143,9 +125,8 @@ export async function loadHotContext(input: {
     careHint,
     nowMs: input.nowMs,
     stale: false,
-    jump: jumped.jump,
+    jump: false,
     inject,
-    recentPhrases,
   });
 
   const longterm = renderVoiceLongterm(meta.selfSummary, meta.bondSummary, portrait);
@@ -163,7 +144,7 @@ export async function loadHotContext(input: {
     careHint,
     nowMs: input.nowMs,
     mindStale,
-    jump: jumped.jump,
+    jump: false,
     voiceTemplate: loaded.body,
     selfSummary: meta.selfSummary,
     bondSummary: meta.bondSummary,
@@ -171,7 +152,6 @@ export async function loadHotContext(input: {
     injectMemories: inject.memories,
     injectLongterm: inject.longterm,
     historyWindow: inject.history,
-    recentPhrases,
   };
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(charter.trim() || "你就是清然。正在和 Rosie 语音通话。"),
@@ -192,8 +172,8 @@ export async function loadHotContext(input: {
     fallbackIds,
     queryIds: picked.queryIds,
     queryScores: picked.queryScores,
-    jump: jumped.jump,
-    jumpScore: jumped.score,
+    jump: false,
+    jumpScore: 0,
     careHint,
     clockText,
     userMsgId: input.userMsgId,
@@ -218,8 +198,8 @@ export async function loadHotContext(input: {
     fallbackIds,
     queryIds: picked.queryIds,
     queryScores: picked.queryScores,
-    jump: jumped.jump,
-    jumpScore: jumped.score,
+    jump: false,
+    jumpScore: 0,
     careHint,
     charterHash,
     longtermHash,
@@ -232,7 +212,6 @@ export async function loadHotContext(input: {
     promptKey: loaded.key,
     promptHash: loaded.hash,
     inject,
-    recentPhrases,
   };
 }
 

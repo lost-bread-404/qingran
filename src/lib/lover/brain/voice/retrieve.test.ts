@@ -112,7 +112,7 @@ test("pickHotNotes keeps mind notes and only adds content matches", async () => 
     const picked = await pickHotNotes(
       mindNotes.map((n) => n.id),
       "今晚想吃火锅然后去看电影",
-      { jump: false },
+      { },
     );
     assert.deepEqual(picked.queryIds.slice().sort(), ["q1", "q2"]);
     assert.equal(picked.queryIds.includes("tonight"), false);
@@ -121,7 +121,6 @@ test("pickHotNotes keeps mind notes and only adds content matches", async () => 
     assert.deepEqual(picked.mindIds, ["m1", "m2", "m3", "m4"]);
     assert.equal(picked.notes.length, 6);
     const strict = await pickHotNotes(mindNotes.map((n) => n.id), "今晚想吃火锅然后去看电影", {
-      jump: false,
       minTerms: 2,
     });
     assert.deepEqual(strict.queryIds, []);
@@ -131,7 +130,7 @@ test("pickHotNotes keeps mind notes and only adds content matches", async () => 
   }
 });
 
-test("pickHotNotes jump path adds strong keyword hits and skips filler", async () => {
+test("pickHotNotes adds strong keyword hits and skips filler", async () => {
   const iso = await openIsolatedSql();
   try {
     await upsertNote(note("only-mind", "她论文还是一个字都没写"));
@@ -143,11 +142,14 @@ test("pickHotNotes jump path adds strong keyword hits and skips filler", async (
     await bumpNotesVersion();
     resetRetrieveCache();
 
-    const picked = await pickHotNotes(["only-mind"], "今晚吃火锅看电影再买蛋糕去公园", { jump: true });
+    const picked = await pickHotNotes(["only-mind"], "今晚吃火锅看电影再买蛋糕去公园");
     assert.deepEqual(picked.mindIds, ["only-mind"]);
-    assert.deepEqual(picked.queryIds.slice().sort(), ["q-cake", "q-hotpot", "q-movie", "q-walk"]);
+    assert.equal(picked.queryIds.length, 2);
     assert.equal(picked.queryIds.includes("q-filler"), false);
-    assert.equal(picked.notes.length, 5);
+    for (const id of picked.queryIds) {
+      assert.ok(["q-cake", "q-hotpot", "q-movie", "q-walk"].includes(id));
+    }
+    assert.equal(picked.notes.length, 3);
   } finally {
     await iso.close();
   }
@@ -197,7 +199,7 @@ test("MiniSearch matches tags and aliases via searchText without putting them in
     resetRetrieveCache();
     const { mini } = await getMemoryIndex();
     assert.ok(mini.search("citadel superday").some((hit) => String(hit.id) === "alias-n"));
-    const picked = await pickHotNotes([], "citadel superday", { jump: false });
+    const picked = await pickHotNotes([], "citadel superday");
     assert.deepEqual(picked.queryIds, ["alias-n"]);
     assert.deepEqual(picked.notes.map((n) => n.id), ["alias-n"]);
     assert.equal(
@@ -267,7 +269,7 @@ test("pickHotNotes does not pad to 6 when query has no hits", async () => {
     await upsertNote(note("only-mind", "她论文还是一个字都没写"));
     await bumpNotesVersion();
     resetRetrieveCache();
-    const picked = await pickHotNotes(["only-mind"], "", { jump: false });
+    const picked = await pickHotNotes(["only-mind"], "");
     assert.equal(picked.notes.length, 1);
     assert.equal(picked.notes[0]!.id, "only-mind");
     assert.equal(picked.queryIds.length, 0);

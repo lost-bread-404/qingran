@@ -113,7 +113,7 @@ export const Route = createFileRoute("/api/talk")({
 
               let ttftMs: number | null = null;
               let firstAudioMs: number | null = null;
-              let interrupted = false;
+              const interrupted = false;
               tVoice = Date.now();
               const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
               const safety = voiceSafetyPick();
@@ -143,7 +143,7 @@ export const Route = createFileRoute("/api/talk")({
                 await upsertMessage({
                   id: replyId,
                   role: "assistant",
-                  text: `⟦回:${userMsgId}⟧${display}`.slice(0, 4000),
+                  text: `⟦回:${userMsgId}⟧${display}`,
                   createdAt: Number.isFinite(replyAt) && replyAt > 0 ? replyAt : userCreatedAt + 1,
                   timeZone,
                 });
@@ -213,7 +213,6 @@ export const Route = createFileRoute("/api/talk")({
                   injectLongterm: ctx.inject.longterm,
                   historyWindow: ctx.inject.history,
                   injectLine: formatVoiceInjectLine(ctx.inject),
-                  recentPhrases: ctx.recentPhrases,
                 },
                 reply: {
                   text: display,

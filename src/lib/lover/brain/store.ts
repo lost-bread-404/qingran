@@ -290,6 +290,7 @@ export async function listHistoryWindow(
     `select id, role, body, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
      where ($1::text is null or id <> $1)
+       and forgotten_at is null
        and created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
      order by created_at desc, id desc
      limit $2`,
@@ -376,7 +377,7 @@ export async function upsertMessage(msg: {
        kind = excluded.kind,
        session_id = coalesce(qingran_messages.session_id, excluded.session_id),
        local_day = coalesce(qingran_messages.local_day, excluded.local_day)`,
-    [msg.id, msg.role, msg.text.slice(0, 4000), msg.createdAt, kind, sess, day],
+    [msg.id, msg.role, msg.text, msg.createdAt, kind, sess, day],
   );
   return {
     id: msg.id,
@@ -393,7 +394,7 @@ export async function upsertMessage(msg: {
 export async function updateMessageText(id: string, text: string, kind?: StoredMessage["kind"]): Promise<void> {
   const existing = await getMessage(id);
   const db = await getSql();
-  const next = text.slice(0, 4000);
+  const next = text;
   const ts = now();
   if (existing && existing.text !== next) {
     await db.query(

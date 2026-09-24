@@ -74,7 +74,7 @@ export function useVoiceInput({ lang, prompt }: Options) {
     setLevel(0);
     setThreshold(0);
     try {
-      recorderRef.current?.state === "recording" && recorderRef.current.stop();
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     } catch {
       /* ignore */
     }

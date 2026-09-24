@@ -225,7 +225,8 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Min
     return null;
   }
   const allowed = new Set([...coreIndex, ...relatedIndex].map((i) => i.id));
-  const rawInsight = typeof result.json.insight === "string" ? result.json.insight : "";
+  const rawJson = result.json && typeof result.json === "object" ? (result.json as { insight?: unknown }) : {};
+  const rawInsight = typeof rawJson.insight === "string" ? rawJson.insight : "";
   const rejected = insightDirectiveReason(rawInsight);
   const next = validateMind(result.json, old, allowed);
   next.turn_seq = turnSeq;

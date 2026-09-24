@@ -49,20 +49,6 @@ const REFLECT_SYSTEM = `你是清然的内心。下面的【人设】就是你�
 ${FIRST_PERSON}
 不要输出其他字段。只根据给出的材料推断，不编造事实。`;
 
-export const MIND_NOT_SPOKEN =
-  "这是我对她的理解，不是要我说出来的话，不要复述，也不要说明自己没做什么。";
-
-/** Editable sentence in the reply template. Empty {recent_phrases} drops the whole paragraph. */
-export const RECENT_PHRASE_PARAGRAPH =
-  "这些话你最近说过：{recent_phrases}。不要再重复这些句子；场景没变就不用再描述一次动作。";
-
-export function ensureVoiceRecentPhrases(messages: PromptMessage[]): void {
-  if (messages.some((message) => message.content.includes("{recent_phrases}"))) return;
-  const host = messages.find((message) => message.content.includes("说话要有逻辑"));
-  if (!host) return;
-  host.content = `${host.content.replace(/\s+$/, "")}\n\n${RECENT_PHRASE_PARAGRAPH}`;
-}
-
 const ARCHIVE_SYSTEM = `你是一个中立、细心的记录员，为 Rosie 和清然的对话写观察笔记。笔记会同时用于：清然记住和理解 Rosie；Rosie 的被动日记（分析她的状态和规律）。
 
 写什么：
@@ -134,58 +120,6 @@ const EXPERIMENTS_SYSTEM = `根据最高分的 antecedent findings 提出最多 
 
 const BACKFILL_SYSTEM = DIARY_ANALYST_TEXT;
 
-const REMEMBER_USER = `你在给清然写长期记忆。默认什么都不记。只输出 JSON：{"facts":[]}
-
-只记已经发生、会改变以后相处的大事。看整段对话再决定，不要按单句拆，不要把一次互动拆成多条。
-一件事只记一条，写成一句完整的话。
-
-要记：分手或提分手、复合、同居或搬家、重要的人进场或离场、失业/找到工作并造成后果、大的情绪崩溃并改变关系、明确的长期约定。
-不要记：撒娇、拥抱、亲吻、蹭、日常聊天、心情、一次安慰、场景动作、语气、重复已有记忆、这一句里的细节。
-
-要记的例子：
-- Rosie因为找不到工作而情绪崩溃，跟清然提分手
-- 林泽因为嫌清然和Rosie太吵而从房子里搬了出去
-不要记的例子：
-- Rosie在清然的怀里撒娇蹭了蹭
-- 清然今晚陪Rosie说话
-- Rosie有点累、想被抱
-
-已有记忆（重复的不要再写，同件事不要存两次）：
-{memories}
-
-这一段对话：
-{stretch}
-
-没有足够大的事，就输出 {"facts":[]}。最多一条 fact。`;
-
-const OVERFLOW_USER = `你在给清然压缩滑出窗口的对话。只输出 JSON：{"fact":"","consume":0}
-
-看 overflow 整段，再用 lookahead 判断这件事有没有说完。
-一件已经说完、会改变以后相处的大事，写成一句 fact。没有就 fact 留空。
-consume 是 overflow 里已经看完、不必再扫的条数，从前往后数。
-事情说完了，就把相关句子都 consume 掉。说到窗口里还没完，就少 consume，留给下一轮。
-不要把日常撒娇、拥抱、心情写成 fact。
-
-已有记忆：
-{memories}
-
-overflow：
-{overflow}
-
-lookahead：
-{lookahead}`;
-
-const CONSOLIDATE_USER = `你在整理清然的长期记忆。现在是{clock}。只输出 JSON：{"facts":[{"text":"","at":0}]}
-
-把碎的、重复的、同一件事拆开的记忆合并成少数几条关键记忆。
-每条 fact 是一句完整的话，写清谁、发生了什么、结果。
-at 用原来那件事里最早的 createdAt 毫秒时间戳。没有就省略 at。
-不要写撒娇、拥抱、日常语气。不要发明没出现过的事。
-最多 12 条。没有可整理的就原样压缩成更短的关键句。
-
-现有记忆：
-{memories}`;
-
 const JUDGE_SYSTEM = `你是严格、一致的对话评审。你评估 AI 恋人“清然”对 Rosie 的最后一条回复。
 只看给出的人设和对话，不要脑补。每项独立打分。
 
@@ -209,6 +143,9 @@ const JUDGE_SYSTEM = `你是严格、一致的对话评审。你评估 AI 恋人
 const NONE = "（没有）";
 const NONE_YET = "（还没有）";
 
+export const MIND_NOT_SPOKEN =
+  "这是我对她的理解，不是要我说出来的话，不要复述，也不要说明自己没做什么。";
+
 export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
   voice: [
     {
@@ -216,29 +153,21 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       label: "每轮回复",
       placeholders: [
         SYSTEM_PROMPT,
-        ph("self", "「我自己」摘要。空的时候是「（还在过自己的日子）」。注入回复前会改成清然的第一人称：Rosie→你，清然→我，她→你。库里原文不变。"),
-        ph("bond", "「我们」摘要。空的时候是「（还在一点点建立）」。注入回复前同样改成第一人称，库里原文不变。"),
-        ph("portrait", "状态为 active 的画像，每行「主题：正文」，超长会截断。没有时是「（还在慢慢认识你）」。注入回复前改成第一人称，库里原文不变。"),
+        ph("self", "「我自己」摘要。空的时候是「（还在过自己的日子）」。按库里原文注入，不再改人称。"),
+        ph("bond", "「我们」摘要。空的时候是「（还在一点点建立）」。按库里原文注入，不再改人称。"),
+        ph("portrait", "状态为 active 的画像，每行「主题：正文」，超长会截断。没有时是「（还在慢慢认识你）」。按库里原文注入，不再改人称。"),
         ph(
           "history_messages",
-          "最近对话，条数由设置 → 指令里的「上下文长度」决定（0–80，默认 40）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息，不拼成一段文字。设成 0 或没有对话就整段去掉。role 不使用。",
+          "最近对话，条数由设置 → 指令里的「上下文长度」决定（0–80，默认 20）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息，不拼成一段文字。设成 0 或没有对话就整段去掉。role 不使用。已保存的设置值不会被改掉。",
         ),
         ph("clock", "当前时间，用资料里的时区。"),
         ph(
           "mind",
-          "Reflector 写下的 insight 原文，注入回复前改成清然的第一人称。没有洞察、关闭了「把内心写进回复」、或距离上次超过 30 分钟时，是空字符串。标题在模板里，不由代码加。库里原文不变。",
+          "Reflector 写下的 insight 原文。没有洞察、关闭了「把内心写进回复」、或距离上次超过 30 分钟时，是空字符串。标题在模板里，不由代码加。按库里原文注入，不再改人称。",
         ),
         ph(
           "memories",
-          "这一刻挑出的笔记，最多 6 条，每行「MM-DD 正文」。注入回复前改成第一人称。没有时是「（这一刻没有特别要提起的）」。库里原文不变。",
-        ),
-        ph(
-          "care",
-          "只有打开关怀检查、今天日记还没覆盖、并且这轮还没问过时，才是换行加上那句「如果时机自然…」。否则是空字符串。",
-        ),
-        ph(
-          "recent_phrases",
-          "最近 8 条清然回复里，去掉标点和语气词后不少于 6 字、并且至少出现在 2 条里的句子或短语，最多 8 条。没有重复时是空字符串，模板里包含它的那一段整段不发送。",
+          "这一刻挑出的笔记，最多 6 条，每行「MM-DD 正文」。没有时是「（这一刻没有特别要提起的）」。按库里原文注入，不再改人称。",
         ),
         ph("user_text", "这一句 Rosie 刚说的话。"),
       ],
@@ -257,9 +186,7 @@ ${MIND_NOT_SPOKEN}
 【可以用的记忆】
 {memories}
 
-说话要有逻辑：观点有依据，前后一致。旁白和对话都用「你」称呼对方，用「我」称呼自己，不要改成第三人称。{care}
-
-${RECENT_PHRASE_PARAGRAPH}`),
+说话要有逻辑：观点有依据，前后一致。旁白和对话都用「你」称呼对方，用「我」称呼自己，不要改成第三人称。`),
         user("{user_text}"),
       ],
     },
@@ -647,40 +574,6 @@ definition: {factor_definition}
 【days】
 {days}`),
       ],
-    },
-  ],
-  remember: [
-    {
-      id: "main",
-      label: "长期记忆",
-      placeholders: [
-        ph("memories", "已有长期记忆，最多 24 条，每行「- 正文」。没有则是「（还没有）」。"),
-        ph("stretch", "这一段对话，最多 1800 字。"),
-      ],
-      messages: [user(REMEMBER_USER)],
-    },
-  ],
-  overflow: [
-    {
-      id: "main",
-      label: "滑出窗口",
-      placeholders: [
-        ph("memories", "已有长期记忆，最多 24 条。没有则是「（还没有）」。"),
-        ph("overflow", "滑出窗口的句子，最多 2200 字。每行「说话人：正文」。"),
-        ph("lookahead", "窗口里还看得见的后续，最多 800 字。每行「说话人：正文」。"),
-      ],
-      messages: [user(OVERFLOW_USER)],
-    },
-  ],
-  consolidate: [
-    {
-      id: "main",
-      label: "整理记忆",
-      placeholders: [
-        ph("clock", "当前时间。"),
-        ph("memories", "现有长期记忆，带时间，拼好后最多 6000 字。没有则是「（还没有）」。"),
-      ],
-      messages: [user(CONSOLIDATE_USER)],
     },
   ],
   judge: [

@@ -73,7 +73,7 @@ function cloneMessage(m: ChatMessage): ChatMessage {
   return {
     id: String(m.id ?? ""),
     role,
-    text: String(m.text ?? "").slice(0, 4000),
+    text: String(m.text ?? ""),
     createdAt: Number(m.createdAt) || 0,
     kind,
     scanned: m.scanned ? true : undefined,

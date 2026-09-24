@@ -26,7 +26,7 @@ let inFlight = 0;
 let pendingSamples = 0;
 const liveSources = new Set<AudioBufferSourceNode>();
 const sampleQueue: Float32Array[] = [];
-let idleWaiters: Array<() => void> = [];
+const idleWaiters: Array<() => void> = [];
 let master: GainNode | null = null;
 
 function audioCtor() {
@@ -597,7 +597,7 @@ function pullMerged(hold: number): Float32Array | null {
   const available = pendingSamples;
   if (hold > 0 && available <= hold) return null;
 
-  let take = hold > 0 ? Math.min(available - hold, Math.max(slice, sampleQueue[0]!.length)) : available;
+  const take = hold > 0 ? Math.min(available - hold, Math.max(slice, sampleQueue[0]!.length)) : available;
   if (take <= 0) return null;
 
   const out = new Float32Array(take);

@@ -59,7 +59,6 @@ test("rebuild matches captured voice/reflect/archive bodies after later mutation
   resetSpendSnap();
   const captured = { voice: [] as string[], reflect: [] as string[], archive: [] as string[] };
   const realFetch = globalThis.fetch;
-  process.env.QR_CARE_CHECKIN = "true";
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url);
     if (!u.startsWith("https://api.x.ai/")) throw new Error(`blocked ${u}`);
@@ -160,7 +159,7 @@ test("rebuild matches captured voice/reflect/archive bodies after later mutation
       updatedAt: t1,
     });
     const ctxCare = await voiceTurn(t1, "论文一个字都没写，今天过得乱七八糟", "u:care");
-    assert.equal(ctxCare.careHint, true);
+    assert.equal(ctxCare.careHint, false);
     assert.equal(ctxCare.fallbackIds.length, 0);
 
     const t2 = t1 + SESSION_GAP_MS + 60_000;
@@ -215,7 +214,6 @@ test("rebuild matches captured voice/reflect/archive bodies after later mutation
     }
   } finally {
     globalThis.fetch = realFetch;
-    delete process.env.QR_CARE_CHECKIN;
     setClock(null);
     await iso.close();
   }

@@ -33,8 +33,6 @@ test("each instruction defaults to its route model", () => {
     assert.equal(pick.effort, resolved.effort);
   }
   assert.equal(defaultPromptModel("experiments").model, resolveRoute("report").model);
-  assert.equal(defaultPromptModel("remember").model, "grok-4.20-0309-non-reasoning");
-  assert.equal(defaultPromptModel("remember").effort, null);
   const locked = lockPromptModels({
     reflect: { model: "grok-4.5", effort: "high" },
     nope: { model: "grok-4.3", effort: "low" },

@@ -20,9 +20,6 @@ export type PromptKey =
   | "report"
   | "experiments"
   | "backfill"
-  | "remember"
-  | "overflow"
-  | "consolidate"
   | "judge";
 
 export type { PromptMessage, PromptPlaceholder };
@@ -93,21 +90,6 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
     key: "backfill",
     name: "回填",
     blurb: "新因子出现后，按定义回填历史每一天。用日常档。",
-  },
-  {
-    key: "remember",
-    name: "长期记忆",
-    blurb: "旧的长期记忆压缩，仍可能被调用。",
-  },
-  {
-    key: "overflow",
-    name: "滑出窗口",
-    blurb: "压缩滑出窗口的对话。",
-  },
-  {
-    key: "consolidate",
-    name: "整理记忆",
-    blurb: "把碎的长期记忆合并成少数几条。",
   },
   {
     key: "judge",

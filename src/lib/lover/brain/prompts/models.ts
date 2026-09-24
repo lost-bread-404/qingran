@@ -1,4 +1,4 @@
-import { MODEL_CLASSES, clampVoiceEffort, resolveRoute, voiceTimeoutMs, type Effort, type Route } from "../config.ts";
+import { clampVoiceEffort, resolveRoute, voiceTimeoutMs, type Effort, type Route } from "../config.ts";
 import { promptKeys, type PromptKey } from "./catalog.ts";
 
 export type PromptModelPick = {
@@ -26,9 +26,6 @@ function asRoute(key: string): Route | null {
 
 /** Code defaults. A saved profile pick replaces these on the next run. */
 export function defaultPromptModel(key: string): PromptModelPick {
-  if (key === "remember" || key === "overflow" || key === "consolidate") {
-    return { model: MODEL_CLASSES.REALTIME.model, effort: null };
-  }
   const route = key === "experiments" ? "report" : (asRoute(key) ?? "voice");
   const resolved = resolveRoute(route);
   return { model: resolved.model, effort: resolved.effort };

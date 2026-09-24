@@ -102,11 +102,12 @@ test("one turn writes one assistant row with the client id; user rows share id",
     assert.equal(before[0]!.keepId, replyId);
     const ran = await dedupeDuplicateAssistantReplies();
     assert.equal(ran.dropped, 1);
-    const after = await iso.sql.query<{ id: string }>(
-      `select id from qingran_messages where role = 'assistant'`,
+    const after = await iso.sql.query<{ id: string; forgotten_at: number | null }>(
+      `select id, forgotten_at from qingran_messages where role = 'assistant' order by id`,
     );
-    assert.equal(after.length, 1);
-    assert.equal(after[0]!.id, replyId);
+    assert.equal(after.length, 2);
+    assert.ok(after.find((row) => row.id === "a-client-dup")?.forgotten_at);
+    assert.equal(after.find((row) => row.id === replyId)?.forgotten_at, null);
   } finally {
     await iso.close();
   }

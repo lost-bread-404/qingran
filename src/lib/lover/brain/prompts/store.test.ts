@@ -11,7 +11,7 @@ test("prompt overrides round-trip and restore to catalog default", async () => {
     const loaded = await loadPrompt("voice");
     assert.equal(loaded.custom, false);
     assert.equal(loaded.body, serializeDoc(defaultDoc("voice")));
-    assert.match(loaded.body, /\{recent_phrases\}/);
+    assert.doesNotMatch(loaded.body, /\{recent_phrases\}/);
     assert.match(defaultPrompt("voice"), /\{system_prompt\}/);
     const saved = await savePrompt("voice", "hello {system_prompt}");
     assert.equal(saved.custom, true);
@@ -25,7 +25,7 @@ test("prompt overrides round-trip and restore to catalog default", async () => {
     assert.equal(voice?.custom, true);
     assert.equal(voice?.name, "每轮回复");
     assert.ok(voice?.placeholders.some((p) => p.token === "system_prompt"));
-    assert.ok(voice?.placeholders.some((p) => p.token === "recent_phrases"));
+    assert.equal(voice?.placeholders.some((p) => p.token === "recent_phrases"), false);
     const restored = await restorePrompt("voice");
     assert.equal(restored.body, serializeDoc(defaultDoc("voice")));
     assert.equal(restored.custom, false);

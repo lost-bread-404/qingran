@@ -70,7 +70,7 @@ export async function sweepNamedPortraits(): Promise<number> {
   const db = await getSql();
   const rows = await db.query<{ id: string }>(
     `delete from qr_portrait where topic = any($1::text[]) returning id`,
-    [pgTextArray(DROP_PORTRAIT_TOPICS)],
+    [pgTextArray([...DROP_PORTRAIT_TOPICS])],
   );
   return rows.length;
 }

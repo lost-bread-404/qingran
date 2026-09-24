@@ -2,8 +2,6 @@ import MiniSearch from "minisearch";
 import {
   INDEX_CORE_MAX,
   INDEX_RELATED_MAX,
-  JUMP_PICK_MIND_SLOTS,
-  JUMP_PICK_QUERY_SLOTS,
   PICK_MAX,
   PICK_MIND_SLOTS,
   PICK_QUERY_SLOTS,
@@ -188,11 +186,11 @@ export async function getRelatedIndexItems(query: string, coreIds: Set<string>):
 export async function pickHotNotes(
   mindIds: string[],
   query: string,
-  opts: { jump: boolean; dry?: boolean; minTerms?: number },
+  opts: { dry?: boolean; minTerms?: number } = {},
 ): Promise<HotPick> {
   const minTerms = clampRetrieveMinTerms(opts.minTerms);
-  const mindSlots = opts.jump ? JUMP_PICK_MIND_SLOTS : PICK_MIND_SLOTS;
-  const querySlots = opts.jump ? JUMP_PICK_QUERY_SLOTS : PICK_QUERY_SLOTS;
+  const mindSlots = PICK_MIND_SLOTS;
+  const querySlots = PICK_QUERY_SLOTS;
   const mindNotes = (await listNotesByIds(mindIds)).filter((n) => n.status === "active");
   const mindPart = mindNotes.map((n) => n.id).slice(0, Math.min(mindSlots, PICK_MAX));
   const mindPartSet = new Set(mindPart);

@@ -38,6 +38,7 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
       select id, role, body, created_at, kind
       from qingran_messages
       where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
+        and forgotten_at is null
       order by created_at desc,
         case when role = 'user' then 1 else 0 end desc,
         id desc
@@ -97,7 +98,7 @@ export const appendRoomMessage = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const sql = await getSql();
     const kind = data.kind === "steer" || data.kind === "setting" ? data.kind : "say";
-    const body = encodeStoredMessage(data).slice(0, 4000);
+    const body = encodeStoredMessage(data);
     await sql`
       insert into qingran_messages (id, role, body, created_at, kind)
       values (${data.id}, ${data.role}, ${body}, ${data.createdAt}, ${kind})
@@ -148,7 +149,7 @@ export const restoreRoomBackup = createServerFn({ method: "POST" })
       const kind = msg.kind === "steer" || msg.kind === "setting" ? msg.kind : "say";
       await sql`
         insert into qingran_messages (id, role, body, created_at, kind)
-        values (${msg.id}, ${msg.role}, ${encodeStoredMessage(msg).slice(0, 4000)}, ${msg.createdAt}, ${kind})
+        values (${msg.id}, ${msg.role}, ${encodeStoredMessage(msg)}, ${msg.createdAt}, ${kind})
         on conflict (id) do update
           set body = excluded.body, kind = excluded.kind
       `;
@@ -179,8 +180,9 @@ export const deleteRoomMessages = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (!data.ids.length) return { ok: true as const };
     const sql = await getSql();
+    const at = Date.now();
     for (const id of data.ids) {
-      await sql`delete from qingran_messages where id = ${id}`;
+      await sql`update qingran_messages set forgotten_at = coalesce(forgotten_at, ${at}) where id = ${id}`;
     }
     return { ok: true as const };
   });

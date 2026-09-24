@@ -1,30 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
-import {
-  consolidateMessages,
-  overflowMessages,
-  rememberMessages,
-  formatClock,
-  parseConsolidateResult,
-  parseOverflowResult,
-  parseRememberResult,
-} from "./prompt";
 import { spokenForTts } from "./speech-tags";
 import { restoreSpeechText } from "./stt-text";
 import { ttsRequestBody, ttsSpeed } from "./tts";
-import type { ChatMessage, Memory } from "./types";
 import { isQuotaHint, readXaiFail } from "./xai-error";
 import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./hearing/config";
 import { recordSttSpend, recordTtsSpend } from "./brain/spend/check";
 import { VOICE_IO } from "./brain/config";
-import { loadPrompt } from "./brain/prompts/store.ts";
-import { storedPromptModel } from "./brain/prompts/model-store.ts";
-
-const FAST_MODEL = "grok-4.20-0309-non-reasoning";
-
-async function modelForPrompt(key: string, fallback: string): Promise<string> {
-  const pick = await storedPromptModel(key);
-  return pick?.model || fallback;
-}
 
 type TtsInput = {
   text: string;
@@ -36,133 +17,6 @@ type SttInput = {
   mimeType: string;
   prompt?: string;
 };
-
-type RememberInput = {
-  stretch: string;
-  memories: Memory[];
-};
-
-type OverflowInput = {
-  overflow: ChatMessage[];
-  lookahead: ChatMessage[];
-  memories: Memory[];
-};
-
-export const rememberTurn = createServerFn({ method: "POST" })
-  .validator((input: RememberInput) => input)
-  .handler(async ({ data }) => {
-    const empty = { facts: [] as string[], events: [] as string[] };
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) return { ok: true as const, ...empty };
-
-    try {
-      const loaded = await loadPrompt("remember");
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: await modelForPrompt("remember", FAST_MODEL),
-          temperature: 0,
-          max_tokens: 120,
-          response_format: { type: "json_object" },
-          messages: rememberMessages(data.stretch, data.memories, loaded.doc),
-        }),
-        signal: AbortSignal.timeout(8_000),
-      });
-      if (!res.ok) return { ok: true as const, ...empty };
-      const body = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      const parsed = parseRememberResult(body.choices?.[0]?.message?.content ?? "");
-      return { ok: true as const, facts: parsed.facts, events: parsed.facts };
-    } catch {
-      return { ok: true as const, ...empty };
-    }
-  });
-
-export const rememberOverflow = createServerFn({ method: "POST" })
-  .validator((input: OverflowInput) => input)
-  .handler(async ({ data }) => {
-    const overflow = Array.isArray(data.overflow) ? data.overflow.slice(0, 24) : [];
-    if (overflow.length === 0) {
-      return { consumedIds: [] as string[], fact: "" };
-    }
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) {
-      return { consumedIds: overflow.map((m) => m.id), fact: "" };
-    }
-    try {
-      const loaded = await loadPrompt("overflow");
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: await modelForPrompt("overflow", FAST_MODEL),
-          temperature: 0,
-          max_tokens: 180,
-          response_format: { type: "json_object" },
-          messages: overflowMessages(overflow, data.lookahead.slice(0, 10), data.memories, loaded.doc),
-        }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) return { consumedIds: overflow.map((m) => m.id), fact: "" };
-      const body = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      const parsed = parseOverflowResult(
-        body.choices?.[0]?.message?.content ?? "",
-        overflow.length,
-      );
-      const consumedIds = overflow.slice(0, Math.max(parsed.consumed, 1)).map((m) => m.id);
-      return { consumedIds, fact: parsed.fact, at: overflow[0]?.createdAt || Date.now() };
-    } catch {
-      return { consumedIds: overflow.map((m) => m.id), fact: "" };
-    }
-  });
-
-export const consolidateMemories = createServerFn({ method: "POST" })
-  .validator((input: { memories: Memory[]; nowMs?: number; timeZone?: string }) => input)
-  .handler(async ({ data }) => {
-    const memories = Array.isArray(data.memories) ? data.memories.slice(0, 80) : [];
-    if (memories.length === 0) return { ok: true as const, facts: [] as Array<{ text: string; createdAt?: number }> };
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) return { ok: false as const, facts: [] as Array<{ text: string; createdAt?: number }> };
-    try {
-      const clock = formatClock(data.nowMs || Date.now(), data.timeZone || "UTC");
-      const loaded = await loadPrompt("consolidate");
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: await modelForPrompt("consolidate", FAST_MODEL),
-          temperature: 0.2,
-          max_tokens: 700,
-          response_format: { type: "json_object" },
-          messages: consolidateMessages(memories, clock, data.timeZone || "UTC", loaded.doc),
-        }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!res.ok) return { ok: false as const, facts: [] as Array<{ text: string; createdAt?: number }> };
-      const body = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      return {
-        ok: true as const,
-        facts: parseConsolidateResult(body.choices?.[0]?.message?.content ?? ""),
-      };
-    } catch {
-      return { ok: false as const, facts: [] as Array<{ text: string; createdAt?: number }> };
-    }
-  });
 
 export const speakAsLover = createServerFn({ method: "POST" })
   .validator((input: TtsInput) => input)

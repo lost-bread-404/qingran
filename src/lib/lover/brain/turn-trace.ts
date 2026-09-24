@@ -43,7 +43,6 @@ export type TurnTraceInput = {
     injectLongterm?: boolean;
     historyWindow?: number;
     injectLine?: string;
-    recentPhrases?: string[];
   };
   reply?: {
     text?: string;
@@ -76,7 +75,7 @@ export type TurnTraceRow = {
 
 function asJsonText(value: unknown): { text: string; truncated: boolean } {
   if (value == null) return { text: "null", truncated: false };
-  let text = typeof value === "string" ? value : JSON.stringify(value);
+  const text = typeof value === "string" ? value : JSON.stringify(value);
   if (text.length <= TRACE_FIELD_LIMIT) return { text, truncated: false };
   return { text: text.slice(0, TRACE_FIELD_LIMIT) + "…[truncated]", truncated: true };
 }

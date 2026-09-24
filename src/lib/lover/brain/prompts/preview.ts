@@ -2,7 +2,7 @@ import { getSql } from "../../../db.ts";
 import { isNightNoiseBody } from "../../message-markup.ts";
 import { voiceInjectFromProfile } from "../../types.ts";
 import { now } from "../clock.ts";
-import { HISTORY_WINDOW, HISTORY_WINDOW_MAX, QR_VOICE_READS_DIARY, REFLECT_WINDOW } from "../config.ts";
+import { HISTORY_WINDOW, QR_VOICE_READS_DIARY, REFLECT_WINDOW } from "../config.ts";
 import { currentArchiveVars } from "../archivist.ts";
 import { buildReportData } from "../diary/report.ts";
 import {
@@ -27,7 +27,6 @@ import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
 import { portraitInputVars } from "../voice/nightly.ts";
 import { buildVoiceMessages, formatMemories, voiceFacingSlots, voiceHistoryMessages } from "../voice/pack-build.ts";
-import { formatRecentPhrases, recentPhrasesFromHistory } from "../voice/recent-phrases.ts";
 import { formatReflectConversation, reflectVars, type ReflectorParts } from "../voice/reflector.ts";
 import { getCoreIndexItems, getRelatedIndexItems } from "../voice/retrieve.ts";
 import type { Finding } from "../types.ts";
@@ -75,10 +74,6 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
     historyWindow: typeof profile.historyWindow === "number" ? profile.historyWindow : HISTORY_WINDOW,
   });
   const history = await listHistoryWindow(null, inject.history);
-  const phraseHistory =
-    inject.history >= HISTORY_WINDOW_MAX ? history : await listHistoryWindow(null, HISTORY_WINDOW_MAX);
-  const recentPhrases = recentPhrasesFromHistory(phraseHistory);
-  const phraseText = formatRecentPhrases(recentPhrases);
   const ids = mind.memory_ids ?? [];
   let notes = ids.length ? (await listNotesByIds(ids)).filter((note) => note.status === "active") : [];
   if (!notes.length) notes = (await listNotes({ status: "active", limit: 6 })).slice(0, 6);
@@ -108,7 +103,6 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
     nowMs: now(),
     voiceTemplate: body,
     inject,
-    recentPhrases,
   });
   return {
     slots: {
@@ -116,13 +110,11 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
       mind: facing.mind || "（空，这一轮不会放【内心】）",
       system_prompt: charter,
       clock,
-      care: "",
       user_text: "在吗",
       history_messages: historyText,
-      recent_phrases: phraseText || "（没有重复。这一段不会出现在发给模型的内容里）",
     },
     messages,
-    note: "没有正在说的这一句，用户消息用「在吗」占位。记忆、画像、内心是发给回复模型前的文本，库里原文没改。最近说过的句子来自最近 8 条清然回复。",
+    note: "没有正在说的这一句，用户消息用「在吗」占位。记忆、画像、内心是发给回复模型前的文本，库里原文没改。",
   };
 }
 
@@ -285,20 +277,6 @@ async function slotsFor(key: PromptKey, variantId: string): Promise<{ slots: Rec
     return {
       slots: { data: data.slice(0, key === "report" ? 20_000 : 12_000) },
       note: `用 ${month} 的月报统计。`,
-    };
-  }
-  if (key === "remember" || key === "overflow" || key === "consolidate") {
-    const meta = await getMeta();
-    const tz = resolveTz(meta.timeZone);
-    return {
-      slots: {
-        memories: NONE,
-        stretch: LATER,
-        overflow: LATER,
-        lookahead: LATER,
-        clock: formatClock(now(), tz),
-      },
-      note: "这三步只在压缩旧的长期记忆时才有对话材料。现在没有待处理的一段。",
     };
   }
   const charter = await getProfilePrompt();

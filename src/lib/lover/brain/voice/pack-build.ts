@@ -11,8 +11,6 @@ import {
   voiceInjectFromProfile,
   type VoiceInjectFlags,
 } from "../../types.ts";
-import { asQingranFirstPerson } from "./person.ts";
-import { formatRecentPhrases, omitEmptyRecentPhraseBlock, recentPhrasesFromHistory } from "./recent-phrases.ts";
 
 export { formatVoiceInjectLine };
 export type { VoiceInjectFlags };
@@ -31,10 +29,10 @@ function portraitBlock(rows: PortraitRow[]): string {
 }
 
 function faceVoice(text: string): string {
-  return asQingranFirstPerson(text);
+  return text;
 }
 
-/** Text of the five reply slots after the first-person rewrite. Empty mind stays empty. */
+/** Text of the five reply slots. Injected as stored; names are not rewritten. Empty mind stays empty. */
 export function voiceFacingSlots(input: {
   selfSummary?: string;
   bondSummary?: string;
@@ -95,7 +93,6 @@ export type VoicePackParts = {
   injectMemories?: boolean;
   injectLongterm?: boolean;
   historyWindow?: number;
-  recentPhrases?: string[];
 };
 
 export type VoiceInputChars = {
@@ -107,11 +104,6 @@ export type VoiceInputChars = {
 };
 
 const FALLBACK_CHARTER = "你就是清然。正在和 Rosie 语音通话。";
-const CARE_LINE = "\n如果时机自然，可以像平常关心一样问问你今天过得怎么样、睡得如何。";
-
-export function voiceCareText(careHint: boolean): string {
-  return careHint ? CARE_LINE : "";
-}
 
 export function voiceMindText(opts: {
   mind: Mind;
@@ -174,7 +166,7 @@ function polishVoiceSystem(content: string, inject: VoiceInjectFlags): string {
 }
 
 const LONGTERM_TOKEN = /\{(?:self|bond|portrait)\}/;
-const OTHER_VOICE_TOKEN = /\{(?:system_prompt|user_text|history_messages|clock|mind|memories|care)\}/;
+const OTHER_VOICE_TOKEN = /\{(?:system_prompt|user_text|history_messages|clock|mind|memories)\}/;
 
 function withoutLongtermMessage<T extends { content: string }>(messages: T[], inject: VoiceInjectFlags): T[] {
   if (inject.longterm) return messages;
@@ -220,10 +212,8 @@ function voiceVars(parts: {
   clock: string;
   mind: string;
   memories: string;
-  care: string;
   userText: string;
   inject: VoiceInjectFlags;
-  phraseText: string;
 }): Record<string, string> {
   const longterm = parts.inject.longterm;
   const slots = voiceFacingSlots({
@@ -241,9 +231,7 @@ function voiceVars(parts: {
     clock: parts.clock,
     mind: slots.mind,
     memories: parts.inject.memories ? slots.memories : "",
-    care: parts.care,
     user_text: parts.userText,
-    recent_phrases: parts.phraseText,
   };
 }
 
@@ -267,26 +255,17 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
     stale: strip === "none" ? parts.mindStale : false,
     voiceTemplate: parts.voiceTemplate,
     inject,
-    recentPhrases: parts.recentPhrases,
   });
   if (strip !== "thin") return rendered;
-  const phrase = rendered
-    .filter((message) => message.role === "system")
-    .flatMap((message) => message.content.split(/\n\n+/))
-    .find((paragraph) => paragraph.includes("这些话你最近说过"));
   const head = rendered.find((message) => message.role === "system") ?? {
     role: "system" as const,
     content: systemCharter(parts.charter, parts.voiceTemplate),
   };
-  const first =
-    phrase && !head.content.includes("这些话你最近说过")
-      ? { role: "system" as const, content: `${head.content.trim()}\n\n${phrase}` }
-      : head;
   const cap = inject.history <= 0 ? 0 : Math.min(VOICE_THIN_HISTORY, inject.history);
   const history = voiceHistoryMessages(parts.history, cap);
   const last = rendered[rendered.length - 1];
   const user = last?.role === "user" ? last : { role: "user" as const, content: parts.userText };
-  return [first, ...history, user];
+  return [head, ...history, user];
 }
 
 export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
@@ -335,7 +314,6 @@ export function buildTail(opts: {
   stale?: boolean;
   jump?: boolean;
   inject?: VoiceInjectFlags;
-  recentPhrases?: string[];
 }): string {
   const inject = partsInject(opts.inject);
   const template = variantMessages(defaultDoc("voice"), "main").find(
@@ -345,13 +323,10 @@ export function buildTail(opts: {
     mind: voiceMindText(opts),
     memories: formatMemories(opts.notes, opts.timeZone),
   });
-  const phraseText = formatRecentPhrases(opts.recentPhrases ?? []);
-  const filled = fillTemplate(omitEmptyRecentPhraseBlock(template?.content ?? "", phraseText), {
+  const filled = fillTemplate(template?.content ?? "", {
     clock: opts.clock,
     mind: slots.mind,
     memories: inject.memories ? slots.memories : "",
-    care: voiceCareText(opts.careHint),
-    recent_phrases: phraseText,
   });
   return polishVoiceSystem(filled, inject);
 }
@@ -377,7 +352,6 @@ export function buildVoiceMessages(opts: {
   stale?: boolean;
   voiceTemplate?: string;
   inject?: VoiceInjectFlags;
-  recentPhrases?: string[];
 }): VoiceChatMessage[] {
   const inject = partsInject(opts.inject);
   const doc = voiceDoc(opts.voiceTemplate);
@@ -392,11 +366,6 @@ export function buildVoiceMessages(opts: {
     nowMs: opts.nowMs,
     stale: opts.stale,
   });
-  const phraseText = formatRecentPhrases(opts.recentPhrases ?? recentPhrasesFromHistory(opts.history));
-  messages = messages.map((message) => ({
-    ...message,
-    content: omitEmptyRecentPhraseBlock(message.content, phraseText),
-  }));
   return renderPromptMessages(
     messages,
     voiceVars({
@@ -407,10 +376,8 @@ export function buildVoiceMessages(opts: {
       clock: opts.clock ?? "",
       mind,
       memories: formatMemories(opts.notes ?? [], opts.timeZone ?? "UTC"),
-      care: voiceCareText(Boolean(opts.careHint)),
       userText: opts.userText,
       inject,
-      phraseText,
     }),
     voiceHistoryMessages(opts.history, inject.history),
   )

@@ -776,7 +776,7 @@ export function convertV1(
     .map((m) => ({
       id: String(m.id ?? ""),
       role: m.role === "assistant" ? "assistant" : "user",
-      body: String(m.text ?? "").slice(0, 4000),
+      body: String(m.text ?? ""),
       created_at: Number(m.createdAt) || 0,
       kind: m.kind === "steer" || m.kind === "setting" ? m.kind : "say",
     }))
