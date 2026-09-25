@@ -61,6 +61,10 @@ const PATCH_KEYS = [
   "intimateNotes",
   "storyline",
   "brainOn",
+  "mode",
+  "realModel",
+  "realEffort",
+  "realPrompt",
   "personaPlacement",
 ] as const satisfies readonly (keyof Profile)[];
 

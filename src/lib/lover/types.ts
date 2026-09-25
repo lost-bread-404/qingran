@@ -85,6 +85,11 @@ export type Profile = {
   storyline: string;
   /** Run the inner mind (reflect) and memory editor. Off → reply uses persona + context only. */
   brainOn: boolean;
+  /** 戏 = voiceModel + systemPrompt. 现实 = realModel + realPrompt (empty → systemPrompt). Rosie flips it by hand. */
+  mode: "play" | "real";
+  realModel: string;
+  realEffort: VoiceEffort;
+  realPrompt: string;
   /** Where the persona text sits: system prompt, or the first user message. */
   personaPlacement: "system" | "first_user";
 };
@@ -174,6 +179,10 @@ export const DEFAULT_PROFILE: Profile = {
   intimateNotes: "",
   storyline: "",
   brainOn: true,
+  mode: "play",
+  realModel: "grok-4.7",
+  realEffort: "low",
+  realPrompt: "",
   personaPlacement: "system",
 };
 
@@ -221,6 +230,10 @@ type LooseProfile = Partial<Profile> & {
   intimateNotes?: string;
   storyline?: string;
   brainOn?: boolean;
+  mode?: string;
+  realModel?: string;
+  realEffort?: unknown;
+  realPrompt?: string;
   personaPlacement?: string;
 };
 
@@ -267,6 +280,10 @@ export function lockedProfile(input?: unknown): Profile {
     intimateNotes: typeof raw.intimateNotes === "string" ? raw.intimateNotes.slice(0, 8000) : "",
     storyline: typeof raw.storyline === "string" ? raw.storyline.slice(0, 20000) : "",
     brainOn: raw.brainOn !== false,
+    mode: raw.mode === "real" ? "real" : "play",
+    realModel: typeof raw.realModel === "string" && raw.realModel.trim() ? raw.realModel.trim().slice(0, 80) : "grok-4.7",
+    realEffort: raw.realEffort === null ? null : isVoiceEffort(raw.realEffort) ? raw.realEffort : "low",
+    realPrompt: typeof raw.realPrompt === "string" ? raw.realPrompt.slice(0, 16_000) : "",
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
   };
 }

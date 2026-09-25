@@ -197,6 +197,12 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [callKitBackground, setCallKitBackground] = useState(profile.callKitBackground);
   const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
   const [storyDraft, setStoryDraft] = useState(profile.storyline);
+  const [realPromptDraft, setRealPromptDraft] = useState(profile.realPrompt);
+  const [realModelDraft, setRealModelDraft] = useState(profile.realModel);
+  useEffect(() => {
+    setRealPromptDraft(profile.realPrompt);
+    setRealModelDraft(profile.realModel);
+  }, [profile.realPrompt, profile.realModel]);
   useEffect(() => {
     setStoryDraft(profile.storyline);
   }, [profile.storyline]);
@@ -784,6 +790,52 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
               ) : null}
             </label>
+            <div className="flex flex-col gap-2 rounded-md bg-surface-2 px-3 py-3">
+              <p className="text-sm">现实模式</p>
+              <p className="text-xs text-subtle">聊天页右上角点「戏 / 现实」切换。上面的人设和回复模型是「戏」用的；现实模式用下面这套，人设空着就沿用上面那份。</p>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-subtle">模型</span>
+                <input
+                  className="h-11 rounded-md bg-surface px-3 text-sm"
+                  value={realModelDraft}
+                  onChange={(e) => setRealModelDraft(e.target.value)}
+                  onBlur={() => {
+                    const next = realModelDraft.trim();
+                    if (next && next !== profile.realModel) persistProfile({ realModel: next });
+                  }}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-subtle">effort</span>
+                <select
+                  className="h-11 rounded-md bg-surface px-2 text-sm"
+                  value={profile.realEffort ?? "none"}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    persistProfile({ realEffort: v === "low" || v === "medium" || v === "high" ? v : null });
+                  }}
+                >
+                  <option value="none">无（non-reasoning 模型）</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-subtle">现实模式人设</span>
+                <Textarea
+                  value={realPromptDraft}
+                  onChange={(e) => setRealPromptDraft(e.target.value)}
+                  onBlur={() => {
+                    const next = realPromptDraft.trim();
+                    if (next !== profile.realPrompt.trim()) persistProfile({ realPrompt: next });
+                  }}
+                  maxLength={16000}
+                  className="min-h-48 resize-none font-mono leading-relaxed"
+                  placeholder="空着就用上面「戏」的人设"
+                />
+              </label>
+            </div>
             <label className="flex flex-col gap-2">
               <span className="text-sm">故事线</span>
               <Textarea

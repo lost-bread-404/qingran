@@ -21,6 +21,12 @@ export function resolveTalkProfile(given: unknown, saved: unknown): ResolvedTalk
     const client = lockedProfile(given);
     profile.voiceSpeed = client.voiceSpeed;
     profile.muted = client.muted;
+    if (given && typeof given === "object" && "mode" in given) profile.mode = client.mode;
+  }
+  if (profile.mode === "real") {
+    profile.voiceModel = profile.realModel;
+    profile.voiceEffort = profile.realEffort;
+    if (profile.realPrompt.trim()) profile.systemPrompt = profile.realPrompt;
   }
   return { profile, personaMissing };
 }
