@@ -4,7 +4,6 @@ import { PLAN_OPEN_MAX } from "./config.ts";
 import {
   applyReflectOutput,
   expireOpenPlans,
-  makePlanId,
   nowRejectedReason,
 } from "./mind-parse.ts";
 import { EMPTY_INNER, type InnerPlan, type InnerState } from "./types.ts";
@@ -12,8 +11,9 @@ import { EMPTY_INNER, type InnerPlan, type InnerState } from "./types.ts";
 function plan(partial: Partial<InnerPlan> & Pick<InnerPlan, "id">): InnerPlan {
   return {
     what: partial.what ?? "做这件事",
-    trigger: partial.trigger ?? "她提起的时候",
-    expires_at: partial.expires_at ?? 10_000,
+    why: partial.why ?? "",
+    trigger: partial.trigger,
+    expires_at: partial.expires_at,
     status: partial.status ?? "open",
     id: partial.id,
   };
@@ -45,50 +45,45 @@ test("rejected now is wiped and the rest is kept", () => {
   assert.ok(discarded.now_rejected);
 });
 
-test("plan ids stay, empty ids are generated, expiry and the open cap are applied", () => {
+test("plan ids stay, empty ids are generated, and the open cap drops the earliest", () => {
   const nowMs = 1_000_000;
   const prev = [
-    plan({ id: "keep-me", what: "旧计划", expires_at: nowMs + 3_600_000 }),
-    plan({ id: "old-open", what: "没被模型提到", expires_at: nowMs + 3_600_000 }),
+    plan({ id: "keep-me", what: "旧计划" }),
+    plan({ id: "old-open", what: "没被模型提到" }),
   ];
   const raw = [
-    { id: "keep-me", what: "旧计划还在", trigger: "她回来", expires_in_hours: 2, status: "open" },
-    { id: "", what: "新的", trigger: "明天早上", expires_in_hours: 10, status: "open" },
-    { id: "due", what: "已经到点", trigger: "现在", expires_in_hours: 0, status: "open" },
-    ...Array.from({ length: PLAN_OPEN_MAX }, (_, i) => ({
+    { id: "keep-me", what: "旧计划还在", why: "还想", status: "open" },
+    { id: "", what: "新的", why: "", status: "open" },
+    { id: "due", what: "已经到点", why: "不看钟", status: "open" },
+    ...Array.from({ length: PLAN_OPEN_MAX - 2 }, (_, i) => ({
       id: `extra-${i}`,
       what: `多出来的${i}`,
-      trigger: "有空",
-      expires_in_hours: 5,
+      why: "",
       status: "open",
     })),
   ];
   const { next, discarded } = applyReflectOutput({ ...EMPTY_INNER, plans: prev }, { plans: raw }, nowMs, 3);
   const kept = next.plans.find((item) => item.id === "keep-me");
   assert.equal(kept?.what, "旧计划还在");
-  assert.equal(kept?.status, "open");
-  assert.equal(kept?.expires_at, nowMs + 2 * 3_600_000);
   const generated = next.plans.find((item) => item.what === "新的");
   assert.ok(generated);
   assert.notEqual(generated!.id, "");
-  assert.equal(generated!.id, makePlanId(nowMs, 1, new Set()));
-  assert.equal(next.plans.find((item) => item.id === "due")?.status, "dropped");
-  assert.equal(next.plans.find((item) => item.id === "old-open")?.status, "open");
-  assert.ok(next.plans.filter((item) => item.status === "open").length <= PLAN_OPEN_MAX);
+  assert.equal(next.plans.find((item) => item.id === "due")?.status, "open");
+  assert.equal(next.plans.filter((item) => item.status === "open").length, PLAN_OPEN_MAX);
   const drops = discarded.plans as Array<{ id: string; reason: string }>;
-  assert.ok(drops.some((item) => item.reason === "expired"));
-  assert.ok(drops.some((item) => item.reason === "open_cap"));
+  assert.ok(drops.every((item) => item.reason === "open_cap"));
+  assert.equal(drops[0]?.id, "keep-me");
 });
 
-test("open plans past expires_at are dropped before the next reflect", () => {
+test("open plans are not dropped just because an old expires_at passed", () => {
   const nowMs = 5_000;
   const { plans, dropped } = expireOpenPlans(
     [plan({ id: "a", expires_at: 4_000 }), plan({ id: "b", expires_at: 9_000, status: "done" })],
     nowMs,
   );
-  assert.equal(plans[0]!.status, "dropped");
+  assert.equal(plans[0]!.status, "open");
   assert.equal(plans[1]!.status, "done");
-  assert.deepEqual(dropped, [{ id: "a", reason: "expired" }]);
+  assert.deepEqual(dropped, []);
 });
 
 test("longing timestamp moves only when the text changes", () => {

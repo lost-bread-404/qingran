@@ -9,6 +9,8 @@ test("whitelist: login, cron, static assets", () => {
   assert.equal(isPublicPath("POST", "/api/logout"), true);
   assert.equal(isPublicPath("GET", "/api/cron/brain"), true);
   assert.equal(isPublicPath("GET", "/api/cron/brain?slot=2"), true);
+  assert.equal(isPublicPath("GET", "/api/cron/wake"), true);
+  assert.equal(isPublicPath("POST", "/api/cron/wake"), true);
   assert.equal(isPublicPath("GET", "/assets/index-abc.js"), true);
   assert.equal(isPublicPath("GET", "/favicon.svg"), true);
   assert.equal(isPublicPath("GET", "/favicon.ico"), true);

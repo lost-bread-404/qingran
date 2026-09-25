@@ -38,11 +38,9 @@ import type {
   StoredMessage,
   Theme,
 } from "@/lib/lover/brain/types";
-import { BrainSystemArchive } from "@/components/lover/brain-system-archive";
-import { BrainSpendPage } from "@/components/lover/brain-spend-page";
 import { cn } from "@/lib/utils";
 
-type Tab = "overview" | "report" | "saydo" | "themes" | "experiments" | "ask" | "spend" | "archive";
+type Tab = "overview" | "report" | "saydo" | "themes" | "experiments" | "ask";
 
 const JOB_LABEL: Record<string, string> = {
   dusk: "整理今天",
@@ -88,7 +86,7 @@ export function DiaryPage() {
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && window.location.hash === "#spend") setTab("spend");
+    if (typeof window !== "undefined" && window.location.hash === "#ask") setTab("ask");
   }, []);
 
   async function loadAll() {
@@ -200,8 +198,6 @@ export function DiaryPage() {
     ["themes", "主题"],
     ["experiments", "实验"],
     ["ask", "问日记"],
-    ["spend", "费用"],
-    ["archive", "系统档案"],
   ];
 
   return (
@@ -462,8 +458,6 @@ export function DiaryPage() {
           </section>
         ) : null}
 
-        {tab === "spend" ? <BrainSpendPage /> : null}
-        {tab === "archive" ? <BrainSystemArchive /> : null}
       </div>
     </div>
   );

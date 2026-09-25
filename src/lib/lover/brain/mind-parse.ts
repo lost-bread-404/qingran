@@ -1,5 +1,6 @@
-import { LONGING_TTL_MS, PICK_MAX, PLAN_MAX_HOURS, PLAN_OPEN_MAX, SESSION_GAP_MS } from "./config.ts";
-import type { InnerPlan, InnerPlanStatus, InnerState, Mind } from "./types.ts";
+import { LONGING_TTL_MS, PICK_MAX, PLAN_OPEN_MAX, SESSION_GAP_MS } from "./config.ts";
+import { glowNow, glowWord, GLOW_HALF_LIFE_MS } from "./life.ts";
+import type { InnerPlan, InnerPlanStatus, InnerState, LongingItem, Mind } from "./types.ts";
 import { EMPTY_INNER, EMPTY_MIND } from "./types.ts";
 
 function clipPlain(text: string, max: number): string {
@@ -60,23 +61,30 @@ export function nowRejectedReason(nowText: string): string | null {
   return `now 写成了否定式意图（含「${hit[0]}」），本轮不注入`;
 }
 
-export type MomentText = { feel: string; want: string; now: string; longing: string };
+export type MomentText = { feel: string; want: string; now: string; longing: string; glow: string };
 
 export type MomentInject = MomentText & {
   stale: { moment: boolean; longing: boolean };
 };
 
-export function momentForVoice(inner: InnerState, nowMs: number, enabled: boolean): MomentInject {
+export function momentForVoice(
+  inner: InnerState,
+  nowMs: number,
+  enabled: boolean,
+  halfLifeMs = GLOW_HALF_LIFE_MS,
+): MomentInject {
   const momentStale = !inner.updated_at || nowMs - inner.updated_at > SESSION_GAP_MS;
   const longingStale = !inner.longing_updated_at || nowMs - inner.longing_updated_at > LONGING_TTL_MS;
+  const word = glowWord(glowNow(inner.glow, inner.glow_at, nowMs, halfLifeMs));
   if (!enabled) {
-    return { feel: "", want: "", now: "", longing: "", stale: { moment: true, longing: true } };
+    return { feel: "", want: "", now: "", longing: "", glow: "", stale: { moment: true, longing: true } };
   }
   return {
     feel: momentStale ? "" : inner.feel.trim(),
     want: momentStale ? "" : inner.want.trim(),
     now: momentStale ? "" : inner.now.trim(),
     longing: longingStale ? "" : inner.longing.trim(),
+    glow: word ? `${word}（比平常）` : "",
     stale: { moment: momentStale, longing: longingStale },
   };
 }
@@ -90,12 +98,6 @@ function planStatus(raw: unknown, fallback: InnerPlanStatus): InnerPlanStatus {
   return raw === "open" || raw === "done" || raw === "dropped" ? raw : fallback;
 }
 
-function clampHours(raw: unknown, fallback: number): number {
-  const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : Number.NaN;
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(0, Math.min(PLAN_MAX_HOURS, n));
-}
-
 export function makePlanId(nowMs: number, index: number, used: Set<string>): string {
   let n = index;
   let id = `p${nowMs.toString(36)}${n.toString(36)}`;
@@ -106,37 +108,38 @@ export function makePlanId(nowMs: number, index: number, used: Set<string>): str
   return id;
 }
 
+/** Plans no longer expire on a clock. Kept so older callers still compile. */
 export function expireOpenPlans(
   plans: InnerPlan[],
-  nowMs: number,
+  _nowMs: number,
 ): { plans: InnerPlan[]; dropped: Array<{ id: string; reason: string }> } {
-  const dropped: Array<{ id: string; reason: string }> = [];
-  const next = plans.map((plan) => {
-    if (plan.status === "open" && plan.expires_at <= nowMs) {
-      dropped.push({ id: plan.id, reason: "expired" });
-      return { ...plan, status: "dropped" as const };
-    }
-    return plan;
-  });
-  return { plans: next, dropped };
+  return { plans: plans.map((plan) => ({ ...plan })), dropped: [] };
 }
 
 export function formatOldInner(inner: InnerState, nowMs: number): string {
+  const word = glowWord(glowNow(inner.glow, inner.glow_at, nowMs));
   const lines = [
     inner.feel.trim() ? `feel：${inner.feel.trim()}` : "",
     inner.want.trim() ? `want：${inner.want.trim()}` : "",
     inner.choice.trim() ? `choice：${inner.choice.trim()}` : "",
     inner.now.trim() ? `now：${inner.now.trim()}` : "",
+    word ? `心情：${word}` : "",
     inner.longing.trim() ? `longing：${inner.longing.trim()}` : "",
   ].filter(Boolean);
   const open = inner.plans.filter((plan) => plan.status === "open");
   const planLines = open.map((plan) => {
-    const hours = Math.max(0, (plan.expires_at - nowMs) / 3_600_000);
-    const shown = Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
-    return `- id=${plan.id} what=${plan.what} trigger=${plan.trigger} 剩余${shown}小时`;
+    const why = plan.why?.trim() ? ` why=${plan.why.trim()}` : "";
+    return `- id=${plan.id} what=${plan.what}${why}`;
   });
-  if (!lines.length && !planLines.length) return "（空）";
-  return [...lines, planLines.length ? `plans：\n${planLines.join("\n")}` : ""].filter(Boolean).join("\n");
+  const longingLines = inner.longings
+    .filter((item) => item.text.trim())
+    .map((item) => `- ${item.text.trim()}${item.since ? `（从 ${item.since} 起）` : ""}`);
+  if (!lines.length && !planLines.length && !longingLines.length) return "（空）";
+  return [
+    ...lines,
+    longingLines.length ? `longings：\n${longingLines.join("\n")}` : "",
+    planLines.length ? `plans：\n${planLines.join("\n")}` : "",
+  ].filter(Boolean).join("\n");
 }
 
 export function applyReflectOutput(
@@ -144,13 +147,19 @@ export function applyReflectOutput(
   raw: unknown,
   nowMs: number,
   turnSeq: number,
-): { next: InnerState; discarded: Record<string, unknown> } {
+): {
+  next: InnerState;
+  discarded: Record<string, unknown>;
+  glow: { delta: number; why: string } | null;
+  nextReach: { inHours: number; intent: string } | null | undefined;
+} {
   const row = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const feel = clipField(row.feel);
   const want = clipField(row.want);
   const choice = clipField(row.choice);
   let nowText = clipField(row.now);
-  const longing = clipField(row.longing);
+  const longingFromList = mergeLongings(prev, row.longings, row.longing, nowMs);
+  const longing = longingFromList.text;
   const discarded: Record<string, unknown> = {};
   const rejected = nowRejectedReason(nowText);
   if (rejected) {
@@ -159,6 +168,8 @@ export function applyReflectOutput(
   }
   const plans = mergePlans(prev.plans, row.plans, nowMs, discarded);
   const longingChanged = longing !== prev.longing.trim();
+  const glow = parseGlow(row.glow);
+  const nextReach = parseNextReach(row);
   return {
     next: {
       feel,
@@ -166,13 +177,77 @@ export function applyReflectOutput(
       choice,
       now: nowText,
       longing,
+      longings: longingFromList.items,
       plans,
+      glow: prev.glow,
+      glow_at: prev.glow_at,
       turn_seq: turnSeq,
       updated_at: nowMs,
       longing_updated_at: longingChanged ? nowMs : prev.longing_updated_at,
     },
     discarded,
+    glow,
+    nextReach,
   };
+}
+
+function dayStamp(nowMs: number): string {
+  const d = new Date(nowMs);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+function mergeLongings(
+  prev: InnerState,
+  rawList: unknown,
+  rawString: unknown,
+  nowMs: number,
+): { items: LongingItem[]; text: string } {
+  const today = dayStamp(nowMs);
+  const prevById = new Map(prev.longings.map((item) => [item.id, item]));
+  let items: LongingItem[] = prev.longings.map((item) => ({ ...item }));
+  if (Array.isArray(rawList)) {
+    const used = new Set<string>();
+    items = [];
+    rawList.slice(0, 5).forEach((item, index) => {
+      if (!item || typeof item !== "object") return;
+      const row = item as Record<string, unknown>;
+      const text = clipField(row.text, PLAN_TEXT_MAX);
+      if (!text) return;
+      const requested = typeof row.id === "string" ? row.id.trim() : "";
+      const existing = requested ? prevById.get(requested) : undefined;
+      const id = existing?.id || requested || makePlanId(nowMs, index, used);
+      if (used.has(id)) return;
+      used.add(id);
+      items.push({ id, text, since: existing?.since || today });
+    });
+  } else if (typeof rawString === "string") {
+    const text = clipField(rawString);
+    if (!text) items = [];
+    else if (prev.longings.length === 1 && prev.longings[0]?.text === text) items = prev.longings.map((item) => ({ ...item }));
+    else if (prev.longing.trim() === text && prev.longings.length) items = prev.longings.map((item) => ({ ...item }));
+    else items = [{ id: prev.longings[0]?.id || "l1", text, since: prev.longings[0]?.since || today }];
+  }
+  return { items, text: items.map((item) => item.text).join("；") };
+}
+
+function parseGlow(raw: unknown): { delta: number; why: string } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const delta = Number(row.delta);
+  if (!Number.isFinite(delta)) return null;
+  return { delta: Math.max(-30, Math.min(30, delta)), why: clipField(row.why, 200) };
+}
+
+function parseNextReach(row: Record<string, unknown>): { inHours: number; intent: string } | null | undefined {
+  if (!("next_reach" in row)) return undefined;
+  const raw = row.next_reach;
+  if (raw == null) return null;
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Record<string, unknown>;
+  const hours = Number(item.in_hours);
+  if (!Number.isFinite(hours)) return null;
+  return { inHours: hours, intent: clipField(item.intent, PLAN_TEXT_MAX) };
 }
 
 function mergePlans(
@@ -185,53 +260,36 @@ function mergePlans(
   const prevById = new Map(prev.map((plan) => [plan.id, plan]));
   const used = new Set<string>();
   const next: InnerPlan[] = [];
-  const drops: Array<{ id: string; reason: string }> = [];
   raw.forEach((item, index) => {
     if (!item || typeof item !== "object") return;
     const row = item as Record<string, unknown>;
     const what = clipField(row.what, PLAN_TEXT_MAX);
-    const trigger = clipField(row.trigger, PLAN_TEXT_MAX);
-    if (!what && !trigger) return;
+    const why = clipField(row.why, PLAN_TEXT_MAX);
+    if (!what) return;
     const requested = typeof row.id === "string" ? row.id.trim() : "";
     const existing = requested ? prevById.get(requested) : undefined;
     const id = existing ? existing.id : requested && !used.has(requested) ? requested : makePlanId(nowMs, index, used);
     if (used.has(id)) return;
     used.add(id);
-    const fallbackHours = existing ? Math.max(0, (existing.expires_at - nowMs) / 3_600_000) : PLAN_MAX_HOURS;
-    const hours = clampHours(row.expires_in_hours, fallbackHours);
-    let status = planStatus(row.status, existing?.status ?? "open");
-    const expires_at = nowMs + hours * 3_600_000;
-    if (status === "open" && expires_at <= nowMs) {
-      status = "dropped";
-      drops.push({ id, reason: "expired" });
-    }
-    next.push({ id, what: what || existing?.what || "", trigger: trigger || existing?.trigger || "", expires_at, status });
+    const status = planStatus(row.status, existing?.status ?? "open");
+    next.push({
+      id,
+      what,
+      why: why || existing?.why || "",
+      status,
+      trigger: existing?.trigger,
+      expires_at: existing?.expires_at,
+    });
   });
   for (const plan of prev) {
-    if (!used.has(plan.id)) next.push({ ...plan });
+    if (!used.has(plan.id)) next.push({ ...plan, why: plan.why || "" });
   }
-  // Keep plans that already existed. New open plans fill whatever room is left,
-  // earliest first; anything past the cap is dropped (open_cap).
-  const prevIds = new Set(prev.map((plan) => plan.id));
-  const existingOpen = next.filter((plan) => plan.status === "open" && prevIds.has(plan.id)).length;
-  let room = PLAN_OPEN_MAX - existingOpen;
-  for (const plan of next) {
-    if (plan.status !== "open" || prevIds.has(plan.id)) continue;
-    if (room > 0) {
-      room -= 1;
-      continue;
-    }
-    plan.status = "dropped";
-    drops.push({ id: plan.id, reason: "open_cap" });
-  }
-  if (room < 0) {
-    for (let i = next.length - 1; i >= 0 && room < 0; i--) {
-      const plan = next[i]!;
-      if (plan.status !== "open") continue;
-      plan.status = "dropped";
-      drops.push({ id: plan.id, reason: "open_cap" });
-      room += 1;
-    }
+  const drops: Array<{ id: string; reason: string }> = [];
+  while (next.filter((plan) => plan.status === "open").length > PLAN_OPEN_MAX) {
+    const earliest = next.find((plan) => plan.status === "open");
+    if (!earliest) break;
+    earliest.status = "dropped";
+    drops.push({ id: earliest.id, reason: "open_cap" });
   }
   if (drops.length) discarded.plans = drops;
   return next;

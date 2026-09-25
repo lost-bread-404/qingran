@@ -13,7 +13,7 @@ import {
 export { formatVoiceInjectLine };
 export type { VoiceInjectFlags };
 
-export const EMPTY_MOMENT: MomentText = { feel: "", want: "", now: "", longing: "" };
+export const EMPTY_MOMENT: MomentText = { feel: "", want: "", now: "", longing: "", glow: "" };
 
 function portraitBlock(rows: PortraitRow[]): string {
   const active = rows.filter((r) => r.status === "active");
@@ -48,6 +48,7 @@ export const VOICE_STRIPS: VoiceStrip[] = ["none", "moment", "dossier", "thin"];
 
 export type VoicePackParts = {
   charter: string;
+  identity?: string;
   longterm: string;
   history: StoredMessage[];
   userText: string;
@@ -77,9 +78,9 @@ export type VoiceInputChars = {
 };
 
 const FALLBACK_CHARTER = "你就是清然。正在和 Rosie 语音通话。";
-const MOMENT_FIELD = /\{(feel|want|longing|now)\}/;
+const MOMENT_FIELD = /\{(feel|want|longing|now|glow)\}/;
 const DOSSIER_TOKEN = /\{(?:dossier|self|bond|portrait)\}/;
-const OTHER_VOICE_TOKEN = /\{(?:system_prompt|user_text|history_messages|clock|feel|want|longing|now|mind|memories)\}/;
+const OTHER_VOICE_TOKEN = /\{(?:system_prompt|identity_block|user_text|history_messages|clock|feel|want|longing|now|glow|mind|memories)\}/;
 
 export function voiceInjectOf(parts: {
   injectMoment?: boolean;
@@ -125,7 +126,7 @@ function withoutDossierMessage<T extends { content: string }>(messages: T[], inj
 function prepareMomentTemplate(content: string, moment: MomentText, enabled: boolean): string {
   if (!content.includes("【我此刻】") && !MOMENT_FIELD.test(content)) return content;
   const values: Record<string, string> = moment;
-  const any = ["feel", "want", "longing", "now"].some((key) => values[key]?.trim());
+  const any = ["feel", "want", "longing", "now", "glow"].some((key) => values[key]?.trim());
   if (!enabled || !any) return "";
   return content
     .split("\n")
@@ -165,11 +166,13 @@ function firstSystemTemplate(template?: string): string {
 export function systemCharter(charter: string, template?: string): string {
   return fillTemplate(firstSystemTemplate(template), {
     system_prompt: charter.trim() || FALLBACK_CHARTER,
+    identity_block: "",
   }).trim();
 }
 
 function voiceVars(parts: {
   charter: string;
+  identity?: string;
   dossier: string;
   clock: string;
   moment: MomentText;
@@ -179,6 +182,7 @@ function voiceVars(parts: {
 }): Record<string, string> {
   return {
     system_prompt: parts.charter.trim() || FALLBACK_CHARTER,
+    identity_block: parts.identity?.trim() ? `${parts.identity.trim()}\n` : "",
     dossier: parts.dossier,
     self: "",
     bond: "",
@@ -188,6 +192,7 @@ function voiceVars(parts: {
     want: parts.moment.want.trim(),
     longing: parts.moment.longing.trim(),
     now: parts.moment.now.trim(),
+    glow: parts.moment.glow.trim(),
     mind: parts.mindText,
     memories: parts.memoriesText,
     user_text: parts.userText,
@@ -209,6 +214,7 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
     userText: parts.userText,
     moment,
     clock: parts.clockText,
+    identity: parts.identity,
     voiceTemplate: parts.voiceTemplate,
     showMemories: parts.showMemories === true && (strip === "none" || strip === "moment"),
     mindText: strip === "none" ? parts.mindText : "",
@@ -294,7 +300,7 @@ export function buildTail(opts: {
   const clock = variantMessages(defaultDoc("voice"), "main").find((message) => message.content.includes("{clock}"));
   const momentText = prepareMomentTemplate(template?.content ?? "", moment, inject.moment);
   const filledMoment = momentText
-    ? fillTemplate(momentText, { feel: moment.feel, want: moment.want, longing: moment.longing, now: moment.now })
+    ? fillTemplate(momentText, { feel: moment.feel, want: moment.want, longing: moment.longing, now: moment.now, glow: moment.glow })
     : "";
   const filledClock = fillTemplate(clock?.content ?? "现在是{clock}。", { clock: opts.clock });
   return [filledMoment, filledClock].filter(Boolean).join("\n\n");
@@ -314,6 +320,7 @@ export function buildVoiceMessages(opts: {
   userText: string;
   moment?: MomentText;
   clock?: string;
+  identity?: string;
   timeZone?: string;
   voiceTemplate?: string;
   inject?: VoiceInjectFlags;
@@ -338,6 +345,7 @@ export function buildVoiceMessages(opts: {
   const dossier = opts.longtermOverride != null ? "" : dossierSections(opts.selfSummary ?? "", opts.bondSummary ?? "", opts.portrait ?? []);
   const vars = voiceVars({
     charter: opts.charter,
+    identity: opts.identity,
     dossier,
     clock: opts.clock ?? "",
     moment,

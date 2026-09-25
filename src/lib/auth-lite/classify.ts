@@ -23,6 +23,7 @@ export function isPublicPath(method: string, path: string): boolean {
   if (m === "POST" && p === "/api/login") return true;
   if (m === "POST" && p === "/api/logout") return true;
   if (p === "/api/cron/brain" || p.startsWith("/api/cron/brain/")) return true;
+  if (p === "/api/cron/wake" || p.startsWith("/api/cron/wake/")) return true;
   if (PUBLIC_EXACT.has(p)) return true;
   if (p === "/assets" || p === "/icons") return true;
   for (const prefix of PUBLIC_PREFIX) {

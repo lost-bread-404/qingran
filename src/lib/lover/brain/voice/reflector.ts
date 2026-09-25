@@ -10,6 +10,7 @@ import {
   patchBrainLog,
   saveInner,
   saveInnerPlans,
+  getProfileData,
 } from "../store.ts";
 import { formatClock } from "../time.ts";
 import { now } from "../clock.ts";
@@ -22,33 +23,71 @@ import type { InnerState, StoredMessage } from "../types.ts";
 import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { dossierTextForModel } from "../dossier.ts";
+import { applyGlowDelta, busyContextLine, clampInHours, GLOW_HALF_LIFE_MS, identityBlock } from "../life.ts";
+import { currentBusy } from "../busy.ts";
+import { lockedProfile } from "../../types.ts";
+import { insertGlowEvent, readIdentity, saveReach } from "../life-store.ts";
 
 const INNER_SCHEMA = {
   name: "inner",
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["feel", "want", "choice", "now", "longing", "plans"],
+    required: ["feel", "want", "choice", "now", "longings", "plans", "glow", "next_reach"],
     properties: {
       feel: { type: "string" },
       want: { type: "string" },
       choice: { type: "string" },
       now: { type: "string" },
-      longing: { type: "string" },
+      longings: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "text", "since"],
+          properties: {
+            id: { type: "string" },
+            text: { type: "string" },
+            since: { type: "string" },
+          },
+        },
+      },
       plans: {
         type: "array",
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["id", "what", "trigger", "expires_in_hours", "status"],
+          required: ["id", "what", "why", "status"],
           properties: {
             id: { type: "string" },
             what: { type: "string" },
-            trigger: { type: "string" },
-            expires_in_hours: { type: "number" },
+            why: { type: "string" },
             status: { type: "string", enum: ["open", "done", "dropped"] },
           },
         },
+      },
+      glow: {
+        type: "object",
+        additionalProperties: false,
+        required: ["delta", "why"],
+        properties: {
+          delta: { type: "number" },
+          why: { type: "string" },
+        },
+      },
+      next_reach: {
+        anyOf: [
+          { type: "null" },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["in_hours", "intent"],
+            properties: {
+              in_hours: { type: "number" },
+              intent: { type: "string" },
+            },
+          },
+        ],
       },
     },
   },
@@ -56,15 +95,17 @@ const INNER_SCHEMA = {
 
 export function formatReflectConversation(history: StoredMessage[], timeZone: string): string {
   const lines = history
-    .filter((m) => !isNightNoiseBody(m.text))
+    .filter((m) => m.kind !== "system_notice" && !isNightNoiseBody(m.text))
     .map((m) => `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "Rosie" : "清然"}：${m.text}`);
   return lines.join("\n");
 }
 
 export type ReflectorParts = {
   charter: string;
+  identity?: string;
   dossier: string;
   clock: string;
+  busyLine?: string;
   oldInner: string;
   conversation: string;
 };
@@ -75,8 +116,10 @@ export type ReflectorPacked = { system: string; stable: string; turn: string };
 export function reflectVars(parts: ReflectorParts): Record<string, string> {
   return {
     system_prompt: parts.charter,
+    identity_block: parts.identity?.trim() ? `${parts.identity.trim()}\n` : "",
     dossier: parts.dossier.trim() || "（还没有）",
     clock: parts.clock,
+    busy_line: parts.busyLine?.trim() ?? "",
     old_inner: parts.oldInner.trim() || "（空）",
     conversation: parts.conversation.trim() || "（还没有）",
     self: "",
@@ -111,12 +154,17 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Inn
   if (expired.dropped.length) await saveInnerPlans(expired.plans);
   const old: InnerState = { ...loadedInner, plans: expired.plans };
 
-  const [meta, history, systemPrompt, dossier] = await Promise.all([
+  const [meta, history, systemPrompt, dossier, ident, busy, profileData] = await Promise.all([
     getMeta(),
     listHistoryWindow(null, REFLECT_WINDOW),
     getProfilePrompt(),
     dossierTextForModel(),
+    readIdentity(),
+    currentBusy(at),
+    getProfileData(),
   ]);
+  const profile = lockedProfile(profileData);
+  const half = Math.round(profile.glowHalfLifeDays * 24 * 60 * 60 * 1000) || GLOW_HALF_LIFE_MS;
   const tz = resolveTz(meta.timeZone);
   const convo = formatReflectConversation(history, tz);
   const clockText = formatClock(at, tz);
@@ -125,8 +173,10 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Inn
   const packed = buildReflectorInput(
     {
       charter: systemPrompt,
+      identity: identityBlock(ident.identity),
       dossier,
       clock: clockText,
+      busyLine: busyContextLine(busy),
       oldInner: oldInnerText,
       conversation: convo,
     },
@@ -174,6 +224,31 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Inn
   }
   const applied = applyReflectOutput(old, result.json, at, turnSeq);
   if (expired.dropped.length) applied.discarded.expired_before = expired.dropped;
+  if (applied.glow && applied.glow.delta) {
+    const nextGlow = applyGlowDelta(applied.next.glow, applied.next.glow_at, at, applied.glow.delta, half);
+    applied.next.glow = nextGlow.glow;
+    applied.next.glow_at = nextGlow.glowAt;
+    if (nextGlow.event) {
+      await insertGlowEvent({
+        at,
+        delta: applied.glow.delta,
+        why: applied.glow.why,
+        source: "reflect",
+        turnSeq,
+        glowAfter: nextGlow.glow,
+      });
+    }
+  }
+  if (applied.nextReach !== undefined) {
+    const hours = applied.nextReach ? clampInHours(applied.nextReach.inHours) : null;
+    await saveReach({
+      nextAt: hours == null ? null : at + hours * 3_600_000,
+      intent: applied.nextReach?.intent ?? "",
+      setBy: "reflect",
+      setAt: at,
+      retry: 0,
+    });
+  }
   const saved = await saveInner(applied.next, turnSeq, {
     model: result.model,
     ms: result.ms,

@@ -36,6 +36,7 @@ import {
   saveRoomProfile,
   updateRoomMessage,
 } from "@/lib/lover/room";
+import { registerNativePush } from "@/lib/lover/push-client";
 import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { buildHearingContext, extractContextKeyterms, lastDialogueTurns, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
@@ -51,13 +52,12 @@ import { classifyTalkException, TALK_FAIL, talkExceptionHint } from "@/lib/lover
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { stripAcousticTags } from "@/lib/lover/hearing/tags";
 import { engineLineFromHeard } from "@/lib/lover/hearing/select";
-import { formatCallAudioLog, installAudioTrace, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
+import { installAudioTrace } from "@/lib/lover/call-audio-log";
 import {
   confirmHearingClip,
   flagQingranReply,
   getHearingClipLabel,
   getHearingTurnAudio,
-  hearingLabeledCount,
   patchHearingFinalText,
   patchHearingReplyId,
   patchHearingTurn,
@@ -125,7 +125,6 @@ export function VoiceRoom() {
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmAudioUrl, setConfirmAudioUrl] = useState<string | null>(null);
-  const [labeledCount, setLabeledCount] = useState(0);
   const confirmWasOpenRef = useRef(false);
   const confirmOpenRef = useRef(false);
   const skipAutoPlayRef = useRef(false);
@@ -133,7 +132,6 @@ export function VoiceRoom() {
   const editingRef = useRef(false);
   const [undoConfirmId, setUndoConfirmId] = useState<string | null>(null);
   const undoTimerRef = useRef(0);
-  const [audioLog, setAudioLog] = useState("");
   const [confirmPredicted, setConfirmPredicted] = useState<AcousticTags | null>(null);
   const [confirmGoldTags, setConfirmGoldTags] = useState<Partial<AcousticTags> | null>(null);
   const [confirmNoise, setConfirmNoise] = useState(false);
@@ -239,17 +237,31 @@ export function VoiceRoom() {
   }, []);
 
   useEffect(() => {
-    if (!hydrated || !profile.debugHearing) return;
-    void hearingLabeledCount({ data: {} }).then((result) => {
-      if (result.ok) setLabeledCount(result.count);
-    });
-  }, [hydrated, profile.debugHearing]);
-
-  useEffect(() => {
-    if (!profile.debugHearing) return;
-    setAudioLog(formatCallAudioLog());
-    return subscribeCallAudioLog(() => setAudioLog(formatCallAudioLog()));
-  }, [profile.debugHearing]);
+    const reload = () => {
+      void loadRoom()
+        .then((room) => {
+          setMessages(room.messages);
+        })
+        .catch(() => undefined);
+    };
+    const onToken = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      void registerNativePush(detail);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") reload();
+    };
+    window.addEventListener("qingran-push-token", onToken);
+    window.addEventListener("qingran-push", reload);
+    window.addEventListener("focus", reload);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("qingran-push-token", onToken);
+      window.removeEventListener("qingran-push", reload);
+      window.removeEventListener("focus", reload);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   useEffect(() => {
     installAudioTrace();
@@ -988,7 +1000,6 @@ export function VoiceRoom() {
         setConfirmError(result.error);
         return;
       }
-      if (msg.hearingGold !== "confirmed") setLabeledCount((n) => n + 1);
       const plan = planConfirmSave(chatRef.current, msg, {
         goldText: input.goldText,
         noiseOnly: input.noiseOnly,
@@ -1040,7 +1051,6 @@ export function VoiceRoom() {
         setBanner(result.error);
         return;
       }
-      if (msg.hearingGold !== "confirmed") setLabeledCount((n) => n + 1);
       const updated: ChatMessage = { ...msg, hearingGold: "confirmed" };
       void updateRoomMessage({ data: updated });
       setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
@@ -1071,7 +1081,6 @@ export function VoiceRoom() {
       if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
       undoTimerRef.current = 0;
       setUndoConfirmId(null);
-      if (msg.hearingGold === "confirmed") setLabeledCount((n) => Math.max(0, n - 1));
       const updated: ChatMessage = { ...msg, hearingGold: "unconfirmed" };
       void updateRoomMessage({ data: updated });
       setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
@@ -1197,21 +1206,7 @@ export function VoiceRoom() {
               className="min-w-0 flex-1 text-left"
             >
               <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
-              <p className="text-xs text-subtle">
-                {profile.debugHearing
-                  ? `已标 ${labeledCount} / 200`
-                  : call.active
-                    ? "通话中"
-                    : "在"}
-              </p>
-              {profile.debugHearing ? (
-                <p className="text-[10px] text-subtle/80">
-                  {formatVoiceInjectLine(voiceInjectFromProfile(profile))}
-                </p>
-              ) : null}
-              {profile.debugHearing && audioLog ? (
-                <p className="max-w-[14rem] truncate text-[10px] text-subtle/80">{audioLog}</p>
-              ) : null}
+              <p className="text-xs text-subtle">{call.active ? "通话中" : "在"}</p>
             </button>
           </div>
           <div

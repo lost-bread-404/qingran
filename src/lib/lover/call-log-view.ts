@@ -5,19 +5,21 @@ export type CallLogMessage = {
 };
 
 export const LOG_ROUTE_FILTERS = [
-  ["voice", "voice"],
-  ["reflect", "reflect"],
-  ["archive", "archive"],
-  ["editor", "editor"],
-  ["dusk", "dusk"],
-  ["portrait", "portrait"],
-  ["assign", "assign"],
-  ["synth", "synth"],
-  ["report", "report"],
-  ["ask", "ask"],
-  ["judge", "judge"],
-  ["backfill", "backfill"],
-  ["hear", "hear"],
+  ["voice", "回复"],
+  ["reflect", "内心"],
+  ["reach", "主动"],
+  ["editor", "整理记忆"],
+  ["busy", "忙碌"],
+  ["archive", "日记"],
+  ["dusk", "日暮"],
+  ["assign", "打标"],
+  ["synth", "合成"],
+  ["report", "月报"],
+  ["ask", "问日记"],
+  ["judge", "评审"],
+  ["backfill", "回填"],
+  ["hear", "听力"],
+  ["manual", "手改"],
 ] as const;
 
 export const LOG_RANGE_FILTERS = [

@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { now } from "@/lib/lover/brain/clock";
 import { assertModelConfig, LONG_DRAIN_MS } from "@/lib/lover/brain/config";
+import { cronGate } from "@/lib/lover/brain/cron-auth";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
 import { drainJobs } from "@/lib/lover/brain/jobs";
 import { countPendingJobs, getMeta } from "@/lib/lover/brain/store";
@@ -9,33 +10,12 @@ import { resolveTz } from "@/lib/lover/brain/tz";
 import { getSql } from "@/lib/db";
 import { maybeRebuildLexicon } from "@/lib/lover/hearing/persist";
 
-function isLocalDev(): boolean {
-  return process.env.NODE_ENV !== "production" && !process.env.VERCEL && !process.env.NITRO;
-}
-
-function cronAuthorized(request: Request): "ok" | "unauthorized" | "no-secret" {
-  const secret = process.env.CRON_SECRET;
-  const auth = request.headers.get("authorization") ?? "";
-  if (secret && auth === `Bearer ${secret}`) return "ok";
-  if (!secret && !isLocalDev()) return "no-secret";
-  if (!secret && isLocalDev()) {
-    const host = request.headers.get("host") ?? "";
-    if (host.startsWith("localhost") || host.startsWith("127.0.0.1")) return "ok";
-  }
-  return "unauthorized";
-}
-
 export const Route = createFileRoute("/api/cron/brain")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const auth = cronAuthorized(request);
-        if (auth === "no-secret") {
-          return Response.json({ ok: false, error: "CRON_SECRET is required" }, { status: 503 });
-        }
-        if (auth !== "ok") {
-          return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
-        }
+        const denied = cronGate(request);
+        if (denied) return denied;
         try {
           assertModelConfig();
         } catch (err) {

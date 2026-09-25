@@ -13,6 +13,9 @@ export type PromptKey =
   | "reflect"
   | "archive"
   | "editor"
+  | "busy"
+  | "busy_tool"
+  | "reach"
   | "dusk"
   | "assign"
   | "synth"
@@ -55,6 +58,21 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
     key: "editor",
     name: "整理记忆",
     blurb: "大约每 20 轮，或隔了一段时间再开口时，把新对话收进「我记得的」。也可以手动现在整理。",
+  },
+  {
+    key: "busy",
+    name: "忙碌表",
+    blurb: "根据身份生成未来大约三年的忙闲。只在设置里手动生成。",
+  },
+  {
+    key: "busy_tool",
+    name: "查忙碌",
+    blurb: "回复时的工具说明。只有她问起某段时间在忙什么时才会用。",
+  },
+  {
+    key: "reach",
+    name: "主动找她",
+    blurb: "不在聊天里。醒来之后决定要不要发一条，并写下一次什么时候再想起她。",
   },
   {
     key: "dusk",

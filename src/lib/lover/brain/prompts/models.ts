@@ -19,6 +19,8 @@ const ROUTE_KEYS = new Set<string>([
   "ask",
   "judge",
   "editor",
+  "busy",
+  "reach",
 ]);
 
 function asRoute(key: string): Route | null {

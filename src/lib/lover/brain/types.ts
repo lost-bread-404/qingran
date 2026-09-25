@@ -1,7 +1,7 @@
 export type Subject = "rosie" | "qingran" | "us";
 export type Lens = "diary" | "bond";
 export type NoteStatus = "active" | "superseded" | "archived" | "pending";
-export type JobType = "reflect" | "archive" | "dusk" | "synth" | "report" | "backfill" | "editor";
+export type JobType = "reflect" | "archive" | "dusk" | "synth" | "report" | "backfill" | "editor" | "wake";
 export type JobStatus = "pending" | "running" | "done" | "failed";
 
 export type Note = {
@@ -43,19 +43,31 @@ export type InnerPlanStatus = "open" | "done" | "dropped";
 export type InnerPlan = {
   id: string;
   what: string;
-  trigger: string;
-  expires_at: number;
+  /** Why he wants this. Old rows may still have trigger / expires_at; those are not used. */
+  why: string;
   status: InnerPlanStatus;
+  trigger?: string;
+  expires_at?: number;
 };
 
-/** Private inner state. The reply sees feel / want / now / longing only. */
+export type LongingItem = {
+  id: string;
+  text: string;
+  since: string;
+};
+
+/** Private inner state. The reply sees feel / want / now / longing / glow word only. */
 export type InnerState = {
   feel: string;
   want: string;
   choice: string;
   now: string;
+  /** Joined from longings so the existing voice line still has something to say. */
   longing: string;
+  longings: LongingItem[];
   plans: InnerPlan[];
+  glow: number;
+  glow_at: number;
   turn_seq: number;
   updated_at: number;
   longing_updated_at: number;
@@ -67,7 +79,10 @@ export const EMPTY_INNER: InnerState = {
   choice: "",
   now: "",
   longing: "",
+  longings: [],
   plans: [],
+  glow: 0,
+  glow_at: 0,
   turn_seq: 0,
   updated_at: 0,
   longing_updated_at: 0,
@@ -290,15 +305,21 @@ export type StoredMessage = {
   role: "user" | "assistant";
   text: string;
   createdAt: number;
-  kind: "say" | "steer" | "setting";
+  kind: "say" | "steer" | "setting" | "proactive" | "system_notice";
   archivedAt: number | null;
   sessionId: string | null;
   localDay: string | null;
 };
 
 export type VoiceChatMessage = {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
 };
 
 export type IndexItem = {

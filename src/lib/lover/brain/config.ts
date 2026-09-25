@@ -76,7 +76,9 @@ export type Route =
   | "report"
   | "ask"
   | "judge"
-  | "editor";
+  | "editor"
+  | "busy"
+  | "reach";
 
 export const ROUTES: Record<
   Route,
@@ -94,6 +96,8 @@ export const ROUTES: Record<
   ask: { cls: "AGENT", timeoutMs: 90_000, maxOutput: 8_000 },
   judge: { cls: "DEEP_THINKER", timeoutMs: 120_000, maxOutput: 8_000 },
   editor: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 8_000 },
+  busy: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 8_000 },
+  reach: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 2_000 },
 };
 
 export const VOICE_IO = {
@@ -126,6 +130,15 @@ export function clampDossierMaxChars(value: unknown, fallback = DOSSIER_MAX_CHAR
   const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
   if (!Number.isFinite(n)) return fallback;
   return Math.max(DOSSIER_MAX_CHARS_MIN, Math.min(DOSSIER_MAX_CHARS_MAX, Math.round(n)));
+}
+
+export const GLOW_HALF_LIFE_DAYS = 2;
+
+export function clampGlowHalfLifeDays(value: unknown, fallback = GLOW_HALF_LIFE_DAYS): number {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n)) return fallback;
+  const stepped = Math.round(n * 10) / 10;
+  return Math.max(0.5, Math.min(7, stepped));
 }
 export const ARCHIVE_BATCH_MAX = 40;
 export const ARCHIVE_MIN_OVERFLOW = 8;

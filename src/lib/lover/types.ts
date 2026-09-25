@@ -4,7 +4,7 @@ import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
 import { DEFAULT_HEARING_SENSE, lockHearingSense, type HearingSense } from "./hearing/sense.ts";
 import { SILENCE_MS } from "./vad.ts";
-import { clampHistoryWindow, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms, clampDossierMaxChars, HISTORY_WINDOW, PORTRAIT_ACTIVE_MAX, PORTRAIT_STALE_DAYS, RETRIEVE_MIN_TERMS } from "./brain/config.ts";
+import { clampHistoryWindow, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms, clampDossierMaxChars, clampGlowHalfLifeDays, HISTORY_WINDOW, PORTRAIT_ACTIVE_MAX, PORTRAIT_STALE_DAYS, RETRIEVE_MIN_TERMS } from "./brain/config.ts";
 import { lockPromptModels, type PromptModelPick } from "./brain/prompts/models.ts";
 import type { PromptKey } from "./brain/prompts/catalog.ts";
 
@@ -13,7 +13,7 @@ export type { HearingSense };
 
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
-export type MessageKind = "say" | "steer" | "setting" | "unheard";
+export type MessageKind = "say" | "steer" | "setting" | "unheard" | "proactive" | "system_notice";
 export type VoiceEffort = "low" | "medium" | "high" | null;
 
 export const CONTEXT_WINDOW = 40;
@@ -71,6 +71,12 @@ export type Profile = {
   callKitBackground: boolean;
   /** Dossier character cap. 2000–8000, default 4000. */
   dossierMaxChars: number;
+  /** Fixed life, separate from the system prompt. Empty omits the identity line. */
+  identity: string;
+  /** One sentence of ordinary hours. Written when the busy table is generated. */
+  rhythm: string;
+  /** Glow half-life in days. 0.5–7, default 2. */
+  glowHalfLifeDays: number;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -160,6 +166,9 @@ export const DEFAULT_PROFILE: Profile = {
   retrieveMinTerms: RETRIEVE_MIN_TERMS,
   callKitBackground: false,
   dossierMaxChars: 4000,
+  identity: "",
+  rhythm: "",
+  glowHalfLifeDays: 2,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -170,7 +179,6 @@ type LooseProfile = Partial<Profile> & {
   rules?: string;
   friends?: string;
   story?: string;
-  identity?: string;
   muted?: boolean;
   voiceSpeed?: number;
   softVoice?: boolean;
@@ -200,6 +208,9 @@ type LooseProfile = Partial<Profile> & {
   retrieveMinTerms?: number;
   callKitBackground?: boolean;
   dossierMaxChars?: number;
+  identity?: string;
+  rhythm?: string;
+  glowHalfLifeDays?: number;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -238,6 +249,9 @@ export function lockedProfile(input?: unknown): Profile {
     retrieveMinTerms: clampRetrieveMinTerms(raw.retrieveMinTerms),
     callKitBackground: raw.callKitBackground === true,
     dossierMaxChars: clampDossierMaxChars(raw.dossierMaxChars),
+    identity: typeof raw.identity === "string" ? raw.identity.slice(0, 2000) : "",
+    rhythm: typeof raw.rhythm === "string" ? raw.rhythm.slice(0, 500) : "",
+    glowHalfLifeDays: clampGlowHalfLifeDays(raw.glowHalfLifeDays),
   };
 }
 

@@ -61,6 +61,7 @@ test("clear keeps archived notes and only forgets unarchived turns", async () =>
     const keptPlan: InnerPlan = {
       id: "p1",
       what: "明天早上问她睡得怎么样",
+      why: "",
       trigger: "她醒来",
       expires_at: tClear + 86_400_000,
       status: "open",

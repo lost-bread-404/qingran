@@ -1,0 +1,168 @@
+import { createServerFn } from "@tanstack/react-start";
+import { now } from "./clock.ts";
+import { applyGlowDelta } from "./life.ts";
+import { generateBusySchedule, saveBusyEdits, currentBusy, busyGeneratedAt } from "./busy.ts";
+import { wakeOnce } from "./reach.ts";
+import { sendApns } from "../push/apns.ts";
+import { getInner, saveInner } from "./store.ts";
+import { lockedProfile } from "../types.ts";
+import { getProfileData } from "./store.ts";
+import type { InnerPlan, LongingItem } from "./types.ts";
+import {
+  getReach,
+  insertGlowEvent,
+  insertManualEdit,
+  innerSnapshot,
+  listBusyPeriods,
+  listGlowEvents,
+  listReachLog,
+  profileClockZone,
+  reachCountsToday,
+  readIdentity,
+  saveReach,
+  writeIdentity,
+  listManualEdits,
+} from "./life-store.ts";
+
+export const brainGetLife = createServerFn({ method: "GET" }).handler(async () => {
+  const at = now();
+  const zone = await profileClockZone();
+  const [identity, periods, busy, reach, log, glow, inner, counts, generatedAt] = await Promise.all([
+    readIdentity(),
+    listBusyPeriods(),
+    currentBusy(at),
+    getReach(),
+    listReachLog(30),
+    listGlowEvents(40),
+    getInner(),
+    reachCountsToday(zone, at),
+    busyGeneratedAt(),
+  ]);
+  return {
+    identity: identity.identity,
+    identityUpdatedAt: identity.updatedAt,
+    rhythm: identity.rhythm,
+    periods,
+    busy,
+    generatedAt,
+    reach,
+    log: log.map((row) => JSON.parse(JSON.stringify(row))),
+    glow,
+    inner,
+    counts,
+  };
+});
+
+export const brainSaveIdentity = createServerFn({ method: "POST" })
+  .validator((input: { identity: string }) => input)
+  .handler(async ({ data }) => {
+    await writeIdentity(String(data.identity ?? ""));
+    return { ok: true as const };
+  });
+
+export const brainGenerateBusy = createServerFn({ method: "POST" }).handler(async () => {
+  const generated = await generateBusySchedule();
+  return { ok: true as const, periods: generated.periods, rhythm: generated.rhythm };
+});
+
+export const brainSaveBusy = createServerFn({ method: "POST" })
+  .validator((input: { rhythm: string; periods: Array<{ id?: string; fromDay: string; toDay: string; busy: number; label: string; reason: string }> }) => input)
+  .handler(async ({ data }) => {
+    const periods = await saveBusyEdits(
+      data.periods.map((row) => ({
+        id: row.id || "",
+        fromDay: row.fromDay,
+        toDay: row.toDay,
+        busy: Number(row.busy) || 0,
+        label: row.label,
+        reason: row.reason,
+      })),
+      String(data.rhythm ?? ""),
+    );
+    return { ok: true as const, periods };
+  });
+
+export const brainSetReach = createServerFn({ method: "POST" })
+  .validator((input: { enabled?: boolean; nextAt?: number | null; intent?: string; clear?: boolean }) => input)
+  .handler(async ({ data }) => {
+    const before = await getReach();
+    const next = await saveReach({
+      enabled: data.enabled,
+      nextAt: data.clear ? null : data.nextAt,
+      intent: data.clear ? "" : data.intent,
+      setBy: "rosie",
+      setAt: now(),
+      retry: 0,
+    });
+    await insertManualEdit("reach", before, next);
+    return { ok: true as const, reach: next };
+  });
+
+export const brainWakeNow = createServerFn({ method: "POST" }).handler(async () => {
+  const result = await wakeOnce({ manual: true });
+  return result;
+});
+
+export const brainTestPush = createServerFn({ method: "POST" }).handler(async () => {
+  const push = await sendApns({ body: "这是一条测试通知。", messageId: "test" });
+  return { ok: true as const, push };
+});
+
+export const brainAdjustGlow = createServerFn({ method: "POST" })
+  .validator((input: { delta: number; why: string }) => input)
+  .handler(async ({ data }) => {
+    const inner = await getInner();
+    const profile = lockedProfile(await getProfileData());
+    const half = Math.round(profile.glowHalfLifeDays * 24 * 60 * 60 * 1000);
+    const at = now();
+    const before = inner.glow;
+    const next = applyGlowDelta(inner.glow, inner.glow_at, at, Number(data.delta) || 0, half);
+    inner.glow = next.glow;
+    inner.glow_at = next.glowAt;
+    await saveInner({ ...inner, turn_seq: inner.turn_seq + 1, updated_at: inner.updated_at || at }, inner.turn_seq + 1);
+    if (next.event) {
+      await insertGlowEvent({
+        at,
+        delta: Number(data.delta) || 0,
+        why: String(data.why ?? "").slice(0, 200),
+        source: "rosie",
+        turnSeq: inner.turn_seq,
+        glowAfter: next.glow,
+      });
+    }
+    await insertManualEdit("glow", { glow: before }, { glow: next.glow, why: data.why });
+    return { ok: true as const, glow: next.glow };
+  });
+
+export const brainSaveHeart = createServerFn({ method: "POST" })
+  .validator((input: {
+    feel?: string;
+    want?: string;
+    now?: string;
+    choice?: string;
+    plans?: InnerPlan[];
+    longings?: LongingItem[];
+  }) => input)
+  .handler(async ({ data }) => {
+    const inner = await getInner();
+    const before = innerSnapshot(inner);
+    const next = {
+      ...inner,
+      feel: data.feel === undefined ? inner.feel : String(data.feel).slice(0, 1200),
+      want: data.want === undefined ? inner.want : String(data.want).slice(0, 1200),
+      now: data.now === undefined ? inner.now : String(data.now).slice(0, 1200),
+      choice: data.choice === undefined ? inner.choice : String(data.choice).slice(0, 1200),
+      plans: Array.isArray(data.plans) ? data.plans.slice(0, 12) : inner.plans,
+      longings: Array.isArray(data.longings) ? data.longings.slice(0, 5) : inner.longings,
+    };
+    next.longing = next.longings.map((item) => item.text).filter(Boolean).join("；");
+    const bumped = inner.turn_seq + 1;
+    await saveInner({ ...next, turn_seq: bumped }, bumped);
+    await insertManualEdit("inner", before, innerSnapshot(next));
+    return { ok: true as const };
+  });
+
+export const brainListManualEdits = createServerFn({ method: "GET" }).handler(async () => {
+  const rows = await listManualEdits(40);
+  return rows.map((row) => JSON.parse(JSON.stringify(row)));
+});

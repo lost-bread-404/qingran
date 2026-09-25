@@ -69,7 +69,7 @@ test("moment lines stay in full and choice is not a voice slot", () => {
   const now = "听她把今天说完，再决定要不要靠近。";
   const tail = buildTail({
     clock: "x",
-    moment: { feel: "想抱着你", want: "想被需要", now, longing: "" },
+    moment: { feel: "想抱着你", want: "想被需要", now, longing: "", glow: "" },
   });
   assert.match(tail, /【我此刻】/);
   assert.match(tail, /心里：想抱着你/);

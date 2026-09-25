@@ -21,6 +21,8 @@ export type VoiceFallbackInput = {
   voiceSpeed?: number;
   primary: VoiceModelPick;
   safety: VoiceModelPick;
+  tools?: TalkStreamInput["tools"];
+  resolveTool?: (call: { id: string; name: string; arguments: string }) => Promise<string>;
 };
 
 export type VoiceStreamFn = (
@@ -38,6 +40,7 @@ export type VoiceFallbackResult = {
   usage: TokenUsage;
   messages: VoiceChatMessage[];
   modelFallback: VoiceModelFallbackNote | null;
+  toolNote: string | null;
 };
 
 function usageTokens(usage: TalkStreamResult["usage"]): { prompt: number | null; completion: number | null } {
@@ -130,6 +133,7 @@ function streamArgs(
   messages: VoiceChatMessage[],
   pick: VoiceModelPick,
   failOnEmpty: boolean,
+  tools?: TalkStreamInput["tools"],
 ): TalkStreamInput {
   return {
     text: data.text,
@@ -140,6 +144,7 @@ function streamArgs(
     model: pick.model,
     effort: pick.effort,
     timeoutMs: pick.timeoutMs,
+    tools,
   };
 }
 
@@ -157,11 +162,13 @@ export async function runVoiceWithFallback(
   let safetyTried = false;
   let modelFallback: VoiceModelFallbackNote | null = null;
 
+  let toolNote: string | null = null;
   const runOnce = async (
     pick: VoiceModelPick,
     strip: VoiceStrip,
     messages: VoiceChatMessage[],
     lastTry: boolean,
+    tools?: TalkStreamInput["tools"],
   ): Promise<{
     result: TalkStreamResult;
     spoken: string;
@@ -173,7 +180,7 @@ export async function runVoiceWithFallback(
     let heldErr: Extract<TalkStreamEvent, { t: "err" }> | null = null;
     let result: TalkStreamResult;
     try {
-      result = await stream(streamArgs(data, messages, pick, !lastTry), (event) => {
+      result = await stream(streamArgs(data, messages, pick, !lastTry, tools), (event) => {
         if (event.t === "text_end") speech = event.speech || speech;
         if (event.t === "done") speech = event.speech || speech;
         if (event.t === "err") {
@@ -208,6 +215,7 @@ export async function runVoiceWithFallback(
     out: { result: TalkStreamResult; spoken: string },
     strip: VoiceStrip,
     messages: VoiceChatMessage[],
+    note: string | null,
   ): VoiceFallbackResult => ({
     result: out.result,
     attempts,
@@ -218,6 +226,7 @@ export async function runVoiceWithFallback(
     usage: sumUsage(attempts),
     messages,
     modelFallback,
+    toolNote: note,
   });
 
   const giveUp = (
@@ -236,6 +245,7 @@ export async function runVoiceWithFallback(
       usage: sumUsage(attempts),
       messages,
       modelFallback,
+      toolNote: null,
     };
   };
 
@@ -245,8 +255,33 @@ export async function runVoiceWithFallback(
     const messages = voiceMessagesForStrip(data.parts, strip);
     lastMessages = messages;
     const safetyAvailable = !safetyTried && !sameVoicePick(data.primary, data.safety);
-    let out = await runOnce(model, strip, messages, lastStrip && !safetyAvailable);
-    if (out.spoken && !out.failMessage) return ok(out, strip, messages);
+    const withTools = i === 0 && data.tools?.length ? data.tools : undefined;
+    let out = await runOnce(model, strip, messages, lastStrip && !safetyAvailable && !withTools, withTools);
+    const call = out.result.toolCalls?.[0];
+    if (call && data.resolveTool && !out.spoken) {
+      const started = Date.now();
+      let toolText = "";
+      try {
+        toolText = await data.resolveTool(call);
+      } catch (err) {
+        toolText = err instanceof Error ? err.message : "查不到";
+      }
+      toolNote = `${call.name} ${call.arguments.slice(0, 180)} ms=${Date.now() - started}`.slice(0, 400);
+      const nextMessages: VoiceChatMessage[] = [
+        ...messages,
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ id: call.id || "call", type: "function", function: { name: call.name, arguments: call.arguments } }],
+        },
+        { role: "tool", content: toolText, tool_call_id: call.id || "call" },
+      ];
+      out = await runOnce(model, strip, nextMessages, lastStrip && !safetyAvailable);
+      lastMessages = nextMessages;
+    } else if (withTools && !out.spoken && !out.result.toolCalls?.length && toolsRejected(out.result)) {
+      out = await runOnce(model, strip, messages, lastStrip && !safetyAvailable);
+    }
+    if (out.spoken && !out.failMessage) return ok(out, strip, lastMessages, toolNote);
 
     const currentEmpty = emptyRetryable(out.result, out.spoken);
     if (safetyAvailable) {
@@ -265,7 +300,7 @@ export async function runVoiceWithFallback(
       const primaryHardError = Boolean(out.failMessage) && !currentEmpty;
       out = await runOnce(data.safety, strip, messages, lastStrip);
       if (primaryHardError) model = data.safety;
-      if (out.spoken && !out.failMessage) return ok(out, strip, messages);
+      if (out.spoken && !out.failMessage) return ok(out, strip, messages, toolNote);
     }
 
     const retry = currentEmpty || emptyRetryable(out.result, out.spoken);
@@ -282,5 +317,12 @@ export async function runVoiceWithFallback(
     usage: sumUsage(attempts),
     messages: lastMessages,
     modelFallback,
+    toolNote,
   };
+}
+
+function toolsRejected(result: TalkStreamResult): boolean {
+  const status = result.status ?? 0;
+  if (status === 400 || status === 422) return true;
+  return result.otherEvents.toLowerCase().includes("tool");
 }

@@ -8,6 +8,7 @@ import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { ensureMemoryHygiene } from "../memory-hygiene.ts";
 import { getDossier } from "../dossier.ts";
+import { identityBlock } from "../life.ts";
 import {
   buildTail,
   renderDossierBlock,
@@ -101,12 +102,23 @@ export async function loadHotContext(input: {
     ? null
     : await Promise.all([getMeta(), listPortrait()]).then(([meta, portrait]) => ({ meta, portrait }));
 
-  const injected = momentForVoice(inner, input.nowMs, inject.moment);
+  const injected = momentForVoice(
+    inner,
+    input.nowMs,
+    inject.moment,
+    Math.round(input.profile.glowHalfLifeDays * 24 * 60 * 60 * 1000),
+  );
   const mindAgeMs = inner.updated_at ? input.nowMs - inner.updated_at : 0;
   const mindStale = injected.stale.moment;
   const careHint = false;
   const clockText = formatClock(input.nowMs, input.timeZone);
-  const moment = { feel: injected.feel, want: injected.want, now: injected.now, longing: injected.longing };
+  const moment = {
+    feel: injected.feel,
+    want: injected.want,
+    now: injected.now,
+    longing: injected.longing,
+    glow: injected.glow,
+  };
   const tail = buildTail({ clock: clockText, moment, inject });
   const longterm = dossierRow.active
     ? renderDossierBlock(dossierRow.body)
@@ -129,6 +141,7 @@ export async function loadHotContext(input: {
     injectMoment: inject.moment,
     injectDossier: inject.dossier,
     historyWindow: inject.history,
+    identity: identityBlock(input.profile.identity),
   };
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(charter.trim() || "你就是清然。正在和 Rosie 语音通话。"),

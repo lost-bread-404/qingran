@@ -39,7 +39,12 @@ export function decodeStoredBody(body: string, kindCol?: string): {
   let text = body;
   let scanned = false;
   let kind: MessageKind | undefined =
-    kindCol === "steer" || kindCol === "setting" || kindCol === "say" || kindCol === "unheard"
+    kindCol === "steer" ||
+    kindCol === "setting" ||
+    kindCol === "say" ||
+    kindCol === "unheard" ||
+    kindCol === "proactive" ||
+    kindCol === "system_notice"
       ? kindCol
       : undefined;
   let voiceTurnId: string | undefined;

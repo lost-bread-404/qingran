@@ -16,7 +16,7 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.doesNotMatch(src, /to="\/record"/);
   assert.match(src, /打开标注页/);
   assert.match(src, /to="\/lab"/);
-  assert.doesNotMatch(src, />高级</);
+  assert.match(src, /label="高级"/);
   assert.match(src, /brainListVoiceModels/);
   assert.match(src, /voiceModel:/);
   assert.match(src, /voiceEffort:/);
@@ -136,7 +136,7 @@ test("settings prompts tab edits catalog steps and log expand shows assembled pr
   const src = readFileSync(new URL("../../../components/lover/settings-drawer.tsx", import.meta.url), "utf8");
   const api = readFileSync(new URL("../brain/api.ts", import.meta.url), "utf8");
   const editor = readFileSync(new URL("../../../components/lover/prompt-step-editor.tsx", import.meta.url), "utf8");
-  assert.match(src, /\["prompts", "指令"\]/);
+  assert.match(src, /label="指令"/);
   assert.match(src, /brainListPrompts/);
   assert.match(src, /brainSavePrompt/);
   assert.match(src, /brainRestorePrompt/);
@@ -226,9 +226,11 @@ test("transcript has 差在哪 below the reply, 44pt targets, no thumbs-down", (
   assert.doesNotMatch(src, /flex-col gap-1/);
 });
 
-test("voice room shows labeled count, volume meter, and writes final_text back", () => {
+test("voice room keeps the meter and writes final_text back; the labeled count lives in settings", () => {
   const src = readFileSync(new URL("../../../components/lover/voice-room.tsx", import.meta.url), "utf8");
-  assert.match(src, /已标 \$\{labeledCount\} \/ 200/);
+  const life = readFileSync(new URL("../../../components/lover/settings-life.tsx", import.meta.url), "utf8");
+  assert.match(life, /已标 \{labeledCount\} \/ 200/);
+  assert.doesNotMatch(src, /已标 \$\{labeledCount\} \/ 200/);
   assert.match(src, /VolumeMeter/);
   assert.match(src, /patchHearingFinalText/);
   assert.match(src, /saveConfirmQuick/);

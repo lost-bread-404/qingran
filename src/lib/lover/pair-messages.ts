@@ -106,7 +106,7 @@ export function skipsQingran(msg: ChatMessage): boolean {
 
 export function historyForQingran(messages: ChatMessage[], limit = CONTEXT_WINDOW): ChatMessage[] {
   return collapseReplyVariants(messages)
-    .filter((msg) => msg.kind !== "steer" && msg.kind !== "setting" && !skipsQingran(msg))
+    .filter((msg) => msg.kind !== "steer" && msg.kind !== "setting" && msg.kind !== "system_notice" && !skipsQingran(msg))
     .slice(-limit)
     .map((msg) =>
       msg.role === "assistant" && msg.interrupted
@@ -121,7 +121,7 @@ export function pairMessages(messages: ChatMessage[]): ChatPair[] {
   const openById = new Map<string, number>();
 
   for (const msg of sortConversation(messages)) {
-    if (msg.kind === "steer" || msg.kind === "setting") {
+    if (msg.kind === "steer" || msg.kind === "setting" || msg.kind === "system_notice") {
       pairs.push({ note: msg });
       continue;
     }

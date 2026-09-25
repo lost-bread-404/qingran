@@ -24,6 +24,7 @@ import type {
   Mind,
   InnerPlan,
   InnerState,
+  LongingItem,
   Note,
   NoteStatus,
   PortraitKind,
@@ -213,23 +214,48 @@ function parsePlans(raw: unknown): InnerPlan[] {
     plans.push({
       id: row.id,
       what: typeof row.what === "string" ? row.what : "",
-      trigger: typeof row.trigger === "string" ? row.trigger : "",
-      expires_at: asInt(row.expires_at),
+      why: typeof row.why === "string" ? row.why : "",
+      trigger: typeof row.trigger === "string" ? row.trigger : undefined,
+      expires_at: row.expires_at == null ? undefined : asInt(row.expires_at),
       status,
     });
   }
   return plans;
 }
 
+function parseLongings(raw: unknown, legacy: string): LongingItem[] {
+  const value = typeof raw === "string" ? JSON.parse(raw) : raw;
+  const items: LongingItem[] = [];
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const text = typeof row.text === "string" ? row.text.trim() : "";
+      if (!text) continue;
+      items.push({
+        id: typeof row.id === "string" && row.id ? row.id : `l${items.length + 1}`,
+        text,
+        since: typeof row.since === "string" ? row.since : "",
+      });
+    }
+  }
+  if (!items.length && legacy.trim()) return [{ id: "legacy", text: legacy.trim(), since: "" }];
+  return items.slice(0, 5);
+}
+
 function rowToInner(row: Record<string, unknown> | undefined): InnerState {
-  if (!row) return { ...EMPTY_INNER, plans: [] };
+  if (!row) return { ...EMPTY_INNER, plans: [], longings: [] };
+  const longings = parseLongings(row.longings, String(row.longing ?? ""));
   return {
     feel: String(row.feel ?? ""),
     want: String(row.want ?? ""),
     choice: String(row.choice ?? ""),
     now: String(row.now_text ?? ""),
-    longing: String(row.longing ?? ""),
+    longing: longings.map((item) => item.text).join("；"),
+    longings,
     plans: parsePlans(row.plans),
+    glow: Number(row.glow ?? 0) || 0,
+    glow_at: asInt(row.glow_at),
     turn_seq: asInt(row.turn_seq),
     updated_at: asInt(row.updated_at),
     longing_updated_at: asInt(row.longing_updated_at),
@@ -239,7 +265,7 @@ function rowToInner(row: Record<string, unknown> | undefined): InnerState {
 export async function getInner(): Promise<InnerState> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
-    `select feel, want, choice, now_text, longing, plans, turn_seq, updated_at, longing_updated_at
+    `select feel, want, choice, now_text, longing, longings, plans, glow, glow_at, turn_seq, updated_at, longing_updated_at
      from qr_inner where id = 1`,
   );
   return rowToInner(rows[0]);
@@ -292,10 +318,15 @@ export async function saveInner(
   meta?: { model?: string; ms?: number; log?: unknown },
 ): Promise<boolean> {
   const db = await getSql();
+  const longings = inner.longings?.length
+    ? inner.longings.slice(0, 5)
+    : inner.longing.trim()
+      ? [{ id: "legacy", text: inner.longing.trim(), since: "" }]
+      : [];
   const rows = await db.query<{ id: number }>(
     `update qr_inner
-     set feel = $1, want = $2, choice = $3, now_text = $4, longing = $5, plans = $6::jsonb,
-         turn_seq = $7, updated_at = $8, longing_updated_at = $9
+     set feel = $1, want = $2, choice = $3, now_text = $4, longings = $5::jsonb, plans = $6::jsonb,
+         turn_seq = $7, updated_at = $8, longing_updated_at = $9, glow = $10, glow_at = $11
      where id = 1 and turn_seq < $7
      returning id`,
     [
@@ -303,11 +334,13 @@ export async function saveInner(
       inner.want,
       inner.choice,
       inner.now,
-      inner.longing,
+      JSON.stringify(longings),
       JSON.stringify(inner.plans),
       expectedTurn,
       inner.updated_at,
       inner.longing_updated_at,
+      inner.glow ?? 0,
+      inner.glow_at ?? 0,
     ],
   );
   if (meta?.log !== undefined) {
@@ -409,7 +442,10 @@ function rowMessage(r: Record<string, unknown>): StoredMessage {
     role: r.role === "assistant" ? "assistant" : "user",
     text: String(r.body ?? ""),
     createdAt: asInt(r.created_at),
-    kind: r.kind === "steer" || r.kind === "setting" ? r.kind : "say",
+    kind:
+      r.kind === "steer" || r.kind === "setting" || r.kind === "proactive" || r.kind === "system_notice"
+        ? r.kind
+        : "say",
     archivedAt: asIntOrNull(r.archived_at),
     sessionId: r.session_id ? String(r.session_id) : null,
     localDay: r.local_day ? String(r.local_day) : null,
@@ -441,6 +477,7 @@ export async function listHistoryWindow(
      from qingran_messages
      where ($1::text is null or id <> $1)
        and forgotten_at is null
+       and kind is distinct from 'system_notice'
        and created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
      order by created_at desc, id desc
      limit $2`,

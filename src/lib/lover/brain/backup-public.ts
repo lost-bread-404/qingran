@@ -38,4 +38,10 @@ export const IMPORT_ORDER = [
   "qr_inner_log",
   "qr_dossier",
   "qr_dossier_versions",
+  "qr_busy_periods",
+  "qr_glow_events",
+  "qr_reach",
+  "qr_reach_log",
+  "qr_push_devices",
+  "qr_manual_edits",
 ] as const;

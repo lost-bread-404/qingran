@@ -238,6 +238,32 @@ export function applyBangGear(sense: HearingSense, gear: Exclude<SenseGear, "cus
   return lockHearingSense({ ...sense, ...BANG_PRESETS[gear] });
 }
 
+export type HearingTier = "low" | "mid" | "high" | "custom";
+
+export const HEARING_TIER_BLURB: Record<Exclude<HearingTier, "custom">, string> = {
+  low: "更少把环境声当成你在说话。适合吵一点的地方。",
+  mid: "现在的默认。房间安静、正常说话时用。",
+  high: "更轻的声音也会录进来。适合小声说话，吵的时候容易误触发。",
+};
+
+function sameSense(a: HearingSense, b: HearingSense): boolean {
+  return (Object.keys(DEFAULT_HEARING_SENSE) as Array<keyof HearingSense>).every((key) => a[key] === b[key]);
+}
+
+/** One control for the sound page. Low misses less noise; high hears quieter speech. */
+export function applyHearingTier(sense: HearingSense, tier: Exclude<HearingTier, "custom">): HearingSense {
+  if (tier === "low") return applyNoiseGear(applyRecordGear(sense, "low"), "high");
+  if (tier === "high") return applyNoiseGear(applyRecordGear(sense, "high"), "low");
+  return applyNoiseGear(applyRecordGear(sense, "mid"), "mid");
+}
+
+export function hearingTierOf(sense: HearingSense): HearingTier {
+  for (const tier of ["low", "mid", "high"] as const) {
+    if (sameSense(sense, applyHearingTier(DEFAULT_HEARING_SENSE, tier))) return tier;
+  }
+  return "custom";
+}
+
 export function withRecordFine(sense: HearingSense, patch: Partial<RecordFine>): HearingSense {
   return lockHearingSense({ ...sense, ...patch });
 }

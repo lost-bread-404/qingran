@@ -159,9 +159,13 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
             className="flex flex-col gap-3"
           >
             {pair.note ? (
+              pair.note.kind === "system_notice" ? (
+                <p className="self-center px-6 text-center text-xs text-subtle">{pair.note.text}</p>
+              ) : (
               <p className="self-end whitespace-pre-wrap text-xs text-subtle">
                 {pair.note.kind === "steer" ? "走向" : "设定"} · {pair.note.text}
               </p>
+              )
             ) : null}
             {pair.user ? (
               editingId === pair.user.id ? (
@@ -210,9 +214,12 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
               <div className="flex max-w-[min(22rem,92%)] flex-col gap-6 self-start">
                 {shown.text.trim() ? (
                 <div className="flex items-start gap-2">
-                  <p className="whitespace-pre-wrap break-words font-display text-lg font-medium leading-relaxed tracking-tight text-fg">
-                    {shown.text}
-                  </p>
+                  <div className="min-w-0">
+                    {shown.kind === "proactive" ? <p className="mb-1 text-[10px] text-subtle">他先找你</p> : null}
+                    <p className="whitespace-pre-wrap break-words font-display text-lg font-medium leading-relaxed tracking-tight text-fg">
+                      {shown.text}
+                    </p>
+                  </div>
                   {onPlay ? (
                     <button
                       type="button"

@@ -97,6 +97,12 @@ async function runOne(job: BrainJob): Promise<void> {
     await finishJob(job.id, "done");
     return;
   }
+  if (job.type === "wake") {
+    const { runWake } = await import("./reach");
+    await runWake();
+    await finishJob(job.id, "done");
+    return;
+  }
   await finishJob(job.id, "failed", { error: `unknown type ${job.type}` });
 }
 

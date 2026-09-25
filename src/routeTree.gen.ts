@@ -15,6 +15,8 @@ import { Route as LabRouteImport } from './routes/lab'
 import { Route as ApiTalkRouteImport } from './routes/api/talk'
 import { Route as ApiWarmRouteImport } from './routes/api/warm'
 import { Route as ApiCronBrainRouteImport } from './routes/api/cron/brain'
+import { Route as ApiCronWakeRouteImport } from './routes/api/cron/wake'
+import { Route as ApiPushRegisterRouteImport } from './routes/api/push/register'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +48,16 @@ const ApiCronBrainRoute = ApiCronBrainRouteImport.update({
   path: '/api/cron/brain',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCronWakeRoute = ApiCronWakeRouteImport.update({
+  id: '/api/cron/wake',
+  path: '/api/cron/wake',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPushRegisterRoute = ApiPushRegisterRouteImport.update({
+  id: '/api/push/register',
+  path: '/api/push/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +66,8 @@ export interface FileRoutesByFullPath {
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
   '/api/cron/brain': typeof ApiCronBrainRoute
+  '/api/cron/wake': typeof ApiCronWakeRoute
+  '/api/push/register': typeof ApiPushRegisterRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +76,8 @@ export interface FileRoutesByTo {
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
   '/api/cron/brain': typeof ApiCronBrainRoute
+  '/api/cron/wake': typeof ApiCronWakeRoute
+  '/api/push/register': typeof ApiPushRegisterRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,13 +87,30 @@ export interface FileRoutesById {
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
   '/api/cron/brain': typeof ApiCronBrainRoute
+  '/api/cron/wake': typeof ApiCronWakeRoute
+  '/api/push/register': typeof ApiPushRegisterRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/diary' | '/lab' | '/api/talk' | '/api/warm' | '/api/cron/brain'
+    | '/'
+    | '/diary'
+    | '/lab'
+    | '/api/talk'
+    | '/api/warm'
+    | '/api/cron/brain'
+    | '/api/cron/wake'
+    | '/api/push/register'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/diary' | '/lab' | '/api/talk' | '/api/warm' | '/api/cron/brain'
+  to:
+    | '/'
+    | '/diary'
+    | '/lab'
+    | '/api/talk'
+    | '/api/warm'
+    | '/api/cron/brain'
+    | '/api/cron/wake'
+    | '/api/push/register'
   id:
     | '__root__'
     | '/'
@@ -86,6 +119,8 @@ export interface FileRouteTypes {
     | '/api/talk'
     | '/api/warm'
     | '/api/cron/brain'
+    | '/api/cron/wake'
+    | '/api/push/register'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -95,6 +130,8 @@ export interface RootRouteChildren {
   ApiTalkRoute: typeof ApiTalkRoute
   ApiWarmRoute: typeof ApiWarmRoute
   ApiCronBrainRoute: typeof ApiCronBrainRoute
+  ApiCronWakeRoute: typeof ApiCronWakeRoute
+  ApiPushRegisterRoute: typeof ApiPushRegisterRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -141,6 +178,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCronBrainRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cron/wake': {
+      id: '/api/cron/wake'
+      path: '/api/cron/wake'
+      fullPath: '/api/cron/wake'
+      preLoaderRoute: typeof ApiCronWakeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/push/register': {
+      id: '/api/push/register'
+      path: '/api/push/register'
+      fullPath: '/api/push/register'
+      preLoaderRoute: typeof ApiPushRegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -151,6 +202,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTalkRoute: ApiTalkRoute,
   ApiWarmRoute: ApiWarmRoute,
   ApiCronBrainRoute: ApiCronBrainRoute,
+  ApiCronWakeRoute: ApiCronWakeRoute,
+  ApiPushRegisterRoute: ApiPushRegisterRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

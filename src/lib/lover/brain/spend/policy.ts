@@ -14,7 +14,9 @@ export type SpendRoute =
   | "backfill"
   | "report"
   | "judge"
-  | "editor";
+  | "editor"
+  | "busy"
+  | "reach";
 
 export type SpendLevel = "ok" | "soft" | "hard" | "breaker";
 export type SpendScope = "day" | "month";
@@ -40,13 +42,13 @@ export type SpendOverrides = { day?: boolean; month?: boolean };
 const RANK: Record<SpendLevel, number> = { ok: 0, soft: 1, hard: 2, breaker: 3 };
 
 const P0 = new Set<SpendRoute>(["voice", "tts", "stt"]);
-const P1 = new Set<SpendRoute>(["reflect"]);
-const P2 = new Set<SpendRoute>(["archive", "dusk", "portrait", "assign", "ask", "editor"]);
+const P1 = new Set<SpendRoute>(["reflect", "reach"]);
+const P2 = new Set<SpendRoute>(["archive", "dusk", "portrait", "assign", "ask", "editor", "busy"]);
 
 export function routePriority(route: string): 0 | 1 | 2 | 3 {
   const r = route as SpendRoute;
   if (P0.has(r)) return 0;
-  if (P1.has(r)) return 1;
+  if (P1.has(r) || route === "wake") return 1;
   if (P2.has(r)) return 2;
   return 3;
 }

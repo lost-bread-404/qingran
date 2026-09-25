@@ -98,12 +98,36 @@ export function takeTalkDelta(json: unknown): { token: string; finishReason: str
   };
 }
 
+export type ToolCallPiece = { index: number; id?: string; name?: string; arguments?: string };
+
+export function takeToolCallDeltas(json: unknown): ToolCallPiece[] {
+  if (!json || typeof json !== "object") return [];
+  const choice = (json as {
+    choices?: {
+      delta?: { tool_calls?: Array<Record<string, unknown>> };
+      message?: { tool_calls?: Array<Record<string, unknown>> };
+    }[];
+  }).choices?.[0];
+  const raw = choice?.delta?.tool_calls ?? choice?.message?.tool_calls;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item, index) => {
+    const fn = item.function && typeof item.function === "object" ? (item.function as Record<string, unknown>) : {};
+    return {
+      index: typeof item.index === "number" ? item.index : index,
+      id: typeof item.id === "string" ? item.id : undefined,
+      name: typeof fn.name === "string" ? fn.name : undefined,
+      arguments: typeof fn.arguments === "string" ? fn.arguments : undefined,
+    };
+  });
+}
+
 const USAGE_ONLY_KEYS = new Set(["usage", "id", "object", "created", "model", "system_fingerprint"]);
 
 export function describeNonTextTalkEvent(json: unknown): string | null {
   if (!json || typeof json !== "object") return null;
   const { token } = takeTalkDelta(json);
   if (token) return null;
+  if (takeToolCallDeltas(json).length) return null;
   const obj = json as Record<string, unknown>;
   const hasChoices = Array.isArray(obj.choices) && obj.choices.length > 0;
   if (!hasChoices) {

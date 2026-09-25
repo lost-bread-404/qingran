@@ -212,8 +212,9 @@ export async function rebuildVoiceMessages(turnSeq: number): Promise<RebuildResu
         want: refs.momentWant ?? "",
         now: refs.momentNow ?? "",
         longing: refs.momentLonging ?? "",
+        glow: "",
       }
-    : { feel: "", want: "", now: "", longing: "" };
+    : { feel: "", want: "", now: "", longing: "", glow: "" };
   const messages = buildVoiceMessages({
     charter: charter ?? "",
     longtermOverride: block?.text ?? null,

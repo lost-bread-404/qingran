@@ -19,6 +19,8 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
   private var webView: WKWebView!
   private var failed = false
   private var foregroundObserver: NSObjectProtocol?
+  private var tokenObserver: NSObjectProtocol?
+  private var pushObserver: NSObjectProtocol?
 
   init(url: URL, onChangeURL: @escaping () -> Void) {
     self.startURL = url
@@ -76,11 +78,31 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     ) { [weak self] _ in
       self?.reloadIfIdle()
     }
+    tokenObserver = NotificationCenter.default.addObserver(
+      forName: .qingranPushToken,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.deliverPushToken()
+    }
+    pushObserver = NotificationCenter.default.addObserver(
+      forName: .qingranPush,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.deliverPushRefresh()
+    }
   }
 
   deinit {
     if let foregroundObserver {
       NotificationCenter.default.removeObserver(foregroundObserver)
+    }
+    if let tokenObserver {
+      NotificationCenter.default.removeObserver(tokenObserver)
+    }
+    if let pushObserver {
+      NotificationCenter.default.removeObserver(pushObserver)
     }
     webView?.configuration.userContentController.removeScriptMessageHandler(forName: "qingran")
     CallEngine.shared.onSystemHangup = nil
@@ -136,6 +158,22 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       return
     }
     decisionHandler(.allow)
+  }
+
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    failed = false
+    deliverPushToken()
+  }
+
+  private func deliverPushToken() {
+    guard let token = UserDefaults.standard.string(forKey: "qingran.pushToken"), !token.isEmpty else { return }
+    let env = UserDefaults.standard.string(forKey: "qingran.pushEnv") ?? "sandbox"
+    let js = "window.dispatchEvent(new CustomEvent('qingran-push-token', {detail:{token:'\(token)', env:'\(env)'}}))"
+    webView?.evaluateJavaScript(js, completionHandler: nil)
+  }
+
+  private func deliverPushRefresh() {
+    webView?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('qingran-push'))", completionHandler: nil)
   }
 
   func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

@@ -3,12 +3,14 @@ import { test } from "node:test";
 import { utteranceToneMark, type ProsodyFrame } from "../prosody.ts";
 import {
   applyBangGear,
+  applyHearingTier,
   applyNoiseGear,
   applyRecordGear,
   applyWaveGear,
   bangGearFor,
   DEFAULT_HEARING_SENSE,
   formatSenseLine,
+  hearingTierOf,
   lockHearingSense,
   parseSenseLine,
   previewToneReplay,
@@ -111,3 +113,13 @@ test("replay scores the last labeled clips from stored prosody", () => {
   assert.equal(on.markedRate, 1);
   assert.equal(on.agreeRate, 1);
 });
+
+test("one hearing tier maps low to fewer false starts and high to quieter speech", () => {
+  assert.equal(hearingTierOf(DEFAULT_HEARING_SENSE), "mid");
+  assert.equal(hearingTierOf(applyHearingTier(DEFAULT_HEARING_SENSE, "low")), "low");
+  const high = applyHearingTier(DEFAULT_HEARING_SENSE, "high");
+  assert.equal(hearingTierOf(high), "high");
+  assert.ok(high.startMin < DEFAULT_HEARING_SENSE.startMin);
+  assert.equal(hearingTierOf({ ...DEFAULT_HEARING_SENSE, endWaitMs: 2000 }), "custom");
+});
+

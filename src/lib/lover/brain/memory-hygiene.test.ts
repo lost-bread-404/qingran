@@ -102,7 +102,7 @@ test("ensureMemoryHygiene clears mind once and does not delete portraits", async
         ...EMPTY_INNER,
         feel: "旧心思",
         longing: "还惦记着",
-        plans: [{ id: "p1", what: "以后问", trigger: "她提起", expires_at: 9, status: "open" }],
+        plans: [{ id: "p1", what: "以后问", why: "", trigger: "她提起", expires_at: 9, status: "open" }],
         turn_seq: 9,
         updated_at: 9,
         longing_updated_at: 4,

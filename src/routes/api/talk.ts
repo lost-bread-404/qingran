@@ -16,6 +16,9 @@ import { talkRateHit } from "@/lib/lover/brain/spend/rate";
 import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
 import { formatVoiceInjectLine, lockedProfile, type Profile } from "@/lib/lover/types";
+import { lookupBusyRange } from "@/lib/lover/brain/busy";
+import { loadPrompt } from "@/lib/lover/brain/prompts/store";
+import { parsePromptBody, renderVariant } from "@/lib/lover/brain/prompts/doc";
 import { type TalkStreamEvent } from "@/lib/lover/stream-talk";
 import { logTalkTurn, talkFailFromResult } from "@/lib/lover/talk-fail";
 import { recordTurnTrace } from "@/lib/lover/brain/turn-trace";
@@ -118,8 +121,56 @@ export const Route = createFileRoute("/api/talk")({
               tVoice = Date.now();
               const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
               const safety = voiceSafetyPick();
+              const busyTool = await loadPrompt("busy_tool").catch(() => null);
+              const busyDescription = busyTool
+                ? renderVariant(parsePromptBody("busy_tool", busyTool.body), "main", {})
+                    .find((message) => message.role === "system")
+                    ?.content ?? ""
+                : "";
+              const toolStarted = { ms: 0, name: "", args: "" };
               const fallback = await runVoiceWithFallback(
-                { text, parts: ctx.parts, replyId, voiceSpeed: profile.voiceSpeed, primary, safety },
+                {
+                  text,
+                  parts: ctx.parts,
+                  replyId,
+                  voiceSpeed: profile.voiceSpeed,
+                  primary,
+                  safety,
+                  tools: busyDescription
+                    ? [
+                        {
+                          type: "function" as const,
+                          function: {
+                            name: "busy_lookup",
+                            description: busyDescription,
+                            parameters: {
+                              type: "object",
+                              additionalProperties: false,
+                              required: ["from_day", "to_day"],
+                              properties: {
+                                from_day: { type: "string" },
+                                to_day: { type: "string" },
+                              },
+                            },
+                          },
+                        },
+                      ]
+                    : undefined,
+                  resolveTool: async (call) => {
+                    const started = Date.now();
+                    let args: { from_day?: string; to_day?: string } = {};
+                    try {
+                      args = JSON.parse(call.arguments) as { from_day?: string; to_day?: string };
+                    } catch {
+                      args = {};
+                    }
+                    const result = await lookupBusyRange(String(args.from_day ?? ""), String(args.to_day ?? ""));
+                    toolStarted.ms = Date.now() - started;
+                    toolStarted.name = call.name;
+                    toolStarted.args = call.arguments.slice(0, 180);
+                    return JSON.stringify(result);
+                  },
+                },
                 (event) => {
                   if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;
                   if (event.t === "timing" && event.k === "first_audio_ms") firstAudioMs = event.ms;
@@ -187,6 +238,7 @@ export const Route = createFileRoute("/api/talk")({
                   failMessage: fallback.failMessage,
                   modelFallback: fallback.modelFallback,
                   injectLine: formatVoiceInjectLine(ctx.inject),
+                  toolLine: fallback.toolNote,
                 }),
               });
               await recordTurnTrace({
@@ -203,6 +255,9 @@ export const Route = createFileRoute("/api/talk")({
                   historyWindow: ctx.inject.history,
                   injectLine: formatVoiceInjectLine(ctx.inject),
                   inner: ctx.injected,
+                  tool: toolStarted.name
+                    ? { name: toolStarted.name, arguments: toolStarted.args, ms: toolStarted.ms }
+                    : null,
                 },
                 reply: {
                   text: display,

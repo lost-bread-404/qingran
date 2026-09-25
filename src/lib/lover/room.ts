@@ -25,8 +25,8 @@ const EMPTY_ROOM: Room = {
 export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
   try {
     const sql = await getSql();
-    const [profileRow] = await sql<{ data: Profile | string }>`
-      select data from qingran_profile where id = 1
+    const [profileRow] = await sql<{ data: Profile | string; identity?: string | null; rhythm?: string | null }>`
+      select data, identity, rhythm from qingran_profile where id = 1
     `;
     const messages = await sql<{
       id: string;
@@ -59,6 +59,12 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
     const stored =
       typeof raw === "string" ? (safeJson(raw) as Partial<Profile> | null) : raw;
     const profile = lockedProfile(stored ?? {});
+    if (typeof profileRow?.identity === "string" && profileRow.identity.trim()) {
+      profile.identity = profileRow.identity.trim().slice(0, 2000);
+    }
+    if (typeof profileRow?.rhythm === "string" && profileRow.rhythm.trim()) {
+      profile.rhythm = profileRow.rhythm.trim().slice(0, 500);
+    }
     return {
       profile,
       messages: sortConversation(
@@ -84,11 +90,17 @@ export const saveRoomProfile = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const sql = await getSql();
     const profile = lockedProfile(data);
+    const prev = await sql<{ identity: string | null }>`select identity from qingran_profile where id = 1`;
+    const changed = String(prev[0]?.identity ?? "").trim() !== profile.identity.trim();
+    const stamp = Date.now();
     await sql`
-      insert into qingran_profile (id, data, updated_at)
-      values (1, ${JSON.stringify(profile)}::jsonb, now())
+      insert into qingran_profile (id, data, identity, identity_updated_at, updated_at)
+      values (1, ${JSON.stringify(profile)}::jsonb, ${profile.identity}, ${changed ? stamp : 0}, now())
       on conflict (id) do update
-        set data = excluded.data, updated_at = now()
+        set data = excluded.data,
+            identity = excluded.identity,
+            identity_updated_at = case when ${changed} then ${stamp} else qingran_profile.identity_updated_at end,
+            updated_at = now()
     `;
     return { ok: true as const };
   });

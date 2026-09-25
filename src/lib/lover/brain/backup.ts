@@ -502,6 +502,9 @@ export const BACKUP_TABLES: TableSpec[] = [
       ["turn_seq", "int"],
       ["updated_at", "int"],
       ["longing_updated_at", "int"],
+      ["glow", "real"],
+      ["glow_at", "int"],
+      ["longings", "json"],
     ],
   },
   {
@@ -539,6 +542,87 @@ export const BACKUP_TABLES: TableSpec[] = [
       ["author", "text"],
       ["ops", "json"],
       ["created_at", "int"],
+    ],
+  },
+  {
+    name: "qr_busy_periods",
+    pk: ["id"],
+    columns: [
+      ["id", "text"],
+      ["from_day", "text"],
+      ["to_day", "text"],
+      ["busy", "real"],
+      ["label", "text"],
+      ["reason", "text"],
+      ["identity_hash", "text"],
+      ["created_at", "int"],
+    ],
+  },
+  {
+    name: "qr_glow_events",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["at", "int"],
+      ["delta", "real"],
+      ["why", "text"],
+      ["source", "text"],
+      ["turn_seq", "int"],
+      ["glow_after", "real"],
+    ],
+  },
+  {
+    name: "qr_reach",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["next_at", "int"],
+      ["intent", "text"],
+      ["set_by", "text"],
+      ["set_at", "int"],
+      ["enabled", "bool"],
+      ["retry", "int"],
+    ],
+  },
+  {
+    name: "qr_reach_log",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["at", "int"],
+      ["trigger", "text"],
+      ["intent", "text"],
+      ["called_llm", "bool"],
+      ["sent", "bool"],
+      ["message_id", "text"],
+      ["text", "text"],
+      ["push_result", "text"],
+      ["next_at", "int"],
+      ["next_intent", "text"],
+      ["model", "text"],
+      ["ms", "int"],
+    ],
+  },
+  {
+    name: "qr_push_devices",
+    pk: ["token"],
+    columns: [
+      ["token", "text"],
+      ["env", "text"],
+      ["created_at", "int"],
+      ["last_ok_at", "int"],
+      ["last_error", "text"],
+    ],
+  },
+  {
+    name: "qr_manual_edits",
+    pk: ["id"],
+    columns: [
+      ["id", "int"],
+      ["at", "int"],
+      ["target", "text"],
+      ["before", "json"],
+      ["after", "json"],
     ],
   },
 ];
@@ -587,19 +671,34 @@ function cmpTuple(a: string[], b: string[]): number {
 
 async function loadProfile(): Promise<Profile> {
   const db = await getSql();
-  const rows = await db.query<{ data: unknown }>("select data from qingran_profile where id = 1");
+  const rows = await db.query<{ data: unknown; identity: string | null; rhythm: string | null }>(
+    "select data, identity, rhythm from qingran_profile where id = 1",
+  );
   const raw = rows[0]?.data;
   const data = typeof raw === "string" ? (JSON.parse(raw) as unknown) : raw;
-  return lockedProfile(data ?? {});
+  const profile = lockedProfile(data ?? {});
+  const identity = String(rows[0]?.identity ?? "").trim();
+  const rhythm = String(rows[0]?.rhythm ?? "").trim();
+  if (identity) profile.identity = identity.slice(0, 2000);
+  if (rhythm) profile.rhythm = rhythm.slice(0, 500);
+  return profile;
 }
 
 async function saveProfile(profile: Profile): Promise<void> {
   const db = await getSql();
+  const locked = lockedProfile(profile);
+  const prev = await db.query<{ identity: string | null }>("select identity from qingran_profile where id = 1");
+  const changed = String(prev[0]?.identity ?? "").trim() !== locked.identity.trim();
   await db.query(
-    `insert into qingran_profile (id, data, updated_at)
-     values (1, $1::jsonb, now())
-     on conflict (id) do update set data = excluded.data, updated_at = now()`,
-    [JSON.stringify(lockedProfile(profile))],
+    `insert into qingran_profile (id, data, identity, rhythm, identity_updated_at, updated_at)
+     values (1, $1::jsonb, $2, $3, $4, now())
+     on conflict (id) do update set
+       data = excluded.data,
+       identity = excluded.identity,
+       rhythm = excluded.rhythm,
+       identity_updated_at = case when $5 then $4 else qingran_profile.identity_updated_at end,
+       updated_at = now()`,
+    [JSON.stringify(locked), locked.identity, locked.rhythm, changed ? now() : 0, changed],
   );
 }
 
@@ -735,6 +834,7 @@ export async function importTableChunk(
 ): Promise<{ inserted: number; updated: number; skipped: number }> {
   const spec = TABLE_BY_NAME.get(table);
   if (!spec) return { inserted: 0, updated: 0, skipped: rows.length };
+  if (table === "qr_push_devices") return { inserted: 0, updated: 0, skipped: rows.length };
   const db = await getSql();
   let inserted = 0;
   let updated = 0;

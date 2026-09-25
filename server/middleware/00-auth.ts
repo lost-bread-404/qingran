@@ -19,7 +19,7 @@ function appPassword(): string | undefined {
 }
 
 function isCron(path: string): boolean {
-  return path === "/api/cron/brain" || path.startsWith("/api/cron/brain/");
+  return path === "/api/cron/brain" || path.startsWith("/api/cron/brain/") || path === "/api/cron/wake" || path.startsWith("/api/cron/wake/");
 }
 
 export default async function authMiddleware(

@@ -50,6 +50,7 @@ export type TurnTraceInput = {
       longing: string;
       stale: { moment: boolean; longing: boolean };
     };
+    tool?: { name: string; arguments: string; ms: number } | null;
   };
   reply?: {
     text?: string;

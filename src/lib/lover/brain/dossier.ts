@@ -17,6 +17,8 @@ import { lockedProfile } from "../types.ts";
 import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
 import { loadPrompt } from "./prompts/store.ts";
 import { dossierSections } from "./voice/pack-build.ts";
+import { identityBlock } from "./life.ts";
+import { readIdentity } from "./life-store.ts";
 import type { JsonValue } from "./turn-trace.ts";
 import {
   applyDossierOps,
@@ -203,7 +205,7 @@ async function listAfterCursor(cursorAt: number): Promise<Array<Record<string, u
   return db.query<Record<string, unknown>>(
     `select id, role, body, created_at
      from qingran_messages
-     where created_at > $1 and forgotten_at is null
+     where created_at > $1 and forgotten_at is null and kind is distinct from 'system_notice'
      order by created_at asc, id asc`,
     [cursorAt],
   );
@@ -245,6 +247,11 @@ async function commitBody(input: {
   await writeVersion({ version, body: input.body, author: input.author, ops: input.ops, at });
 }
 
+async function identityLine(): Promise<string> {
+  const block = identityBlock((await readIdentity()).identity);
+  return block ? `${block}\n` : "";
+}
+
 function packed(variant: "main" | "compact" | "seed", vars: Record<string, string>, template: string) {
   const messages = renderVariant(parsePromptBody("editor", template), variant, vars);
   const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
@@ -274,6 +281,7 @@ export async function runEditor(reason = "turns", complete: Completer = callMode
   const longing = (await getInner()).longing.trim() || "（没有）";
   const systemPrompt = await getProfilePrompt();
   const limit = await maxChars();
+  const identity_block = await identityLine();
   let body = row.body.trim() ? row.body : DEFAULT_DOSSIER;
   let cursor = row.cursorAt;
   const batches = batchConversation(items);
@@ -281,6 +289,7 @@ export async function runEditor(reason = "turns", complete: Completer = callMode
     const batch = batches[i]!;
     const conversation = batch.map((item) => item.line).join("\n");
     const prompt = packed("main", {
+      identity_block,
       system_prompt: systemPrompt,
       dossier: body,
       longing,
@@ -309,7 +318,7 @@ export async function runEditor(reason = "turns", complete: Completer = callMode
     });
   }
   if (body.trim().length > limit) {
-    const prompt = packed("compact", { dossier: body, max_chars: String(limit) }, loaded.body);
+    const prompt = packed("compact", { identity_block, dossier: body, max_chars: String(limit) }, loaded.body);
     const result = await complete("editor", {
       system: prompt.system,
       input: prompt.user,
@@ -368,7 +377,9 @@ export async function seedDossierDraft(complete: Completer = callModel): Promise
   ].filter(Boolean).join("\n");
   const noteText = notes.map((row) => `${row.local_day} ${row.subject} w${row.weight}：${row.text}`).join("\n");
   const limit = await maxChars();
+  const identity_block = await identityLine();
   const prompt = packed("seed", {
+    identity_block,
     system_prompt: systemPrompt,
     max_chars: String(limit),
     story: storyText || "（没有）",

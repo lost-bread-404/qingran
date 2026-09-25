@@ -73,6 +73,10 @@ function addDays(year: number, month: number, day: number, delta: number) {
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
 }
 
+export function localHour(ms: number, timeZone: string): number {
+  return zonedParts(ms, timeZone).hour;
+}
+
 export function localDay(ms: number, timeZone: string, boundaryHour = DAY_BOUNDARY_HOUR): string {
   const p = zonedParts(ms, timeZone);
   if (p.hour < boundaryHour) {
@@ -82,8 +86,9 @@ export function localDay(ms: number, timeZone: string, boundaryHour = DAY_BOUNDA
   return isoDate(p.year, p.month, p.day);
 }
 
-export function localHour(ms: number, timeZone: string): number {
-  return zonedParts(ms, timeZone).hour;
+export function calendarDay(ms: number, timeZone: string): string {
+  const p = zonedParts(ms, timeZone);
+  return isoDate(p.year, p.month, p.day);
 }
 
 export function shiftDay(day: string, delta: number): string {

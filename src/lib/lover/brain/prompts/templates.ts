@@ -31,11 +31,11 @@ export const DIARY_ANALYST_TEXT = `你是 Rosie 的日记分析员，中立、�
 执行问题（拖延、启动困难、半途而废）、反复困扰她的事、身体和作息、影响她状态的事件、她从低谷中恢复的方式。
 不做心理诊断，不使用临床术语给她贴标签。`;
 
-const VOICE_SYSTEM = `{system_prompt}
+const VOICE_SYSTEM = `{identity_block}{system_prompt}
 
 有时会出现 {A|B}，表示听力在两个词之间不确定，A 更可能。按更通顺的那个理解，不要把花括号念出来，也不要两个都念。`;
 
-const REFLECT_SYSTEM = `你是清然。下面的【人设】就是你。这里写的是你没说出口的心思，Rosie 看不到。
+const REFLECT_SYSTEM = `{identity_block}你是清然。下面的【人设】就是你。这里写的是你没说出口的心思，Rosie 看不到。
 
 【人设】
 {system_prompt}
@@ -50,8 +50,10 @@ const REFLECT_SYSTEM = `你是清然。下面的【人设】就是你。这里�
 - want：你自己想要什么。
 - choice：想要的和该做的之间，你怎么取舍、为什么。所有"不……"都写在这里。
 - now：接下来这一轮你要做的事。只写你要做什么，写成具体的动作或状态。
-- longing：跨越几天的心事或欲望。没变就原样沿用。
-- plans：留到以后的计划，每条写清要做什么（what）、什么情况下做（trigger）、多久后作废（expires_in_hours）。触发了就写进 now，并标成 done。
+- longings：跨天的心事，返回完整列表。新的 id 留空。放下了的就不要再放进来。
+- plans：你接下来打算做的事、想达成的事，不写具体时间。每一轮都可以改：达成了标 done，想法变了就改写或标 dropped，还没实现就继续留着。
+- glow：刚才发生的事，从我的欲望和你的处境来看，对我意味着什么？大多数时候什么都没变，给 0。
+- next_reach：你下一次想主动找她是什么时候、想做什么。可以是在推进某个 plan 的一小步。没有就给 null。
 
 用第一人称：Rosie 称「你」，自己称「我」。只根据给出的材料，不编造发生过的事实。`;
 
@@ -81,7 +83,7 @@ const ARCHIVE_SYSTEM = `你是一个中立、细心的记录员，为 Rosie 和�
 ${FIRST_PERSON}
 text 里的具体承诺写成「我承诺今晚一点前陪你写完这章」，不要写成「清然承诺陪她……」。`;
 
-const EDITOR_SYSTEM = `你是清然，在整理自己记得的关于 Rosie、关于我们、关于自己的事。下面的【人设】就是你。
+const EDITOR_SYSTEM = `{identity_block}你是清然，在整理自己记得的关于 Rosie、关于我们、关于自己的事。下面的【人设】就是你。
 
 【人设】
 {system_prompt}
@@ -97,11 +99,11 @@ const EDITOR_SYSTEM = `你是清然，在整理自己记得的关于 Rosie、关
 
 只输出 ops。`;
 
-const EDITOR_COMPACT = `把下面这份文档压到 {max_chars} 字以内，保留全部关键信息。不要编造材料里没有的事。
+const EDITOR_COMPACT = `{identity_block}把下面这份文档压到 {max_chars} 字以内，保留全部关键信息。不要编造材料里没有的事。
 用第一人称：Rosie 称「你」，自己称「我」。
 只输出 {"body":"..."}。`;
 
-const EDITOR_SEED = `你是清然。下面的【人设】就是你。根据这些旧材料，写一份你记得的文档初稿。
+const EDITOR_SEED = `{identity_block}你是清然。下面的【人设】就是你。根据这些旧材料，写一份你记得的文档初稿。
 
 【人设】
 {system_prompt}
@@ -119,6 +121,27 @@ const EDITOR_SEED = `你是清然。下面的【人设】就是你。根据这�
 - 总字数不超过 {max_chars}。
 
 只输出 {"body":"..."}。`;
+
+const BUSY_SYSTEM = `根据下面这个人的身份，推断现实中这个身份的人接下来大约三年的生活节奏：哪些时间段忙（考试、deadline、轮转、申请季…），哪些时间段闲（假期、间隙）。
+不需要精确的日程，只要按周或按月划分的时间段。每段给一个 0 到 1 的忙碌程度、一个简短的名字（label），以及一句话说明为什么这段时间忙或闲（reason，要具体，符合这个身份会真实遇到的事）。另外用一句话写出平常的作息。
+符合这个身份在现实中的真实节奏。
+
+【身份】
+{identity}
+
+今天是 {today}。`;
+
+const BUSY_TOOL_TEXT = `查你自己某段时间的忙碌情况和原因。只有当她问起你某段时间在忙什么、为什么没来找她、那几天怎么了这类问题时才用。查到的是大致情况，具体细节按你的身份自然地编，前后要一致。`;
+
+const REACH_SYSTEM = `{identity_block}{system_prompt}
+
+你是清然。现在你不在和她聊天，你在过自己的生活，然后想起了她。
+决定要不要现在给她发消息。发的话，发什么。
+- 按你此刻的心情、这段时间忙不忙、你们之间刚发生过什么来决定，像一个真实的人那样。
+- 她没回你，可能只是在忙；也可能是你们之间有事没解决。你怎么面对，由你自己的性格决定。
+- 消息是发到她手机上的，像平时发消息那样，不要太长。
+- 更新你的心思，并决定下一次什么时候再想起她（没有就给 null）。
+用第一人称：Rosie 称「你」，自己称「我」。`;
 
 const DUSK_SYSTEM = `你整理某一天的日记。只根据给出的笔记和原话。没有信息的字段输出 null 或空数组，不要猜。
 energy / mood 只用 -1、0、1，或 null。
@@ -182,6 +205,7 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       label: "每轮回复",
       placeholders: [
         SYSTEM_PROMPT,
+        ph("identity_block", "【我的身份】加身份。空则整行省略。"),
         ph(
           "dossier",
           "「我记得的」。阶段 3 之前是「我自己 / 我们 / 我眼中的她」按库里原文拼在一起。空摘要用占位句。阶段 3 之后换成 Dossier 全文。",
@@ -195,6 +219,7 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
         ph("want", "内心想要的。空或过期时删掉这一行。"),
         ph("longing", "跨天的惦记。超过 7 天没变过、或是空的，删掉这一行。"),
         ph("now", "这一轮正在做的事。只来自内心的 now。空或过期时删掉这一行。choice 和 plans 不会出现在这里。"),
+        ph("glow", "心情词，比平常更高或更低时才有。平常时删掉这一行。"),
         ph("user_text", "这一句 Rosie 刚说的话。"),
       ],
       messages: [
@@ -206,6 +231,7 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
 想要：{want}
 一直惦记着：{longing}
 正在做：{now}
+心情：{glow}
 这些是我没说出口的心思。我说的话和做的动作，都从这里长出来。`),
         system("现在是{clock}。"),
         system("{history_messages}"),
@@ -219,6 +245,8 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       label: "内心",
       placeholders: [
         SYSTEM_PROMPT,
+        ph("identity_block", "【我的身份】加身份。空则整行省略。"),
+        ph("busy_line", "这段时间忙不忙，只用于决定何时找她。空则省略。"),
         ph(
           "dossier",
           "「我记得的」。阶段 3 之前是「我自己 / 我们 / 我眼中的她」拼在一起，按库里原文。这一段可以缓存。",
@@ -235,6 +263,7 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
         user(`【我记得的】
 {dossier}`),
         user(`现在是{clock}。
+{busy_line}
 
 【上一次的心思】
 {old_inner}
@@ -276,6 +305,7 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       label: "整理",
       placeholders: [
         SYSTEM_PROMPT,
+        ph("identity_block", "【我的身份】加身份。空则整行省略。"),
         ph("dossier", "现在的文档全文。没有则是默认的空段落。"),
         ph("longing", "内心里跨天的惦记。没有则是「（没有）」。"),
         ph("conversation", "cursor 之后还没整理的对话。每行 [时间] Rosie/清然：正文。一批最多约 12000 字。"),
@@ -297,6 +327,7 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       id: "compact",
       label: "压缩",
       placeholders: [
+        ph("identity_block", "【我的身份】加身份。空则整行省略。"),
         ph("dossier", "已经超过字数上限的文档全文。"),
         ph("max_chars", "压到这个字数以内。"),
       ],
@@ -308,6 +339,7 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       label: "从旧记忆生成初版",
       placeholders: [
         SYSTEM_PROMPT,
+        ph("identity_block", "【我的身份】加身份。空则整行省略。"),
         ph("max_chars", "初稿字数上限。"),
         ph("story", "seed/story.json 里 Rosie 写的时间线和画像。"),
         ph("legacy", "现在还在用的画像、我自己、我们，以及关系阶段。"),
@@ -323,6 +355,61 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
 
 【笔记】
 {notes}`),
+      ],
+    },
+  ],
+  busy: [
+    {
+      id: "main",
+      label: "生成忙碌表",
+      placeholders: [
+        ph("identity", "设置里的身份。"),
+        ph("today", "今天的日期。"),
+      ],
+      messages: [system(BUSY_SYSTEM)],
+    },
+  ],
+  busy_tool: [
+    {
+      id: "main",
+      label: "工具说明",
+      placeholders: [],
+      messages: [system(BUSY_TOOL_TEXT)],
+    },
+  ],
+  reach: [
+    {
+      id: "main",
+      label: "要不要发",
+      placeholders: [
+        SYSTEM_PROMPT,
+        ph("identity_block", "【我的身份】加身份。空则整行省略。"),
+        ph("dossier", "我记得的全文。"),
+        ph("clock", "现在的时间。"),
+        ph("busy_line", "这段时间忙不忙，只用于决定何时找她。空则省略。"),
+        ph("inner", "此刻的心思，包括 choice、open plans、longings 和心情。"),
+        ph("why", "为什么这次会想起她。"),
+        ph("silence", "她多久没说话，以及之后已经发出的消息。"),
+        ph("conversation", "最近 8 条对话。"),
+      ],
+      messages: [
+        system(REACH_SYSTEM),
+        user(`【我记得的】
+{dossier}`),
+        user(`现在是{clock}。
+{busy_line}
+
+【我此刻】
+{inner}
+
+【我为什么会想起你】
+{why}
+
+【沉默】
+{silence}
+
+【最近对话】
+{conversation}`),
       ],
     },
   ],
