@@ -92,8 +92,14 @@ async function runOne(job: BrainJob): Promise<void> {
     return;
   }
   if (job.type === "editor") {
-    const { runEditor } = await import("./dossier");
-    await runEditor(String(job.payload.reason ?? "turns"));
+    const reason = String(job.payload.reason ?? "turns");
+    if (reason === "activate") {
+      const { ensureDossierLive } = await import("./dossier");
+      await ensureDossierLive();
+    } else {
+      const { runEditor } = await import("./dossier");
+      await runEditor(reason);
+    }
     await finishJob(job.id, "done");
     return;
   }

@@ -75,7 +75,7 @@ export const importStoryLine = createServerFn({ method: "POST" })
       if (data.confirm !== "清空并导入") {
         return { ok: false as const, error: "需要二次确认。" };
       }
-      return { ok: false as const, error: "故事线不再写入笔记和画像。到设置里「从旧记忆生成初版」。" };
+      return { ok: false as const, error: "故事线不再写入笔记和画像。种子只在第一次整理「我记得的」时用。" };
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
     }

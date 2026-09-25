@@ -57,7 +57,7 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
   {
     key: "editor",
     name: "整理记忆",
-    blurb: "大约每 20 轮，或隔了一段时间再开口时，把新对话收进「我记得的」。也可以手动现在整理。",
+    blurb: "第一次会自己写成一份并直接生效。之后大约每 20 轮，或隔了一段时间再开口时，把新对话收进去。也可以手动现在整理。",
   },
   {
     key: "busy",

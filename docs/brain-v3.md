@@ -17,7 +17,7 @@ Rosie ──► ① 回答 ◄──── ② 内心 ───────┘
 |---|---|---|---|
 | ① 回答 | `voice` | 每轮 | Rosie |
 | ② 内心 | `reflect` | 每轮，回复后异步 | ①，以及下一次 reflect |
-| ③ Dossier | `editor` | 启用后，约每 20 轮 Rosie 的消息，或隔了一次会话再开口，或设置里「现在整理」 | ① ② |
+| ③ Dossier | `editor` | 第一次自动生效；之后约每 20 轮 Rosie 的消息，或隔了一次会话再开口，或设置里「现在整理」 | ① ② |
 | 日记 | `archive` 以及 dusk / synth / … | 对话滑出窗口、每天、每周 | 只给日记页。清然不读 `mem_notes` |
 
 ## 为什么是这样
@@ -46,7 +46,7 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 都是 system，在 history 前面。顺序：
 
 1. `{system_prompt}`，外加 `{A|B}` 那句听力说明
-2. `【我记得的】`：启用 Dossier 之后是全文；启用之前是旧的「我自己 / 我们 / 我眼中的她」
+2. `【我记得的】`：生效之后是全文；还没生效时是旧的「我自己 / 我们 / 我眼中的她」
 3. `【我此刻】`：想要（desire）、心里（feel）、正在做（now）、心情（glow 词）。某一行空了就删掉那一行；四行都空就整块删掉。desire / feel / now 超过 30 分钟不注入。旧的「一直惦记着」不再出现在默认热路径里。
 4. `现在是{clock}。`
 5. 最近 N 条 history
@@ -66,7 +66,7 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 | `reflect` | 回复后 | 人设；可缓存的我记得的；时间、上一次内心（含 read_her、choice 和 open plans）、最近 16 条 | desire / read_her / feel / choice / now / longings / plans / glow / next_reach。desire 排第一 |
 | `editor` main | 见上 | 人设、当前文档、longing、cursor 之后没被遗忘的对话（一批最多约 12000 字）、字数上限 | `{ops:[{section,action,old,new}]}` |
 | `editor` compact | 应用后超过上限 | 全文、上限 | `{body}`，author=`compact` |
-| `editor` seed | 设置里「从旧记忆生成初版」 | 人设、`seed/story.json`、还在用的画像和 self/bond、最近 60 天 weight≥3 的笔记最多 150 条、longing | `{body}`，只进版本历史，不启用 |
+| `editor` seed | `active` 仍是 false 且没有草稿时，自动跑一次 | 人设、`seed/story.json`、还在用的画像和 self/bond、最近 60 天 weight≥3 的笔记最多 150 条、longing | `{body}`，写进版本历史后立刻生效 |
 | `archive` | 对话滑出窗口 | 相关笔记、这一批对话 | 笔记 ops。开头写明只给日记，清然不会读 |
 | `judge` | 离线 | 人设和对话 | 打分，含 `meta_narration` 和 `self_desire` |
 | dusk / assign / synth / ask / report / experiments / backfill | 日记页 | 不变 | 不变 |
@@ -81,16 +81,16 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 | read_her | 看不到 | 对她的理解留在这里，避免挤进欲望和动作 |
 | choice | 看不到 | 否定句和取舍过程留在这里，避免被念出来 |
 | plans | 看不到 | 只有 reflect 把它写进 now，才会出现在回复里 |
-| Dossier 全文 | 启用后看得到 | 一份当前成立的理解，不是流水账 |
+| Dossier 全文 | 生效后看得到 | 一份当前成立的理解，不是流水账 |
 
-## 启用之前和之后
+## 生效之前和之后
 
-`qr_dossier.active` 默认 false。没启用时，热路径和 reflect 继续用旧的 self / bond / portrait。点「启用」才把正文写进 `qr_dossier.body`，把 `cursor_at` 放到当前最新一条消息，并把 `turns_since_edit` 归零。
+`qr_dossier.active` 默认 false，页面上不露开关。没生效时，热路径和 reflect 继续用旧的 self / bond / portrait。第一次说话、打开「我记得的」，或 `/api/cron/brain`，会排一个幂等任务：已有最新的 seed 草稿就直接生效；没有就生成再生效。`cursor_at` 停在当时最新一条消息上，`turns_since_edit` 归零。之后 editor 的更新本来就会直接写进正文。
 
 清空聊天：
 
-- 还没启用：仍按 `archived_at is null` 标记遗忘（和以前一样）。
-- 启用之后：`created_at > cursor_at` 且还没遗忘的，标记 `forgotten_at`。已经整理进文档的对话还在她眼前。日记的 archive 是否跳过被遗忘的消息，维持原样。
+- 还没生效：仍按 `archived_at is null` 标记遗忘（和以前一样）。
+- 生效之后：`created_at > cursor_at` 且还没遗忘的，标记 `forgotten_at`。已经整理进文档的对话还在她眼前。日记的 archive 是否跳过被遗忘的消息，维持原样。
 
 ## 以后再做（这次不做）
 
@@ -98,11 +98,11 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 
 ## 和规格不一致的地方
 
-- `qr_dossier.active`：规格里的建表没有这一列。加上它，是为了让热路径在 Rosie 审完初版之前继续用旧文，不花 editor 的调用。
-- 自动 editor 只在 `active` 之后入队。轮次计数一直加，但没启用时不调用模型。
+- `qr_dossier.active` 仍在，当安全开关读，页面上不再点「启用」。没生效之前热路径用旧文。
+- 自动 editor 只在 `active` 之后入队。轮次计数一直加，但没生效时不调用整理模型；那时候只跑一次生成或把已有草稿生效。
 - `qr_dossier_versions.ops` 存的是 `{ops, skipped, reason}`，不是裸数组。跳过的 replace 才能在版本历史里看见。
 - 关系阶段没有单独的列，seed 时从画像主题「关系阶段」读。
 - `portrait` route 还留在 `config.ts`，给旧的花费记录用。设置里已经没有画像 prompt，也不会再跑 nightly。
-- 实验室的「导入故事线」不再清空或写入 notes / portrait。种子只作为「从旧记忆生成初版」的输入。
+- 实验室的「导入故事线」不再清空或写入 notes / portrait。种子只作为第一次自动整理的输入。
 - 清然读 `mem_notes` 的唯一一次是生成初版。日记和检索测试里的函数还在，不在通话路径上。
 - `qr_inner.want` 不删。0030 复制进 `desire` 之后不再写入。已保存的自定义 reflect / voice 模板不会被新默认覆盖。默认热路径不再注入 longing；自定义模板里如果还写着 `{want}` 或 `{longing}`，`{want}` 会填成 desire。

@@ -1,18 +1,22 @@
 import { createServerFn } from "@tanstack/react-start";
 import { runJobsNow } from "./jobs.ts";
+import { LONG_DRAIN_MS } from "./config.ts";
+import { runInBackground } from "./wait-until.ts";
 import {
-  enableDossier,
+  enqueueDossierActivate,
   enqueueEditorNow,
   getDossier,
   listDossierVersions,
   rollbackDossier,
   saveDossierBody,
-  seedDossierDraft,
 } from "./dossier.ts";
 import { listInnerLogs } from "./store.ts";
 import { getInner } from "./store.ts";
 
 export const brainGetDossier = createServerFn({ method: "GET" }).handler(async () => {
+  if (await enqueueDossierActivate()) {
+    await runInBackground(() => runJobsNow(LONG_DRAIN_MS));
+  }
   const [row, versions] = await Promise.all([getDossier(), listDossierVersions(40)]);
   return { row, versions };
 });
@@ -24,24 +28,12 @@ export const brainSaveDossier = createServerFn({ method: "POST" })
     return { ok: true as const, row };
   });
 
-export const brainEnableDossier = createServerFn({ method: "POST" })
-  .validator((input: { body: string }) => input)
-  .handler(async ({ data }) => {
-    const row = await enableDossier(String(data.body ?? "").slice(0, 20_000));
-    return { ok: true as const, row };
-  });
-
 export const brainRollbackDossier = createServerFn({ method: "POST" })
   .validator((input: { id: number }) => input)
   .handler(async ({ data }) => {
     const row = await rollbackDossier(Number(data.id));
     return { ok: true as const, row };
   });
-
-export const brainSeedDossier = createServerFn({ method: "POST" }).handler(async () => {
-  const draft = await seedDossierDraft();
-  return { ok: true as const, draft };
-});
 
 export const brainEditDossierNow = createServerFn({ method: "POST" }).handler(async () => {
   await enqueueEditorNow();

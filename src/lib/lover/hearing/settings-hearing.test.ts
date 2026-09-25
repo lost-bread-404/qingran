@@ -118,8 +118,10 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.match(src, /DossierPanel/);
   assert.match(src, /清空聊天/);
   const dossier = readFileSync(new URL("../../../components/lover/dossier-panel.tsx", import.meta.url), "utf8");
-  assert.match(dossier, /从旧记忆生成初版/);
   assert.match(dossier, /现在整理/);
+  assert.match(dossier, /失焦就记下/);
+  assert.doesNotMatch(dossier, /从旧记忆生成初版/);
+  assert.doesNotMatch(dossier, /启用这一份/);
   assert.match(src, /injectMind/);
   assert.doesNotMatch(src, />记忆</);
   assert.match(src, />我记得的</);

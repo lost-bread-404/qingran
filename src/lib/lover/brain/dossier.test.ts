@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setClock } from "./clock.ts";
-import { enableDossier, getDossier, listDossierVersions, runEditor, saveDossierBody, seedDossierDraft } from "./dossier.ts";
+import { enableDossier, enqueueDossierActivate, ensureDossierLive, getDossier, listDossierVersions, runEditor, saveDossierBody, seedDossierDraft } from "./dossier.ts";
 import { openIsolatedSql } from "./eval-db.ts";
 import type { callModel } from "./llm.ts";
 import { clearRecentConversation, upsertMessage } from "./store.ts";
@@ -134,6 +134,103 @@ test("a rosie edit keeps a version and a seed draft does not activate", async ()
     assert.equal(after.active, false);
     assert.match(after.body, /手改/);
     assert.match(draft.body, /草稿/);
+  } finally {
+    await iso.close();
+  }
+});
+
+test("an inactive seed draft becomes the live dossier without another generation", async () => {
+  const iso = await openIsolatedSql();
+  const t0 = Date.UTC(2026, 8, 23, 12, 0, 0);
+  try {
+    setClock(() => t0);
+    await upsertMessage({ id: "m1", role: "user", text: "在", createdAt: t0, timeZone: TZ });
+    await seedDossierDraft(fake({ body: "## 我们\n草稿。\n" }));
+    assert.equal((await getDossier()).active, false);
+    let called = 0;
+    const boom = (async () => {
+      called += 1;
+      throw new Error("should not seed");
+    }) as typeof callModel;
+    assert.equal(await ensureDossierLive(boom), "draft");
+    assert.equal(called, 0);
+    const row = await getDossier();
+    assert.equal(row.active, true);
+    assert.equal(row.cursorAt, t0);
+    assert.match(row.body, /草稿/);
+  } finally {
+    setClock(null);
+    await iso.close();
+  }
+});
+
+test("an inactive dossier with no draft is generated and then live", async () => {
+  const iso = await openIsolatedSql();
+  const t0 = Date.UTC(2026, 8, 24, 12, 0, 0);
+  try {
+    setClock(() => t0);
+    await upsertMessage({ id: "m2", role: "user", text: "嗯", createdAt: t0, timeZone: TZ });
+    assert.equal(await ensureDossierLive(fake({ body: "## 我自己\n生成的。\n" })), "seeded");
+    const row = await getDossier();
+    assert.equal(row.active, true);
+    assert.equal(row.cursorAt, t0);
+    assert.match(row.body, /生成的/);
+    const versions = await listDossierVersions();
+    assert.equal(versions.some((version) => version.author === "seed"), true);
+  } finally {
+    setClock(null);
+    await iso.close();
+  }
+});
+
+test("a live dossier is not seeded again", async () => {
+  const iso = await openIsolatedSql();
+  try {
+    await enableDossier("## 我们\n已经在用。\n");
+    let called = 0;
+    const boom = (async () => {
+      called += 1;
+      throw new Error("should not seed");
+    }) as typeof callModel;
+    assert.equal(await ensureDossierLive(boom), "already");
+    assert.equal(called, 0);
+    assert.equal(await enqueueDossierActivate(), false);
+    const row = await getDossier();
+    assert.equal(row.active, true);
+    assert.match(row.body, /已经在用/);
+  } finally {
+    await iso.close();
+  }
+});
+
+test("a saved body goes live without a new seed", async () => {
+  const iso = await openIsolatedSql();
+  try {
+    await saveDossierBody("## 我自己\n手写。\n", "rosie");
+    let called = 0;
+    const boom = (async () => {
+      called += 1;
+      throw new Error("should not seed");
+    }) as typeof callModel;
+    assert.equal(await ensureDossierLive(boom), "kept");
+    assert.equal(called, 0);
+    const row = await getDossier();
+    assert.equal(row.active, true);
+    assert.match(row.body, /手写/);
+  } finally {
+    await iso.close();
+  }
+});
+
+test("the activate job is queued once while the dossier is still off", async () => {
+  const iso = await openIsolatedSql();
+  try {
+    assert.equal(await enqueueDossierActivate(), true);
+    assert.equal(await enqueueDossierActivate(), false);
+    const rows = await (await import("./store.ts")).sql().then((db) =>
+      db.query<{ dedupe_key: string }>("select dedupe_key from brain_jobs where dedupe_key = 'dossier:activate'"),
+    );
+    assert.equal(rows.length, 1);
   } finally {
     await iso.close();
   }

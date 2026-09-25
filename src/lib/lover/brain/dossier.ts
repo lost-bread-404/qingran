@@ -113,7 +113,7 @@ export async function getDossier(): Promise<DossierRow> {
   return rowOf(rows[0]);
 }
 
-/** What the reply and reflect prompts should see. Old longterm until Rosie enables this. */
+/** What the reply and reflect prompts should see. Old longterm only until this document is live. */
 export async function dossierTextForModel(): Promise<string> {
   const row = await getDossier();
   if (row.active) return row.body.trim();
@@ -166,6 +166,15 @@ export async function saveDossierBody(body: string, author: "rosie" | "seed" | "
 }
 
 export async function enableDossier(body: string): Promise<DossierRow> {
+  return publishLive(body, "rosie", { enable: true });
+}
+
+/** Copy a seed draft (or a freshly generated body) into the live document. */
+export async function activateDossierBody(body: string): Promise<DossierRow> {
+  return publishLive(body, "seed", { activate: true });
+}
+
+async function publishLive(body: string, author: "rosie" | "seed", ops: unknown): Promise<DossierRow> {
   const db = await sql();
   const at = now();
   const current = await getDossier();
@@ -174,14 +183,64 @@ export async function enableDossier(body: string): Promise<DossierRow> {
     "select max(created_at)::float8 as at from qingran_messages",
   );
   const cursor = Number(latest[0]?.at ?? 0) || 0;
+  const text = body.endsWith("\n") ? body : `${body}\n`;
   await db.query(
     `update qr_dossier
      set body = $1, version = $2, updated_at = $3, active = true, cursor_at = $4, turns_since_edit = 0
      where id = 1`,
-    [body, version, at, cursor],
+    [text, version, at, cursor],
   );
-  await writeVersion({ version, body, author: "rosie", ops: { enable: true }, at });
+  await writeVersion({ version, body: text, author, ops, at });
   return getDossier();
+}
+
+const ACTIVATE_KEY = "dossier:activate";
+
+/**
+ * One-shot while `active` is still false. A body she already saved stays.
+ * Otherwise a seed draft goes live as-is. No draft means generate one, then go live.
+ */
+export async function ensureDossierLive(complete: Completer = callModel): Promise<"already" | "kept" | "draft" | "seeded"> {
+  const row = await getDossier();
+  if (row.active) return "already";
+  if (row.body.trim()) {
+    await flipActiveOnly();
+    return "kept";
+  }
+  const versions = await listDossierVersions(40);
+  const draft = versions.find((version) => version.author === "seed" && version.body.trim());
+  if (draft) {
+    if ((await getDossier()).active) return "already";
+    await activateDossierBody(draft.body);
+    return "draft";
+  }
+  const seeded = await seedDossierDraft(complete);
+  if ((await getDossier()).active) return "already";
+  await activateDossierBody(seeded.body);
+  return "seeded";
+}
+
+async function flipActiveOnly(): Promise<void> {
+  const db = await sql();
+  const at = now();
+  const latest = await db.query<{ at: number | null }>(
+    "select max(created_at)::float8 as at from qingran_messages",
+  );
+  const cursor = Number(latest[0]?.at ?? 0) || 0;
+  await db.query(
+    `update qr_dossier set active = true, cursor_at = $1, turns_since_edit = 0, updated_at = $2 where id = 1`,
+    [cursor, at],
+  );
+}
+
+export async function enqueueDossierActivate(): Promise<boolean> {
+  if ((await getDossier()).active) return false;
+  const db = await sql();
+  await db.query(
+    `delete from brain_jobs where dedupe_key = $1 and status in ('done', 'failed')`,
+    [ACTIVATE_KEY],
+  );
+  return enqueue("editor", ACTIVATE_KEY, { reason: "activate" });
 }
 
 export async function rollbackDossier(versionId: number): Promise<DossierRow> {
@@ -409,6 +468,7 @@ export async function seedDossierDraft(complete: Completer = callModel): Promise
 }
 
 export async function noteRosieTurn(createdAt: number): Promise<void> {
+  if (!(await getDossier()).active) await enqueueDossierActivate();
   const db = await sql();
   const prev = await db.query<{ at: number | null }>(
     `select max(created_at)::float8 as at from qingran_messages

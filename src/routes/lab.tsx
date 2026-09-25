@@ -750,7 +750,7 @@ function HearingLabPage() {
               <section className="rounded-md bg-surface-2 px-3 py-3">
                 <p className="mb-2 font-display text-lg">导入故事线</p>
                 <p className="text-sm text-muted">
-                  故事线不再写入笔记和画像。到设置里「从旧记忆生成初版」。这里只显示种子里有多少条。
+                  故事线不再写入笔记和画像。种子只在第一次整理「我记得的」时用。这里只显示种子里有多少条。
                 </p>
                 <Button
                   type="button"
@@ -762,7 +762,7 @@ function HearingLabPage() {
                       setStatus(preview.error);
                       return;
                     }
-                    setStatus(`种子里有 ${preview.notes} 条事件、${preview.portrait} 条画像。不再写入笔记和画像。到设置里「从旧记忆生成初版」。`);
+                    setStatus(`种子里有 ${preview.notes} 条事件、${preview.portrait} 条画像。不再写入笔记和画像。`);
                   }}
                 >
                   看种子有多少
