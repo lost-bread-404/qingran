@@ -1,4 +1,4 @@
-import { NEUTRAL_PERSONA, type Profile } from "./types";
+import { NEUTRAL_PERSONA, type Profile } from "./types.ts";
 import { defaultPrompt } from "./brain/prompts/catalog.ts";
 import { fillTemplate } from "./brain/prompts/fill.ts";
 

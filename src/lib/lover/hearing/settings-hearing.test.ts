@@ -493,7 +493,7 @@ test("confirm panel and settings drawer follow visualViewport and keep the caret
   assert.match(settings, /keepCaretVisible/);
   assert.match(settings, /top: viewport\.offsetTop/);
   assert.match(settings, /height: viewport\.height/);
-  assert.match(settings, /写给模型的 system prompt/);
+  assert.match(settings, /写给他的人设。空着时只会告诉他：你是清然。/);
   assert.match(settings, /keepCaretVisible/);
 });
 
