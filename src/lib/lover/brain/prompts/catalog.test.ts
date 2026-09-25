@@ -47,7 +47,7 @@ test("removed memory prompts are not in the catalog", () => {
 });
 
 test("reflect archive editor defaults close the memory loop", () => {
-  assert.match(defaultPrompt("reflect"), /有自己欲望/);
+  assert.match(defaultPrompt("reflect"), /你自己此刻的欲望/);
   assert.match(defaultPrompt("reflect"), /plans/);
   assert.match(defaultPrompt("reflect"), /第一人称/);
   assert.doesNotMatch(defaultPrompt("reflect"), /不要延续上一刻的计划/);

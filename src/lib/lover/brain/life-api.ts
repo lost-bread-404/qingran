@@ -101,8 +101,9 @@ export const brainAdjustGlow = createServerFn({ method: "POST" })
 
 export const brainSaveHeart = createServerFn({ method: "POST" })
   .validator((input: {
+    desire?: string;
+    readHer?: string;
     feel?: string;
-    want?: string;
     now?: string;
     choice?: string;
     plans?: InnerPlan[];
@@ -113,8 +114,9 @@ export const brainSaveHeart = createServerFn({ method: "POST" })
     const before = innerSnapshot(inner);
     const next = {
       ...inner,
+      desire: data.desire === undefined ? inner.desire : String(data.desire).slice(0, 1200),
+      readHer: data.readHer === undefined ? inner.readHer : String(data.readHer).slice(0, 1200),
       feel: data.feel === undefined ? inner.feel : String(data.feel).slice(0, 1200),
-      want: data.want === undefined ? inner.want : String(data.want).slice(0, 1200),
       now: data.now === undefined ? inner.now : String(data.now).slice(0, 1200),
       choice: data.choice === undefined ? inner.choice : String(data.choice).slice(0, 1200),
       plans: Array.isArray(data.plans) ? data.plans.slice(0, 12) : inner.plans,

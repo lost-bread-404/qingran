@@ -57,8 +57,9 @@ export function InnerNowPanel() {
         <p className="text-sm text-subtle">正在读…</p>
       ) : (
         <div className="whitespace-pre-wrap text-sm leading-relaxed">
+          {line("欲望：", inner.desire)}
+          {line("对她：", inner.readHer)}
           {line("心里：", inner.feel)}
-          {line("想要：", inner.want)}
           {line("取舍：", inner.choice)}
           {line("正在做：", inner.now)}
           {line("惦记：", inner.longing)}

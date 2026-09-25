@@ -495,6 +495,8 @@ export const BACKUP_TABLES: TableSpec[] = [
       ["id", "int"],
       ["feel", "text"],
       ["want", "text"],
+      ["desire", "text"],
+      ["read_her", "text"],
       ["choice", "text"],
       ["now_text", "text"],
       ["longing", "text"],

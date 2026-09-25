@@ -13,7 +13,7 @@ import {
 export { formatVoiceInjectLine };
 export type { VoiceInjectFlags };
 
-export const EMPTY_MOMENT: MomentText = { feel: "", want: "", now: "", longing: "", glow: "" };
+export const EMPTY_MOMENT: MomentText = { feel: "", desire: "", now: "", longing: "", glow: "" };
 
 function portraitBlock(rows: PortraitRow[]): string {
   const active = rows.filter((r) => r.status === "active");
@@ -78,9 +78,9 @@ export type VoiceInputChars = {
 };
 
 const FALLBACK_CHARTER = "你就是清然。正在和 Rosie 语音通话。";
-const MOMENT_FIELD = /\{(feel|want|longing|now|glow)\}/;
+const MOMENT_FIELD = /\{(feel|desire|want|longing|now|glow)\}/;
 const DOSSIER_TOKEN = /\{(?:dossier|self|bond|portrait)\}/;
-const OTHER_VOICE_TOKEN = /\{(?:system_prompt|identity_block|user_text|history_messages|clock|feel|want|longing|now|glow|mind|memories)\}/;
+const OTHER_VOICE_TOKEN = /\{(?:system_prompt|identity_block|user_text|history_messages|clock|feel|desire|want|longing|now|glow|mind|memories)\}/;
 
 export function voiceInjectOf(parts: {
   injectMoment?: boolean;
@@ -126,7 +126,7 @@ function withoutDossierMessage<T extends { content: string }>(messages: T[], inj
 function prepareMomentTemplate(content: string, moment: MomentText, enabled: boolean): string {
   if (!content.includes("【我此刻】") && !MOMENT_FIELD.test(content)) return content;
   const values: Record<string, string> = moment;
-  const any = ["feel", "want", "longing", "now", "glow"].some((key) => values[key]?.trim());
+  const any = ["feel", "desire", "now", "glow"].some((key) => values[key]?.trim());
   if (!enabled || !any) return "";
   return content
     .split("\n")
@@ -189,7 +189,8 @@ function voiceVars(parts: {
     portrait: "",
     clock: parts.clock,
     feel: parts.moment.feel.trim(),
-    want: parts.moment.want.trim(),
+    desire: parts.moment.desire.trim(),
+    want: parts.moment.desire.trim(),
     longing: parts.moment.longing.trim(),
     now: parts.moment.now.trim(),
     glow: parts.moment.glow.trim(),
@@ -241,7 +242,7 @@ export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
   const inject = voiceInjectOf(parts);
   const history = voiceHistoryMessages(parts.history, inject.history);
   const moment = inject.moment
-    ? [parts.moment.feel, parts.moment.want, parts.moment.now, parts.moment.longing].filter((line) => line.trim()).join("\n")
+    ? [parts.moment.feel, parts.moment.desire, parts.moment.now, parts.moment.glow].filter((line) => line.trim()).join("\n")
     : "";
   const dossier = inject.dossier
     ? parts.longterm || dossierSections(parts.selfSummary ?? "", parts.bondSummary ?? "", parts.portrait ?? [])
@@ -300,7 +301,14 @@ export function buildTail(opts: {
   const clock = variantMessages(defaultDoc("voice"), "main").find((message) => message.content.includes("{clock}"));
   const momentText = prepareMomentTemplate(template?.content ?? "", moment, inject.moment);
   const filledMoment = momentText
-    ? fillTemplate(momentText, { feel: moment.feel, want: moment.want, longing: moment.longing, now: moment.now, glow: moment.glow })
+    ? fillTemplate(momentText, {
+        feel: moment.feel,
+        desire: moment.desire,
+        want: moment.desire,
+        longing: moment.longing,
+        now: moment.now,
+        glow: moment.glow,
+      })
     : "";
   const filledClock = fillTemplate(clock?.content ?? "现在是{clock}。", { clock: opts.clock });
   return [filledMoment, filledClock].filter(Boolean).join("\n\n");

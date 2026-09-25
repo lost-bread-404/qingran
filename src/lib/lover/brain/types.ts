@@ -56,13 +56,16 @@ export type LongingItem = {
   since: string;
 };
 
-/** Private inner state. The reply sees feel / want / now / longing / glow word only. */
+/** Private inner state. The reply sees desire / feel / now / glow word only. */
 export type InnerState = {
+  desire: string;
+  readHer: string;
   feel: string;
+  /** Legacy column. Not written. Copied into desire by 0030. */
   want: string;
   choice: string;
   now: string;
-  /** Joined from longings so the existing voice line still has something to say. */
+  /** Joined from longings so older callers still have a single string. */
   longing: string;
   longings: LongingItem[];
   plans: InnerPlan[];
@@ -74,6 +77,8 @@ export type InnerState = {
 };
 
 export const EMPTY_INNER: InnerState = {
+  desire: "",
+  readHer: "",
   feel: "",
   want: "",
   choice: "",

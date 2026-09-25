@@ -30,9 +30,10 @@ export type { VoiceInputChars, VoicePackParts, VoiceStrip } from "./pack-build.t
 
 export type InjectedInner = {
   feel: string;
-  want: string;
+  desire: string;
   now: string;
   longing: string;
+  glow: string;
   stale: { moment: boolean; longing: boolean };
 };
 
@@ -114,7 +115,7 @@ export async function loadHotContext(input: {
   const clockText = formatClock(input.nowMs, input.timeZone);
   const moment = {
     feel: injected.feel,
-    want: injected.want,
+    desire: injected.desire,
     now: injected.now,
     longing: injected.longing,
     glow: injected.glow,
@@ -171,7 +172,7 @@ export async function loadHotContext(input: {
     injectLongterm: inject.dossier,
     injectMoment: inject.moment,
     momentFeel: moment.feel,
-    momentWant: moment.want,
+    momentWant: moment.desire,
     momentNow: moment.now,
     momentLonging: moment.longing,
     historyWindow: inject.history,
@@ -213,7 +214,7 @@ export async function loadHotContext(input: {
 export async function loadVoicePerspective(): Promise<{
   dossier: string;
   feel: string;
-  want: string;
+  desire: string;
   now: string;
   longing: string;
 }> {
@@ -222,7 +223,7 @@ export async function loadVoicePerspective(): Promise<{
   return {
     dossier: await dossierTextForModel(),
     feel: inner.feel,
-    want: inner.want,
+    desire: inner.desire,
     now: inner.now,
     longing: inner.longing,
   };

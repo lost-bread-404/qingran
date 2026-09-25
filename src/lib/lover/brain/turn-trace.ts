@@ -45,7 +45,8 @@ export type TurnTraceInput = {
     injectLine?: string;
     inner?: {
       feel: string;
-      want: string;
+      desire?: string;
+      want?: string;
       now: string;
       longing: string;
       stale: { moment: boolean; longing: boolean };

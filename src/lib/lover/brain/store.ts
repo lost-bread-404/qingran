@@ -247,6 +247,8 @@ function rowToInner(row: Record<string, unknown> | undefined): InnerState {
   if (!row) return { ...EMPTY_INNER, plans: [], longings: [] };
   const longings = parseLongings(row.longings, String(row.longing ?? ""));
   return {
+    desire: String(row.desire ?? ""),
+    readHer: String(row.read_her ?? ""),
     feel: String(row.feel ?? ""),
     want: String(row.want ?? ""),
     choice: String(row.choice ?? ""),
@@ -265,7 +267,7 @@ function rowToInner(row: Record<string, unknown> | undefined): InnerState {
 export async function getInner(): Promise<InnerState> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
-    `select feel, want, choice, now_text, longing, longings, plans, glow, glow_at, turn_seq, updated_at, longing_updated_at
+    `select feel, desire, read_her, want, choice, now_text, longing, longings, plans, glow, glow_at, turn_seq, updated_at, longing_updated_at
      from qr_inner where id = 1`,
   );
   return rowToInner(rows[0]);
@@ -325,13 +327,14 @@ export async function saveInner(
       : [];
   const rows = await db.query<{ id: number }>(
     `update qr_inner
-     set feel = $1, want = $2, choice = $3, now_text = $4, longings = $5::jsonb, plans = $6::jsonb,
-         turn_seq = $7, updated_at = $8, longing_updated_at = $9, glow = $10, glow_at = $11
-     where id = 1 and turn_seq < $7
+     set feel = $1, desire = $2, read_her = $3, choice = $4, now_text = $5, longings = $6::jsonb, plans = $7::jsonb,
+         turn_seq = $8, updated_at = $9, longing_updated_at = $10, glow = $11, glow_at = $12
+     where id = 1 and turn_seq < $8
      returning id`,
     [
       inner.feel,
-      inner.want,
+      inner.desire,
+      inner.readHer,
       inner.choice,
       inner.now,
       JSON.stringify(longings),
@@ -359,7 +362,7 @@ export async function resetInnerTurn(): Promise<void> {
   const db = await getSql();
   await db.query(
     `update qr_inner
-     set feel = '', want = '', choice = '', now_text = '', turn_seq = 0, updated_at = $1
+     set feel = '', desire = '', read_her = '', choice = '', now_text = '', turn_seq = 0, updated_at = $1
      where id = 1`,
     [now()],
   );

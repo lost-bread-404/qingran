@@ -388,8 +388,9 @@ export async function todayCalendar(at = now()): Promise<string> {
 }
 
 export type ManualInnerPatch = {
+  desire?: string;
+  readHer?: string;
   feel?: string;
-  want?: string;
   now?: string;
   choice?: string;
   plans?: InnerPlan[];
@@ -398,8 +399,9 @@ export type ManualInnerPatch = {
 
 export function innerSnapshot(inner: InnerState): Record<string, unknown> {
   return {
+    desire: inner.desire,
+    readHer: inner.readHer,
     feel: inner.feel,
-    want: inner.want,
     now: inner.now,
     choice: inner.choice,
     plans: inner.plans,

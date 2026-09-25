@@ -145,14 +145,15 @@ export function HeartEditor({
     load();
   }, []);
 
-  function save(patch: Partial<{ feel: string; want: string; now: string; choice: string; plans: InnerPlan[]; longings: LongingItem[] }>) {
+  function save(patch: Partial<{ desire: string; readHer: string; feel: string; now: string; choice: string; plans: InnerPlan[]; longings: LongingItem[] }>) {
     if (!inner) return;
     const next = { ...inner, ...patch, now: patch.now ?? inner.now };
     setInner(next);
     void brainSaveHeart({
       data: {
+        desire: next.desire,
+        readHer: next.readHer,
         feel: next.feel,
-        want: next.want,
         now: next.now,
         choice: next.choice,
         plans: next.plans,
@@ -171,10 +172,11 @@ export function HeartEditor({
       <p className="text-xs text-subtle">失焦就记下。下一次他想事情时，读到的就是改过的。</p>
       {(
         [
+          ["欲望", "desire"],
+          ["对她", "readHer"],
           ["心里", "feel"],
-          ["想要", "want"],
-          ["正在做", "now"],
           ["取舍", "choice"],
+          ["正在做", "now"],
         ] as const
       ).map(([label, key]) => (
         <label key={key} className="flex flex-col gap-1">

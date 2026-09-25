@@ -95,8 +95,8 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
   return {
     slots: {
       dossier,
+      desire: moment.desire,
       feel: moment.feel,
-      want: moment.want,
       longing: moment.longing,
       now: moment.now,
       system_prompt: charter,

@@ -1,6 +1,6 @@
 import { REFLECT_WINDOW } from "../config.ts";
 import { callModel, classifyReflectFailure } from "../llm.ts";
-import { applyReflectOutput, expireOpenPlans, formatOldInner } from "../mind-parse.ts";
+import { applyReflectOutput, expireOpenPlans, formatOldInner, REFLECT_OUTPUT_KEYS } from "../mind-parse.ts";
 import {
   appendInnerLog,
   getInner,
@@ -28,15 +28,16 @@ import { currentBusy } from "../busy.ts";
 import { lockedProfile } from "../../types.ts";
 import { insertGlowEvent, readIdentity, saveReach } from "../life-store.ts";
 
-const INNER_SCHEMA = {
+export const INNER_SCHEMA = {
   name: "inner",
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["feel", "want", "choice", "now", "longings", "plans", "glow", "next_reach"],
+    required: [...REFLECT_OUTPUT_KEYS],
     properties: {
+      desire: { type: "string" },
+      read_her: { type: "string" },
       feel: { type: "string" },
-      want: { type: "string" },
       choice: { type: "string" },
       now: { type: "string" },
       longings: {

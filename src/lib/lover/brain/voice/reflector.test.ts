@@ -105,7 +105,7 @@ test("A and B omit clock, old inner, and recent conversation", () => {
   assert.match(p.turn, /她怕自己不够好/);
   assert.match(p.turn, /Rosie：又到十一点了/);
   assert.match(p.stable, /【我记得的】/);
-  assert.match(p.system, /有自己欲望/);
+  assert.match(p.system, /你自己此刻的欲望/);
   assert.doesNotMatch(p.system, /不要延续上一刻的计划/);
   assert.doesNotMatch(p.turn, /不要复述/);
 });

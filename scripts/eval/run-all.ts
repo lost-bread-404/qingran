@@ -149,6 +149,7 @@ async function main() {
     "repeated_phrase",
     "handed_back",
     "meta_narration",
+    "self_desire",
   ] as const;
 
   const metric = (pick: (r: (typeof last)) => number[]) => {

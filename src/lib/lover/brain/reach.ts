@@ -45,12 +45,13 @@ const REACH_SCHEMA = {
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["send", "text", "feel", "want", "now", "longings", "glow", "next_reach"],
+    required: ["send", "text", "desire", "read_her", "feel", "now", "longings", "glow", "next_reach"],
     properties: {
       send: { type: "boolean" },
       text: { type: "string" },
+      desire: { type: "string" },
+      read_her: { type: "string" },
       feel: { type: "string" },
-      want: { type: "string" },
       now: { type: "string" },
       longings: {
         type: "array",
@@ -206,8 +207,9 @@ export async function runWake(opts: {
   const history = await recentLines(zone);
   const word = glowWord(glow);
   const innerText = [
+    inner.desire.trim() ? `想要：${inner.desire.trim()}` : "",
+    inner.readHer.trim() ? `对她：${inner.readHer.trim()}` : "",
     inner.feel.trim() ? `心里：${inner.feel.trim()}` : "",
-    inner.want.trim() ? `想要：${inner.want.trim()}` : "",
     word ? `心情：${word}（比平常）` : "",
     inner.longings.length
       ? `心事：\n${inner.longings.map((item) => `- ${item.text}${item.since ? `（从 ${item.since} 起）` : ""}`).join("\n")}`
@@ -246,6 +248,8 @@ export async function runWake(opts: {
   }
   const json = result.json as Record<string, unknown>;
   const applied = applyReflectOutput(inner, {
+    desire: json.desire ?? json.want,
+    read_her: json.read_her,
     feel: json.feel,
     want: json.want,
     choice: inner.choice,
@@ -372,12 +376,13 @@ async function saveInnerForced(inner: import("./types.ts").InnerState): Promise<
   const db = await getSql();
   await db.query(
     `update qr_inner
-     set feel = $1, want = $2, choice = $3, now_text = $4, longings = $5::jsonb, plans = $6::jsonb,
-         updated_at = $7, longing_updated_at = $8, glow = $9, glow_at = $10
+     set feel = $1, desire = $2, read_her = $3, choice = $4, now_text = $5, longings = $6::jsonb, plans = $7::jsonb,
+         updated_at = $8, longing_updated_at = $9, glow = $10, glow_at = $11
      where id = 1`,
     [
       inner.feel,
-      inner.want,
+      inner.desire,
+      inner.readHer,
       inner.choice,
       inner.now,
       JSON.stringify(inner.longings ?? []),

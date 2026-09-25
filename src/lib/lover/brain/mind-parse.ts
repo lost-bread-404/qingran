@@ -61,7 +61,28 @@ export function nowRejectedReason(nowText: string): string | null {
   return `now 写成了否定式意图（含「${hit[0]}」），本轮不注入`;
 }
 
-export type MomentText = { feel: string; want: string; now: string; longing: string; glow: string };
+export type MomentText = { feel: string; desire: string; now: string; longing: string; glow: string };
+
+/** Reflect writes these in order. Desire is first so it is not swallowed by the analysis. */
+export const REFLECT_OUTPUT_KEYS = [
+  "desire",
+  "read_her",
+  "feel",
+  "choice",
+  "now",
+  "longings",
+  "plans",
+  "glow",
+  "next_reach",
+] as const;
+
+export function nowNotActionReason(nowText: string): string | null {
+  const text = nowText.trim();
+  if (!text) return null;
+  if (/(^|[，。！？、；\n])我/.test(text)) return null;
+  if (!text.includes("她")) return null;
+  return "now 没有以我为主语的动作，看起来是在描述她";
+}
 
 export type MomentInject = MomentText & {
   stale: { moment: boolean; longing: boolean };
@@ -77,11 +98,11 @@ export function momentForVoice(
   const longingStale = !inner.longing_updated_at || nowMs - inner.longing_updated_at > LONGING_TTL_MS;
   const word = glowWord(glowNow(inner.glow, inner.glow_at, nowMs, halfLifeMs));
   if (!enabled) {
-    return { feel: "", want: "", now: "", longing: "", glow: "", stale: { moment: true, longing: true } };
+    return { feel: "", desire: "", now: "", longing: "", glow: "", stale: { moment: true, longing: true } };
   }
   return {
     feel: momentStale ? "" : inner.feel.trim(),
-    want: momentStale ? "" : inner.want.trim(),
+    desire: momentStale ? "" : inner.desire.trim(),
     now: momentStale ? "" : inner.now.trim(),
     longing: longingStale ? "" : inner.longing.trim(),
     glow: word ? `${word}（比平常）` : "",
@@ -119,8 +140,9 @@ export function expireOpenPlans(
 export function formatOldInner(inner: InnerState, nowMs: number): string {
   const word = glowWord(glowNow(inner.glow, inner.glow_at, nowMs));
   const lines = [
+    inner.desire.trim() ? `desire：${inner.desire.trim()}` : "",
+    inner.readHer.trim() ? `read_her：${inner.readHer.trim()}` : "",
     inner.feel.trim() ? `feel：${inner.feel.trim()}` : "",
-    inner.want.trim() ? `want：${inner.want.trim()}` : "",
     inner.choice.trim() ? `choice：${inner.choice.trim()}` : "",
     inner.now.trim() ? `now：${inner.now.trim()}` : "",
     word ? `心情：${word}` : "",
@@ -155,7 +177,8 @@ export function applyReflectOutput(
 } {
   const row = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const feel = clipField(row.feel);
-  const want = clipField(row.want);
+  const desire = clipField(row.desire) || clipField(row.want);
+  const readHer = clipField(row.read_her);
   const choice = clipField(row.choice);
   let nowText = clipField(row.now);
   const longingFromList = mergeLongings(prev, row.longings, row.longing, nowMs);
@@ -165,6 +188,9 @@ export function applyReflectOutput(
   if (rejected) {
     discarded.now_rejected = { reason: rejected, text: nowText };
     nowText = "";
+  } else {
+    const observed = nowNotActionReason(nowText);
+    if (observed) discarded.now_not_action = { reason: observed, text: nowText };
   }
   const plans = mergePlans(prev.plans, row.plans, nowMs, discarded);
   const longingChanged = longing !== prev.longing.trim();
@@ -172,8 +198,10 @@ export function applyReflectOutput(
   const nextReach = parseNextReach(row);
   return {
     next: {
+      desire,
+      readHer,
       feel,
-      want,
+      want: "",
       choice,
       now: nowText,
       longing,

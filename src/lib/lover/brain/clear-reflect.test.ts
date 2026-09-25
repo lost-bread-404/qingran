@@ -70,7 +70,7 @@ test("clear keeps archived notes and only forgets unarchived turns", async () =>
       {
         ...EMPTY_INNER,
         feel: "刚说的",
-        want: "想抱",
+        desire: "想抱",
         choice: "先听",
         now: "听她说",
         longing: "一直惦记",
@@ -92,6 +92,7 @@ test("clear keeps archived notes and only forgets unarchived turns", async () =>
     const inner = await getInner();
     assert.equal(inner.turn_seq, 0);
     assert.equal(inner.feel, "");
+    assert.equal(inner.desire, "");
     assert.equal(inner.want, "");
     assert.equal(inner.choice, "");
     assert.equal(inner.now, "");

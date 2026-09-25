@@ -69,11 +69,20 @@ test("moment lines stay in full and choice is not a voice slot", () => {
   const now = "听她把今天说完，再决定要不要靠近。";
   const tail = buildTail({
     clock: "x",
-    moment: { feel: "想抱着你", want: "想被需要", now, longing: "", glow: "" },
+    moment: { feel: "想抱着你", desire: "想被需要", now, longing: "", glow: "" },
   });
   assert.match(tail, /【我此刻】/);
   assert.match(tail, /心里：想抱着你/);
   assert.match(tail, /想要：想被需要/);
+  assert.doesNotMatch(tail, /read_her/);
+  assert.doesNotMatch(tail, /choice/);
+  const privateTail = buildTail({
+    clock: "x",
+    moment: { feel: "矛盾", desire: "想抱她", now: "我问她肯不肯过来", longing: "她其实只是累了", glow: "" },
+  });
+  assert.match(privateTail, /想要：想抱她/);
+  assert.doesNotMatch(privateTail, /她其实只是累了/);
+  assert.doesNotMatch(privateTail, /取舍/);
   assert.ok(tail.includes(now));
   assert.doesNotMatch(tail, /一直惦记着/);
   assert.doesNotMatch(tail, /不要催/);
@@ -84,7 +93,7 @@ test("stale moment fields are omitted by momentForVoice", () => {
   const inner = {
     ...EMPTY_INNER,
     feel: "嘴里长溃疡了也好想抱",
-    want: "想留下来",
+    desire: "想留下来",
     now: "先听她说",
     longing: "一直想被她叫姐姐",
     updated_at: updated,
@@ -93,6 +102,7 @@ test("stale moment fields are omitted by momentForVoice", () => {
   };
   const stale = momentForVoice(inner, Date.UTC(2026, 8, 16, 19, 0, 0), true);
   assert.equal(stale.feel, "");
+  assert.equal(stale.desire, "");
   assert.equal(stale.now, "");
   assert.equal(stale.longing, "一直想被她叫姐姐");
   const overLonging = momentForVoice(inner, updated + LONGING_TTL_MS + 1, true);
