@@ -53,7 +53,7 @@ export function InnerNowPanel() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-xs text-subtle">只读。心思只写他自己的感觉和对你此刻的理解，不替回复决定做什么；沿用到写出新的为止（thought 为空就是沿用），30 分钟不说话就过期。</p>
+      <p className="text-xs text-subtle">只读。心思只写他自己的感觉和对你此刻的理解，不替回复决定做什么；沿用到写出新的为止（thought 为空就是沿用），16 小时后过期。</p>
       {error ? <p className="text-sm text-live">{error}</p> : null}
       {!inner ? (
         <p className="text-sm text-subtle">正在读…</p>
@@ -66,7 +66,7 @@ export function InnerNowPanel() {
       <div className="flex flex-col gap-1">
         <p className="text-sm">戏 / 现实 切换记录</p>
         {modes.length === 0 ? (
-          <p className="text-sm text-subtle">还没有。没有决定时，工作日 8–20 点是现实，其余是戏。</p>
+          <p className="text-sm text-subtle">还没有。没有决定时，工作日 8–20 点是现实，其余是戏。关掉「运行心思和记忆整理」时改成聊天页右上角手动切换。</p>
         ) : (
           modes.map((row) => (
             <p key={`${row.at}-${row.mode}`} className="text-sm">

@@ -792,7 +792,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             </label>
             <div className="flex flex-col gap-2 rounded-md bg-surface-2 px-3 py-3">
               <p className="text-sm">现实模式</p>
-              <p className="text-xs text-subtle">他自己按时间、你的作息和状态在「戏」和「现实」之间切换，作息从聊天里记（要开着「运行心思和记忆整理」）。上面的人设和回复模型是「戏」用的；现实用下面这套，人设空着就沿用上面那份。</p>
+              <p className="text-xs text-subtle">开着「运行心思和记忆整理」时，他自己按时间、你的作息和状态在「戏」和「现实」之间切换；关掉时，在聊天页右上角手动切换。上面的人设和回复模型是「戏」用的；现实用下面这套，人设空着就沿用上面那份。</p>
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-subtle">模型</span>
                 <input

@@ -243,7 +243,7 @@ export async function runReflector(
     readHer: "",
     feel: "",
     choice: "",
-    // His state + read of her carries across turns until the mind writes a new one; it lapses after a silence (SESSION_GAP_MS).
+    // His state + read of her carries across turns until the mind writes a new one; it lapses after THOUGHT_TTL_MS (16h).
     now: thought || old.now,
     scene: json.scene === "intimate" ? "intimate" : "daily",
     turn_seq: turnSeq,
@@ -251,7 +251,8 @@ export async function runReflector(
   };
   const pending = await getReach();
   const keepWake = pending.setBy === "mode" && pending.nextAt != null && pending.nextAt > at;
-  if (reach !== undefined && !(keepWake && !reach)) {
+  // A pending end-of-rest wake wins: it is the call that brings her back to study.
+  if (reach !== undefined && !keepWake) {
     const hours = reach && typeof reach.in_hours === "number" ? clampInHours(reach.in_hours) : null;
     await saveReach({
       nextAt: hours == null ? null : at + hours * 3_600_000,

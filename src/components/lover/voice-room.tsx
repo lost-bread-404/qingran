@@ -1266,6 +1266,29 @@ export function VoiceRoom() {
                 <BookOpen className="size-5" />
               </Link>
             </Button>
+            {!profile.brainOn ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={profile.mode === "real" ? "现在是现实模式，点一下切到戏" : "现在是戏，点一下切到现实模式"}
+                className={cn("text-xs", profile.mode === "real" && "text-live")}
+                onClick={() => {
+                  const mode = profileRef.current.mode === "real" ? "play" : "real";
+                  const next = lockedProfile({ ...profileRef.current, mode });
+                  profileRef.current = next;
+                  setProfile(next);
+                  void saveProfilePatch({ data: { patch: { mode } } })
+                    .then((result) => {
+                      if (!result?.ok) return;
+                      revsRef.current = result.revs;
+                      setRevs(result.revs);
+                    })
+                    .catch(() => undefined);
+                }}
+              >
+                {profile.mode === "real" ? "现实" : "戏"}
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="sm"

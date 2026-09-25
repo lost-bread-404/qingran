@@ -16,7 +16,7 @@ import { checkSpend } from "@/lib/lover/brain/spend/check";
 import { talkRateHit } from "@/lib/lover/brain/spend/rate";
 import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
-import { formatVoiceInjectLine, type Profile } from "@/lib/lover/types";
+import { formatVoiceInjectLine, lockedProfile, type Profile } from "@/lib/lover/types";
 import { resolveTalkProfile } from "@/lib/lover/talk-profile";
 import { lookupBusyRange } from "@/lib/lover/brain/busy";
 import { loadPrompt } from "@/lib/lover/brain/prompts/store";
@@ -100,7 +100,14 @@ export const Route = createFileRoute("/api/talk")({
             try {
               const text = String(body.text ?? "");
               const savedProfile = await getProfileData();
-              const talkMode = await effectiveMode(Number(body.nowMs) || Date.now(), timeZone);
+              // Brain on: reflect decides the mode. Brain off: her own toggle in the chat header.
+              const saved = lockedProfile(savedProfile);
+              const clientMode = (body.profile as { mode?: unknown } | undefined)?.mode;
+              const talkMode = saved.brainOn
+                ? await effectiveMode(Number(body.nowMs) || Date.now(), timeZone)
+                : clientMode === "real" || clientMode === "play"
+                  ? clientMode
+                  : saved.mode;
               const resolved = resolveTalkProfile(body.profile, savedProfile, talkMode);
               const profile = resolved.profile;
               if (resolved.personaMissing) {
