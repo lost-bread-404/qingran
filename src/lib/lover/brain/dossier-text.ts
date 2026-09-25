@@ -8,7 +8,7 @@ export const DEFAULT_DOSSIER_HEADINGS = [
 
 export const DEFAULT_DOSSIER = `${DEFAULT_DOSSIER_HEADINGS.join("\n\n")}\n`;
 
-export const EDITOR_EVERY_TURNS = 60;
+export const EDITOR_EVERY_TURNS = 30;
 export const EDITOR_CONVO_CHARS = 12_000;
 
 export type DossierAction = "add" | "replace" | "remove";
@@ -65,6 +65,14 @@ function asOp(raw: unknown): DossierOp | null {
     new: typeof row.new === "string" ? row.new : "",
   };
 }
+
+/** Body of one `## heading` section, or "" when missing. */
+export function dossierSection(body: string, heading: string): string {
+  const found = parseDossier(body).sections.find((section) => section.heading === heading);
+  return found ? found.body.trim() : "";
+}
+
+export const ADJUST_HEADING = "## 我们之间的磨合";
 
 export function applyDossierOps(body: string, rawOps: unknown): { body: string; skipped: SkippedOp[]; ops: DossierOp[] } {
   const list = Array.isArray(rawOps) ? rawOps : [];

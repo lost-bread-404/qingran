@@ -1,3 +1,5 @@
+import { modeFacts } from "../mode.ts";
+import { ADJUST_HEADING, dossierSection } from "../dossier-text.ts";
 import { mergeEditedUserBody } from "../../message-markup.ts";
 import { NEUTRAL_PERSONA, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
@@ -115,7 +117,8 @@ export async function loadHotContext(input: {
   const mindAgeMs = inner.updated_at ? input.nowMs - inner.updated_at : 0;
   const mindStale = injected.stale.moment;
   const careHint = false;
-  const clockText = formatClock(input.nowMs, input.timeZone);
+  // Code-computed time facts (how long she has studied today, current mode and why) so the reply can judge a rest itself.
+  const clockText = `${formatClock(input.nowMs, input.timeZone)}\n${await modeFacts(input.nowMs, input.timeZone)}`;
   const moment = {
     feel: injected.feel,
     desire: injected.desire,
@@ -124,8 +127,12 @@ export async function loadHotContext(input: {
     glow: injected.glow,
   };
   const tail = buildTail({ clock: clockText, moment, inject });
+  const adjust = dossierRow.active ? dossierSection(dossierRow.body, ADJUST_HEADING) : "";
+  // The reply only sees how the two of them have adjusted to each other; everything else stays with the mind.
   const longterm = dossierRow.active
-    ? renderDossierBlock(dossierRow.body)
+    ? adjust
+      ? renderDossierBlock(adjust)
+      : ""
     : renderVoiceLongterm(legacy!.meta.selfSummary, legacy!.meta.bondSummary, legacy!.portrait);
   const charter = input.profile.systemPrompt;
   const [loaded, ackPrompt] = await Promise.all([loadPrompt("voice"), loadPrompt("persona_ack")]);
@@ -144,7 +151,7 @@ export async function loadHotContext(input: {
     bondSummary: dossierRow.active ? undefined : legacy!.meta.bondSummary,
     portrait: dossierRow.active ? undefined : legacy!.portrait,
     injectMoment: inject.moment,
-    injectDossier: inject.dossier,
+    injectDossier: inject.dossier && Boolean(longterm),
     historyWindow: inject.history,
     identity: identityBlock(input.profile.identity),
     personaPlacement: input.profile.personaPlacement,

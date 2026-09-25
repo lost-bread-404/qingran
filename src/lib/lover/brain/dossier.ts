@@ -325,6 +325,20 @@ async function requireJson(result: CallModelResult, label: string): Promise<Reco
   return result.json as Record<string, unknown>;
 }
 
+/** Opinions the mind judged sincere, since the last edit. */
+async function sincereFeedbackSince(fromMs: number, tz: string): Promise<string> {
+  const db = await sql();
+  const rows = await db.query<{ created_at: number; feedback: string }>(
+    `select created_at::float8 as created_at, data->'output'->>'feedback' as feedback
+     from qr_inner_log
+     where created_at > $1 and data->>'kind' = 'reflect' and coalesce(data->'output'->>'feedback', '') <> ''
+     order by id asc limit 50`,
+    [fromMs],
+  );
+  if (!rows.length) return "（没有）";
+  return rows.map((r) => `[${formatClock(Number(r.created_at), tz)}] ${String(r.feedback).trim()}`).join("\n");
+}
+
 export async function runEditor(reason = "turns", complete: Completer = callModel): Promise<{ batches: number }> {
   const row = await getDossier();
   const meta = await getMeta();
@@ -339,6 +353,7 @@ export async function runEditor(reason = "turns", complete: Completer = callMode
   const loaded = await loadPrompt("editor");
   const [systemPrompt, profileData] = await Promise.all([getProfilePrompt(), getProfileData()]);
   const story = lockedProfile(profileData).storyline.trim() || "（没有）";
+  const feedback = await sincereFeedbackSince(row.cursorAt, tz);
   const limit = await maxChars();
   const identity_block = await identityLine();
   let body = row.body.trim() ? row.body : "（还没有）";
@@ -351,6 +366,7 @@ export async function runEditor(reason = "turns", complete: Completer = callMode
       system_prompt: systemPrompt,
       story,
       dossier: body,
+      feedback,
       conversation,
       max_chars: String(limit),
     }, loaded.body);

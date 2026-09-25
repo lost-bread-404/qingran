@@ -43,6 +43,19 @@ export const brainEditDossierNow = createServerFn({ method: "POST" }).handler(as
 });
 
 export const brainGetInnerNow = createServerFn({ method: "GET" }).handler(async () => {
-  const [inner, log] = await Promise.all([getInner(), listInnerLogs(20)]);
-  return { inner, log };
+  const { recentModeLog } = await import("./mode.ts");
+  const [inner, log, modes] = await Promise.all([getInner(), listInnerLogs(20), recentModeLog(20)]);
+  return { inner, log, modes };
+});
+
+/** 清然's notes about each day, newest day first. Last 30 days. */
+export const brainGetDays = createServerFn({ method: "GET" }).handler(async () => {
+  const [{ dayNotes, groupByDay }, { getMeta }, { resolveTz }] = await Promise.all([
+    import("./day-notes.ts"),
+    import("./store.ts"),
+    import("./tz.ts"),
+  ]);
+  const tz = resolveTz((await getMeta()).timeZone);
+  const to = Date.now();
+  return groupByDay(await dayNotes(to - 30 * 24 * 3_600_000, to + 1), tz).reverse();
 });

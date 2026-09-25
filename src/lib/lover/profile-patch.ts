@@ -62,6 +62,7 @@ const PATCH_KEYS = [
   "storyline",
   "brainOn",
   "mode",
+  "routine",
   "realModel",
   "realEffort",
   "realPrompt",

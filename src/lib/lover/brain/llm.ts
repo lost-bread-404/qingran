@@ -327,6 +327,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
   }
   if (input.tools?.length) body.tools = input.tools;
   if (route === "reflect") body.prompt_cache_key = REFLECT_PROMPT_CACHE_KEY;
+  if (route === "reflect") body.temperature = 1.0;
 
   const baseLog = {
     jobId: input.jobId,

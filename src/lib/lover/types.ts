@@ -87,6 +87,8 @@ export type Profile = {
   brainOn: boolean;
   /** 戏 = voiceModel + systemPrompt. 现实 = realModel + realPrompt (empty → systemPrompt). Rosie flips it by hand. */
   mode: "play" | "real";
+  /** Rosie's rough routine in her own words. Only the reflect controller reads it. */
+  routine: string;
   realModel: string;
   realEffort: VoiceEffort;
   realPrompt: string;
@@ -180,6 +182,7 @@ export const DEFAULT_PROFILE: Profile = {
   storyline: "",
   brainOn: true,
   mode: "play",
+  routine: "",
   realModel: "grok-4.7",
   realEffort: "low",
   realPrompt: "",
@@ -231,6 +234,7 @@ type LooseProfile = Partial<Profile> & {
   storyline?: string;
   brainOn?: boolean;
   mode?: string;
+  routine?: string;
   realModel?: string;
   realEffort?: unknown;
   realPrompt?: string;
@@ -281,6 +285,7 @@ export function lockedProfile(input?: unknown): Profile {
     storyline: typeof raw.storyline === "string" ? raw.storyline.slice(0, 20000) : "",
     brainOn: raw.brainOn !== false,
     mode: raw.mode === "real" ? "real" : "play",
+    routine: typeof raw.routine === "string" ? raw.routine.slice(0, 4000) : "",
     realModel: typeof raw.realModel === "string" && raw.realModel.trim() ? raw.realModel.trim().slice(0, 80) : "grok-4.7",
     realEffort: raw.realEffort === null ? null : isVoiceEffort(raw.realEffort) ? raw.realEffort : "low",
     realPrompt: typeof raw.realPrompt === "string" ? raw.realPrompt.slice(0, 16_000) : "",

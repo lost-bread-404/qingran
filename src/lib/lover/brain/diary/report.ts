@@ -179,7 +179,13 @@ export async function runReport(month: string, jobId?: string): Promise<void> {
     }
     summaries = parts.join("\n\n");
   }
-  const narrative = await writeNarrative(summaries, jobId);
+  const { dayNotes, groupByDay } = await import("../day-notes.ts");
+  const { getMeta } = await import("../store.ts");
+  const { resolveTz } = await import("../tz.ts");
+  const tz = resolveTz((await getMeta()).timeZone);
+  const days = groupByDay(await dayNotes(Date.parse(`${start}T08:00:00Z`), Date.parse(`${end}T08:00:00Z`) + 24 * 3_600_000), tz);
+  const table = days.length ? `【每天的记录】（清然随手记下的，带时间）\n${days.map((d) => `${d.day}\n${d.lines.join("\n")}`).join("\n\n")}\n\n` : "";
+  const narrative = await writeNarrative(`${table}【对话摘要】\n${summaries}`, jobId);
   await upsertReport({
     id: month,
     periodStart: start,

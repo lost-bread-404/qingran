@@ -1,4 +1,6 @@
 import { LONGING_TTL_MS, PICK_MAX, PLAN_OPEN_MAX, SESSION_GAP_MS } from "./config.ts";
+
+const THOUGHT_TTL_MS = 16 * 3_600_000;
 import { glowNow, glowWord, GLOW_HALF_LIFE_MS } from "./life.ts";
 import type { InnerPlan, InnerPlanStatus, InnerScene, InnerState, LongingItem, Mind } from "./types.ts";
 import { EMPTY_INNER, EMPTY_MIND } from "./types.ts";
@@ -103,7 +105,8 @@ export function momentForVoice(
   enabled: boolean,
   halfLifeMs = GLOW_HALF_LIFE_MS,
 ): MomentInject {
-  const momentStale = !inner.updated_at || nowMs - inner.updated_at > SESSION_GAP_MS;
+  // His state and read of her last until the mind writes new ones; what he felt when she left is what greets her return.
+  const momentStale = !inner.updated_at || nowMs - inner.updated_at > THOUGHT_TTL_MS;
   const longingStale = !inner.longing_updated_at || nowMs - inner.longing_updated_at > LONGING_TTL_MS;
   void halfLifeMs;
   if (!enabled) {

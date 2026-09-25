@@ -9,7 +9,7 @@ export type ResolvedTalkProfile = {
  * Persona, model, and what gets injected come from the saved profile.
  * The client may still choose playback (speed, mute).
  */
-export function resolveTalkProfile(given: unknown, saved: unknown): ResolvedTalkProfile {
+export function resolveTalkProfile(given: unknown, saved: unknown, mode?: "play" | "real"): ResolvedTalkProfile {
   const savedProfile = lockedProfile(saved);
   const stored = storedSystemPrompt(saved);
   const personaMissing = !stored;
@@ -21,8 +21,8 @@ export function resolveTalkProfile(given: unknown, saved: unknown): ResolvedTalk
     const client = lockedProfile(given);
     profile.voiceSpeed = client.voiceSpeed;
     profile.muted = client.muted;
-    if (given && typeof given === "object" && "mode" in given) profile.mode = client.mode;
   }
+  if (mode) profile.mode = mode;
   if (profile.mode === "real") {
     profile.voiceModel = profile.realModel;
     profile.voiceEffort = profile.realEffort;

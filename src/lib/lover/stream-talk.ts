@@ -174,7 +174,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   try {
     const body: Record<string, unknown> = {
       model: route.model,
-      temperature: 0.85,
+      temperature: 1.0,
       max_tokens: route.maxOutput,
       stream: true,
       stream_options: { include_usage: true },

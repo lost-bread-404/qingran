@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { noteRosieTurn } from "@/lib/lover/brain/dossier";
+import { effectiveMode } from "@/lib/lover/brain/mode";
 import { enqueueArchiveIfNeeded } from "@/lib/lover/brain/archivist";
 import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } from "@/lib/lover/brain/config";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
@@ -99,7 +100,8 @@ export const Route = createFileRoute("/api/talk")({
             try {
               const text = String(body.text ?? "");
               const savedProfile = await getProfileData();
-              const resolved = resolveTalkProfile(body.profile, savedProfile);
+              const talkMode = await effectiveMode(Number(body.nowMs) || Date.now(), timeZone);
+              const resolved = resolveTalkProfile(body.profile, savedProfile, talkMode);
               const profile = resolved.profile;
               if (resolved.personaMissing) {
                 await appendBrainLog({

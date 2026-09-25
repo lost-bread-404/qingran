@@ -25,16 +25,23 @@ import { dossierTextForModel } from "../dossier.ts";
 import { busyContextLine, clampInHours, identityBlock } from "../life.ts";
 import { currentBusy } from "../busy.ts";
 import { lockedProfile } from "../../types.ts";
-import { readIdentity, saveReach } from "../life-store.ts";
+import { getReach, readIdentity, saveReach } from "../life-store.ts";
+import { latestMode, modeAt, modeFacts, recordMode, type TalkMode } from "../mode.ts";
+import { addDayNote } from "../day-notes.ts";
 
 export const INNER_SCHEMA = {
   name: "inner",
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["thought", "scene", "next_reach"],
+    required: ["thought", "scene", "next_reach", "mode", "until_hours", "mode_why", "feedback", "day_note"],
     properties: {
+      day_note: { type: "string" },
+      feedback: { type: "string" },
       thought: { type: "string" },
+      mode: { type: "string", enum: ["play", "real"] },
+      until_hours: { anyOf: [{ type: "null" }, { type: "number" }] },
+      mode_why: { type: "string" },
       scene: { type: "string", enum: ["daily", "intimate"] },
       next_reach: {
         anyOf: [
@@ -74,6 +81,33 @@ export async function recentThoughts(timeZone: string): Promise<string> {
     .join("\n");
 }
 
+const MAX_REST_HOURS = 14;
+
+/** Mode for her next message. A rest with an end time also books the call to bring her back. */
+async function applyModeDecision(json: Record<string, unknown>, at: number, tz: string): Promise<void> {
+  const mode: TalkMode | null = json.mode === "real" ? "real" : json.mode === "play" ? "play" : null;
+  if (!mode) return;
+  const hours = typeof json.until_hours === "number" && json.until_hours > 0 ? Math.min(json.until_hours, MAX_REST_HOURS) : null;
+  const until = mode === "play" && hours != null ? Math.round(at + hours * 3_600_000) : null;
+  const why = typeof json.mode_why === "string" ? json.mode_why.trim() : "";
+  const last = await latestMode();
+  const current = modeAt(last, at, tz);
+  const untilMoved = until != null && (last?.until == null || Math.abs(last.until - until) > 10 * 60_000);
+  if (mode === current && !untilMoved) return;
+  await recordMode({ at, mode, until, why });
+  if (until != null) {
+    await saveReach({ nextAt: until, intent: `休息时间到了，去把她叫回来。${why}`, setBy: "mode", setAt: at, retry: 0 });
+  }
+}
+
+/** One plain sentence about her day, stamped at her last message. */
+async function applyDayNote(json: Record<string, unknown>, history: StoredMessage[]): Promise<void> {
+  const text = typeof json.day_note === "string" ? json.day_note.trim() : "";
+  if (!text) return;
+  const lastUser = [...history].reverse().find((m) => m.role === "user");
+  await addDayNote(lastUser?.createdAt ?? now(), text);
+}
+
 export function formatReflectConversation(history: StoredMessage[], timeZone: string): string {
   const lines = history
     .filter((m) => m.kind !== "system_notice" && !isNightNoiseBody(m.text))
@@ -90,6 +124,8 @@ export type ReflectorParts = {
   busyLine?: string;
   thoughts: string;
   conversation: string;
+  routine?: string;
+  modeFacts?: string;
 };
 
 export type ReflectorPacked = { system: string; stable: string; turn: string };
@@ -103,6 +139,7 @@ export function reflectVars(parts: ReflectorParts): Record<string, string> {
     clock: parts.clock,
     busy_line: parts.busyLine?.trim() ?? "",
     thoughts: parts.thoughts.trim() || "（还没有）",
+    mode_facts: parts.modeFacts?.trim() || "（没有）",
     conversation: parts.conversation.trim() || "（还没有）",
   };
 }
@@ -141,7 +178,7 @@ export async function runReflector(
   const tz = resolveTz(meta.timeZone);
   const convo = formatReflectConversation(history, tz);
   const clockText = formatClock(at, tz);
-  const thoughts = await recentThoughts(tz);
+  const [thoughts, modeFactsText] = await Promise.all([recentThoughts(tz), modeFacts(at, tz)]);
   const loaded = await loadPrompt("reflect");
   const packed = buildReflectorInput(
     {
@@ -153,6 +190,7 @@ export async function runReflector(
       busyLine: busyContextLine(busy),
       thoughts,
       conversation: convo,
+      modeFacts: modeFactsText,
     },
     loaded.body,
   );
@@ -205,13 +243,15 @@ export async function runReflector(
     readHer: "",
     feel: "",
     choice: "",
-    // Only a fresh thought reaches the next reply. Nothing new → nothing injected.
-    now: thought,
+    // His state + read of her carries across turns until the mind writes a new one; it lapses after a silence (SESSION_GAP_MS).
+    now: thought || old.now,
     scene: json.scene === "intimate" ? "intimate" : "daily",
     turn_seq: turnSeq,
     updated_at: at,
   };
-  if (reach !== undefined) {
+  const pending = await getReach();
+  const keepWake = pending.setBy === "mode" && pending.nextAt != null && pending.nextAt > at;
+  if (reach !== undefined && !(keepWake && !reach)) {
     const hours = reach && typeof reach.in_hours === "number" ? clampInHours(reach.in_hours) : null;
     await saveReach({
       nextAt: hours == null ? null : at + hours * 3_600_000,
@@ -221,6 +261,8 @@ export async function runReflector(
       retry: 0,
     });
   }
+  await applyModeDecision(json, at, tz);
+  await applyDayNote(json, history);
   const saved = await saveInner(next, turnSeq, {
     model: result.model,
     ms: result.ms,

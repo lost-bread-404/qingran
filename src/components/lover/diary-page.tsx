@@ -2,6 +2,7 @@ import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
+import { DayRecords } from "@/components/lover/day-records";
 import { brainGetDiary, brainGetReports, brainJobStatus, brainRunDue, brainRunJobs, brainSetDiary } from "@/lib/lover/brain/api";
 
 function sleep(ms: number) {
@@ -83,6 +84,7 @@ export function DiaryPage() {
         </Link>
         <h1 className="text-lg">日记</h1>
       </div>
+      <DayRecords />
       {!enabled ? <p className="text-sm text-subtle">日记已暂停</p> : null}
       <label className="flex min-h-11 items-center justify-between gap-3 rounded-md bg-surface-2 px-3 py-3">
         <span className="text-sm">每月自动写上个月</span>
