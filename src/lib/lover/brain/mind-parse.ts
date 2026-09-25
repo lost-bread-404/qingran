@@ -105,16 +105,17 @@ export function momentForVoice(
 ): MomentInject {
   const momentStale = !inner.updated_at || nowMs - inner.updated_at > SESSION_GAP_MS;
   const longingStale = !inner.longing_updated_at || nowMs - inner.longing_updated_at > LONGING_TTL_MS;
-  const word = glowWord(glowNow(inner.glow, inner.glow_at, nowMs, halfLifeMs));
+  void halfLifeMs;
   if (!enabled) {
     return { feel: "", desire: "", now: "", longing: "", glow: "", stale: { moment: true, longing: true } };
   }
+  // Only the fresh thought from the mind reaches the reply. Glow and longings stay private.
   return {
-    feel: momentStale ? "" : inner.feel.trim(),
-    desire: momentStale ? "" : inner.desire.trim(),
+    feel: "",
+    desire: "",
     now: momentStale ? "" : inner.now.trim(),
-    longing: longingStale ? "" : formatLongingsLine(inner),
-    glow: word ? `${word}（比平常）` : "",
+    longing: "",
+    glow: "",
     stale: { moment: momentStale, longing: longingStale },
   };
 }

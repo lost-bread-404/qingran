@@ -337,12 +337,11 @@ export async function runEditor(reason = "turns", complete: Completer = callMode
     return { batches: 0 };
   }
   const loaded = await loadPrompt("editor");
-  const longing = (await getInner()).longing.trim() || "（没有）";
-  const systemPrompt = await getProfilePrompt();
+  const [systemPrompt, profileData] = await Promise.all([getProfilePrompt(), getProfileData()]);
+  const story = lockedProfile(profileData).storyline.trim() || "（没有）";
   const limit = await maxChars();
   const identity_block = await identityLine();
-  let body = row.body.trim() ? row.body : DEFAULT_DOSSIER;
-  let cursor = row.cursorAt;
+  let body = row.body.trim() ? row.body : "（还没有）";
   const batches = batchConversation(items);
   for (let i = 0; i < batches.length; i += 1) {
     const batch = batches[i]!;
@@ -350,54 +349,30 @@ export async function runEditor(reason = "turns", complete: Completer = callMode
     const prompt = packed("main", {
       identity_block,
       system_prompt: systemPrompt,
+      story,
       dossier: body,
-      longing,
       conversation,
       max_chars: String(limit),
     }, loaded.body);
     const result = await complete("editor", {
       system: prompt.system,
       input: prompt.user,
-      schema: OPS_SCHEMA,
+      schema: BODY_SCHEMA,
       promptKey: loaded.key,
       promptHash: loaded.hash,
       outputRef: `dossier:${reason}`,
     });
     const json = await requireJson(result, "editor");
-    const applied = applyDossierOps(body, json.ops);
-    body = applied.body;
-    cursor = batch[batch.length - 1]!.createdAt;
-    const last = i === batches.length - 1;
+    const next = typeof json.body === "string" ? json.body.trim() : "";
+    const cursor = batch[batch.length - 1]!.createdAt;
+    if (next) body = `${next.length > limit ? next.slice(0, limit) : next}\n`;
     await commitBody({
       body,
       cursorAt: cursor,
       author: "editor",
-      ops: { ops: applied.ops, skipped: applied.skipped, reason },
-      resetTurns: last,
+      ops: { reason, empty: !next },
+      resetTurns: i === batches.length - 1,
     });
-  }
-  if (body.trim().length > limit) {
-    const prompt = packed("compact", { identity_block, dossier: body, max_chars: String(limit) }, loaded.body);
-    const result = await complete("editor", {
-      system: prompt.system,
-      input: prompt.user,
-      schema: BODY_SCHEMA,
-      promptKey: loaded.key,
-      promptHash: loaded.hash,
-      outputRef: "dossier:compact",
-    });
-    const json = await requireJson(result, "compact");
-    const compactBody = typeof json.body === "string" ? json.body.trim() : "";
-    if (compactBody) {
-      const clipped = compactBody.length > limit ? `${compactBody.slice(0, limit)}` : compactBody;
-      await commitBody({
-        body: clipped.endsWith("\n") ? clipped : `${clipped}\n`,
-        cursorAt: cursor,
-        author: "compact",
-        ops: { max_chars: limit },
-        resetTurns: true,
-      });
-    }
   }
   return { batches: batches.length };
 }

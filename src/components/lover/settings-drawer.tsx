@@ -192,6 +192,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
   const [callKitBackground, setCallKitBackground] = useState(profile.callKitBackground);
   const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
+  const [storyDraft, setStoryDraft] = useState(profile.storyline);
+  useEffect(() => {
+    setStoryDraft(profile.storyline);
+  }, [profile.storyline]);
   const [identityDraft, setIdentityDraft] = useState(profile.identity);
   const identityDirty = useRef(false);
   const intimateDirty = useRef(false);
@@ -775,6 +779,21 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   onKeepMine={() => persistProfile({ intimateNotes: intimateDraft.trim() })}
                 />
               ) : null}
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm">故事线</span>
+              <Textarea
+                value={storyDraft}
+                onChange={(e) => setStoryDraft(e.target.value)}
+                onBlur={() => {
+                  const next = storyDraft.trim();
+                  if (next !== profile.storyline.trim()) persistProfile({ storyline: next });
+                }}
+                maxLength={20000}
+                className="min-h-64 resize-none leading-relaxed"
+                placeholder="你们之前发生过的事"
+              />
+              <p className="text-xs text-subtle">只给他的心思和记忆整理看，回复本身看不到。他从这里知道自己是谁、你们之间有过什么。</p>
             </label>
           </div>
         </div>

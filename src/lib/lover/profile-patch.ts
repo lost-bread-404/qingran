@@ -59,6 +59,7 @@ const PATCH_KEYS = [
   "glowHalfLifeDays",
   "diaryEnabled",
   "intimateNotes",
+  "storyline",
   "personaPlacement",
 ] as const satisfies readonly (keyof Profile)[];
 

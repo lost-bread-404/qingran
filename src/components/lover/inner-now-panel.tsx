@@ -51,31 +51,14 @@ export function InnerNowPanel() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-xs text-subtle">只读。回复看不到取舍和计划。清空聊天会清掉心里、想要、取舍和正在做，惦记和计划还留着。</p>
+      <p className="text-xs text-subtle">只读。他每一轮都在心里想，想出新东西才会放进下一句回复。下面的记录里 thought 为空就是这一轮没想出什么。</p>
       {error ? <p className="text-sm text-live">{error}</p> : null}
       {!inner ? (
         <p className="text-sm text-subtle">正在读…</p>
       ) : (
         <div className="whitespace-pre-wrap text-sm leading-relaxed">
-          {line("欲望：", inner.desire)}
-          {line("对她：", inner.readHer)}
-          {line("心里：", inner.feel)}
-          {line("取舍：", inner.choice)}
-          {line("正在做：", inner.now)}
-          {line("惦记：", inner.longing)}
-          <div className="mt-2">
-            <p className="text-subtle">计划：</p>
-            {inner.plans.length === 0 ? (
-              <p>（没有）</p>
-            ) : (
-              inner.plans.map((plan) => (
-                <p key={plan.id || plan.what}>
-                  [{plan.status}] {plan.what}
-                  {plan.trigger ? ` · ${plan.trigger}` : ""}
-                </p>
-              ))
-            )}
-          </div>
+          {line("刚想到的（会放进下一句回复）：", inner.now)}
+          {line("场景：", inner.scene)}
         </div>
       )}
       <div className="flex flex-col gap-2">

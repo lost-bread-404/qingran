@@ -81,6 +81,8 @@ export type Profile = {
   diaryEnabled: boolean;
   /** Shown to him only while the previous turn was an intimate scene and still fresh. */
   intimateNotes: string;
+  /** Rosie's story line. Only the inner mind and the memory editor read it; the reply never does. */
+  storyline: string;
   /** Where the persona text sits: system prompt, or the first user message. */
   personaPlacement: "system" | "first_user";
 };
@@ -168,6 +170,7 @@ export const DEFAULT_PROFILE: Profile = {
   glowHalfLifeDays: 2,
   diaryEnabled: false,
   intimateNotes: "",
+  storyline: "",
   personaPlacement: "system",
 };
 
@@ -213,6 +216,7 @@ type LooseProfile = Partial<Profile> & {
   glowHalfLifeDays?: number;
   diaryEnabled?: boolean;
   intimateNotes?: string;
+  storyline?: string;
   personaPlacement?: string;
 };
 
@@ -257,6 +261,7 @@ export function lockedProfile(input?: unknown): Profile {
     glowHalfLifeDays: clampGlowHalfLifeDays(raw.glowHalfLifeDays),
     diaryEnabled: raw.diaryEnabled === true,
     intimateNotes: typeof raw.intimateNotes === "string" ? raw.intimateNotes.slice(0, 8000) : "",
+    storyline: typeof raw.storyline === "string" ? raw.storyline.slice(0, 20000) : "",
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
   };
 }

@@ -1,5 +1,5 @@
 import { getSql } from "../../../db.ts";
-import { voiceInjectFromProfile } from "../../types.ts";
+import { lockedProfile, voiceInjectFromProfile } from "../../types.ts";
 import { now } from "../clock.ts";
 import { HISTORY_WINDOW, REFLECT_WINDOW } from "../config.ts";
 import { currentArchiveVars } from "../archivist.ts";
@@ -7,6 +7,7 @@ import { buildReportData } from "../diary/report.ts";
 import {
   getMeta,
   getInner,
+  getProfileData,
   getProfilePrompt,
   listDays,
   listFactors,
@@ -23,8 +24,8 @@ import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
 import { buildVoiceMessages, renderDossierBlock, voiceHistoryMessages } from "../voice/pack-build.ts";
-import { formatReflectConversation, reflectVars } from "../voice/reflector.ts";
-import { formatOldInner, momentForVoice } from "../mind-parse.ts";
+import { formatReflectConversation, recentThoughts, reflectVars } from "../voice/reflector.ts";
+import { momentForVoice } from "../mind-parse.ts";
 import { dossierTextForModel, getDossier } from "../dossier.ts";
 
 export type PromptPreview = {
@@ -110,20 +111,21 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
 }
 
 async function reflectSlots(): Promise<Record<string, string>> {
-  const [history, charter, inner, dossier] = await Promise.all([
+  const [history, charter, dossier, profileData] = await Promise.all([
     listHistoryWindow(null, REFLECT_WINDOW),
     getProfilePrompt(),
-    getInner(),
     dossierTextForModel(),
+    getProfileData(),
   ]);
   const meta = await getMeta();
   const tz = resolveTz(meta.timeZone);
   const at = now();
   return reflectVars({
     charter,
+    story: lockedProfile(profileData).storyline,
     dossier,
     clock: formatClock(at, tz),
-    oldInner: formatOldInner(inner, at),
+    thoughts: await recentThoughts(tz),
     conversation: formatReflectConversation(history, tz),
   });
 }
@@ -136,7 +138,7 @@ async function editorSlots(): Promise<Record<string, string>> {
     longing: inner.longing.trim() || "（没有）",
     conversation: "（要等这次整理才有）",
     max_chars: "4000",
-    story: "（要等这次生成才有）",
+    story: lockedProfile(await getProfileData()).storyline || "（没有）",
     legacy: "（要等这次生成才有）",
     notes: "（要等这次生成才有）",
   };

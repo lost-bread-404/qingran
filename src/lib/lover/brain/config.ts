@@ -123,7 +123,7 @@ export function clampHistoryWindow(value: unknown, fallback = HISTORY_WINDOW): n
   if (!Number.isFinite(n)) return fallback;
   return Math.max(HISTORY_WINDOW_MIN, Math.min(HISTORY_WINDOW_MAX, Math.round(n)));
 }
-export const REFLECT_WINDOW = 16;
+export const REFLECT_WINDOW = 20;
 export const DOSSIER_MAX_CHARS = 4000;
 export const DOSSIER_MAX_CHARS_MIN = 2000;
 export const DOSSIER_MAX_CHARS_MAX = 8000;

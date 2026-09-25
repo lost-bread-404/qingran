@@ -8,7 +8,7 @@ export const DEFAULT_DOSSIER_HEADINGS = [
 
 export const DEFAULT_DOSSIER = `${DEFAULT_DOSSIER_HEADINGS.join("\n\n")}\n`;
 
-export const EDITOR_EVERY_TURNS = 20;
+export const EDITOR_EVERY_TURNS = 60;
 export const EDITOR_CONVO_CHARS = 12_000;
 
 export type DossierAction = "add" | "replace" | "remove";

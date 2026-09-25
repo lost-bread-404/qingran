@@ -251,9 +251,10 @@ export async function rebuildReflectorInput(turnSeq: number): Promise<RebuildRes
   const packed = buildReflectorInput(
     {
       charter: charter ?? "",
+      story: "",
       dossier: "",
       clock: refs.clockText,
-      oldInner: oldInnerText,
+      thoughts: oldInnerText,
       conversation: formatReflectConversation(recent, tz),
     },
     await promptBody(log.promptHash, "reflect"),
