@@ -63,6 +63,9 @@ export type CallModelInput = {
   keepOutputText?: boolean;
   promptKey?: string | null;
   promptHash?: string | null;
+  /** Replay comparison. When set, this model is used instead of the route default. */
+  model?: string | null;
+  effort?: Effort;
 };
 
 export type CallModelResult = {
@@ -242,8 +245,15 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
   const apiKey = process.env.XAI_API_KEY;
   await checkModelAvailability(apiKey);
   const overrideKey = (input.promptKey && input.promptKey.trim()) || route;
-  const override = await storedPromptModel(overrideKey);
-  const resolved = applyAvailabilityFallback(applyPromptModel(resolveRoute(route), override));
+  const override = input.model ? null : await storedPromptModel(overrideKey);
+  let resolved = applyAvailabilityFallback(applyPromptModel(resolveRoute(route), override));
+  if (input.model) {
+    resolved = {
+      ...resolved,
+      model: input.model,
+      effort: input.effort === undefined ? resolved.effort : input.effort,
+    };
+  }
   const fail = (note: string): CallModelResult => ({
     ok: false,
     text: "",

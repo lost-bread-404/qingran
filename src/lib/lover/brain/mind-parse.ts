@@ -1,6 +1,6 @@
 import { LONGING_TTL_MS, PICK_MAX, PLAN_OPEN_MAX, SESSION_GAP_MS } from "./config.ts";
 import { glowNow, glowWord, GLOW_HALF_LIFE_MS } from "./life.ts";
-import type { InnerPlan, InnerPlanStatus, InnerState, LongingItem, Mind } from "./types.ts";
+import type { InnerPlan, InnerPlanStatus, InnerScene, InnerState, LongingItem, Mind } from "./types.ts";
 import { EMPTY_INNER, EMPTY_MIND } from "./types.ts";
 
 function clipPlain(text: string, max: number): string {
@@ -70,6 +70,7 @@ export const REFLECT_OUTPUT_KEYS = [
   "feel",
   "choice",
   "now",
+  "scene",
   "longings",
   "plans",
   "glow",
@@ -164,6 +165,7 @@ export function formatOldInner(inner: InnerState, nowMs: number): string {
     inner.feel.trim() ? `feel：${inner.feel.trim()}` : "",
     inner.choice.trim() ? `choice：${inner.choice.trim()}` : "",
     inner.now.trim() ? `now：${inner.now.trim()}` : "",
+    `scene：${inner.scene === "intimate" ? "intimate" : "daily"}`,
     word ? `心情：${word}` : "",
     inner.longing.trim() ? `longing：${inner.longing.trim()}` : "",
   ].filter(Boolean);
@@ -223,6 +225,7 @@ export function applyReflectOutput(
       want: "",
       choice,
       now: nowText,
+      scene: parseScene(row.scene),
       longing,
       longings: longingFromList.items,
       plans,
@@ -236,6 +239,17 @@ export function applyReflectOutput(
     glow,
     nextReach,
   };
+}
+
+function parseScene(raw: unknown): InnerScene {
+  return raw === "intimate" ? "intimate" : "daily";
+}
+
+export function intimateNotesForVoice(inner: InnerState, nowMs: number, notes: string): string {
+  const text = notes.trim();
+  if (!text || inner.scene !== "intimate") return "";
+  if (!inner.updated_at || nowMs - inner.updated_at > SESSION_GAP_MS) return "";
+  return text;
 }
 
 function dayStamp(nowMs: number): string {

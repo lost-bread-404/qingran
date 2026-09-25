@@ -16,7 +16,8 @@ export type SpendRoute =
   | "judge"
   | "editor"
   | "busy"
-  | "reach";
+  | "reach"
+  | "replay";
 
 export type SpendLevel = "ok" | "soft" | "hard" | "breaker";
 export type SpendScope = "day" | "month";
@@ -41,7 +42,7 @@ export type SpendOverrides = { day?: boolean; month?: boolean };
 
 const RANK: Record<SpendLevel, number> = { ok: 0, soft: 1, hard: 2, breaker: 3 };
 
-const P0 = new Set<SpendRoute>(["voice", "tts", "stt"]);
+const P0 = new Set<SpendRoute>(["voice", "tts", "stt", "replay"]);
 const P1 = new Set<SpendRoute>(["reflect", "reach"]);
 const P2 = new Set<SpendRoute>(["archive", "dusk", "portrait", "assign", "ask", "editor", "busy"]);
 

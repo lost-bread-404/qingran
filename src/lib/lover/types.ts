@@ -79,6 +79,10 @@ export type Profile = {
   glowHalfLifeDays: number;
   /** Monthly diary. Off until Rosie turns it on. Manual reports still run. */
   diaryEnabled: boolean;
+  /** Shown to him only while the previous turn was an intimate scene and still fresh. */
+  intimateNotes: string;
+  /** Where the persona text sits: system prompt, or the first user message. */
+  personaPlacement: "system" | "first_user";
 };
 
 export type ChatRole = "user" | "assistant";
@@ -172,6 +176,8 @@ export const DEFAULT_PROFILE: Profile = {
   rhythm: "",
   glowHalfLifeDays: 2,
   diaryEnabled: false,
+  intimateNotes: "",
+  personaPlacement: "system",
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -215,6 +221,8 @@ type LooseProfile = Partial<Profile> & {
   rhythm?: string;
   glowHalfLifeDays?: number;
   diaryEnabled?: boolean;
+  intimateNotes?: string;
+  personaPlacement?: string;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -257,6 +265,8 @@ export function lockedProfile(input?: unknown): Profile {
     rhythm: typeof raw.rhythm === "string" ? raw.rhythm.slice(0, 500) : "",
     glowHalfLifeDays: clampGlowHalfLifeDays(raw.glowHalfLifeDays),
     diaryEnabled: raw.diaryEnabled === true,
+    intimateNotes: typeof raw.intimateNotes === "string" ? raw.intimateNotes.slice(0, 8000) : "",
+    personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
   };
 }
 

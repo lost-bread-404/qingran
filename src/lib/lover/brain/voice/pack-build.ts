@@ -65,6 +65,10 @@ export type VoicePackParts = {
   historyWindow?: number;
   /** Open plans from the previous turn, shown only in the state block. */
   plansText?: string;
+  personaPlacement?: "system" | "first_user";
+  personaAck?: string;
+  /** Already decided: empty means do not inject. */
+  intimateNotes?: string;
   /** Legacy rebuild only. Notes are not injected on the live path. */
   showMemories?: boolean;
   mindText?: string;
@@ -182,9 +186,11 @@ function voiceVars(parts: {
   mindText: string;
   memoriesText: string;
   plansText: string;
+  placement?: "system" | "first_user";
 }): Record<string, string> {
+  const personaInSystem = parts.placement !== "first_user";
   return {
-    system_prompt: parts.charter.trim() || FALLBACK_CHARTER,
+    system_prompt: personaInSystem ? parts.charter.trim() || FALLBACK_CHARTER : "",
     identity_block: parts.identity?.trim() ? `${parts.identity.trim()}\n` : "",
     dossier: parts.dossier,
     self: "",
@@ -225,6 +231,9 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
     mindText: strip === "none" ? parts.mindText : "",
     memoriesText: strip === "none" || strip === "moment" ? parts.memoriesText : "",
     plansText: parts.plansText,
+    personaPlacement: parts.personaPlacement,
+    personaAck: parts.personaAck,
+    intimateNotes: parts.intimateNotes,
     inject: {
       moment: inject.moment && strip === "none",
       dossier: inject.dossier && dossierOn,
@@ -241,7 +250,20 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
   const history = voiceHistoryMessages(parts.history, cap);
   const last = rendered[rendered.length - 1];
   const user = last?.role === "user" ? last : { role: "user" as const, content: parts.userText };
-  return state ? [head, ...history, state, user] : [head, ...history, user];
+  const intimate = rendered.find((message) => message.content.startsWith("【此刻的我】"));
+  const persona =
+    parts.personaPlacement === "first_user"
+      ? rendered.filter(
+          (message, index) =>
+            (message.role === "user" && message.content === (parts.charter.trim() || FALLBACK_CHARTER) && rendered[index + 1]?.role === "assistant") ||
+            (message.role === "assistant" &&
+              index > 0 &&
+              rendered[index - 1]?.role === "user" &&
+              rendered[index - 1]?.content === (parts.charter.trim() || FALLBACK_CHARTER)),
+        )
+      : [];
+  const middle = [...(intimate ? [intimate] : []), ...persona, ...history];
+  return state ? [head, ...middle, state, user] : [head, ...middle, user];
 }
 
 export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
@@ -342,6 +364,9 @@ export function buildVoiceMessages(opts: {
   mindText?: string;
   memoriesText?: string;
   plansText?: string;
+  personaPlacement?: "system" | "first_user";
+  personaAck?: string;
+  intimateNotes?: string;
   /** Rebuild of an older saved template may still pass these. */
   mind?: Mind;
   notes?: Note[];
@@ -368,11 +393,12 @@ export function buildVoiceMessages(opts: {
     mindText: opts.mindText ?? opts.mind?.insight ?? "",
     memoriesText: opts.showMemories ? opts.memoriesText ?? "" : "",
     plansText: opts.plansText ?? "",
+    placement: opts.personaPlacement,
   });
   messages = messages
     .map((message) => ({ ...message, content: prepareMomentTemplate(message.content, moment, inject.moment) }))
     .filter((message) => message.content.trim());
-  return renderPromptMessages(messages, vars, voiceHistoryMessages(opts.history, inject.history))
+  const rendered = renderPromptMessages(messages, vars, voiceHistoryMessages(opts.history, inject.history))
     .map((message) => {
       if (message.role !== "system") return message;
       let content = message.content;
@@ -381,4 +407,40 @@ export function buildVoiceMessages(opts: {
       return { ...message, content };
     })
     .filter((message) => message.role !== "system" || message.content.trim());
+  return placePersona(
+    insertIntimateNotes(rendered, opts.intimateNotes ?? ""),
+    {
+      placement: opts.personaPlacement ?? "system",
+      charter: opts.charter,
+      ack: opts.personaAck ?? "嗯。",
+    },
+  );
+}
+
+export function insertIntimateNotes<T extends { role: string; content: string }>(messages: T[], notes: string): T[] {
+  const text = notes.trim();
+  if (!text) return messages;
+  const block = { role: "system", content: `【此刻的我】\n${text}` } as T;
+  const moment = messages.findIndex((message) => message.content.includes("【我此刻】"));
+  if (moment >= 0) return [...messages.slice(0, moment + 1), block, ...messages.slice(moment + 1)];
+  const state = messages.findIndex((message) => message.content.includes("⟦心⟧"));
+  const at = state >= 0 ? state : messages.findIndex((message) => message.role !== "system");
+  const index = at < 0 ? messages.length : at;
+  return [...messages.slice(0, index), block, ...messages.slice(index)];
+}
+
+export function placePersona<T extends { role: "system" | "user" | "assistant"; content: string }>(
+  messages: T[],
+  opts: { placement: "system" | "first_user"; charter: string; ack: string },
+): T[] {
+  if (opts.placement !== "first_user") return messages;
+  const persona = opts.charter.trim() || FALLBACK_CHARTER;
+  const ack = opts.ack.trim() || "嗯。";
+  const at = messages.findIndex((message) => message.role !== "system");
+  const index = at < 0 ? messages.length : at;
+  const block = [
+    { role: "user", content: persona },
+    { role: "assistant", content: ack },
+  ] as T[];
+  return [...messages.slice(0, index), ...block, ...messages.slice(index)];
 }

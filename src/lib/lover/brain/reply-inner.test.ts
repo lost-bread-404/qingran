@@ -11,6 +11,7 @@ const GOOD = {
   feel: "舍不得又想要",
   choice: "先试探，不直接做",
   now: "我轻轻问她肯不肯过来",
+  scene: "intimate",
   longings: [{ id: "", text: "想被她抱着" }],
   plans: [{ id: "", what: "不要催她睡觉", why: "她累", status: "open" }],
   glow: { delta: 0, why: "" },
@@ -41,6 +42,7 @@ test("a bad tail keeps the previous inner state and a good tail writes desire", 
     assert.equal(inner.readHer, "她很累");
     assert.equal(inner.feel, "舍不得又想要");
     assert.equal(inner.now, "我轻轻问她肯不肯过来");
+    assert.equal(inner.scene, "intimate");
     assert.equal(inner.want, "");
     const plan = inner.plans.find((item) => item.what === "不要催她睡觉");
     assert.ok(plan);

@@ -56,6 +56,8 @@ export type LongingItem = {
   since: string;
 };
 
+export type InnerScene = "daily" | "intimate";
+
 /** Private inner state. The reply sees desire / feel / now / glow word only. */
 export type InnerState = {
   desire: string;
@@ -65,6 +67,7 @@ export type InnerState = {
   want: string;
   choice: string;
   now: string;
+  scene: InnerScene;
   /** Joined from longings so older callers still have a single string. */
   longing: string;
   longings: LongingItem[];
@@ -83,6 +86,7 @@ export const EMPTY_INNER: InnerState = {
   want: "",
   choice: "",
   now: "",
+  scene: "daily",
   longing: "",
   longings: [],
   plans: [],

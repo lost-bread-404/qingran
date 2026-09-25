@@ -55,7 +55,11 @@ test("reflect archive editor defaults close the memory loop", () => {
   assert.match(defaultPrompt("archive"), /同一承诺不重复记录/);
   assert.match(defaultPrompt("archive"), /清然不会读/);
   assert.match(defaultPrompt("editor"), /只输出 ops/);
+  assert.match(defaultPrompt("editor"), /具体细节/);
+  assert.match(defaultPrompt("editor"), /带情绪的共同往事/);
   assert.match(defaultPrompt("editor"), /第一人称/);
+  const compact = PROMPT_CATALOG.find((s) => s.key === "editor")?.variants.find((v) => v.id === "compact");
+  assert.match(compact?.messages.map((m) => m.content).join("\n") ?? "", /先压缩抽象的描述/);
   assert.match(defaultPrompt("archive"), /第一人称/);
   assert.match(defaultPrompt("reflect"), /所有"不……"都写在这里/);
   const voice = PROMPT_CATALOG.find((s) => s.key === "voice");

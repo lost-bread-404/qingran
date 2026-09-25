@@ -253,6 +253,7 @@ function rowToInner(row: Record<string, unknown> | undefined): InnerState {
     want: String(row.want ?? ""),
     choice: String(row.choice ?? ""),
     now: String(row.now_text ?? ""),
+    scene: row.scene === "intimate" ? "intimate" : "daily",
     longing: longings.map((item) => item.text).join("；"),
     longings,
     plans: parsePlans(row.plans),
@@ -267,7 +268,7 @@ function rowToInner(row: Record<string, unknown> | undefined): InnerState {
 export async function getInner(): Promise<InnerState> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
-    `select feel, desire, read_her, want, choice, now_text, longing, longings, plans, glow, glow_at, turn_seq, updated_at, longing_updated_at
+    `select feel, desire, read_her, want, choice, now_text, scene, longing, longings, plans, glow, glow_at, turn_seq, updated_at, longing_updated_at
      from qr_inner where id = 1`,
   );
   return rowToInner(rows[0]);
@@ -327,9 +328,9 @@ export async function saveInner(
       : [];
   const rows = await db.query<{ id: number }>(
     `update qr_inner
-     set feel = $1, desire = $2, read_her = $3, choice = $4, now_text = $5, longings = $6::jsonb, plans = $7::jsonb,
-         turn_seq = $8, updated_at = $9, longing_updated_at = $10, glow = $11, glow_at = $12
-     where id = 1 and turn_seq < $8
+     set feel = $1, desire = $2, read_her = $3, choice = $4, now_text = $5, scene = $6, longings = $7::jsonb, plans = $8::jsonb,
+         turn_seq = $9, updated_at = $10, longing_updated_at = $11, glow = $12, glow_at = $13
+     where id = 1 and turn_seq < $9
      returning id`,
     [
       inner.feel,
@@ -337,6 +338,7 @@ export async function saveInner(
       inner.readHer,
       inner.choice,
       inner.now,
+      inner.scene === "intimate" ? "intimate" : "daily",
       JSON.stringify(longings),
       JSON.stringify(inner.plans),
       expectedTurn,
@@ -362,7 +364,7 @@ export async function resetInnerTurn(): Promise<void> {
   const db = await getSql();
   await db.query(
     `update qr_inner
-     set feel = '', desire = '', read_her = '', choice = '', now_text = '', turn_seq = 0, updated_at = $1
+     set feel = '', desire = '', read_her = '', choice = '', now_text = '', scene = 'daily', turn_seq = 0, updated_at = $1
      where id = 1`,
     [now()],
   );
@@ -497,6 +499,7 @@ export async function listRecentMessages(limit = 240): Promise<StoredMessage[]> 
 export async function listHistoryWindow(
   excludeId: string | null,
   limit = HISTORY_WINDOW,
+  beforeCreatedAt: number | null = null,
 ): Promise<StoredMessage[]> {
   if (limit <= 0) return [];
   const db = await getSql();
@@ -508,9 +511,10 @@ export async function listHistoryWindow(
        and forgotten_at is null
        and kind is distinct from 'system_notice'
        and created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
+       and ($3::bigint is null or created_at < $3)
      order by created_at desc, id desc
      limit $2`,
-    [excludeId, fetchN],
+    [excludeId, fetchN, beforeCreatedAt],
   );
   return collapseReplyVariants(rows.map(rowMessage).reverse())
     .filter((message) => {

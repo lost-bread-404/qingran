@@ -2,10 +2,11 @@ import { mergeEditedUserBody } from "../../message-markup.ts";
 import { voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getInner, getMessage, getMeta, listHistoryWindow, listPortrait, upsertMessage } from "../store.ts";
-import { formatPlansForPrompt, momentForVoice } from "../mind-parse.ts";
+import { formatPlansForPrompt, intimateNotesForVoice, momentForVoice } from "../mind-parse.ts";
 import { formatClock } from "../time.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadPrompt } from "../prompts/store.ts";
+import { personaAckText } from "../prompts/doc.ts";
 import { ensureMemoryHygiene } from "../memory-hygiene.ts";
 import { getDossier } from "../dossier.ts";
 import { identityBlock } from "../life.ts";
@@ -66,6 +67,8 @@ export type HotContext = {
   promptHash: string;
   inject: VoiceInjectFlags;
   injected: InjectedInner;
+  intimateInjected: boolean;
+  personaPlacement: "system" | "first_user";
 };
 
 export async function loadHotContext(input: {
@@ -125,7 +128,8 @@ export async function loadHotContext(input: {
     ? renderDossierBlock(dossierRow.body)
     : renderVoiceLongterm(legacy!.meta.selfSummary, legacy!.meta.bondSummary, legacy!.portrait);
   const charter = input.profile.systemPrompt;
-  const loaded = await loadPrompt("voice");
+  const [loaded, ackPrompt] = await Promise.all([loadPrompt("voice"), loadPrompt("persona_ack")]);
+  const intimate = intimateNotesForVoice(inner, input.nowMs, input.profile.intimateNotes);
   const parts: VoicePackParts = {
     charter,
     longterm,
@@ -144,6 +148,9 @@ export async function loadHotContext(input: {
     historyWindow: inject.history,
     identity: identityBlock(input.profile.identity),
     plansText: formatPlansForPrompt(inner.plans),
+    personaPlacement: input.profile.personaPlacement,
+    personaAck: personaAckText(ackPrompt.body),
+    intimateNotes: intimate,
   };
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(charter.trim() || "你就是清然。正在和 Rosie 语音通话。"),
@@ -208,6 +215,8 @@ export async function loadHotContext(input: {
     promptHash: loaded.hash,
     inject,
     injected,
+    intimateInjected: Boolean(intimate),
+    personaPlacement: input.profile.personaPlacement,
   };
 }
 

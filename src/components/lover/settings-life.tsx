@@ -170,6 +170,9 @@ export function HeartEditor({
     <div className="flex flex-col gap-4">
       {error ? <p className="text-sm text-live">{error}</p> : null}
       <p className="text-xs text-subtle">失焦就记下。下一次他想事情时，读到的就是改过的。</p>
+      <p className="text-sm">
+        场景：{inner.scene === "intimate" ? "亲密" : "日常"}
+      </p>
       {(
         [
           ["欲望", "desire"],

@@ -43,6 +43,8 @@ export type TurnTraceInput = {
     injectDossier?: boolean;
     historyWindow?: number;
     injectLine?: string;
+    intimateInjected?: boolean;
+    personaPlacement?: "system" | "first_user";
     inner?: {
       feel: string;
       desire?: string;

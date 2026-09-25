@@ -78,7 +78,8 @@ export type Route =
   | "judge"
   | "editor"
   | "busy"
-  | "reach";
+  | "reach"
+  | "replay";
 
 export const ROUTES: Record<
   Route,
@@ -98,6 +99,7 @@ export const ROUTES: Record<
   editor: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 8_000 },
   busy: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 8_000 },
   reach: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 2_000 },
+  replay: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 4_000 },
 };
 
 export const VOICE_IO = {

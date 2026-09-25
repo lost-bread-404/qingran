@@ -40,6 +40,7 @@ export const INNER_SCHEMA = {
       feel: { type: "string" },
       choice: { type: "string" },
       now: { type: "string" },
+      scene: { type: "string", enum: ["daily", "intimate"] },
       longings: {
         type: "array",
         items: {

@@ -40,12 +40,13 @@ test("a mark with an empty body is a failed reply", () => {
 });
 
 test("inner JSON fields stay in the order the model is asked to write", () => {
-  assert.deepEqual(REFLECT_OUTPUT_KEYS.slice(0, 9), [
+  assert.deepEqual(REFLECT_OUTPUT_KEYS.slice(0, 10), [
     "desire",
     "read_her",
     "feel",
     "choice",
     "now",
+    "scene",
     "longings",
     "plans",
     "glow",
@@ -61,7 +62,7 @@ test("inner JSON fields stay in the order the model is asked to write", () => {
 
 test("missing fields and broken JSON do not parse", () => {
   const good = parseInnerPayload(
-    '\n{"desire":"a","read_her":"b","feel":"c","choice":"d","now":"我问","longings":[],"plans":[],"glow":{"delta":0,"why":""},"next_reach":null}',
+    '\n{"desire":"a","read_her":"b","feel":"c","choice":"d","now":"我问","scene":"daily","longings":[],"plans":[],"glow":{"delta":0,"why":""},"next_reach":null}',
   );
   assert.equal(good.ok, true);
   assert.equal(parseInnerPayload("not json").ok, false);

@@ -47,6 +47,12 @@ export function serializeDoc(doc: PromptDoc): string {
   });
 }
 
+export function personaAckText(body: string | null | undefined): string {
+  const messages = variantMessages(parsePromptBody("persona_ack", body), "main");
+  const ack = messages.find((message) => message.role === "assistant") ?? messages[0];
+  return ack?.content.trim() || "嗯。";
+}
+
 export function variantMessages(doc: PromptDoc, variantId: string): PromptMessage[] {
   return (
     doc.variants.find((variant) => variant.id === variantId)?.messages ??
@@ -80,16 +86,36 @@ function normalizeDoc(key: PromptKey, doc: PromptDoc): PromptDoc {
 export function ensureVoiceStateBlock(doc: PromptDoc): PromptDoc {
   let changed = false;
   const variants = doc.variants.map((variant) => {
-    if (variant.messages.some((message) => message.content.includes("⟦心⟧"))) return variant;
-    changed = true;
-    const messages = variant.messages.map((message) => ({ ...message }));
-    const block: PromptMessage = { role: "system", content: VOICE_STATE_BLOCK };
-    const userAt = messages.findIndex((message) => message.content.includes("{user_text}"));
-    if (userAt >= 0) messages.splice(userAt, 0, block);
-    else messages.push(block);
-    return { ...variant, messages };
+    const hasMark = variant.messages.some((message) => message.content.includes("⟦心⟧"));
+    if (!hasMark) {
+      changed = true;
+      const messages = variant.messages.map((message) => ({ ...message }));
+      const block: PromptMessage = { role: "system", content: VOICE_STATE_BLOCK };
+      const userAt = messages.findIndex((message) => message.content.includes("{user_text}"));
+      if (userAt >= 0) messages.splice(userAt, 0, block);
+      else messages.push(block);
+      return { ...variant, messages };
+    }
+    const messages = variant.messages.map((message) => {
+      const content = ensureSceneLine(message.content);
+      if (content !== message.content) changed = true;
+      return { ...message, content };
+    });
+    return changed ? { ...variant, messages } : variant;
   });
   return changed ? { ...doc, variants } : doc;
+}
+
+const SCENE_LINE = "- scene：现在是日常还是亲密场景。写 daily 或 intimate。\n";
+
+function ensureSceneLine(content: string): string {
+  if (!content.includes("⟦心⟧") || content.includes("scene：") || content.includes("- scene")) return content;
+  const needle = "- now：";
+  const at = content.indexOf(needle);
+  if (at < 0) return `${content.trimEnd()}\n${SCENE_LINE}`;
+  const end = content.indexOf("\n", at);
+  if (end < 0) return `${content}\n${SCENE_LINE}`;
+  return `${content.slice(0, end + 1)}${SCENE_LINE}${content.slice(end + 1)}`;
 }
 
 export function parsePromptBody(key: PromptKey, body: string | null | undefined): PromptDoc {

@@ -38,6 +38,7 @@ import { LogoutButton } from "@/components/lover/logout-button";
 import { DossierPanel } from "@/components/lover/dossier-panel";
 import { BrainSpendPage } from "@/components/lover/brain-spend-page";
 import { BrainSystemArchive } from "@/components/lover/brain-system-archive";
+import { ReplayPanel } from "@/components/lover/replay-panel";
 import {
   HeartEditor,
   IdentityField,
@@ -67,7 +68,8 @@ type Page =
   | "log"
   | "spend"
   | "archive"
-  | "status";
+  | "status"
+  | "replay";
 
 type PromptItem = PromptEditorItem;
 
@@ -158,6 +160,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
   const [injectLongterm, setInjectLongterm] = useState(profile.injectLongterm);
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
   const [callKitBackground, setCallKitBackground] = useState(profile.callKitBackground);
+  const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
   const [keytermDraft, setKeytermDraft] = useState(profile.sttKeyterms.join("\n"));
   const historySyncRef = useRef(0);
   const [promptItems, setPromptItems] = useState<PromptItem[]>([]);
@@ -188,6 +191,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
     setInjectLongterm(profile.injectLongterm);
     setHistoryWindow(profile.historyWindow);
     setCallKitBackground(profile.callKitBackground);
+    setIntimateDraft(profile.intimateNotes);
     setKeytermDraft(profile.sttKeyterms.join("\n"));
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setPage("home");
@@ -497,6 +501,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
     spend: "费用",
     archive: "系统存档",
     status: "状态",
+    replay: "重放对比",
   };
   const tier = hearingTierOf(sense);
 
@@ -509,7 +514,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
         <button
           type="button"
           aria-label={page === "home" ? "关闭" : "返回"}
-          onClick={() => (page === "home" ? onOpenChange(false) : setPage(page === "prompts" || page === "context" || page === "hearing" || page === "log" || page === "spend" || page === "archive" || page === "status" ? "advanced" : "home"))}
+          onClick={() => (page === "home" ? onOpenChange(false) : setPage(page === "prompts" || page === "context" || page === "hearing" || page === "log" || page === "spend" || page === "archive" || page === "status" || page === "replay" ? "advanced" : "home"))}
           className="grid size-11 place-items-center rounded-md text-muted"
         >
           <X className={cn("size-5", page !== "home" && "hidden")} />
@@ -542,6 +547,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
             <p className="text-xs text-subtle">调试用，平时不用进。</p>
             <SettingsLink label="指令" onClick={() => setPage("prompts")} />
             <SettingsLink label="上下文" onClick={() => setPage("context")} />
+            <SettingsLink label="重放对比" onClick={() => setPage("replay")} />
             <SettingsLink label="听力参数" onClick={() => setPage("hearing")} />
             <SettingsLink label="调用记录" onClick={() => setPage("log")} />
             <SettingsLink label="费用" onClick={() => setPage("spend")} />
@@ -575,6 +581,18 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
             placeholder="写给模型的 system prompt"
           />
           <p className="mt-2 text-xs text-subtle">「我记得的」会另外附上，不用写进这段。其他步骤的指令在「指令」页。</p>
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm">亲密设定</span>
+              <Textarea
+                value={intimateDraft}
+                onChange={(e) => setIntimateDraft(e.target.value)}
+                onBlur={() => persistProfile({ intimateNotes: intimateDraft })}
+                maxLength={8000}
+                className="min-h-36 resize-none leading-relaxed"
+                placeholder="只在亲密场景时给他看"
+              />
+              <p className="text-xs text-subtle">只在亲密场景时给他看。平时他只知道自己有这一面。</p>
             </label>
           </div>
         </div>
@@ -629,6 +647,21 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
                   )}
                 </p>
               </div>
+              <div className="flex flex-col gap-1 px-1 pb-2">
+                <p className="text-sm">人设放在哪</p>
+                <p className="text-xs text-subtle">系统提示，或者聊天记录里的第一条消息。主动找她也照这个来。</p>
+                {(["system", "first_user"] as const).map((id) => (
+                  <label key={id} className="flex min-h-11 items-center gap-3">
+                    <input
+                      type="radio"
+                      name="persona-placement"
+                      checked={profile.personaPlacement === id}
+                      onChange={() => persistProfile({ personaPlacement: id })}
+                    />
+                    <span className="text-sm">{id === "system" ? "系统提示" : "第一条消息"}</span>
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -643,7 +676,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
               [
-                ["清然", ["voice", "reach", "editor", "busy", "busy_tool"]],
+                ["清然", ["voice", "reach", "editor", "busy", "busy_tool", "persona_ack"]],
                 ["日记", ["report"]],
                 ["评审", ["judge"]],
               ].map(([title, keys]) => (
@@ -817,6 +850,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
               {dbSize?.limitMb ? ` / ${dbSize.limitMb} MB` : ""}
             </p>
           </div>
+        </div>
+      ) : page === "replay" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <ReplayPanel profile={profile} />
         </div>
       ) : page === "hearing" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">

@@ -3,7 +3,7 @@ import { appendBrainLog, getInner, getProfileData, getProfilePrompt, listHistory
 import { now } from "./clock.ts";
 import { formatClock, localDay, shiftDay } from "./time.ts";
 import { zonedWallMs } from "./spend/policy.ts";
-import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
+import { parsePromptBody, personaAckText, renderVariant } from "./prompts/doc.ts";
 import { loadPrompt } from "./prompts/store.ts";
 import { dossierTextForModel } from "./dossier.ts";
 import {
@@ -28,6 +28,7 @@ import { sendApns } from "../push/apns.ts";
 import { newId } from "../storage.ts";
 import { getSql } from "../../db.ts";
 import { lockedProfile } from "../types.ts";
+import { placePersona } from "./voice/pack-build.ts";
 import {
   getReach,
   insertGlowEvent,
@@ -45,7 +46,7 @@ const REACH_SCHEMA = {
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["send", "text", "desire", "read_her", "feel", "now", "longings", "glow", "next_reach"],
+    required: ["send", "text", "desire", "read_her", "feel", "now", "scene", "longings", "glow", "next_reach"],
     properties: {
       send: { type: "boolean" },
       text: { type: "string" },
@@ -53,6 +54,7 @@ const REACH_SCHEMA = {
       read_her: { type: "string" },
       feel: { type: "string" },
       now: { type: "string" },
+      scene: { type: "string", enum: ["daily", "intimate"] },
       longings: {
         type: "array",
         items: {
@@ -215,29 +217,36 @@ export async function runWake(opts: {
       ? `心事：\n${inner.longings.map((item) => `- ${item.text}${item.since ? `（从 ${item.since} 起）` : ""}`).join("\n")}`
       : "",
     inner.choice.trim() ? `取舍：${inner.choice.trim()}` : "",
+    `场景：${inner.scene === "intimate" ? "intimate" : "daily"}`,
     inner.plans.filter((plan) => plan.status === "open").length
       ? `计划：\n${inner.plans.filter((plan) => plan.status === "open").map((plan) => `- ${plan.what}${plan.why ? `（${plan.why}）` : ""}`).join("\n")}`
       : "",
   ].filter(Boolean).join("\n");
   const block = identityBlock(ident.identity);
-  const messages = renderVariant(parsePromptBody("reach", loaded.body), "main", {
-    system_prompt: await getProfilePrompt(),
-    identity_block: block ? `${block}\n` : "",
-    dossier: dossier.trim() || "（还没有）",
-    clock,
-    busy_line: busyLine,
-    inner: innerText || "（空）",
-    why,
-    silence: silenceText,
-    conversation: history || "（还没有）",
-  });
-  const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
-  const users = messages.filter((message) => message.role !== "system").map((message) => message.content);
+  const charter = await getProfilePrompt();
+  const ack = personaAckText((await loadPrompt("persona_ack")).body);
+  const placed = placePersona(
+    renderVariant(parsePromptBody("reach", loaded.body), "main", {
+      system_prompt: profile.personaPlacement === "first_user" ? "" : charter,
+      identity_block: block ? `${block}\n` : "",
+      dossier: dossier.trim() || "（还没有）",
+      clock,
+      busy_line: busyLine,
+      inner: innerText || "（空）",
+      why,
+      silence: silenceText,
+      conversation: history || "（还没有）",
+    }),
+    { placement: profile.personaPlacement, charter, ack },
+  );
+  const system = placed.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
+  const users = placed.filter((message) => message.role !== "system").map((message) => message.content);
   const complete = opts.complete ?? callModel;
   const result = await complete("reach", {
     system,
     input: users[0] ?? "",
     inputParts: users,
+    messages: placed,
     schema: REACH_SCHEMA,
     promptKey: loaded.key,
     promptHash: loaded.hash,
@@ -254,6 +263,7 @@ export async function runWake(opts: {
     want: json.want,
     choice: inner.choice,
     now: json.now,
+    scene: json.scene,
     longings: json.longings,
     plans: inner.plans,
     glow: json.glow,
@@ -376,8 +386,8 @@ async function saveInnerForced(inner: import("./types.ts").InnerState): Promise<
   const db = await getSql();
   await db.query(
     `update qr_inner
-     set feel = $1, desire = $2, read_her = $3, choice = $4, now_text = $5, longings = $6::jsonb, plans = $7::jsonb,
-         updated_at = $8, longing_updated_at = $9, glow = $10, glow_at = $11
+     set feel = $1, desire = $2, read_her = $3, choice = $4, now_text = $5, scene = $6, longings = $7::jsonb, plans = $8::jsonb,
+         updated_at = $9, longing_updated_at = $10, glow = $11, glow_at = $12
      where id = 1`,
     [
       inner.feel,
@@ -385,6 +395,7 @@ async function saveInnerForced(inner: import("./types.ts").InnerState): Promise<
       inner.readHer,
       inner.choice,
       inner.now,
+      inner.scene === "intimate" ? "intimate" : "daily",
       JSON.stringify(inner.longings ?? []),
       JSON.stringify(inner.plans),
       inner.updated_at,

@@ -15,6 +15,7 @@ export type PromptKey =
   | "editor"
   | "busy"
   | "busy_tool"
+  | "persona_ack"
   | "reach"
   | "dusk"
   | "assign"
@@ -68,6 +69,11 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
     key: "busy_tool",
     name: "查忙碌",
     blurb: "回复时的工具说明。只有她问起某段时间在忙什么时才会用。",
+  },
+  {
+    key: "persona_ack",
+    name: "人设之后",
+    blurb: "人设放在第一条消息时，紧跟着的那一句回应。人设在系统提示里时用不到。",
   },
   {
     key: "reach",

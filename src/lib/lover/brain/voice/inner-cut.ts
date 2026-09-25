@@ -7,6 +7,7 @@ const REQUIRED_INNER_KEYS = [
   "feel",
   "choice",
   "now",
+  "scene",
   "longings",
   "plans",
   "glow",

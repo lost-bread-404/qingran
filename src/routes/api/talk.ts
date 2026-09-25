@@ -263,6 +263,8 @@ export const Route = createFileRoute("/api/talk")({
                   injectDossier: ctx.inject.dossier,
                   historyWindow: ctx.inject.history,
                   injectLine: formatVoiceInjectLine(ctx.inject),
+                  intimateInjected: ctx.intimateInjected,
+                  personaPlacement: ctx.personaPlacement,
                   inner: ctx.injected,
                   tool: toolStarted.name
                     ? { name: toolStarted.name, arguments: toolStarted.args, ms: toolStarted.ms }

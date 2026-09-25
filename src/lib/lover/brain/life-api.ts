@@ -8,6 +8,8 @@ import { getInner, saveInner } from "./store.ts";
 import { lockedProfile } from "../types.ts";
 import { getProfileData } from "./store.ts";
 import type { InnerPlan, LongingItem } from "./types.ts";
+import type { Effort } from "./config.ts";
+import { adoptPersona, listPersonaVersions, listReplayTargets, runReplay } from "./voice/replay.ts";
 import {
   getReach,
   insertGlowEvent,
@@ -132,4 +134,41 @@ export const brainSaveHeart = createServerFn({ method: "POST" })
 export const brainListManualEdits = createServerFn({ method: "GET" }).handler(async () => {
   const rows = await listManualEdits(40);
   return rows.map((row) => JSON.parse(JSON.stringify(row)));
+});
+
+export const brainListReplayTargets = createServerFn({ method: "GET" }).handler(async () => {
+  return listReplayTargets(20);
+});
+
+export const brainReplayCompare = createServerFn({ method: "POST" })
+  .validator((input: {
+    userMsgId?: string;
+    persona?: string;
+    placement?: string;
+    model?: string;
+    effort?: string | null;
+  }) => input)
+  .handler(async ({ data }) => {
+    const effort: Effort =
+      data.effort === "low" || data.effort === "medium" || data.effort === "high" || data.effort === "none" || data.effort === null
+        ? data.effort
+        : "low";
+    return runReplay({
+      userMsgId: String(data.userMsgId ?? ""),
+      bPersona: String(data.persona ?? ""),
+      bPlacement: data.placement === "first_user" ? "first_user" : "system",
+      bModel: String(data.model ?? ""),
+      bEffort: effort,
+    });
+  });
+
+export const brainAdoptPersona = createServerFn({ method: "POST" })
+  .validator((input: { persona?: string }) => input)
+  .handler(async ({ data }) => {
+    await adoptPersona(String(data.persona ?? ""));
+    return { ok: true as const };
+  });
+
+export const brainListPersonaVersions = createServerFn({ method: "GET" }).handler(async () => {
+  return listPersonaVersions(8);
 });
