@@ -188,6 +188,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [promptModels, setPromptModels] = useState(profile.promptModels);
   const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
   const [injectMind, setInjectMind] = useState(profile.injectMind);
+  const [brainOn, setBrainOn] = useState(profile.brainOn);
+  useEffect(() => {
+    setBrainOn(profile.brainOn);
+  }, [profile.brainOn]);
   const [injectLongterm, setInjectLongterm] = useState(profile.injectLongterm);
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
   const [callKitBackground, setCallKitBackground] = useState(profile.callKitBackground);
@@ -801,6 +805,18 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
             <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
+              <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
+                <input
+                  type="checkbox"
+                  checked={brainOn}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setBrainOn(next);
+                    persistProfile({ brainOn: next });
+                  }}
+                />
+                <span className="text-sm">运行心思和记忆整理{brainOn ? "" : "（已暂停：只用人设 + 上下文）"}</span>
+              </label>
               <p className="px-1 pt-1 text-sm">这一轮带上什么</p>
             <p className="text-xs text-subtle">只影响开口那一句。</p>
               <label className="flex min-h-11 items-center gap-3 rounded-md px-1">

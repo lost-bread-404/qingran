@@ -290,8 +290,10 @@ export const Route = createFileRoute("/api/talk")({
                 },
               });
 
-              if (!failed && display) await enqueueReflect(userCreatedAt);
-              await noteRosieTurn(userCreatedAt);
+              if (profile.brainOn) {
+                if (!failed && display) await enqueueReflect(userCreatedAt);
+                await noteRosieTurn(userCreatedAt);
+              }
               await enqueueArchiveIfNeeded(userCreatedAt, ctx.inject.history);
               await enqueuePeriodicIfDue(nowMs, timeZone);
               await runInBackground(() => drainJobs(LONG_DRAIN_MS));

@@ -109,7 +109,7 @@ export async function loadHotContext(input: {
   const injected = momentForVoice(
     inner,
     input.nowMs,
-    inject.moment,
+    inject.moment && input.profile.brainOn,
     Math.round(input.profile.glowHalfLifeDays * 24 * 60 * 60 * 1000),
   );
   const mindAgeMs = inner.updated_at ? input.nowMs - inner.updated_at : 0;

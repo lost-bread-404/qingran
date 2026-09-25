@@ -83,6 +83,8 @@ export type Profile = {
   intimateNotes: string;
   /** Rosie's story line. Only the inner mind and the memory editor read it; the reply never does. */
   storyline: string;
+  /** Run the inner mind (reflect) and memory editor. Off → reply uses persona + context only. */
+  brainOn: boolean;
   /** Where the persona text sits: system prompt, or the first user message. */
   personaPlacement: "system" | "first_user";
 };
@@ -171,6 +173,7 @@ export const DEFAULT_PROFILE: Profile = {
   diaryEnabled: false,
   intimateNotes: "",
   storyline: "",
+  brainOn: true,
   personaPlacement: "system",
 };
 
@@ -217,6 +220,7 @@ type LooseProfile = Partial<Profile> & {
   diaryEnabled?: boolean;
   intimateNotes?: string;
   storyline?: string;
+  brainOn?: boolean;
   personaPlacement?: string;
 };
 
@@ -262,6 +266,7 @@ export function lockedProfile(input?: unknown): Profile {
     diaryEnabled: raw.diaryEnabled === true,
     intimateNotes: typeof raw.intimateNotes === "string" ? raw.intimateNotes.slice(0, 8000) : "",
     storyline: typeof raw.storyline === "string" ? raw.storyline.slice(0, 20000) : "",
+    brainOn: raw.brainOn !== false,
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
   };
 }
