@@ -70,7 +70,7 @@ export function InnerNowPanel() {
         ) : (
           modes.map((row) => (
             <p key={`${row.at}-${row.mode}`} className="text-sm">
-              {fmtTime(row.at)} → {row.mode === "real" ? "现实" : "戏"}
+              {fmtTime(row.at)} → {row.mode === "real" ? "现实" : row.mode === "play" ? "戏" : row.mode}
               {row.until ? `（到 ${fmtTime(row.until)}）` : ""}
               {row.why ? ` · ${row.why}` : ""}
             </p>

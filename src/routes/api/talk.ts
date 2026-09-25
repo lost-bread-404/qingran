@@ -103,11 +103,14 @@ export const Route = createFileRoute("/api/talk")({
               // Brain on: reflect decides the mode. Brain off: her own toggle in the chat header.
               const saved = lockedProfile(savedProfile);
               const clientMode = (body.profile as { mode?: unknown } | undefined)?.mode;
+              const modeIds = saved.modes.map((m) => m.id);
               const talkMode = saved.brainOn
-                ? await effectiveMode(Number(body.nowMs) || Date.now(), timeZone)
-                : clientMode === "real" || clientMode === "play"
+                ? await effectiveMode(Number(body.nowMs) || Date.now(), timeZone, modeIds)
+                : typeof clientMode === "string" && modeIds.includes(clientMode)
                   ? clientMode
-                  : saved.mode;
+                  : modeIds.includes(saved.mode)
+                    ? saved.mode
+                    : modeIds[0]!;
               const resolved = resolveTalkProfile(body.profile, savedProfile, talkMode);
               const profile = resolved.profile;
               if (resolved.personaMissing) {

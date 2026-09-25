@@ -1270,10 +1270,12 @@ export function VoiceRoom() {
               <Button
                 variant="ghost"
                 size="sm"
-                aria-label={profile.mode === "real" ? "现在是现实模式，点一下切到戏" : "现在是戏，点一下切到现实模式"}
-                className={cn("text-xs", profile.mode === "real" && "text-live")}
+                aria-label={`现在是「${profile.modes.find((m) => m.id === profile.mode)?.name ?? profile.mode}」，点一下换下一个模式`}
+                className="text-xs"
                 onClick={() => {
-                  const mode = profileRef.current.mode === "real" ? "play" : "real";
+                  const ids = profileRef.current.modes.map((m) => m.id);
+                  const at = ids.indexOf(profileRef.current.mode);
+                  const mode = ids[(at + 1) % ids.length] ?? ids[0]!;
                   const next = lockedProfile({ ...profileRef.current, mode });
                   profileRef.current = next;
                   setProfile(next);
@@ -1286,7 +1288,7 @@ export function VoiceRoom() {
                     .catch(() => undefined);
                 }}
               >
-                {profile.mode === "real" ? "现实" : "戏"}
+                {profile.modes.find((m) => m.id === profile.mode)?.name ?? profile.modes[0]?.name}
               </Button>
             ) : null}
             <Button

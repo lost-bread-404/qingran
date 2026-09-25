@@ -1949,7 +1949,7 @@ function isEmptyVoiceLog(row: { ok: boolean; note: string | null; error: string 
 
 export async function voiceModelStatsLast7d(): Promise<VoiceModelStats[]> {
   const db = await getSql();
-  const since = now() - 7 * 86_400_000;
+  const since = now() - 90 * 86_400_000;
   const rows = await db.query<{
     model: string | null;
     ms: unknown;

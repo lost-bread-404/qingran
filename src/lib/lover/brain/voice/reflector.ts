@@ -26,22 +26,40 @@ import { busyContextLine, clampInHours, identityBlock } from "../life.ts";
 import { currentBusy } from "../busy.ts";
 import { lockedProfile } from "../../types.ts";
 import { listReachPlans, readIdentity, replaceReachPlans } from "../life-store.ts";
-import { latestMode, modeAt, modeFacts, recordMode, type TalkMode } from "../mode.ts";
+import { effectiveMode, modeFacts, recordModePlan } from "../mode.ts";
 import { addDayNote } from "../day-notes.ts";
+
+/** The mode ids come from her settings, so the schema is built per call. */
+export function innerSchema(modeIds: string[]) {
+  const schema = structuredClone(INNER_SCHEMA);
+  const props = schema.schema.properties as Record<string, unknown>;
+  props.mode_plan = {
+    type: "array",
+    items: {
+      type: "object",
+      additionalProperties: false,
+      required: ["after_hours", "mode", "why"],
+      properties: {
+        after_hours: { type: "number" },
+        mode: { type: "string", enum: modeIds },
+        why: { type: "string" },
+      },
+    },
+  };
+  return schema;
+}
 
 export const INNER_SCHEMA = {
   name: "inner",
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["thought", "scene", "reaches", "mode", "until_hours", "mode_why", "feedback", "day_note"],
+    required: ["thought", "scene", "reaches", "mode_plan", "feedback", "day_note"] as string[],
     properties: {
       day_note: { type: "string" },
       feedback: { type: "string" },
       thought: { type: "string" },
-      mode: { type: "string", enum: ["play", "real"] },
-      until_hours: { anyOf: [{ type: "null" }, { type: "number" }] },
-      mode_why: { type: "string" },
+      mode_plan: { type: "array" } as Record<string, unknown>,
       scene: { type: "string", enum: ["daily", "intimate"] },
       reaches: {
         type: "array",
@@ -79,27 +97,24 @@ export async function recentThoughts(timeZone: string): Promise<string> {
     .join("\n");
 }
 
-const MAX_REST_HOURS = 14;
 
-/** Mode for her next message. A rest with an end time also books the call to bring her back. */
-async function applyModeDecision(json: Record<string, unknown>, at: number, tz: string): Promise<void> {
-  const mode: TalkMode | null = json.mode === "real" ? "real" : json.mode === "play" ? "play" : null;
-  if (!mode) return;
-  const hours = typeof json.until_hours === "number" && json.until_hours > 0 ? Math.min(json.until_hours, MAX_REST_HOURS) : null;
-  const until = mode === "play" && hours != null ? Math.round(at + hours * 3_600_000) : null;
-  const why = typeof json.mode_why === "string" ? json.mode_why.trim() : "";
-  const last = await latestMode();
-  const current = modeAt(last, at, tz);
-  const untilMoved = until != null && (last?.until == null || Math.abs(last.until - until) > 10 * 60_000);
-  if (mode === current && !untilMoved) return;
-  await recordMode({ at, mode, until, why });
-  await replaceReachPlans(
-    ["mode"],
-    until != null ? [{ at: until, intent: `休息时间到了，去把她叫回来。${why}` }] : [],
-    "mode",
-    at,
-  );
+/** His plan for which mode meets her, from now into the next hours — so coming back later still meets the right one. */
+async function applyModePlan(json: Record<string, unknown>, at: number, tz: string, ids: string[]): Promise<void> {
+  if (!Array.isArray(json.mode_plan)) return;
+  const entries = json.mode_plan
+    .map((raw) => (raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null))
+    .filter((raw): raw is Record<string, unknown> => raw != null && typeof raw.mode === "string" && ids.includes(raw.mode))
+    .map((raw) => ({
+      afterHours: typeof raw.after_hours === "number" && raw.after_hours > 0 ? Math.min(raw.after_hours, MAX_PLAN_HOURS) : 0,
+      mode: String(raw.mode),
+      why: typeof raw.why === "string" ? raw.why.trim() : "",
+    }))
+    .slice(0, 6);
+  if (!entries.length) return;
+  await recordModePlan(at, entries, await effectiveMode(at, tz, ids));
 }
+
+const MAX_PLAN_HOURS = 24;
 
 const MAX_REACH_PLANS = 5;
 /** Plans the mind may rewrite each turn. The end-of-rest wake and Rosie's own plans are left alone. */
@@ -209,8 +224,13 @@ export async function runReflector(
   const tz = resolveTz(meta.timeZone);
   const convo = formatReflectConversation(history, tz);
   const clockText = formatClock(at, tz);
-  const [thoughts, facts, plansLine] = await Promise.all([recentThoughts(tz), modeFacts(at, tz), pendingReachLine(at, tz)]);
-  const modeFactsText = `${facts}\n${plansLine}`;
+  const modeIds = profile.modes.map((m) => m.id);
+  const [thoughts, facts, plansLine] = await Promise.all([recentThoughts(tz), modeFacts(at, tz, modeIds), pendingReachLine(at, tz)]);
+  const current = await effectiveMode(at, tz, modeIds);
+  const modesText = profile.modes
+    .map((m) => `- ${m.id}（${m.name}）${m.id === current ? "【现在】" : ""}：${m.when.trim() || "（没写什么时候用）"}`)
+    .join("\n");
+  const modeFactsText = `${facts}\n${plansLine}\n\n可以选的模式：\n${modesText}`;
   const loaded = await loadPrompt("reflect");
   const packed = buildReflectorInput(
     {
@@ -246,7 +266,7 @@ export async function runReflector(
     system: packed.system,
     input: packed.stable,
     inputParts: [packed.stable, packed.turn],
-    schema: INNER_SCHEMA,
+    schema: innerSchema(modeIds),
     jobId,
     turnSeq,
     refs,
@@ -281,7 +301,7 @@ export async function runReflector(
     updated_at: at,
   };
   await applyReaches(json, at);
-  await applyModeDecision(json, at, tz);
+  await applyModePlan(json, at, tz, modeIds);
   await applyDayNote(json, history);
   const saved = await saveInner(next, turnSeq, {
     model: result.model,

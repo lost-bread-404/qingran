@@ -18,7 +18,7 @@ export type VoiceEffort = "low" | "medium" | "high" | null;
 
 export const CONTEXT_WINDOW = 40;
 
-export const DEFAULT_VOICE_MODEL = "grok-4.3";
+export const DEFAULT_VOICE_MODEL = "grok-4.20-0309-non-reasoning";
 export const DEFAULT_VOICE_EFFORT: VoiceEffort = "low";
 export const VOICE_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
 
@@ -86,7 +86,10 @@ export type Profile = {
   /** Run the inner mind (reflect) and memory editor. Off → reply uses persona + context only. */
   brainOn: boolean;
   /** 戏 = voiceModel + systemPrompt. 现实 = realModel + realPrompt (empty → systemPrompt). Rosie flips it by hand. */
-  mode: "play" | "real";
+  /** Current mode id (set by reflect, or by her toggle when the brain is off). */
+  mode: string;
+  /** Her modes: each has a name, when it applies (free text for reflect), and a prompt added after the persona. One reply model for all. */
+  modes: TalkModeDef[];
   /** Rosie's rough routine in her own words. Only the reflect controller reads it. */
   routine: string;
   realModel: string;
@@ -145,6 +148,34 @@ export const NEUTRAL_PERSONA = "你是清然。";
 /** Kept for callers that still import the old name. Empty profiles stay empty. */
 export const DEFAULT_SYSTEM_PROMPT = NEUTRAL_PERSONA;
 
+export type TalkModeDef = { id: string; name: string; when: string; prompt: string };
+
+export const DEFAULT_MODES: TalkModeDef[] = [
+  { id: "play", name: "戏", when: "休息、哄睡、午休、亲密、剧情；晚上收工后和周末", prompt: "" },
+  { id: "real", name: "现实", when: "工作日白天她该起床开工、学习、准备面试的时候", prompt: "" },
+];
+
+export function lockModes(raw: unknown): TalkModeDef[] {
+  if (!Array.isArray(raw)) return DEFAULT_MODES.map((m) => ({ ...m }));
+  const seen = new Set<string>();
+  const out: TalkModeDef[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id.trim().slice(0, 40) : "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      name: typeof row.name === "string" && row.name.trim() ? row.name.trim().slice(0, 20) : id,
+      when: typeof row.when === "string" ? row.when.slice(0, 1000) : "",
+      prompt: typeof row.prompt === "string" ? row.prompt.slice(0, 8000) : "",
+    });
+    if (out.length >= 8) break;
+  }
+  return out.length ? out : DEFAULT_MODES.map((m) => ({ ...m }));
+}
+
 export const DEFAULT_PROFILE: Profile = {
   systemPrompt: "",
   muted: false,
@@ -182,6 +213,7 @@ export const DEFAULT_PROFILE: Profile = {
   storyline: "",
   brainOn: true,
   mode: "play",
+  modes: DEFAULT_MODES,
   routine: "",
   realModel: "grok-4.7",
   realEffort: "low",
@@ -234,6 +266,7 @@ type LooseProfile = Partial<Profile> & {
   storyline?: string;
   brainOn?: boolean;
   mode?: string;
+  modes?: unknown;
   routine?: string;
   realModel?: string;
   realEffort?: unknown;
@@ -284,7 +317,8 @@ export function lockedProfile(input?: unknown): Profile {
     intimateNotes: typeof raw.intimateNotes === "string" ? raw.intimateNotes.slice(0, 8000) : "",
     storyline: typeof raw.storyline === "string" ? raw.storyline.slice(0, 20000) : "",
     brainOn: raw.brainOn !== false,
-    mode: raw.mode === "real" ? "real" : "play",
+    mode: typeof raw.mode === "string" && raw.mode.trim() ? raw.mode.trim().slice(0, 40) : "play",
+    modes: lockModes(raw.modes),
     routine: typeof raw.routine === "string" ? raw.routine.slice(0, 4000) : "",
     realModel: typeof raw.realModel === "string" && raw.realModel.trim() ? raw.realModel.trim().slice(0, 80) : "grok-4.7",
     realEffort: raw.realEffort === null ? null : isVoiceEffort(raw.realEffort) ? raw.realEffort : "low",

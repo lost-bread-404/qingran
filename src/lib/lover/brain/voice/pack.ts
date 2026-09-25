@@ -118,7 +118,7 @@ export async function loadHotContext(input: {
   const mindStale = injected.stale.moment;
   const careHint = false;
   // Code-computed time facts (how long she has studied today, current mode and why) so the reply can judge a rest itself.
-  const clockText = `${formatClock(input.nowMs, input.timeZone)}\n${await modeFacts(input.nowMs, input.timeZone)}`;
+  const clockText = `${formatClock(input.nowMs, input.timeZone)}\n${await modeFacts(input.nowMs, input.timeZone, input.profile.modes.map((m) => m.id))}`;
   const moment = {
     feel: injected.feel,
     desire: injected.desire,
