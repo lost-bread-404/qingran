@@ -168,6 +168,67 @@ export async function saveReach(next: Partial<ReachRow> & { at?: number }): Prom
   return row;
 }
 
+export type ReachPlan = { id: number; at: number; intent: string; setBy: string; setAt: number };
+
+/** Pending plans to reach out, soonest first. */
+export async function listReachPlans(): Promise<ReachPlan[]> {
+  const db = await getSql();
+  const rows = await db.query<Record<string, unknown>>(
+    `select id, at, intent, set_by, set_at from qr_reach_plans where done_at is null order by at asc, id asc`,
+  );
+  return rows.map((row) => ({
+    id: asInt(row.id),
+    at: asInt(row.at),
+    intent: String(row.intent ?? ""),
+    setBy: String(row.set_by ?? ""),
+    setAt: asInt(row.set_at),
+  }));
+}
+
+export async function addReachPlan(plan: { at: number; intent: string; setBy: string; setAt: number }): Promise<void> {
+  const db = await getSql();
+  await db.query(`insert into qr_reach_plans (at, intent, set_by, set_at) values ($1, $2, $3, $4)`, [
+    Math.round(plan.at),
+    plan.intent.slice(0, 500),
+    plan.setBy,
+    plan.setAt,
+  ]);
+}
+
+/** Drop the pending plans written by these authors and put the new list in their place. */
+export async function replaceReachPlans(
+  setBy: string[],
+  plans: Array<{ at: number; intent: string }>,
+  author: string,
+  setAt: number,
+): Promise<void> {
+  const db = await getSql();
+  await db.query(`delete from qr_reach_plans where done_at is null and set_by = any($1::text[])`, [setBy]);
+  for (const plan of plans) await addReachPlan({ ...plan, setBy: author, setAt });
+}
+
+export async function finishReachPlans(ids: number[], at: number): Promise<void> {
+  if (!ids.length) return;
+  const db = await getSql();
+  await db.query(`update qr_reach_plans set done_at = $2 where id = any($1::bigint[])`, [ids, at]);
+}
+
+export async function delayReachPlans(ids: number[], to: number): Promise<void> {
+  if (!ids.length) return;
+  const db = await getSql();
+  await db.query(`update qr_reach_plans set at = $2 where id = any($1::bigint[])`, [ids, Math.round(to)]);
+}
+
+export async function removeReachPlan(id: number): Promise<void> {
+  const db = await getSql();
+  await db.query(`delete from qr_reach_plans where id = $1 and done_at is null`, [id]);
+}
+
+export async function clearReachPlans(): Promise<void> {
+  const db = await getSql();
+  await db.query(`delete from qr_reach_plans where done_at is null`);
+}
+
 export async function insertGlowEvent(entry: {
   at: number;
   delta: number;

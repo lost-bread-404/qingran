@@ -5,10 +5,10 @@
 - **回复**：模式（戏 / 现实）决定用哪套模型 + 人设。prompt = 人设 +【我们磨合出来的】（记忆里的磨合段）+【我此刻】（reflect 的 thought）+ 时间和今日时间事实 + 最近 20 条。回复前不调用任何模型。
 - **模式**：reflect 在每轮结束时定好她**下一次**来时用哪种（`qr_mode_log`）：哄她去学了、她不回了 → 下次是戏。休息带 until，到点回到现实并主动叫她。当天还没决定时：工作日 8–20 点是现实，其余是戏。
 - **每天**：reflect 的 `day_note` 像同住的人一样随手记一句她的事，时间戳取她那条消息（`qr_day_notes`）。今天的记录连同「她上次说话距现在多久」一起给回复和 reflect；日记页「每天」展示；月报从这些记录算学习、休息、情绪和睡眠。
-- **reflect** 输出：thought（他自己的状态 + 对她的理解，空 = 沿用，16 小时过期）、day_note、mode / until_hours / mode_why、next_reach、feedback、scene。不写下一步做什么。
+- **reflect** 输出：thought（他自己的状态 + 对她的理解，空 = 沿用，16 小时过期）、day_note、mode / until_hours / mode_why、reaches（数组，可同时好几件）、feedback、scene。不写下一步做什么。
 - **记忆**（每 30 轮或隔了一次会话，整篇重写）：你的档案 / 我看出来的你 / 我们之间 / 我们之间的磨合（只来自 feedback，人设第一）/ 还悬着的事。
 - **开关**：设置里「运行心思和记忆整理」关掉 → 不跑 reflect 和记忆，回复只用人设 + 上下文，模式变手动档（聊天页右上角「戏 / 现实」按钮，存在 `profile.mode`）。
-- **叫醒**：休息带 until 时写一条 `setBy: "mode"` 的 reach；它没到点前，reflect 给的 next_reach 不覆盖它。
+- **主动找她**：计划存在 `qr_reach_plans`，同时可以挂好几条（`done_at` 为空 = 待发）。reflect 每轮看到全部待发计划，给出完整的 `reaches` 列表，只替换 reflect / reach 自己定的那些；休息结束的叫醒（`set_by=mode`）和 Rosie 手动加的（`set_by=rosie`）不动。wake cron 到点把所有到期的计划一起交给 reach，发完标 done，其余继续挂着；reach 给的 next_reach 追加成新的一条。`qr_reach` 只剩开关和 retry。
 
 ---
 

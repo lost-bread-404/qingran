@@ -11,8 +11,12 @@ import type { InnerPlan, LongingItem } from "./types.ts";
 import type { Effort } from "./config.ts";
 import { adoptPersona, listPersonaVersions, listReplayTargets, runReplay } from "./voice/replay.ts";
 import {
+  addReachPlan,
+  clearReachPlans,
   getReach,
   insertGlowEvent,
+  listReachPlans,
+  removeReachPlan,
   insertManualEdit,
   innerSnapshot,
   listGlowEvents,
@@ -26,8 +30,9 @@ import {
 export const brainGetLife = createServerFn({ method: "GET" }).handler(async () => {
   const at = now();
   const zone = await profileClockZone();
-  const [reach, log, glow, inner, counts] = await Promise.all([
+  const [reach, plans, log, glow, inner, counts] = await Promise.all([
     getReach(),
+    listReachPlans(),
     listReachLog(30),
     listGlowEvents(40),
     getInner(),
@@ -35,6 +40,7 @@ export const brainGetLife = createServerFn({ method: "GET" }).handler(async () =
   ]);
   return {
     reach,
+    plans,
     log: log.map((row) => JSON.parse(JSON.stringify(row))),
     glow,
     inner,
@@ -50,19 +56,21 @@ export const brainSaveIdentity = createServerFn({ method: "POST" })
   });
 
 export const brainSetReach = createServerFn({ method: "POST" })
-  .validator((input: { enabled?: boolean; nextAt?: number | null; intent?: string; clear?: boolean }) => input)
+  .validator(
+    (input: { enabled?: boolean; add?: { at: number; intent: string }; remove?: number; clear?: boolean }) => input,
+  )
   .handler(async ({ data }) => {
-    const before = await getReach();
-    const next = await saveReach({
-      enabled: data.enabled,
-      nextAt: data.clear ? null : data.nextAt,
-      intent: data.clear ? "" : data.intent,
-      setBy: "rosie",
-      setAt: now(),
-      retry: 0,
-    });
-    await insertManualEdit("reach", before, next);
-    return { ok: true as const, reach: next };
+    const at = now();
+    const before = { reach: await getReach(), plans: await listReachPlans() };
+    if (data.enabled !== undefined) await saveReach({ enabled: data.enabled });
+    if (data.clear) await clearReachPlans();
+    if (typeof data.remove === "number") await removeReachPlan(data.remove);
+    if (data.add && Number.isFinite(data.add.at)) {
+      await addReachPlan({ at: data.add.at, intent: String(data.add.intent ?? ""), setBy: "rosie", setAt: at });
+    }
+    const after = { reach: await getReach(), plans: await listReachPlans() };
+    await insertManualEdit("reach", before, after);
+    return { ok: true as const, ...after };
   });
 
 export const brainWakeNow = createServerFn({ method: "POST" }).handler(async () => {

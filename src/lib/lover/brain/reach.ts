@@ -30,8 +30,12 @@ import { getSql } from "../../db.ts";
 import { lockedProfile } from "../types.ts";
 import { placePersona } from "./voice/pack-build.ts";
 import {
+  addReachPlan,
+  delayReachPlans,
+  finishReachPlans,
   getReach,
   insertGlowEvent,
+  listReachPlans,
   insertReachLog,
   lastVisibleMessageAt,
   profileClockZone,
@@ -160,8 +164,9 @@ export async function runWake(opts: {
 } = {}): Promise<{ ok: boolean; decision: WakeDecision | { action: "return"; reason: string; log: boolean }; sent: boolean }> {
   const at = opts.at ?? now();
   const zone = await profileClockZone();
-  const [reach, inner, ident, busy, lastAt, silence, counts] = await Promise.all([
+  const [reach, plans, inner, ident, busy, lastAt, silence, counts] = await Promise.all([
     getReach(),
+    listReachPlans(),
     getInner(),
     readIdentity(),
     currentBusy(at),
@@ -172,10 +177,15 @@ export async function runWake(opts: {
   const profile = lockedProfile(await getProfileData());
   const half = Math.round(profile.glowHalfLifeDays * 24 * 60 * 60 * 1000) || GLOW_HALF_LIFE_MS;
   const glow = glowNow(inner.glow, inner.glow_at, at, half);
+  // Several plans can hang at once; the soonest one decides when he wakes, and every plan due by then goes together.
+  const due = plans.filter((plan) => plan.at <= at);
+  const later = plans.filter((plan) => plan.at > at);
+  const dueIds = due.map((plan) => plan.id);
+  const dueIntent = due.map((plan) => plan.intent).filter(Boolean).join("；");
   const decision = decideWake({
     enabled: reach.enabled,
     chatting: !opts.manual && lastAt != null && at - lastAt < CHAT_QUIET_MS,
-    nextAt: reach.nextAt,
+    nextAt: plans[0]?.at ?? null,
     now: at,
     roll: opts.roll ?? Math.random(),
     probability: randomWakeProbability({ glow, busy: busy.busy, longings: inner.longings.length }),
@@ -191,13 +201,13 @@ export async function runWake(opts: {
       await insertReachLog({
         at,
         trigger: `skip:${decision.reason}`,
-        intent: reach.intent,
+        intent: dueIntent,
         calledLlm: false,
         sent: false,
-        nextAt: decision.nextAt ?? reach.nextAt,
+        nextAt: decision.nextAt ?? plans[0]?.at ?? null,
       });
       if (decision.reason === "breaker" && decision.nextAt) {
-        await saveReach({ nextAt: decision.nextAt, setBy: "reach", setAt: at, retry: 0, intent: reach.intent });
+        await delayReachPlans(dueIds, decision.nextAt);
         await appendBrainLog({
           step: "reach-breaker",
           ok: false,
@@ -213,11 +223,14 @@ export async function runWake(opts: {
   const dossier = await dossierTextForModel();
   const clock = formatClock(at, zone);
   const busyLine = busyContextLine(busy);
-  const why = decision.trigger === "planned"
-    ? `之前想好的：${reach.intent || "（没写）"}（${reach.setAt ? `${ago(at - reach.setAt)}前` : "刚刚"}）`
+  const laterText = later.length
+    ? `\n之后还打算：\n${later.map((plan) => `- ${formatClock(plan.at, zone)} ${plan.intent || "（没写）"}`).join("\n")}`
+    : "";
+  const why = (decision.trigger === "planned"
+    ? `之前想好的：\n${due.map((plan) => `- ${plan.intent || "（没写）"}（${plan.setAt ? `${ago(at - plan.setAt)}前定的` : "刚刚"}）`).join("\n")}`
     : decision.trigger === "manual"
       ? "她要你现在想起她。"
-      : "没有特别的事，就是想起你了。";
+      : "没有特别的事，就是想起你了。") + laterText;
   const silenceText = silence.lastUserAt
     ? `你最后一次说话是 ${ago(at - silence.lastUserAt)} 前。之后我已经发了 ${silence.unanswered} 条，你都还没回：\n${silence.lines.join("\n") || "（没有）"}`
     : "你还没有说过话。";
@@ -268,7 +281,7 @@ export async function runWake(opts: {
     outputRef: "reach",
   });
   if (!result.ok || !result.json || typeof result.json !== "object") {
-    return failLlm(at, reach.retry, failReasonZh(result.failKind), result.model, result.ms, decision.trigger);
+    return failLlm(at, reach.retry, dueIds, failReasonZh(result.failKind), result.model, result.ms, decision.trigger);
   }
   const json = result.json as Record<string, unknown>;
   const applied = applyReflectOutput(inner, {
@@ -304,13 +317,10 @@ export async function runWake(opts: {
   const intent = applied.nextReach && typeof applied.nextReach === "object" ? applied.nextReach.intent : "";
   const send = json.send === true && String(json.text ?? "").trim();
   const nextAt = hours == null ? null : clampNextReachAt(at, hours, silence.unanswered + (send ? 1 : 0));
-  await saveReach({
-    nextAt,
-    intent,
-    setBy: decision.trigger === "manual" ? "reach" : decision.trigger,
-    setAt: at,
-    retry: 0,
-  });
+  // The plans that fired are done; the rest keep waiting. A new one from this wake joins them.
+  if (decision.trigger === "planned") await finishReachPlans(dueIds, at);
+  if (nextAt != null) await addReachPlan({ at: nextAt, intent, setBy: "reach", setAt: at });
+  if (reach.retry) await saveReach({ retry: 0 });
   let messageId: string | null = null;
   let pushResult: string | null = null;
   if (send) {
@@ -329,7 +339,7 @@ export async function runWake(opts: {
   await insertReachLog({
     at,
     trigger: decision.trigger,
-    intent: reach.intent,
+    intent: dueIntent,
     calledLlm: true,
     sent: Boolean(send),
     messageId,
@@ -346,6 +356,7 @@ export async function runWake(opts: {
 async function failLlm(
   at: number,
   retry: number,
+  dueIds: number[],
   reason: string,
   model: string,
   ms: number,
@@ -362,7 +373,8 @@ async function failLlm(
       kind: "system_notice",
       timeZone: zone,
     });
-    await saveReach({ nextAt: null, intent: "", setBy: "reach", setAt: at, retry: 0 });
+    await finishReachPlans(dueIds, at);
+    await saveReach({ retry: 0 });
     await insertReachLog({
       at,
       trigger: `skip:llm_fail:${reason}`,
@@ -376,7 +388,8 @@ async function failLlm(
     return { ok: false, decision: { action: "call", trigger: trigger as "planned" }, sent: false };
   }
   const nextAt = at + REACH_RETRY_MS;
-  await saveReach({ nextAt, setBy: "reach", setAt: at, retry: 1 });
+  await delayReachPlans(dueIds, nextAt);
+  await saveReach({ retry: 1 });
   await insertReachLog({
     at,
     trigger: `skip:llm_fail:${reason}`,

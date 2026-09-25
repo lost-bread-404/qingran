@@ -466,6 +466,7 @@ async function clearReachOnRosieClear(at: number): Promise<void> {
        set_at = excluded.set_at`,
     [at],
   );
+  await db.query(`delete from qr_reach_plans where done_at is null`);
 }
 
 function rowMessage(r: Record<string, unknown>): StoredMessage {

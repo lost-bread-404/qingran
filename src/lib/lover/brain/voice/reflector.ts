@@ -25,7 +25,7 @@ import { dossierTextForModel } from "../dossier.ts";
 import { busyContextLine, clampInHours, identityBlock } from "../life.ts";
 import { currentBusy } from "../busy.ts";
 import { lockedProfile } from "../../types.ts";
-import { getReach, readIdentity, saveReach } from "../life-store.ts";
+import { listReachPlans, readIdentity, replaceReachPlans } from "../life-store.ts";
 import { latestMode, modeAt, modeFacts, recordMode, type TalkMode } from "../mode.ts";
 import { addDayNote } from "../day-notes.ts";
 
@@ -34,7 +34,7 @@ export const INNER_SCHEMA = {
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["thought", "scene", "next_reach", "mode", "until_hours", "mode_why", "feedback", "day_note"],
+    required: ["thought", "scene", "reaches", "mode", "until_hours", "mode_why", "feedback", "day_note"],
     properties: {
       day_note: { type: "string" },
       feedback: { type: "string" },
@@ -43,19 +43,17 @@ export const INNER_SCHEMA = {
       until_hours: { anyOf: [{ type: "null" }, { type: "number" }] },
       mode_why: { type: "string" },
       scene: { type: "string", enum: ["daily", "intimate"] },
-      next_reach: {
-        anyOf: [
-          { type: "null" },
-          {
-            type: "object",
-            additionalProperties: false,
-            required: ["in_hours", "intent"],
-            properties: {
-              in_hours: { type: "number" },
-              intent: { type: "string" },
-            },
+      reaches: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["in_hours", "intent"],
+          properties: {
+            in_hours: { type: "number" },
+            intent: { type: "string" },
           },
-        ],
+        },
       },
     },
   },
@@ -95,9 +93,42 @@ async function applyModeDecision(json: Record<string, unknown>, at: number, tz: 
   const untilMoved = until != null && (last?.until == null || Math.abs(last.until - until) > 10 * 60_000);
   if (mode === current && !untilMoved) return;
   await recordMode({ at, mode, until, why });
-  if (until != null) {
-    await saveReach({ nextAt: until, intent: `休息时间到了，去把她叫回来。${why}`, setBy: "mode", setAt: at, retry: 0 });
-  }
+  await replaceReachPlans(
+    ["mode"],
+    until != null ? [{ at: until, intent: `休息时间到了，去把她叫回来。${why}` }] : [],
+    "mode",
+    at,
+  );
+}
+
+const MAX_REACH_PLANS = 5;
+/** Plans the mind may rewrite each turn. The end-of-rest wake and Rosie's own plans are left alone. */
+const MIND_PLAN_AUTHORS = ["reflect", "reach", "planned", "random", "manual"];
+
+/** reflect gives the full list of plans it still means to keep; it replaces its own earlier ones. */
+async function applyReaches(json: Record<string, unknown>, at: number): Promise<void> {
+  if (!Array.isArray(json.reaches)) return;
+  const plans = json.reaches
+    .map((raw) => (raw && typeof raw === "object" ? (raw as { in_hours?: unknown; intent?: unknown }) : null))
+    .filter((raw): raw is { in_hours: number; intent?: unknown } => raw != null && typeof raw.in_hours === "number" && raw.in_hours > 0)
+    .slice(0, MAX_REACH_PLANS)
+    .map((raw) => ({
+      at: at + clampInHours(raw.in_hours) * 3_600_000,
+      intent: typeof raw.intent === "string" ? raw.intent.trim() : "",
+    }));
+  await replaceReachPlans(MIND_PLAN_AUTHORS, plans, "reflect", at);
+}
+
+/** What he already means to do, so the mind can keep, move or drop each plan. */
+export async function pendingReachLine(at: number, tz: string): Promise<string> {
+  const plans = await listReachPlans();
+  if (!plans.length) return "我打算找她的：（没有）";
+  const lines = plans.map((plan) => {
+    const hours = Math.max(0, (plan.at - at) / 3_600_000);
+    const who = plan.setBy === "mode" ? "（休息结束叫她）" : plan.setBy === "rosie" ? "（她定的）" : "";
+    return `${formatClock(plan.at, tz)}（约 ${hours.toFixed(1)} 小时后）${plan.intent || "（没写）"}${who}`;
+  });
+  return `我打算找她的：\n${lines.join("\n")}`;
 }
 
 /** One plain sentence about her day, stamped at her last message. */
@@ -178,7 +209,8 @@ export async function runReflector(
   const tz = resolveTz(meta.timeZone);
   const convo = formatReflectConversation(history, tz);
   const clockText = formatClock(at, tz);
-  const [thoughts, modeFactsText] = await Promise.all([recentThoughts(tz), modeFacts(at, tz)]);
+  const [thoughts, facts, plansLine] = await Promise.all([recentThoughts(tz), modeFacts(at, tz), pendingReachLine(at, tz)]);
+  const modeFactsText = `${facts}\n${plansLine}`;
   const loaded = await loadPrompt("reflect");
   const packed = buildReflectorInput(
     {
@@ -236,7 +268,6 @@ export async function runReflector(
   }
   const json = result.json as Record<string, unknown>;
   const thought = typeof json.thought === "string" ? json.thought.trim().slice(0, 1200) : "";
-  const reach = json.next_reach as { in_hours?: unknown; intent?: unknown } | null | undefined;
   const next: InnerState = {
     ...old,
     desire: "",
@@ -249,19 +280,7 @@ export async function runReflector(
     turn_seq: turnSeq,
     updated_at: at,
   };
-  const pending = await getReach();
-  const keepWake = pending.setBy === "mode" && pending.nextAt != null && pending.nextAt > at;
-  // A pending end-of-rest wake wins: it is the call that brings her back to study.
-  if (reach !== undefined && !keepWake) {
-    const hours = reach && typeof reach.in_hours === "number" ? clampInHours(reach.in_hours) : null;
-    await saveReach({
-      nextAt: hours == null ? null : at + hours * 3_600_000,
-      intent: reach && typeof reach.intent === "string" ? reach.intent : "",
-      setBy: "reflect",
-      setAt: at,
-      retry: 0,
-    });
-  }
+  await applyReaches(json, at);
   await applyModeDecision(json, at, tz);
   await applyDayNote(json, history);
   const saved = await saveInner(next, turnSeq, {

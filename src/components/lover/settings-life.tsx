@@ -26,10 +26,15 @@ type ReachRow = {
   retry: number;
 };
 
+type ReachPlan = { id: number; at: number; intent: string; setBy: string; setAt: number };
+
+const PLAN_AUTHOR: Record<string, string> = { mode: "休息结束叫你", rosie: "你定的", reflect: "心思", reach: "上次找你时定的" };
+
 type GlowRow = { id: number; at: number; delta: number; why: string; source: string; glowAfter: number };
 
 type Life = {
   reach: ReachRow;
+  plans: ReachPlan[];
   log: Array<Record<string, unknown>>;
   glow: GlowRow[];
   inner: InnerState;
@@ -118,7 +123,9 @@ export function HeartEditor({
 }) {
   const [inner, setInner] = useState<InnerState | null>(null);
   const [glow, setGlow] = useState<GlowRow[]>([]);
-  const [reach, setReach] = useState<ReachRow | null>(null);
+  const [plans, setPlans] = useState<ReachPlan[] | null>(null);
+  const [draftAt, setDraftAt] = useState<number | null>(null);
+  const [draftIntent, setDraftIntent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [delta, setDelta] = useState("");
   const [why, setWhy] = useState("");
@@ -129,7 +136,7 @@ export function HeartEditor({
         const life = res as Life;
         setInner(life.inner);
         setGlow(life.glow);
-        setReach(life.reach);
+        setPlans(life.plans ?? []);
       })
       .catch(() => setError("心没读出来。"));
   }
@@ -282,42 +289,58 @@ export function HeartEditor({
         </Button>
       </section>
       <section className="flex flex-col gap-2">
-        <p className="text-sm">下一次找你</p>
-        <p className="text-xs text-subtle">他打算什么时候再找你、想做什么。可以改，可以清空。</p>
-        {reach ? (
-          <>
-            <Input
-              type="datetime-local"
-              value={localInput(reach.nextAt)}
-              onChange={(e) => {
-                const at = e.target.value ? new Date(e.target.value).getTime() : null;
-                setReach({ ...reach, nextAt: at });
-              }}
-              onBlur={() => {
-                void brainSetReach({ data: { nextAt: reach.nextAt, intent: reach.intent } }).catch(() => setError("时间没记下。"));
-              }}
-            />
-            <Textarea
-              value={reach.intent}
-              className="min-h-14"
-              placeholder="想做什么"
-              onChange={(e) => setReach({ ...reach, intent: e.target.value })}
-              onBlur={() => {
-                void brainSetReach({ data: { nextAt: reach.nextAt, intent: reach.intent } }).catch(() => setError("没记下。"));
-              }}
-            />
-            <button
-              type="button"
-              className="text-left text-sm text-muted"
-              onClick={() => {
-                setReach({ ...reach, nextAt: null, intent: "" });
-                void brainSetReach({ data: { clear: true } }).catch(() => setError("没清掉。"));
-              }}
-            >
-              清空
-            </button>
-          </>
-        ) : null}
+        <p className="text-sm">打算找你</p>
+        <p className="text-xs text-subtle">他同时挂着的几件事，到点哪件就发哪件。可以删，也可以自己加。</p>
+        {plans == null ? null : plans.length === 0 ? (
+          <p className="text-sm text-subtle">现在没有计划</p>
+        ) : (
+          plans.map((plan) => (
+            <div key={plan.id} className="flex items-start justify-between gap-3 rounded-md bg-surface-2 px-3 py-2">
+              <p className="text-sm">
+                {clock(plan.at)} · {plan.intent || "（没写）"}
+                <span className="text-xs text-subtle"> · {PLAN_AUTHOR[plan.setBy] ?? plan.setBy}</span>
+              </p>
+              <button
+                type="button"
+                className="shrink-0 text-sm text-muted"
+                onClick={() => {
+                  setPlans(plans.filter((row) => row.id !== plan.id));
+                  void brainSetReach({ data: { remove: plan.id } }).catch(() => setError("没删掉。"));
+                }}
+              >
+                删
+              </button>
+            </div>
+          ))
+        )}
+        <Input
+          type="datetime-local"
+          value={localInput(draftAt)}
+          onChange={(e) => setDraftAt(e.target.value ? new Date(e.target.value).getTime() : null)}
+        />
+        <Textarea
+          value={draftIntent}
+          className="min-h-14"
+          placeholder="想让他那时做什么"
+          onChange={(e) => setDraftIntent(e.target.value)}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          disabled={draftAt == null}
+          onClick={() => {
+            if (draftAt == null) return;
+            void brainSetReach({ data: { add: { at: draftAt, intent: draftIntent.trim() } } })
+              .then((res) => {
+                if (res?.plans) setPlans(res.plans as ReachPlan[]);
+                setDraftAt(null);
+                setDraftIntent("");
+              })
+              .catch(() => setError("没加上。"));
+          }}
+        >
+          加一件
+        </Button>
       </section>
       <section className="flex flex-col gap-2">
         <p className="text-sm">心情</p>
@@ -419,9 +442,7 @@ export function ReachPanel() {
         <span className="text-sm">允许他主动找你</span>
       </label>
       <p className="text-sm">
-        下一次：{life.reach.nextAt ? clock(life.reach.nextAt) : "没有计划"}
-        {life.reach.intent ? ` · ${life.reach.intent}` : ""}
-        {life.reach.setBy ? ` · ${life.reach.setBy}` : ""}
+        打算找你：{life.plans?.length ? life.plans.map((plan) => `${clock(plan.at)} ${plan.intent || "（没写）"}`).join("；") : "没有计划"}
       </p>
       <p className="text-xs text-subtle">
         今天：调用 {life.counts.llm} 次 · 发出 {life.counts.sent} 条
