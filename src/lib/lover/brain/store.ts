@@ -624,6 +624,20 @@ export async function updateMessageText(id: string, text: string, kind?: StoredM
       [id, existing.text, ts],
     );
   }
+  if (existing && existing.role === "user" && existing.text !== next) {
+    // Same-sounding swaps she made by hand: candidates for the xAI keyterms, reviewed later in 听力.
+    try {
+      const { homophoneSwaps } = await import("../hearing/homophone-edits.ts");
+      for (const swap of homophoneSwaps(existing.text, next)) {
+        await db.query(
+          `insert into qr_homophone_edits (at, message_id, wrong, correct, before, after) values ($1,$2,$3,$4,$5,$6)`,
+          [ts, id, swap.wrong, swap.correct, existing.text.slice(0, 500), next.slice(0, 500)],
+        );
+      }
+    } catch {
+      // Never block an edit on this.
+    }
+  }
   if (kind) {
     await db.query(
       `update qingran_messages set body = $2, kind = $3, edited_at = $4 where id = $1`,
