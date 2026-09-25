@@ -4,10 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   brainAdjustGlow,
-  brainGenerateBusy,
   brainGetLife,
   brainListManualEdits,
-  brainSaveBusy,
   brainSaveHeart,
   brainSaveIdentity,
   brainSetReach,
@@ -19,16 +17,6 @@ import type { InnerPlan, InnerState, LongingItem } from "@/lib/lover/brain/types
 import { hearingLabeledCount } from "@/lib/lover/hearing/store";
 import { clampGlowHalfLifeDays } from "@/lib/lover/brain/config";
 import { cn } from "@/lib/utils";
-
-type BusyRow = {
-  id: string;
-  fromDay: string;
-  toDay: string;
-  busy: number;
-  label: string;
-  reason: string;
-  createdAt: number;
-};
 
 type ReachRow = {
   nextAt: number | null;
@@ -42,12 +30,6 @@ type ReachRow = {
 type GlowRow = { id: number; at: number; delta: number; why: string; source: string; glowAfter: number };
 
 type Life = {
-  identity: string;
-  identityUpdatedAt: number;
-  rhythm: string;
-  periods: BusyRow[];
-  busy: { busy: number; label: string; reason: string; rhythm: string };
-  generatedAt: number;
   reach: ReachRow;
   log: Array<Record<string, unknown>>;
   glow: GlowRow[];
@@ -131,156 +113,6 @@ export function IdentityField({
       />
       {error ? <span className="text-xs text-live">{error}</span> : null}
     </label>
-  );
-}
-
-export function BusyPanel({ onRhythm }: { onRhythm?: (rhythm: string) => void }) {
-  const [life, setLife] = useState<Life | null>(null);
-  const [rows, setRows] = useState<BusyRow[]>([]);
-  const [rhythm, setRhythm] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  function apply(next: Life) {
-    setLife(next);
-    setRows(next.periods);
-    setRhythm(next.rhythm);
-  }
-
-  useEffect(() => {
-    void brainGetLife()
-      .then((res) => apply(res as Life))
-      .catch(() => setError("日程没读出来。"));
-  }, []);
-
-  const stale = Boolean(life && life.generatedAt && life.identityUpdatedAt > life.generatedAt);
-  const today = todayStamp();
-
-  return (
-    <section className="flex flex-col gap-3">
-      <div>
-        <p className="text-sm">忙碌表</p>
-        <p className="text-xs text-subtle">只影响他什么时候来找你，不改变聊天里怎么说话。</p>
-      </div>
-      {error ? <p className="text-sm text-live">{error}</p> : null}
-      {stale ? <p className="text-sm text-live">身份改过了，要重新生成吗？</p> : null}
-      {life?.busy.label ? (
-        <p className="text-xs text-subtle">
-          现在：{life.busy.label}（{life.busy.busy.toFixed(2)}）{life.busy.reason}
-        </p>
-      ) : (
-        <p className="text-xs text-subtle">还没有对应的时间段。</p>
-      )}
-      <label className="text-xs text-subtle">
-        作息
-        <Input
-          value={rhythm}
-          className="mt-1"
-          onChange={(e) => setRhythm(e.target.value)}
-          onBlur={() => {
-            void brainSaveBusy({ data: { rhythm, periods: rows } })
-              .then(() => onRhythm?.(rhythm))
-              .catch(() => setError("作息没记下。"));
-          }}
-        />
-      </label>
-      <div className="flex flex-col gap-2">
-        {rows.map((row, index) => {
-          const current = row.fromDay <= today && today <= row.toDay;
-          return (
-            <div key={row.id || index} className={cn("rounded-md bg-surface-2 p-2", current && "ring-1 ring-accent")}>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  aria-label="开始日期"
-                  value={row.fromDay}
-                  onChange={(e) => setRows((list) => list.map((item, i) => (i === index ? { ...item, fromDay: e.target.value } : item)))}
-                  onBlur={() => void brainSaveBusy({ data: { rhythm, periods: rows } }).catch(() => setError("没记下。"))}
-                />
-                <Input
-                  aria-label="结束日期"
-                  value={row.toDay}
-                  onChange={(e) => setRows((list) => list.map((item, i) => (i === index ? { ...item, toDay: e.target.value } : item)))}
-                  onBlur={() => void brainSaveBusy({ data: { rhythm, periods: rows } }).catch(() => setError("没记下。"))}
-                />
-              </div>
-              <Input
-                className="mt-2"
-                aria-label="名字"
-                value={row.label}
-                onChange={(e) => setRows((list) => list.map((item, i) => (i === index ? { ...item, label: e.target.value } : item)))}
-                onBlur={() => void brainSaveBusy({ data: { rhythm, periods: rows } }).catch(() => setError("没记下。"))}
-              />
-              <Input
-                className="mt-2"
-                aria-label="原因"
-                value={row.reason}
-                onChange={(e) => setRows((list) => list.map((item, i) => (i === index ? { ...item, reason: e.target.value } : item)))}
-                onBlur={() => void brainSaveBusy({ data: { rhythm, periods: rows } }).catch(() => setError("没记下。"))}
-              />
-              <div className="mt-2 flex items-center gap-2">
-                <Input
-                  aria-label="忙碌程度"
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={row.busy}
-                  onChange={(e) =>
-                    setRows((list) => list.map((item, i) => (i === index ? { ...item, busy: Number(e.target.value) } : item)))
-                  }
-                  onBlur={() => void brainSaveBusy({ data: { rhythm, periods: rows } }).catch(() => setError("没记下。"))}
-                />
-                <button
-                  type="button"
-                  className="h-11 shrink-0 text-sm text-muted"
-                  onClick={() => {
-                    const next = rows.filter((_, i) => i !== index);
-                    setRows(next);
-                    void brainSaveBusy({ data: { rhythm, periods: next } }).catch(() => setError("没记下。"));
-                  }}
-                >
-                  删除
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={busy}
-          onClick={() => {
-            const next = [
-              ...rows,
-              { id: "", fromDay: today, toDay: today, busy: 0.5, label: "", reason: "", createdAt: 0 },
-            ];
-            setRows(next);
-          }}
-        >
-          加一段
-        </Button>
-        <Button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            setError(null);
-            void brainGenerateBusy()
-              .then(async () => {
-                const res = (await brainGetLife()) as Life;
-                apply(res);
-                onRhythm?.(res.rhythm);
-              })
-              .catch(() => setError("没生成出来。"))
-              .finally(() => setBusy(false));
-          }}
-        >
-          {busy ? "在生成…" : "根据身份生成忙碌表"}
-        </Button>
-      </div>
-    </section>
   );
 }
 

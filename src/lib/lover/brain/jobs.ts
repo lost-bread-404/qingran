@@ -103,6 +103,12 @@ async function runOne(job: BrainJob): Promise<void> {
     await finishJob(job.id, "done");
     return;
   }
+  if (job.type === "busy") {
+    const { generateBusySchedule, busyRefreshNeeded } = await import("./busy");
+    if (await busyRefreshNeeded()) await generateBusySchedule();
+    await finishJob(job.id, "done");
+    return;
+  }
   await finishJob(job.id, "failed", { error: `unknown type ${job.type}` });
 }
 

@@ -7,6 +7,7 @@ import { calendarDay, shiftDay } from "./time.ts";
 import { newId } from "../storage.ts";
 import { getSql } from "../../db.ts";
 import { busyWord, periodOnDay, periodsOverlap, type BusyPeriod } from "./life.ts";
+import { enqueue } from "./jobs.ts";
 import {
   countProactiveBetween,
   identityHash,
@@ -14,6 +15,7 @@ import {
   profileClockZone,
   readIdentity,
   replaceBusyPeriods,
+  writeIdentity,
   writeRhythm,
   type BusyRow,
 } from "./life-store.ts";
@@ -76,10 +78,33 @@ export async function currentBusy(at = now()): Promise<CurrentBusy> {
   };
 }
 
-export async function busyGeneratedAt(): Promise<number> {
-  const rows = await listBusyPeriods();
-  if (!rows.length) return 0;
-  return Math.max(...rows.map((row) => row.createdAt));
+export function busyScheduleStale(identity: string, periods: Array<{ identityHash: string }>): boolean {
+  const text = identity.trim();
+  if (!text) return false;
+  if (!periods.length) return true;
+  const hash = identityHash(text);
+  return periods.some((row) => row.identityHash !== hash);
+}
+
+export async function busyRefreshNeeded(): Promise<boolean> {
+  const [ident, periods] = await Promise.all([readIdentity(), listBusyPeriods()]);
+  return busyScheduleStale(ident.identity, periods);
+}
+
+export async function enqueueBusyRefresh(): Promise<boolean> {
+  const ident = await readIdentity();
+  const periods = await listBusyPeriods();
+  if (!busyScheduleStale(ident.identity, periods)) return false;
+  const hash = identityHash(ident.identity);
+  const key = `busy:${hash}`;
+  const db = await getSql();
+  await db.query(`delete from brain_jobs where dedupe_key = $1 and status in ('done', 'failed')`, [key]);
+  return enqueue("busy", key, { identityHash: hash });
+}
+
+export async function saveIdentityAndRefreshBusy(identity: string): Promise<boolean> {
+  await writeIdentity(identity);
+  return enqueueBusyRefresh();
 }
 
 function normalizePeriods(raw: unknown): BusyPeriod[] | string {
@@ -151,33 +176,6 @@ export async function generateBusySchedule(complete: typeof callModel = callMode
   await replaceBusyPeriods(periods, hash);
   await writeRhythm(rhythm);
   return { periods: await listBusyPeriods(), rhythm };
-}
-
-export async function saveBusyEdits(
-  periods: BusyPeriod[],
-  rhythm: string,
-): Promise<BusyRow[]> {
-  const normalized = normalizePeriods(periods.map((row) => ({
-    id: row.id,
-    from_day: row.fromDay,
-    to_day: row.toDay,
-    busy: row.busy,
-    label: row.label,
-    reason: row.reason,
-  })));
-  if (typeof normalized === "string") throw new Error(normalized);
-  const ident = await readIdentity();
-  const previous = await listBusyPeriods();
-  await appendBrainLog({
-    step: "busy-edit",
-    ok: true,
-    route: "busy",
-    outputText: JSON.stringify(previous),
-    note: "手改前的忙碌表",
-  });
-  await replaceBusyPeriods(normalized, identityHash(ident.identity));
-  await writeRhythm(rhythm);
-  return listBusyPeriods();
 }
 
 export async function lookupBusyRange(fromDay: string, toDay: string): Promise<{

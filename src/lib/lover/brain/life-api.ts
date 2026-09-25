@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { now } from "./clock.ts";
 import { applyGlowDelta } from "./life.ts";
-import { generateBusySchedule, saveBusyEdits, currentBusy, busyGeneratedAt } from "./busy.ts";
+import { saveIdentityAndRefreshBusy } from "./busy.ts";
 import { wakeOnce } from "./reach.ts";
 import { sendApns } from "../push/apns.ts";
 import { getInner, saveInner } from "./store.ts";
@@ -13,38 +13,25 @@ import {
   insertGlowEvent,
   insertManualEdit,
   innerSnapshot,
-  listBusyPeriods,
   listGlowEvents,
   listReachLog,
   profileClockZone,
   reachCountsToday,
-  readIdentity,
   saveReach,
-  writeIdentity,
   listManualEdits,
 } from "./life-store.ts";
 
 export const brainGetLife = createServerFn({ method: "GET" }).handler(async () => {
   const at = now();
   const zone = await profileClockZone();
-  const [identity, periods, busy, reach, log, glow, inner, counts, generatedAt] = await Promise.all([
-    readIdentity(),
-    listBusyPeriods(),
-    currentBusy(at),
+  const [reach, log, glow, inner, counts] = await Promise.all([
     getReach(),
     listReachLog(30),
     listGlowEvents(40),
     getInner(),
     reachCountsToday(zone, at),
-    busyGeneratedAt(),
   ]);
   return {
-    identity: identity.identity,
-    identityUpdatedAt: identity.updatedAt,
-    rhythm: identity.rhythm,
-    periods,
-    busy,
-    generatedAt,
     reach,
     log: log.map((row) => JSON.parse(JSON.stringify(row))),
     glow,
@@ -56,30 +43,8 @@ export const brainGetLife = createServerFn({ method: "GET" }).handler(async () =
 export const brainSaveIdentity = createServerFn({ method: "POST" })
   .validator((input: { identity: string }) => input)
   .handler(async ({ data }) => {
-    await writeIdentity(String(data.identity ?? ""));
-    return { ok: true as const };
-  });
-
-export const brainGenerateBusy = createServerFn({ method: "POST" }).handler(async () => {
-  const generated = await generateBusySchedule();
-  return { ok: true as const, periods: generated.periods, rhythm: generated.rhythm };
-});
-
-export const brainSaveBusy = createServerFn({ method: "POST" })
-  .validator((input: { rhythm: string; periods: Array<{ id?: string; fromDay: string; toDay: string; busy: number; label: string; reason: string }> }) => input)
-  .handler(async ({ data }) => {
-    const periods = await saveBusyEdits(
-      data.periods.map((row) => ({
-        id: row.id || "",
-        fromDay: row.fromDay,
-        toDay: row.toDay,
-        busy: Number(row.busy) || 0,
-        label: row.label,
-        reason: row.reason,
-      })),
-      String(data.rhythm ?? ""),
-    );
-    return { ok: true as const, periods };
+    const queued = await saveIdentityAndRefreshBusy(String(data.identity ?? ""));
+    return { ok: true as const, queued };
   });
 
 export const brainSetReach = createServerFn({ method: "POST" })

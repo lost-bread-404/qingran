@@ -39,7 +39,6 @@ import { DossierPanel } from "@/components/lover/dossier-panel";
 import { BrainSpendPage } from "@/components/lover/brain-spend-page";
 import { BrainSystemArchive } from "@/components/lover/brain-system-archive";
 import {
-  BusyPanel,
   HeartEditor,
   IdentityField,
   ManualEdits,
@@ -529,7 +528,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
       {page === "home" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
-            <SettingsLink label="清然是谁" hint="身份、人设、忙碌表" onClick={() => setPage("who")} />
+            <SettingsLink label="清然是谁" hint="身份、人设" onClick={() => setPage("who")} />
             <SettingsLink label="他的心" hint="此刻、计划、心事、记得的" onClick={() => setPage("heart")} />
             <SettingsLink label="主动消息" hint="开关、下一次、记录" onClick={() => setPage("reach")} />
             <SettingsLink label="声音和听力" hint="语速、静音、灵敏度" onClick={() => setPage("sound")} />
@@ -555,7 +554,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
             <p className="text-xs text-subtle">身份是他在现实里是谁。人设是他怎么说话。</p>
             <IdentityField value={profile.identity} onSave={(identity) => persistProfile({ identity })} />
-            <BusyPanel onRhythm={(rhythm) => persistProfile({ rhythm })} />
             <label className="flex flex-col gap-2">
               <span className="text-sm">人设</span>
           <Textarea

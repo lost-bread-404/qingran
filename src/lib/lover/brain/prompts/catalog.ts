@@ -62,7 +62,7 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
   {
     key: "busy",
     name: "忙碌表",
-    blurb: "根据身份生成未来大约三年的忙闲。只在设置里手动生成。",
+    blurb: "身份保存后在后台生成未来大约三年的忙闲。身份没变就不会再跑。",
   },
   {
     key: "busy_tool",

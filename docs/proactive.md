@@ -46,6 +46,7 @@ Rosie 说话之后，reflect 会重写 `next_reach`。连续没回时，下一�
 | 发不发、下一次 | 设置 → 主动消息 |
 | reach / busy / busy_tool 的说法和模型 | 设置 → 高级 → 指令 |
 | glow 半衰期 | 设置 → 他的心 |
-| 身份和忙碌表 | 设置 → 清然是谁 |
+| 身份 | 设置 → 清然是谁 |
+| 忙碌表 | 身份保存后自动生成。输入输出在 高级 → 调用记录 |
 | 推送密钥 | Vercel：`APNS_KEY_ID` `APNS_TEAM_ID` `APNS_KEY_P8` `APNS_BUNDLE_ID` |
 | 定时器密钥 | Vercel 和 GitHub `CRON_SECRET` |
