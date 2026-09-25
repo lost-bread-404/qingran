@@ -394,21 +394,9 @@ export function HearingSensePanel({
         />
         <div className="flex items-baseline justify-between gap-3">
           <p className="text-sm">最长一句</p>
-          <p className="text-sm tabular-nums">{Math.round(sense.maxUtteranceMs / 1000)} 秒</p>
+          <p className="text-sm">不限</p>
         </div>
-        <p className="text-xs text-subtle">
-          现在 {Math.round(sense.maxUtteranceMs / 1000)} 秒 · 默认 30 秒 · 5–120。到点就结束并送去识别，不管房间还响不响。
-        </p>
-        <input
-          type="range"
-          className="h-11 w-full accent-accent"
-          min={5}
-          max={120}
-          step={1}
-          value={sense.maxUtteranceMs / 1000}
-          aria-label="最长一句"
-          onChange={(e) => onChange({ ...sense, maxUtteranceMs: Math.round(Number(e.target.value) * 1000) })}
-        />
+        <p className="text-xs text-subtle">一直录到你停下来。只留 10 分钟的保护，防止噪音让它一直开着。</p>
         <Fine
           label="保持绝对门槛"
           value={sense.holdMin}

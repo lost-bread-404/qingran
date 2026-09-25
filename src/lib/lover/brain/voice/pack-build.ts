@@ -143,18 +143,42 @@ function prepareMomentTemplate(content: string, moment: MomentText, enabled: boo
     .join("\n");
 }
 
+/** How many of his latest replies stay word for word; older ones keep only what he said aloud. */
+export const VERBATIM_REPLIES = 2;
+
+/**
+ * Like a person remembers a conversation: the gist of what he said, not every gesture.
+ * Older replies drop their action narration so the model stops copying its own template and growing it.
+ */
+export function spokenOnly(text: string): string {
+  const quotes = [...text.matchAll(/[“"「]([^”"」]{1,200})[”"」]/g)].map((m) => m[1]!.trim()).filter(Boolean);
+  if (quotes.length) return quotes.map((q) => `“${q}”`).join(" ");
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 40 ? `${flat.slice(0, 40)}…` : flat;
+}
+
 export function voiceHistoryMessages(
   history: StoredMessage[],
   limit = HISTORY_WINDOW,
 ): Array<{ role: "user" | "assistant"; content: string }> {
   if (limit <= 0) return [];
-  return history
-    .filter((message) => !isNightNoiseBody(message.text))
-    .slice(-limit)
-    .map((message) => ({
-      role: message.role === "assistant" ? "assistant" : "user",
-      content: modelFacingText(message.text),
-    }));
+  const rows = history.filter((message) => !isNightNoiseBody(message.text)).slice(-limit);
+  let replies = 0;
+  const keep = new Set<number>();
+  for (let i = rows.length - 1; i >= 0 && replies < VERBATIM_REPLIES; i -= 1) {
+    if (rows[i]!.role === "assistant") {
+      keep.add(i);
+      replies += 1;
+    }
+  }
+  return rows.map((message, i) => {
+    const text = modelFacingText(message.text);
+    const assistant = message.role === "assistant";
+    return {
+      role: assistant ? "assistant" : "user",
+      content: assistant && !keep.has(i) ? spokenOnly(text) : text,
+    };
+  });
 }
 
 function voiceDoc(template?: string) {
@@ -246,7 +270,7 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
   const history = voiceHistoryMessages(parts.history, cap);
   const last = rendered[rendered.length - 1];
   const user = last?.role === "user" ? last : { role: "user" as const, content: parts.userText };
-  const intimate = rendered.find((message) => message.content.startsWith("【此刻的我】"));
+  const intimate = rendered.find((message) => message.content.startsWith("你在亲密时的样子："));
   const persona =
     parts.personaPlacement === "first_user"
       ? rendered.filter(
@@ -321,7 +345,7 @@ export function buildTail(opts: {
 }): string {
   const inject = opts.inject ?? { moment: true, dossier: true, history: HISTORY_WINDOW };
   const moment = opts.moment ?? EMPTY_MOMENT;
-  const template = variantMessages(defaultDoc("voice"), "main").find((message) => message.content.includes("【我此刻】"));
+  const template = variantMessages(defaultDoc("voice"), "main").find((message) => message.content.includes("{now}"));
   const clock = variantMessages(defaultDoc("voice"), "main").find((message) => message.content.includes("{clock}"));
   const momentText = prepareMomentTemplate(template?.content ?? "", moment, inject.moment);
   const filledMoment = momentText
@@ -414,8 +438,8 @@ export function buildVoiceMessages(opts: {
 export function insertIntimateNotes<T extends { role: string; content: string }>(messages: T[], notes: string): T[] {
   const text = notes.trim();
   if (!text) return messages;
-  const block = { role: "system", content: `【此刻的我】\n${text}` } as T;
-  const moment = messages.findIndex((message) => message.content.includes("【我此刻】"));
+  const block = { role: "system", content: `你在亲密时的样子：\n${text}` } as T;
+  const moment = messages.findIndex((message) => message.content.includes("【我此刻】") || message.content.startsWith("你心里此刻"));
   if (moment >= 0) return [...messages.slice(0, moment + 1), block, ...messages.slice(moment + 1)];
   const at = messages.findIndex((message) => message.role !== "system");
   const index = at < 0 ? messages.length : at;

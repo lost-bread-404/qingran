@@ -56,9 +56,9 @@ export const START_CUE_MULT = 1.12;
 export const HOLD_FLOOR_MIN = 0.0045;
 export const HOLD_FLOOR_MULT = 1.25;
 /** One utterance is cut and sent to recognition after this long, even if the room is still noisy. */
-export const MAX_UTTERANCE_MS = 30_000;
+export const MAX_UTTERANCE_MS = 600_000;
 export const MAX_UTTERANCE_MIN = 5_000;
-export const MAX_UTTERANCE_MAX = 120_000;
+export const MAX_UTTERANCE_MAX = 600_000;
 export const MAX_UTTERANCE_STEP = 1_000;
 
 export const DEBUG_START_FLOOR_MIN = 0.003;

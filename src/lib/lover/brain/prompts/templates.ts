@@ -233,12 +233,9 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       ],
       messages: [
         system(VOICE_SYSTEM),
-        system(`【我们磨合出来的】
-{dossier}
-这些是和她相处中她说过在意的地方。在人设允许的范围里照着调整；和人设冲突时以人设为准。不用提起这些，直接做。`),
-        system(`【我此刻】
-{now}
-这是我心里的感觉和对她的了解，她听不到。`),
+        system(`和她相处这些日子，她在意的地方（在人设允许的范围里照着调整，和人设冲突时以人设为准）：
+{dossier}`),
+        system(`你心里此刻（只有你自己知道）：{now}`),
         system("现在是{clock}。"),
         system("{history_messages}"),
         user("{user_text}"),
