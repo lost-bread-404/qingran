@@ -18,7 +18,7 @@ Rosie ──► ① 回答 ◄──── ② 内心 ───────┘
 | ① 回答 | `voice` | 每轮 | Rosie |
 | ② 内心 | `voice` 同一条输出末尾的 `⟦心⟧` JSON | 每轮，回复说完立刻写，下一轮才注入 | ①，以及 reach |
 | ③ Dossier | `editor` | 第一次自动生效；之后约每 20 轮 Rosie 的消息，或隔了一次会话再开口，或设置里「现在整理」 | ① ② |
-| 日记 | `archive` 以及 dusk / synth / … | 对话滑出窗口、每天、每周 | 只给日记页。清然不读 `mem_notes` |
+| 日记 | `report` | 默认暂停。打开开关后，每月第一天写上个月。日记页也可以手动生成本月 | 只给日记页。清然不读 |
 
 ## 为什么是这样
 
@@ -33,11 +33,11 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 | 表 | 谁写 | 说明 |
 |---|---|---|
 | `qingran_messages` | 通话 | 只追加。清空聊天是 `forgotten_at` + `room_cleared_at`，不是 DELETE |
-| `qr_inner` | reflect | desire / read_her / feel / choice / now_text / longing / plans。旧的 `want` 列保留，不再写入；0030 把已有的 `want` 复制进 `desire`。清空聊天清掉 desire、read_her、feel、choice、now，留 longing 和 plans |
+| `qr_inner` | 回复末尾的隐藏 JSON | desire / read_her / feel / choice / now_text / longing / plans。旧的 `want` 列保留，不再写入；0030 把已有的 `want` 复制进 `desire`。清空聊天清掉 desire、read_her、feel、choice、now，留 longing 和 plans |
 | `qr_inner_log` | reflect | 每轮完整输出，包括被丢掉的 `now` |
 | `qr_dossier` | editor、Rosie | 一份 markdown。`cursor_at` 是已经读过的最后一条消息。`active` 见下面的偏差 |
 | `qr_dossier_versions` | 每次成功写入 | author：`editor` / `rosie` / `seed` / `compact` |
-| `mem_notes`、`qr_portrait`、`qr_mind` | 日记仍写 notes | 清然的热路径和 reflect 不再读。表不删 |
+| `mem_notes`、`qr_portrait`、`qr_mind` | 旧日记管线还留着代码 | 清然的热路径不再读。表不删。自动 archive / dusk / assign / synth / ask / experiments / backfill 已断开 |
 
 备份导出带上 `qr_inner`、`qr_inner_log`、`qr_dossier`、`qr_dossier_versions`。旧表照旧导出。
 
@@ -68,9 +68,10 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 | `editor` main | 见上 | 人设、当前文档、longing、cursor 之后没被遗忘的对话（一批最多约 12000 字）、字数上限 | `{ops:[{section,action,old,new}]}` |
 | `editor` compact | 应用后超过上限 | 全文、上限 | `{body}`，author=`compact` |
 | `editor` seed | `active` 仍是 false 且没有草稿时，自动跑一次 | 人设、`seed/story.json`、还在用的画像和 self/bond、最近 60 天 weight≥3 的笔记最多 150 条、longing | `{body}`，写进版本历史后立刻生效 |
-| `archive` | 对话滑出窗口 | 相关笔记、这一批对话 | 笔记 ops。开头写明只给日记，清然不会读 |
+| `archive` | 不再自动入队 | 函数还在，旧任务可以跑完 | 笔记 ops |
 | `judge` | 离线 | 人设和对话 | 打分，含 `meta_narration` 和 `self_desire` |
-| dusk / assign / synth / ask / report / experiments / backfill | 日记页 | 不变 | 不变 |
+| `report` | 日记页。开关打开时每月 1 日写上个月；「生成本月报告」随时可点 | 这个月的对话原文（跳过 system_notice 和已遗忘）。太长则先 `digest` 再 `main` | 四段月报。模型 grok-4.3 medium |
+| dusk / assign / synth / ask / experiments / backfill | 不再从日记页或周期任务触发 | 旧数据还在 | 指令列表里不再显示 |
 
 `editor` 的 add 在段末追加（段不存在就新建），replace / remove 必须和原文完全一致，对不上就跳过并写进这次的 ops 记录。没有要改的就 `{"ops":[]}`，仍然推进 cursor。
 
@@ -81,7 +82,7 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 | desire, feel, now, 心情词 | 看得到（未过期、开关开着） | 这是要长成话的结论。desire 是他自己的欲望，不是对她的分析 |
 | read_her | 看不到 | 对她的理解留在这里，避免挤进欲望和动作 |
 | choice | 看不到 | 否定句和取舍过程留在这里，避免被念出来 |
-| plans | 看不到 | 只有 reflect 把它写进 now，才会出现在回复里 |
+| plans | 状态说明块里看得到上一次的 open plans | 只用来延续，不进【我此刻】 |
 | Dossier 全文 | 生效后看得到 | 一份当前成立的理解，不是流水账 |
 
 ## 生效之前和之后

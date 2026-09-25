@@ -129,30 +129,32 @@ export const brainAskDiary = createServerFn({ method: "POST" })
 export const brainRunJobs = createServerFn({ method: "POST" })
   .validator((input: { types: JobType[] }) => input)
   .handler(async ({ data }) => {
-    const types = data.types.filter((t) =>
-      ["dusk", "synth", "report", "archive", "backfill"].includes(t),
-    );
+    const types = data.types.filter((t) => t === "report");
     const ts = now();
-    if (types.includes("dusk")) {
-      const tz = resolveTz((await getMeta()).timeZone);
-      const day = shiftDay(localDay(ts, tz), 0);
-      // 独立的 dedupe key：不占用自动 dusk 的 `dusk:<day>`，当天结束后仍会完整重跑
-      await enqueue("dusk", `dusk-manual:${day}:${ts}`, { day, manual: true }, ts, true);
-    }
-    if (types.includes("synth")) {
-      const { currentIsoWeek } = await import("./time");
-      const tz = resolveTz((await getMeta()).timeZone);
-      const week = currentIsoWeek(ts, tz);
-      await enqueue("synth", `synth-manual:${week}:${ts}`, { week, manual: true }, ts, true);
-    }
     if (types.includes("report")) {
-      const { previousMonth, yearMonth, localDay: ld } = await import("./time");
+      const { yearMonth, localDay: ld } = await import("./time");
       const tz = resolveTz((await getMeta()).timeZone);
-      const month = yearMonth(shiftDay(ld(ts, tz), -1));
-      await enqueue("report", `report:${month}`, { month }, ts, true);
+      const month = yearMonth(ld(ts, tz));
+      await enqueue("report", `report-manual:${month}:${ts}`, { month }, ts, true);
     }
     await runInBackground(() => runJobsNow(LONG_DRAIN_MS));
     return { ok: true as const, started: true as const };
+  });
+
+export const brainGetDiary = createServerFn({ method: "GET" }).handler(async () => {
+  const { getProfileData } = await import("./store");
+  const { lockedProfile } = await import("../types");
+  return { enabled: lockedProfile(await getProfileData()).diaryEnabled };
+});
+
+export const brainSetDiary = createServerFn({ method: "POST" })
+  .validator((input: { enabled: boolean }) => ({ enabled: input.enabled === true }))
+  .handler(async ({ data }) => {
+    const { loadProfile, saveProfile } = await import("./backup");
+    const profile = await loadProfile();
+    profile.diaryEnabled = data.enabled;
+    await saveProfile(profile);
+    return { enabled: profile.diaryEnabled };
   });
 
 /** Diary 页面打开时调用：把到期的日/周/月任务排上，drain 放到后台，请求立刻返回。 */

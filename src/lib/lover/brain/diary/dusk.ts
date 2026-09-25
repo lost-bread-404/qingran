@@ -2,7 +2,6 @@ import { enqueue } from "../jobs.ts";
 import { now } from "../clock.ts";
 import { callModel, asModelInput } from "../llm.ts";
 import {
-  firstMessageLocalDay,
   getMeta,
   listFactors,
   messagesOnDay,
@@ -12,7 +11,7 @@ import {
   upsertDay,
   upsertDayFactor,
 } from "../store.ts";
-import { afterBoundary, localDay, overnightValue, previousIsoWeek, previousMonth, shiftDay, yesterday } from "../time.ts";
+import { localDay, overnightValue, previousMonth } from "../time.ts";
 import { resolveTz } from "../tz.ts";
 import type { DayLog } from "../types.ts";
 import { archiveDaySync } from "../archivist.ts";
@@ -316,32 +315,16 @@ export async function runDusk(
 }
 
 export async function enqueuePeriodicIfDue(nowMs: number, timeZone: string): Promise<void> {
+  const { lockedProfile } = await import("../../types.ts");
+  const { getProfileData } = await import("../store.ts");
+  const profile = lockedProfile(await getProfileData());
+  if (!profile.diaryEnabled) return;
   const meta = await getMeta();
   if (meta.timeZone !== timeZone) await patchMeta({ timeZone });
-  if (!afterBoundary(nowMs, timeZone)) return;
-
-  const first = await firstMessageLocalDay();
-  if (!first) return;
-
-  const yest = yesterday(nowMs, timeZone);
   const today = localDay(nowMs, timeZone);
-  const floor = shiftDay(today, -14);
-  const earliest = first > floor ? first : floor;
-  let last = meta.lastDuskDay && meta.lastDuskDay >= earliest ? meta.lastDuskDay : shiftDay(earliest, -1);
-  let guard = 0;
-  while (last < yest && guard < 14) {
-    last = shiftDay(last, 1);
-    if (last < earliest) continue;
-    await enqueue("dusk", `dusk:${last}`, { day: last });
-    guard += 1;
-  }
-
-  const week = previousIsoWeek(nowMs, timeZone);
-  if (meta.lastSynthWeek < week) {
-    await enqueue("synth", `synth:${week}`, { week });
-  }
+  if (today.slice(8) !== "01") return;
   const month = previousMonth(nowMs, timeZone);
-  if (today.slice(8) >= "01" && meta.lastReportMonth < month) {
+  if (meta.lastReportMonth < month) {
     await enqueue("report", `report:${month}`, { month });
   }
 }

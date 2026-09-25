@@ -97,7 +97,7 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
   {
     key: "report",
     name: "月报",
-    blurb: "写月报解读。用深思考档。",
+    blurb: "读这个月的对话原文，写成一份月报。默认暂停，日记页打开开关后每月第一天才自动写上个月。",
   },
   {
     key: "experiments",

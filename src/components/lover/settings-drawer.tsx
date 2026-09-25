@@ -644,7 +644,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
             ) : (
               [
                 ["清然", ["voice", "reach", "editor", "busy", "busy_tool"]],
-                ["日记", ["archive", "dusk", "assign", "synth", "ask", "report", "experiments", "backfill"]],
+                ["日记", ["report"]],
                 ["评审", ["judge"]],
               ].map(([title, keys]) => (
                 <div key={String(title)} className="flex flex-col gap-2">

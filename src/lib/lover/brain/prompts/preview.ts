@@ -221,13 +221,19 @@ async function slotsFor(key: PromptKey, variantId: string): Promise<{ slots: Rec
       note: "提问那一条用了一句占位。笔记是按日记检索前的最近 20 条。",
     };
   }
-  if (key === "report" || key === "experiments") {
+  if (key === "report") {
+    return {
+      slots: { summaries: "（预览）生成时这里是这个月的对话摘要。", chunk: "（预览）一段按天切开的对话。" },
+      note: "月报读对话原文。太长时先走分段摘要。",
+    };
+  }
+  if (key === "experiments") {
     const meta = await getMeta();
     const tz = resolveTz(meta.timeZone);
     const month = localDay(now(), tz).slice(0, 7);
     const data = JSON.stringify(await buildReportData(month));
     return {
-      slots: { data: data.slice(0, key === "report" ? 20_000 : 12_000) },
+      slots: { data: data.slice(0, 12_000) },
       note: `用 ${month} 的月报统计。`,
     };
   }

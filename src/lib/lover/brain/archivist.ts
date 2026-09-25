@@ -1,6 +1,5 @@
-import { ARCHIVE_BATCH_MAX, ARCHIVE_MIN_OVERFLOW, HISTORY_WINDOW, SESSION_GAP_MS, clampHistoryWindow } from "./config.ts";
+import { ARCHIVE_BATCH_MAX } from "./config.ts";
 import { now } from "./clock.ts";
-import { enqueue } from "./jobs.ts";
 import { callModel, asModelInput } from "./llm.ts";
 import { validateOps, type RawOp } from "./archive-ops.ts";
 import {
@@ -8,14 +7,12 @@ import {
   bumpNotesVersion,
   getNote,
   heavyRecentNotes,
-  lastMessageBefore,
   listMessagesByIds,
   listNotes,
   abandonPendingBatch,
   commitArchiveBatch,
   logSupersede,
   unarchivedForDay,
-  unarchivedForSession,
   unarchivedOverflow,
   getStoredHistoryWindow,
   upsertNote,
@@ -173,23 +170,9 @@ export async function runArchivist(ids: string[], jobId?: string): Promise<void>
   await bumpNotesVersion();
 }
 
-export async function enqueueArchiveIfNeeded(userCreatedAt = now(), historyWindow?: number): Promise<void> {
-  const keep = historyWindow == null ? await getStoredHistoryWindow() : clampHistoryWindow(historyWindow);
-  const overflow = await unarchivedOverflow(ARCHIVE_BATCH_MAX, keep);
-  if (overflow.length >= ARCHIVE_MIN_OVERFLOW) {
-    const batch = overflow.slice(0, ARCHIVE_BATCH_MAX);
-    await enqueue("archive", `archive:${batch[0]!.id}`, { ids: batch.map((m) => m.id) });
-  }
-  const prev = await lastMessageBefore(userCreatedAt);
-  if (prev && userCreatedAt - prev.createdAt >= SESSION_GAP_MS && prev.sessionId) {
-    const session = await unarchivedForSession(prev.sessionId);
-    if (session.length) {
-      for (let i = 0; i < session.length; i += ARCHIVE_BATCH_MAX) {
-        const batch = session.slice(i, i + ARCHIVE_BATCH_MAX);
-        await enqueue("archive", `archive:${batch[0]!.id}`, { ids: batch.map((m) => m.id) });
-      }
-    }
-  }
+/** Archive notes are paused. The table stays; nothing enqueues this anymore. */
+export async function enqueueArchiveIfNeeded(_userCreatedAt = now(), _historyWindow?: number): Promise<void> {
+  return;
 }
 
 export async function archiveDaySync(day: string, jobId?: string): Promise<void> {
@@ -202,5 +185,3 @@ export async function archiveDaySync(day: string, jobId?: string): Promise<void>
     );
   }
 }
-
-export { HISTORY_WINDOW };

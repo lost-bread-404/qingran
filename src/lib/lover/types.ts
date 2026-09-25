@@ -77,6 +77,8 @@ export type Profile = {
   rhythm: string;
   /** Glow half-life in days. 0.5–7, default 2. */
   glowHalfLifeDays: number;
+  /** Monthly diary. Off until Rosie turns it on. Manual reports still run. */
+  diaryEnabled: boolean;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -169,6 +171,7 @@ export const DEFAULT_PROFILE: Profile = {
   identity: "",
   rhythm: "",
   glowHalfLifeDays: 2,
+  diaryEnabled: false,
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -211,6 +214,7 @@ type LooseProfile = Partial<Profile> & {
   identity?: string;
   rhythm?: string;
   glowHalfLifeDays?: number;
+  diaryEnabled?: boolean;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -252,6 +256,7 @@ export function lockedProfile(input?: unknown): Profile {
     identity: typeof raw.identity === "string" ? raw.identity.slice(0, 2000) : "",
     rhythm: typeof raw.rhythm === "string" ? raw.rhythm.slice(0, 500) : "",
     glowHalfLifeDays: clampGlowHalfLifeDays(raw.glowHalfLifeDays),
+    diaryEnabled: raw.diaryEnabled === true,
   };
 }
 

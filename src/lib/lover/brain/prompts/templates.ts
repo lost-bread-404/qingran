@@ -175,16 +175,21 @@ const ASK_SYSTEM = `${DIARY_ANALYST_TEXT}
 
 const REPORT_SYSTEM = `写月报解读，共 4 段，总计 ≤ 800 字：
 1. 这个月的你（状态和节奏）
-2. 反复出现的东西（stuck loops、say-do gap）
-3. 可能的规律（前因、恢复路径）
-4. 下个月可以试的一件事（从候选实验中推荐一个）
+2. 反复出现的东西
+3. 可能的规律
+4. 下个月可以试的一件事
 
+材料是这个月的对话摘要，不是统计表。
 规则：
-- 不得出现 data 中没有的数字。
+- 不得出现摘要里没有的数字。
 - 规律一律用“经常出现在……之后”的措辞，不写“因为”。
-- 标成 clue 的条目（含全部恢复路径）是初步线索，用「初步线索」措辞，不要写成确定规律。
-- 覆盖率低于 50% 时，开头说明数据不足。
+- 覆盖不足、摘要里看不出节奏时，开头先说明数据不足。
 - 不做诊断，不使用临床标签。`;
+
+const REPORT_DIGEST = `把这一段对话收成摘要，给月报用。
+只写对话里出现过的事、原话里的关键词、时间和数字。
+不诊断，不贴临床标签，不补没有说过的数字。
+用中文写一段，不要 JSON。`;
 
 const EXPERIMENTS_SYSTEM = `根据最高分的 antecedent findings 提出最多 3 个小实验。hypothesis 和 action 要具体、可执行。outcome 和 compliance factor 必须来自 findings。`;
 
@@ -640,8 +645,14 @@ aliases：这条笔记以后还可能被怎么说起——同义说法、简称�
     {
       id: "main",
       label: "月报",
-      placeholders: [ph("data", "这个月的统计 JSON，最多 20000 字。数字只能来自这里。")],
-      messages: [system(REPORT_SYSTEM), user("{data}")],
+      placeholders: [ph("summaries", "这个月的对话摘要。太长时先由「分段摘要」写成一段一段，再交给这里。")],
+      messages: [system(REPORT_SYSTEM), user("{summaries}")],
+    },
+    {
+      id: "digest",
+      label: "分段摘要",
+      placeholders: [ph("chunk", "按天切开的一段对话原文。")],
+      messages: [system(REPORT_DIGEST), user("{chunk}")],
     },
   ],
   experiments: [

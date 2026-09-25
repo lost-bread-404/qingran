@@ -84,7 +84,7 @@ export const ROUTES: Record<
   Route,
   { cls: ModelClass; effort?: Effort; timeoutMs: number; maxOutput: number }
 > = {
-  voice: { cls: "FAST_THINKER", effort: "low", timeoutMs: 60_000, maxOutput: 550 },
+  voice: { cls: "FAST_THINKER", effort: "low", timeoutMs: 60_000, maxOutput: 2_000 },
   reflect: { cls: "FAST_THINKER", timeoutMs: 240_000, maxOutput: 4_000 },
   archive: { cls: "WORKHORSE", timeoutMs: 30_000, maxOutput: 6_000 },
   dusk: { cls: "ANALYST", timeoutMs: 60_000, maxOutput: 8_000 },
@@ -92,7 +92,7 @@ export const ROUTES: Record<
   assign: { cls: "WORKHORSE", timeoutMs: 60_000, maxOutput: 6_000 },
   backfill: { cls: "WORKHORSE", timeoutMs: 60_000, maxOutput: 6_000 },
   synth: { cls: "DEEP_THINKER", timeoutMs: 180_000, maxOutput: 20_000 },
-  report: { cls: "DEEP_THINKER", effort: "medium", timeoutMs: 120_000, maxOutput: 12_000 },
+  report: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 4_000 },
   ask: { cls: "AGENT", timeoutMs: 90_000, maxOutput: 8_000 },
   judge: { cls: "DEEP_THINKER", timeoutMs: 120_000, maxOutput: 8_000 },
   editor: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 8_000 },

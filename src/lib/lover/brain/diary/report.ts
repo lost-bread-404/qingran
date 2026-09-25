@@ -1,5 +1,6 @@
 import { asModelInput, callModel } from "../llm.ts";
 import { now } from "../clock.ts";
+import { getSql } from "../../../db.ts";
 import {
   listDays,
   listEpisodes,
@@ -13,11 +14,84 @@ import {
   upsertReport,
 } from "../store.ts";
 import { daysInclusive, isoWeek, monthRange, shiftDay } from "../time.ts";
-import { proposeExperiments } from "./experiments.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { narrativeNumbersOk } from "./report-check.ts";
 import { safetyFlag, sayDoByTag, stuckLoops } from "./stats.ts";
+
+const CHUNK_CHARS = 12_000;
+
+export type MonthLine = { day: string; role: "user" | "assistant"; text: string };
+
+/** This month's spoken turns. System notices and forgotten rows stay out. */
+export async function loadMonthDialogue(month: string): Promise<MonthLine[]> {
+  if (!/^\d{4}-\d{2}$/.test(month)) return [];
+  const { start, end } = monthRange(month);
+  const db = await getSql();
+  const rows = await db.query<{ role: string; body: string; local_day: string | null }>(
+    `select role, body, local_day
+     from qingran_messages
+     where forgotten_at is null
+       and kind is distinct from 'system_notice'
+       and local_day >= $1 and local_day <= $2
+     order by created_at asc, id asc`,
+    [start, end],
+  );
+  return rows
+    .map((row) => ({
+      day: String(row.local_day ?? ""),
+      role: row.role === "assistant" ? "assistant" as const : "user" as const,
+      text: String(row.body ?? "").replace(/\s+/g, " ").trim(),
+    }))
+    .filter((row) => row.day && row.text);
+}
+
+export function chunkByDay(lines: MonthLine[], maxChars = CHUNK_CHARS): string[] {
+  const days: Array<{ day: string; text: string }> = [];
+  for (const line of lines) {
+    const who = line.role === "user" ? "Rosie" : "清然";
+    const row = `${who}：${line.text}`;
+    const last = days[days.length - 1];
+    if (last?.day === line.day) last.text = `${last.text}\n${row}`;
+    else days.push({ day: line.day, text: row });
+  }
+  const chunks: string[] = [];
+  let buf = "";
+  const push = (block: string) => {
+    if (block.length <= maxChars) {
+      chunks.push(block);
+      return;
+    }
+    for (let i = 0; i < block.length; i += maxChars) chunks.push(block.slice(i, i + maxChars));
+  };
+  for (const day of days) {
+    const block = `【${day.day}】\n${day.text}`;
+    if (buf && buf.length + block.length + 2 > maxChars) {
+      push(buf);
+      buf = "";
+    }
+    if (block.length > maxChars) {
+      if (buf) push(buf);
+      buf = "";
+      push(block);
+      continue;
+    }
+    buf = buf ? `${buf}\n\n${block}` : block;
+  }
+  if (buf) push(buf);
+  return chunks;
+}
+
+async function completeVariant(variantId: string, vars: Record<string, string>, jobId?: string): Promise<string> {
+  const reportPrompt = await loadPrompt("report");
+  const result = await callModel("report", {
+    ...asModelInput(renderVariant(parsePromptBody("report", reportPrompt.body), variantId, vars)),
+    jobId,
+    promptKey: reportPrompt.key,
+    promptHash: reportPrompt.hash,
+  });
+  return result.text.trim();
+}
 
 export async function buildReportData(month: string) {
   const { start, end } = monthRange(month);
@@ -74,53 +148,47 @@ export async function buildReportData(month: string) {
   };
 }
 
-export async function writeNarrative(data: unknown, jobId?: string): Promise<string> {
-  for (let i = 0; i < 3; i++) {
-    const reportPrompt = await loadPrompt("report");
-    const result = await callModel("report", {
-      ...asModelInput(
-        renderVariant(parsePromptBody("report", reportPrompt.body), "main", {
-          data: JSON.stringify(data).slice(0, 20_000),
-        }),
-      ),
-      jobId,
-      promptKey: reportPrompt.key,
-      promptHash: reportPrompt.hash,
-    });
-    const text = result.text.replace(/\s+/g, " ").trim().slice(0, 800);
-    if (text && narrativeNumbersOk(text, data)) return text;
-  }
-  return "";
+export async function writeNarrative(summaries: string, jobId?: string): Promise<string> {
+  const text = await completeVariant("main", { summaries: summaries.slice(0, 20_000), data: summaries.slice(0, 20_000) }, jobId);
+  return text.replace(/\n{3,}/g, "\n\n").trim().slice(0, 800);
 }
 
 export async function runReport(month: string, jobId?: string): Promise<void> {
   if (!/^\d{4}-\d{2}$/.test(month)) return;
   const { start, end } = monthRange(month);
-  const days = await listDays(start, end);
-  if (!days.some((d) => d.coverage !== "none")) {
+  const lines = await loadMonthDialogue(month);
+  if (!lines.length) {
     await upsertReport({
       id: month,
       periodStart: start,
       periodEnd: end,
-      data: { month, empty: true, okDays: 0 },
-      narrative: "本月没有数据。",
+      data: { month, empty: true, source: "messages" },
+      narrative: "这个月没有对话。",
       createdAt: now(),
     });
     await patchMeta({ lastReportMonth: month });
     return;
   }
-  const data = await buildReportData(month);
-  await proposeExperiments(data, jobId);
-  const narrative = await writeNarrative(data, jobId);
+  const chunks = chunkByDay(lines);
+  let summaries = chunks[0] ?? "";
+  if (chunks.length > 1 || summaries.length > CHUNK_CHARS) {
+    const parts: string[] = [];
+    for (const chunk of chunks) {
+      const digest = await completeVariant("digest", { chunk, summaries: chunk, data: chunk }, jobId);
+      if (digest) parts.push(digest);
+    }
+    summaries = parts.join("\n\n");
+  }
+  const narrative = await writeNarrative(summaries, jobId);
   await upsertReport({
     id: month,
     periodStart: start,
     periodEnd: end,
-    data,
-    narrative,
+    data: { month, source: "messages", chunks: chunks.length },
+    narrative: narrative || "没写成。",
     createdAt: now(),
   });
   await patchMeta({ lastReportMonth: month });
 }
 
-export { narrativeNumbersOk, shiftDay };
+export { narrativeNumbersOk, shiftDay, CHUNK_CHARS };
