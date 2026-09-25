@@ -125,6 +125,7 @@ export function VoiceRoom() {
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmAudioUrl, setConfirmAudioUrl] = useState<string | null>(null);
+  const [confirmClipNote, setConfirmClipNote] = useState<string | null>(null);
   const confirmWasOpenRef = useRef(false);
   const confirmOpenRef = useRef(false);
   const skipAutoPlayRef = useRef(false);
@@ -774,6 +775,7 @@ export function VoiceRoom() {
 
   useEffect(() => {
     if (!confirmId) {
+      setConfirmClipNote(null);
       setConfirmAudioUrl((url) => {
         if (url) URL.revokeObjectURL(url);
         return null;
@@ -784,6 +786,7 @@ export function VoiceRoom() {
     if (!msg?.voiceTurnId) return;
     let revoked = false;
     let url: string | null = null;
+    setConfirmClipNote(null);
     setConfirmPredicted(msg.predictedTags ?? null);
     setConfirmGoldTags(null);
     setConfirmNoise(false);
@@ -792,9 +795,14 @@ export function VoiceRoom() {
     setConfirmDraft(msg.text);
     setConfirmStt(msg.text);
     void getHearingTurnAudio({ data: { turnId: msg.voiceTurnId } }).then((result) => {
-      if (!result.ok || revoked) return;
+      if (revoked) return;
+      if (!result.ok) {
+        setConfirmClipNote(result.error);
+        return;
+      }
       const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
       url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
+      setConfirmClipNote(null);
       setConfirmAudioUrl(url);
     });
     void getHearingClipLabel({ data: { turnId: msg.voiceTurnId } }).then((result) => {
@@ -1443,6 +1451,7 @@ export function VoiceRoom() {
           sttText={confirmStt}
           initialDraft={confirmDraft}
           audioUrl={confirmAudioUrl}
+          clipNote={confirmClipNote}
           busy={confirmBusy}
           error={confirmError}
           initialPredicted={confirmPredicted}

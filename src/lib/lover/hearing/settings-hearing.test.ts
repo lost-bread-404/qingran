@@ -15,6 +15,19 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.doesNotMatch(src, /录音采集/);
   assert.doesNotMatch(src, /to="\/record"/);
   assert.match(src, /打开标注页/);
+  assert.equal(src.split("<LabelModeSwitch").length - 1, 2);
+  assert.match(src, /听错了/);
+  const life = readFileSync(new URL("../../../components/lover/settings-life.tsx", import.meta.url), "utf8");
+  assert.match(life, /他没说出口的/);
+  assert.match(life, /不会自己过期/);
+  assert.match(life, /一直惦记的/);
+  assert.match(life, /可以改，可以清空/);
+  assert.match(life, /还没有起伏/);
+  assert.match(life, /给他的心情/);
+  assert.match(life, /例如 \+10/);
+  assert.match(life, /开心或难过多久回到平常/);
+  const transcript = readFileSync(new URL("../../../components/lover/transcript.tsx", import.meta.url), "utf8");
+  assert.match(transcript, /听错了/);
   assert.match(src, /to="\/lab"/);
   assert.match(src, /label="高级"/);
   assert.match(src, /brainListVoiceModels/);
@@ -29,6 +42,8 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.match(editor, /VOICE_EFFORT_OPTIONS/);
   assert.match(editor, /切换后下一句立刻生效/);
   assert.match(editor, /grok-4\.20-0309-non-reasoning 再试一次/);
+  assert.match(editor, /busy_tool/);
+  assert.match(editor, /回复时的工具说明（不单独调用模型）/);
   assert.doesNotMatch(src, />回复模型</);
   assert.doesNotMatch(src, /VOICE_CHAT_OPTIONS/);
   assert.doesNotMatch(src, /VoiceChatId/);

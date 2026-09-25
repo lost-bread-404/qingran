@@ -12,6 +12,7 @@ type Props = {
   open: boolean;
   sttText: string;
   audioUrl?: string | null;
+  clipNote?: string | null;
   onClose: () => void;
   onConfirm: (input: {
     goldText: string;
@@ -40,6 +41,7 @@ export function ConfirmTurn({
   open,
   sttText,
   audioUrl,
+  clipNote,
   onClose,
   onConfirm,
   busy,
@@ -107,7 +109,7 @@ export function ConfirmTurn({
         {audioUrl ? (
           <audio className="mb-3 w-full shrink-0" controls src={audioUrl} />
         ) : (
-          <p className="mb-3 shrink-0 text-xs text-subtle">没有这段录音，或者还在加载。</p>
+          <p className="mb-3 shrink-0 text-xs text-subtle">{clipNote || "没有这段录音，或者还在加载。"}</p>
         )}
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <Textarea

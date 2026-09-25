@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD, lockSttKeyterms } from "@/lib/lover/hearing/config";
+import { RECENT_CLIP_KEEP } from "@/lib/lover/brain/config";
 import { formatHearingTimingSummary, parseHearingTimingLine } from "@/lib/lover/hearing/timing-format";
 import { formatCallAudioLogLines, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
@@ -139,6 +140,31 @@ type Props = {
   onSave: (next: Profile) => void;
   onClearChat: () => void;
 };
+
+function LabelModeSwitch({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
+      <input
+        type="checkbox"
+        className="mt-1"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>
+        <span className="block text-sm">标注模式</span>
+        <span className="block text-xs text-subtle">
+          打开后每一句都存成 clip。关掉时仍保留最近 {RECENT_CLIP_KEEP} 条语音，消息上可以点「听错了」改正。更早的只删录音，不删聊天。
+        </span>
+      </span>
+    </label>
+  );
+}
 
 export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, callDeaf = false, onSave, onClearChat }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
@@ -752,6 +778,13 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
               />
               <span className="text-sm">静音</span>
             </label>
+            <LabelModeSwitch
+              checked={debugHearing}
+              onChange={(next) => {
+                setDebugHearing(next);
+                persistProfile({ debugHearing: next, captureAudio: next });
+              }}
+            />
             <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
               <input
                 type="checkbox"
@@ -928,24 +961,13 @@ maxAlternatives: 3`}
                 </pre>
               </div>
             </section>
-            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={debugHearing}
-                onChange={(e) => {
-                  const next = e.target.checked;
-                  setDebugHearing(next);
-                  persistProfile({ debugHearing: next, captureAudio: next });
-                }}
-              />
-              <span>
-                <span className="block text-sm">标注模式</span>
-                <span className="block text-xs text-subtle">
-                  打开后每一句都存成 clip，并启用确认面板。关掉就不存录音，铅笔只是改字。
-                </span>
-              </span>
-            </label>
+            <LabelModeSwitch
+              checked={debugHearing}
+              onChange={(next) => {
+                setDebugHearing(next);
+                persistProfile({ debugHearing: next, captureAudio: next });
+              }}
+            />
             <Link
               to="/lab"
               className="flex min-h-11 items-center justify-center rounded-md bg-surface-2 px-3 text-sm"

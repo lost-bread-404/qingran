@@ -336,8 +336,18 @@ function UserBubble({
   onNoiseReply?: (id: string) => void;
 }) {
   const canConfirm = Boolean(debugHearing && user.voiceTurnId && onConfirmStart);
+  const canMishear = Boolean(!debugHearing && user.voiceTurnId && onConfirmStart);
   const labeled = user.hearingGold === "confirmed";
   const showUndo = Boolean(canConfirm && labeled && undoConfirmId === user.id && onUndoConfirm);
+  const holdRef = useRef<number | null>(null);
+  function clearHold() {
+    if (holdRef.current != null) window.clearTimeout(holdRef.current);
+    holdRef.current = null;
+  }
+  function openMishear() {
+    if (!user.voiceTurnId || !onConfirmStart) return;
+    onConfirmStart(user.id);
+  }
   if (user.nightNoise) {
     return (
       <div className="flex justify-end">
@@ -365,7 +375,32 @@ function UserBubble({
             <Pencil className="size-3.5" />
           </button>
         ) : null}
-        <div className="relative flex max-w-[min(20rem,85%)] flex-col items-end">
+        {canMishear ? (
+          <button
+            type="button"
+            aria-label="听错了"
+            onClick={openMishear}
+            className="mb-1 shrink-0 text-xs text-subtle transition-colors duration-150 hover:text-fg"
+          >
+            听错了
+          </button>
+        ) : null}
+        <div
+          className="relative flex max-w-[min(20rem,85%)] flex-col items-end"
+          onContextMenu={(event) => {
+            if (!user.voiceTurnId || !onConfirmStart) return;
+            event.preventDefault();
+            openMishear();
+          }}
+          onPointerDown={() => {
+            if (!user.voiceTurnId || !onConfirmStart) return;
+            clearHold();
+            holdRef.current = window.setTimeout(openMishear, 550);
+          }}
+          onPointerUp={clearHold}
+          onPointerLeave={clearHold}
+          onPointerCancel={clearHold}
+        >
           {labeled ? (
             <span
               className="absolute -right-1 -top-1 size-2 rounded-full bg-emerald-500"

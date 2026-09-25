@@ -148,6 +148,8 @@ export const SESSION_GAP_MS = 30 * 60_000;
 /** longing stays in the reply for a week after the text last changed. */
 export const LONGING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const PLAN_OPEN_MAX = 5;
+/** Voice clips kept when label mode is off. Older files are deleted; messages stay. */
+export const RECENT_CLIP_KEEP = 20;
 export const PLAN_MAX_HOURS = 72;
 export const INDEX_MAX_ITEMS = 150;
 export const INDEX_CORE_MAX = 60; // 放在 Reflector B 段（可缓存）

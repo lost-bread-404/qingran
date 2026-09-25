@@ -85,6 +85,26 @@ test("non-debug does not record silence or a miss; debug still does", () => {
   assert.equal(shouldRecordHearing({ debugHearing: true, text: "" }), true);
 });
 
+test("non-debug transcript keeps a turn id so 听错了 can find the clip", () => {
+  const heard = heardFromHearing({
+    debugHearing: false,
+    turnId: "t-keep",
+    tagged: "在吗",
+    xaiText: "在吗",
+    noiseOnly: false,
+  });
+  assert.equal(heard.text, "在吗");
+  assert.equal(voiceTurnIdForMessage(heard), "t-keep");
+  const miss = heardFromHearing({
+    debugHearing: false,
+    turnId: "t-miss",
+    tagged: "",
+    xaiText: "",
+    noiseOnly: true,
+  });
+  assert.equal(voiceTurnIdForMessage(miss), undefined);
+});
+
 test("non-debug empty still returns blank so the UI can say 没听清", () => {
   const heard = heardFromHearing({
     debugHearing: false,

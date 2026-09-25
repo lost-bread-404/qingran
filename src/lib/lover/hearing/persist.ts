@@ -137,6 +137,40 @@ export async function insertClipRow(sql: Sql, input: InsertClipRowInput): Promis
   `;
 }
 
+/** Drop audio on real, unlabeled clips past `keep`. Rows and chat messages stay. */
+export async function dropOldHearingClipFiles(sql: Sql, keep: number): Promise<string[]> {
+  const limit = Math.max(0, Math.floor(keep));
+  const rows = await sql<{
+    id: string;
+    blob_pathname: string | null;
+    source: string | null;
+    gold_source: string | null;
+    gold_text: string | null;
+    has_wav: number | boolean | string | null;
+  }>`
+    select id, blob_pathname, source, gold_source, gold_text,
+           case when audio_wav is null then 0 else 1 end as has_wav
+    from qingran_hearing_clips
+    order by created_at desc, id desc
+  `;
+  const live = rows.filter((row) => {
+    if (row.source && row.source !== "real") return false;
+    if (row.gold_source || (row.gold_text && row.gold_text.trim())) return false;
+    const hasWav = row.has_wav === true || row.has_wav === 1 || row.has_wav === "1" || row.has_wav === "t";
+    return hasWav || Boolean(row.blob_pathname);
+  });
+  const paths: string[] = [];
+  for (const row of live.slice(limit)) {
+    if (row.blob_pathname) paths.push(row.blob_pathname);
+    await sql`
+      update qingran_hearing_clips
+      set audio_wav = null, blob_pathname = null, blob_error = 'pruned'
+      where id = ${row.id}
+    `;
+  }
+  return paths;
+}
+
 export async function confirmClipByTurn(
   sql: Sql,
   input: {

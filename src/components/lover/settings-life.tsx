@@ -127,7 +127,7 @@ export function HeartEditor({
   const [glow, setGlow] = useState<GlowRow[]>([]);
   const [reach, setReach] = useState<ReachRow | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [delta, setDelta] = useState("0");
+  const [delta, setDelta] = useState("");
   const [why, setWhy] = useState("");
 
   function load() {
@@ -169,31 +169,38 @@ export function HeartEditor({
   return (
     <div className="flex flex-col gap-4">
       {error ? <p className="text-sm text-live">{error}</p> : null}
-      <p className="text-xs text-subtle">失焦就记下。下一次他想事情时，读到的就是改过的。</p>
-      <p className="text-sm">
-        场景：{inner.scene === "intimate" ? "亲密" : "日常"}
-      </p>
-      {(
-        [
-          ["欲望", "desire"],
-          ["对她", "readHer"],
-          ["心里", "feel"],
-          ["取舍", "choice"],
-          ["正在做", "now"],
-        ] as const
-      ).map(([label, key]) => (
-        <label key={key} className="flex flex-col gap-1">
-          <span className="text-sm">{label}</span>
-          <Textarea
-            value={inner[key]}
-            className="min-h-16"
-            onChange={(e) => setInner({ ...inner, [key]: e.target.value })}
-            onBlur={() => save({ [key]: inner[key] })}
-          />
-        </label>
-      ))}
+      <section className="flex flex-col gap-2">
+        <p className="text-sm">此刻</p>
+        <p className="text-xs text-subtle">
+          他没说出口的。下一轮回复看得到欲望、心里和正在做，取舍和对她的理解他留着自己看。
+        </p>
+        <p className="text-sm">场景：{inner.scene === "intimate" ? "亲密" : "日常"}</p>
+        <p className="text-xs text-subtle">失焦就记下。</p>
+        {(
+          [
+            ["欲望", "desire"],
+            ["对她", "readHer"],
+            ["心里", "feel"],
+            ["取舍", "choice"],
+            ["正在做", "now"],
+          ] as const
+        ).map(([label, key]) => (
+          <label key={key} className="flex flex-col gap-1">
+            <span className="text-sm">{label}</span>
+            <Textarea
+              value={inner[key]}
+              className="min-h-16"
+              onChange={(e) => setInner({ ...inner, [key]: e.target.value })}
+              onBlur={() => save({ [key]: inner[key] })}
+            />
+          </label>
+        ))}
+      </section>
       <section className="flex flex-col gap-2">
         <p className="text-sm">计划</p>
+        <p className="text-xs text-subtle">
+          他接下来想做成的事。达成了标做成了，想法变了就改或标放下了。不会自己过期。
+        </p>
         {inner.plans.map((plan, index) => (
           <div key={plan.id || index} className="rounded-md bg-surface-2 p-2">
             <Textarea
@@ -245,6 +252,7 @@ export function HeartEditor({
       </section>
       <section className="flex flex-col gap-2">
         <p className="text-sm">心事</p>
+        <p className="text-xs text-subtle">一直惦记的，几天不说话也还在。</p>
         {inner.longings.map((item, index) => (
           <div key={item.id || index} className="rounded-md bg-surface-2 p-2">
             <Textarea
@@ -282,6 +290,7 @@ export function HeartEditor({
       </section>
       <section className="flex flex-col gap-2">
         <p className="text-sm">下一次找你</p>
+        <p className="text-xs text-subtle">他打算什么时候再找你、想做什么。可以改，可以清空。</p>
         {reach ? (
           <>
             <Input
@@ -322,40 +331,57 @@ export function HeartEditor({
         <p className="text-xs text-subtle">
           {word ? `${word}（比平常）` : "平常"} · {inner.glow.toFixed(1)}
         </p>
-        <div className="flex h-16 items-end gap-1">
-          {[...glow].reverse().map((row) => (
-            <div
-              key={row.id}
-              title={`${clock(row.at)} ${row.why}`}
-              className={cn("w-2 rounded-sm", row.glowAfter >= 0 ? "bg-accent" : "bg-live")}
-              style={{ height: `${Math.max(8, (Math.abs(row.glowAfter) / maxGlow) * 100)}%` }}
-            />
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <Input aria-label="心情加减" value={delta} onChange={(e) => setDelta(e.target.value)} />
+        {glow.length === 0 ? (
+          <p className="text-sm text-subtle">还没有起伏</p>
+        ) : (
+          <div className="flex h-16 items-end gap-1">
+            {[...glow].reverse().map((row) => (
+              <div
+                key={row.id}
+                title={`${clock(row.at)} ${row.why}`}
+                className={cn("w-2 rounded-sm", row.glowAfter >= 0 ? "bg-accent" : "bg-live")}
+                style={{ height: `${Math.max(8, (Math.abs(row.glowAfter) / maxGlow) * 100)}%` }}
+              />
+            ))}
+          </div>
+        )}
+        <label className="flex flex-col gap-1 text-xs text-subtle">
+          给他的心情 +/−
+          <Input
+            aria-label="给他的心情 +/−"
+            value={delta}
+            placeholder="例如 +10"
+            onChange={(e) => setDelta(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-subtle">
+          原因
           <Input aria-label="原因" value={why} onChange={(e) => setWhy(e.target.value)} placeholder="原因" />
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              void brainAdjustGlow({ data: { delta: Number(delta) || 0, why } })
-                .then(() => load())
-                .catch(() => setError("心情没记下。"));
-            }}
-          >
-            记下
-          </Button>
-        </div>
+        </label>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            void brainAdjustGlow({ data: { delta: Number(delta) || 0, why } })
+              .then(() => {
+                setDelta("");
+                setWhy("");
+                load();
+              })
+              .catch(() => setError("心情没记下。"));
+          }}
+        >
+          记下
+        </Button>
         <label className="text-xs text-subtle">
-          半衰期 {halfLifeDays} 天
+          开心或难过多久回到平常：{halfLifeDays} 天
           <input
             type="range"
             min={0.5}
             max={7}
             step={0.5}
             value={halfLifeDays}
-            aria-label="心情半衰期"
+            aria-label="开心或难过多久回到平常"
             className="mt-1 h-11 w-full accent-accent"
             onChange={(e) => onHalfLife(clampGlowHalfLifeDays(Number(e.target.value)))}
           />

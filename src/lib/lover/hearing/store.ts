@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { dbSource, getSql } from "@/lib/db";
+import { RECENT_CLIP_KEEP } from "@/lib/lover/brain/config";
 import { newId } from "../storage";
 import {
   HEARING,
@@ -50,6 +51,7 @@ import {
   hallucinationCountByReason,
   engineUseStats,
   insertClipRow,
+  dropOldHearingClipFiles,
   insertReplyFlag,
   listClipRows,
   listClipsMissingProsody,
@@ -322,17 +324,23 @@ export const getHearingTurnAudio = createServerFn({ method: "POST" })
   .validator((input: { turnId: string }) => input)
   .handler(async ({ data }) => {
     const sql = await getSql();
-    const rows = await sql<{ audio_wav: string | null; blob_pathname: string | null }>`
-      select audio_wav, blob_pathname from qingran_hearing_clips
+    const rows = await sql<{
+      audio_wav: string | null;
+      blob_pathname: string | null;
+      blob_error: string | null;
+    }>`
+      select audio_wav, blob_pathname, blob_error from qingran_hearing_clips
       where turn_id = ${data.turnId}
       order by created_at desc
       limit 1
     `;
-    const wav = rows[0]?.audio_wav;
+    if (!rows[0]) return { ok: false as const, error: "没有这段录音。" };
+    const wav = rows[0].audio_wav;
     if (wav) return { ok: true as const, audioBase64: wav, mimeType: "audio/wav" };
-    const fromBlob = rows[0]?.blob_pathname ? await readHearingWav(rows[0].blob_pathname) : null;
-    if (!fromBlob) return { ok: false as const, error: "没有这段录音。" };
-    return { ok: true as const, audioBase64: fromBlob, mimeType: "audio/wav" };
+    const fromBlob = rows[0].blob_pathname ? await readHearingWav(rows[0].blob_pathname) : null;
+    if (fromBlob) return { ok: true as const, audioBase64: fromBlob, mimeType: "audio/wav" };
+    if (rows[0].blob_error === "pruned") return { ok: false as const, error: "这段录音已经不在了。" };
+    return { ok: false as const, error: "没有这段录音。" };
   });
 
 export const runHearing = createServerFn({ method: "POST" })
@@ -516,6 +524,7 @@ export const runHearing = createServerFn({ method: "POST" })
             durationMs,
             peakRms: data.peakRms ?? peakRms,
             capture: Boolean(data.capture || data.debugHearing),
+            keepAllClips: Boolean(data.debugHearing),
             refusal,
             engineRequested: provider,
             engineUsed: used,
@@ -1395,6 +1404,8 @@ async function persistHearingTurn(input: {
   durationMs: number;
   peakRms: number;
   capture: boolean;
+  /** Label mode keeps every clip. Otherwise only the newest RECENT_CLIP_KEEP files stay. */
+  keepAllClips?: boolean;
   refusal: boolean;
   engineRequested?: string;
   engineUsed?: string;
@@ -1440,7 +1451,7 @@ async function persistHearingTurn(input: {
     stt_corrected_text: input.sttCorrectedText ?? null,
     stt_corrections: input.sttCorrections?.length ? input.sttCorrections : null,
   });
-  if (!input.capture) return;
+  if (!input.data.audioBase64) return;
   try {
     await insertClip({
       audioBase64: input.data.audioBase64,
@@ -1480,6 +1491,11 @@ async function persistHearingTurn(input: {
       toneMark: input.data.toneMark ?? null,
       senseLine: input.data.senseLine ?? null,
     });
+    if (!input.keepAllClips) {
+      const sql = await getSql();
+      const paths = await dropOldHearingClipFiles(sql, RECENT_CLIP_KEEP);
+      for (const path of paths) await deleteHearingWav(path);
+    }
   } catch (err) {
     const saveError = errorText(err);
     console.error("[hearing] insertClip failed:", saveError);

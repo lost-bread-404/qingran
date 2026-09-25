@@ -94,6 +94,7 @@ export function heardFromHearing(input: {
     clipId: input.clipId,
     saveError: input.saveError,
     skipQingran: Boolean(input.hallucinationSuspect),
+    persistPending: !empty,
     predictedTags: input.predictedTags,
     ...timing,
     ...extra,
