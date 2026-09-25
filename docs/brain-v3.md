@@ -16,7 +16,7 @@ Rosie ──► ① 回答 ◄──── ② 内心 ───────┘
 | 部分 | 写入方 | 频率 | 读取方 |
 |---|---|---|---|
 | ① 回答 | `voice` | 每轮 | Rosie |
-| ② 内心 | `reflect` | 每轮，回复后异步 | ①，以及下一次 reflect |
+| ② 内心 | `voice` 同一条输出末尾的 `⟦心⟧` JSON | 每轮，回复说完立刻写，下一轮才注入 | ①，以及 reach |
 | ③ Dossier | `editor` | 第一次自动生效；之后约每 20 轮 Rosie 的消息，或隔了一次会话再开口，或设置里「现在整理」 | ① ② |
 | 日记 | `archive` 以及 dusk / synth / … | 对话滑出窗口、每天、每周 | 只给日记页。清然不读 `mem_notes` |
 
@@ -50,11 +50,12 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 3. `【我此刻】`：想要（desire）、心里（feel）、正在做（now）、心情（glow 词）。某一行空了就删掉那一行；四行都空就整块删掉。desire / feel / now 超过 30 分钟不注入。旧的「一直惦记着」不再出现在默认热路径里。
 4. `现在是{clock}。`
 5. 最近 N 条 history
-6. user：这一句
+6. 状态说明（可编辑，在 voice 模板里）：让模型在说完后另起一行写 `⟦心⟧` 和 JSON。里面带上一次的 plans，只用来延续。
+7. user：这一句
 
-开关在设置 → 指令：「我记得的」「注入我此刻」（在「我此刻」页）、上下文长度。
+`read_her` 和 `choice` 不进【我此刻】。忙碌程度不进回复。降级顺序仍是：去掉【我此刻】→ 去掉【我记得的】→ 只留人设 + 最近 8 条 + 状态说明 + 这一句。分隔符后面的 JSON 不进屏幕、不进 TTS、不进 `qingran_messages`。
 
-**不注入** `read_her`、`choice` 和 `plans`。降级顺序：去掉【我此刻】→ 去掉【我记得的】→ 只留人设 + 最近 8 条 + 这一句。
+没有分隔符或 JSON 不完整时，内心保持上一轮，`qr_inner_log` 记 `inner_missing` 或 `inner_parse_error`。不再为内心单独排 reflect job。
 
 ## 每个 prompt
 
@@ -62,8 +63,8 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 
 | key | 何时跑 | 输入 | 输出 |
 |---|---|---|---|
-| `voice` | 每轮回复 | 人设、我记得的、我此刻、时间、history、这一句 | 说出来的话 |
-| `reflect` | 回复后 | 人设；可缓存的我记得的；时间、上一次内心（含 read_her、choice 和 open plans）、最近 16 条 | desire / read_her / feel / choice / now / longings / plans / glow / next_reach。desire 排第一 |
+| `voice` | 每轮回复 | 人设、我记得的、我此刻、时间、history、状态说明（含上一次的 plans）、这一句 | 说出来的话，然后 `⟦心⟧` 加 desire / read_her / feel / choice / now / longings / plans / glow / next_reach |
+| `reflect` | 不再入队 | 旧任务如果还在队列里，仍按原来的输入跑完 | 同上面的内心字段。新的一轮不再调用 |
 | `editor` main | 见上 | 人设、当前文档、longing、cursor 之后没被遗忘的对话（一批最多约 12000 字）、字数上限 | `{ops:[{section,action,old,new}]}` |
 | `editor` compact | 应用后超过上限 | 全文、上限 | `{body}`，author=`compact` |
 | `editor` seed | `active` 仍是 false 且没有草稿时，自动跑一次 | 人设、`seed/story.json`、还在用的画像和 self/bond、最近 60 天 weight≥3 的笔记最多 150 条、longing | `{body}`，写进版本历史后立刻生效 |

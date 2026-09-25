@@ -76,6 +76,25 @@ export const REFLECT_OUTPUT_KEYS = [
   "next_reach",
 ] as const;
 
+export function formatLongingsLine(inner: InnerState): string {
+  const items = inner.longings.filter((item) => item.text.trim());
+  if (!items.length) return inner.longing.trim();
+  return items
+    .map((item) => `${item.text.trim()}${item.since ? `（从 ${item.since} 起）` : ""}`)
+    .join("；");
+}
+
+export function formatPlansForPrompt(plans: InnerPlan[]): string {
+  const open = plans.filter((plan) => plan.status === "open" && plan.what.trim());
+  if (!open.length) return "（没有）";
+  return open
+    .map((plan) => {
+      const why = plan.why?.trim() ? ` why=${plan.why.trim()}` : "";
+      return `- id=${plan.id} what=${plan.what.trim()}${why} status=${plan.status}`;
+    })
+    .join("\n");
+}
+
 export function nowNotActionReason(nowText: string): string | null {
   const text = nowText.trim();
   if (!text) return null;
@@ -104,7 +123,7 @@ export function momentForVoice(
     feel: momentStale ? "" : inner.feel.trim(),
     desire: momentStale ? "" : inner.desire.trim(),
     now: momentStale ? "" : inner.now.trim(),
-    longing: longingStale ? "" : inner.longing.trim(),
+    longing: longingStale ? "" : formatLongingsLine(inner),
     glow: word ? `${word}（比平常）` : "",
     stale: { moment: momentStale, longing: longingStale },
   };
@@ -299,6 +318,14 @@ function mergePlans(
     const id = existing ? existing.id : requested && !used.has(requested) ? requested : makePlanId(nowMs, index, used);
     if (used.has(id)) return;
     used.add(id);
+    const rejected = nowRejectedReason(what);
+    if (rejected) {
+      const list = Array.isArray(discarded.plan_not_positive)
+        ? (discarded.plan_not_positive as Array<{ id: string; reason: string; text: string }>)
+        : [];
+      list.push({ id, reason: rejected, text: what });
+      discarded.plan_not_positive = list;
+    }
     const status = planStatus(row.status, existing?.status ?? "open");
     next.push({
       id,

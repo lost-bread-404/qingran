@@ -14,6 +14,7 @@ import {
   talkFailFromResult,
 } from "./talk-fail.ts";
 import { recordTtsSpend } from "./brain/spend/check";
+import { InnerCutBuffer, replyBodyMissing } from "./brain/voice/inner-cut";
 
 const MAX_INPUT = 2000;
 const PCM_MIME = `audio/pcm;rate=${VOICE_IO.sampleRate}`;
@@ -80,6 +81,9 @@ export type TalkStreamResult = {
   chars: number;
   otherEvents: string;
   toolCalls?: Array<{ id: string; name: string; arguments: string }>;
+  /** Text after ⟦心⟧. null when the model never wrote the mark. */
+  innerTail?: string | null;
+  innerCut?: boolean;
 };
 
 function emptyResult(partial: Partial<TalkStreamResult> = {}): TalkStreamResult {
@@ -244,22 +248,23 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     return emptyResult({ model: route.model, effort: route.effort, status, ms: Date.now() - t0, otherEvents: "empty body" });
   }
 
-  let full = "";
   let pending = "";
   let firstSpoken = true;
+  const cut = new InnerCutBuffer();
+  let released = false;
+  let releaseWait: Promise<void> | null = null;
   const toolMap = new Map<number, { id: string; name: string; arguments: string }>();
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
 
-  const ingestToken = (token: string) => {
+  const emitVisible = (token: string) => {
     if (!token) return;
     if (!ttftSent) {
       ttftMs = Date.now() - t0;
       emit({ t: "timing", k: "ttft_ms", ms: ttftMs });
       ttftSent = true;
     }
-    full += token;
     pending += token;
     emit({ t: "text", d: token });
     if (shouldFlushSpoken(pending, firstSpoken)) {
@@ -267,6 +272,45 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       pending = "";
       firstSpoken = false;
     }
+  };
+
+  const releaseSpoken = () => {
+    if (released || !cut.seen || replyBodyMissing(cut.speech, cut.seen)) return;
+    released = true;
+    if (pending.trim()) {
+      ensureTts().push(pending);
+      pending = "";
+      firstSpoken = false;
+    }
+    const speech = cut.speech.trim();
+    releaseWait = (async () => {
+      if (live.tts) await live.tts.finish();
+      if (!live.tts?.complete) {
+        const clip = await speakRest(apiKey, speech, speed);
+        if (clip?.b) {
+          timedEmit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
+        } else {
+          fail(TALK_FAIL.tts, { status, finishReason, ms: Date.now() - t0, chars: speech.length }, true);
+        }
+      }
+      emit({ t: "text_end", speech });
+      emit({
+        t: "done",
+        speech,
+        replyId: data.replyId,
+        status,
+        finishReason,
+        ms: Date.now() - t0,
+        chars: speech.length,
+        ttftMs: ttftMs ?? undefined,
+      });
+    })();
+  };
+
+  const ingestToken = (token: string) => {
+    if (!token) return;
+    emitVisible(cut.push(token));
+    releaseSpoken();
   };
 
   const handleJson = (json: unknown) => {
@@ -330,9 +374,15 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   }
   buf += decoder.decode();
   drainBuf(true);
+  emitVisible(cut.finish());
+  releaseSpoken();
+  if (releaseWait) await releaseWait;
   const toolCalls = [...toolMap.values()].filter((call) => call.name);
+  const speech = cut.speech.trim();
+  const innerTail = cut.seen ? cut.tail : null;
+  const innerCut = cut.seen;
 
-  if (toolCalls.length && !full.trim()) {
+  if (toolCalls.length && !speech) {
     live.tts?.abort();
     return {
       usage,
@@ -347,11 +397,13 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       chars: 0,
       otherEvents: takeOtherEvents(),
       toolCalls,
+      innerTail,
+      innerCut,
     };
   }
 
-  if (pending.trim()) ensureTts().push(pending);
-  const speech = full.trim();
+  if (replyBodyMissing(cut.speech, cut.seen)) live.tts?.abort();
+  if (!released && pending.trim()) ensureTts().push(pending);
   const outcome = talkFailFromResult({
     kind: "ok",
     status: status ?? 200,
@@ -360,6 +412,23 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     ms: Date.now() - t0,
   });
   const otherEvents = takeOtherEvents();
+  if (released) {
+    return {
+      usage,
+      ttftMs,
+      firstAudioMs,
+      model: route.model,
+      effort: route.effort,
+      ttsChars: live.tts?.chars ?? spokenForTts(speech).length,
+      status,
+      finishReason,
+      ms: Date.now() - t0,
+      chars: speech.length,
+      otherEvents,
+      innerTail,
+      innerCut,
+    };
+  }
   if (outcome.message) {
     if (data.failOnEmpty && isRetryableEmptyTalk({ status: status ?? 200, finishReason, speech })) {
       live.tts?.abort();
@@ -376,6 +445,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
         ms: Date.now() - t0,
         chars: 0,
         otherEvents,
+        innerTail: null,
+        innerCut: false,
       };
     }
     emit({ t: "text_end", speech });
@@ -392,6 +463,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       ms: Date.now() - t0,
       chars: speech.length,
       otherEvents,
+      innerTail: null,
+      innerCut: false,
     };
   }
   emit({ t: "text_end", speech });
@@ -432,6 +505,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     ms: Date.now() - t0,
     chars: speech.length,
     otherEvents,
+    innerTail: null,
+    innerCut: false,
   };
 }
 

@@ -126,6 +126,18 @@ test("open plans are not dropped just because an old expires_at passed", () => {
   assert.deepEqual(dropped, []);
 });
 
+test("a negative plan is kept and only logged", () => {
+  const { next, discarded } = applyReflectOutput(
+    EMPTY_INNER,
+    { plans: [{ id: "", what: "不要催她", why: "她累", status: "open" }] },
+    10,
+    1,
+  );
+  assert.equal(next.plans[0]?.what, "不要催她");
+  const logged = discarded.plan_not_positive as Array<{ text: string }>;
+  assert.equal(logged[0]?.text, "不要催她");
+});
+
 test("longing timestamp moves only when the text changes", () => {
   const prev: InnerState = { ...EMPTY_INNER, longing: "同一句", longing_updated_at: 20 };
   const same = applyReflectOutput(prev, { longing: "同一句", plans: [] }, 80, 1).next;

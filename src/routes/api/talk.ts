@@ -3,7 +3,8 @@ import { noteRosieTurn } from "@/lib/lover/brain/dossier";
 import { enqueueArchiveIfNeeded } from "@/lib/lover/brain/archivist";
 import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } from "@/lib/lover/brain/config";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
-import { drainJobs, enqueue } from "@/lib/lover/brain/jobs";
+import { drainJobs } from "@/lib/lover/brain/jobs";
+import { commitReplyInner } from "@/lib/lover/brain/reply-inner";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
 import { upsertMessage } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
@@ -128,6 +129,7 @@ export const Route = createFileRoute("/api/talk")({
                     ?.content ?? ""
                 : "";
               const toolStarted = { ms: 0, name: "", args: "" };
+              let sentDone = false;
               const fallback = await runVoiceWithFallback(
                 {
                   text,
@@ -178,7 +180,14 @@ export const Route = createFileRoute("/api/talk")({
                     send(event);
                     return;
                   }
-                  if (event.t === "done") return;
+                  if (event.t === "done") {
+                    speech = event.speech || speech;
+                    if (!sentDone) {
+                      sentDone = true;
+                      send(event);
+                    }
+                    return;
+                  }
                   send(event);
                 },
               );
@@ -200,7 +209,7 @@ export const Route = createFileRoute("/api/talk")({
                   timeZone,
                 });
               }
-              if (!failed) {
+              if (!failed && !sentDone) {
                 send({
                   t: "done",
                   speech,
@@ -266,7 +275,14 @@ export const Route = createFileRoute("/api/talk")({
                 },
               });
 
-              await enqueue("reflect", `reflect:${userCreatedAt}`, { turnSeq: userCreatedAt });
+              if (!failed && display) {
+                await commitReplyInner({
+                  turnSeq: userCreatedAt,
+                  tail: streamResult.innerCut ? (streamResult.innerTail ?? "") : null,
+                  model: streamResult.model || null,
+                  ms: streamResult.ms,
+                });
+              }
               await noteRosieTurn(userCreatedAt);
               await enqueueArchiveIfNeeded(userCreatedAt, ctx.inject.history);
               await enqueuePeriodicIfDue(nowMs, timeZone);

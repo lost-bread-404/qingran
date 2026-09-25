@@ -895,7 +895,6 @@ export async function finishImport(opts: { v1?: boolean } = {}): Promise<void> {
   await bumpNotesVersion();
   resetRetrieveCache();
   const ts = now();
-  await enqueue("reflect", `reflect:import:${ts}`, { turnSeq: ts }, ts, true);
   if (opts.v1) {
     await enqueue("archive", `archive:import:${ts}`, { ids: [] }, ts, true);
   }

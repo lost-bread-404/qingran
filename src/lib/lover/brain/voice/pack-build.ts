@@ -63,6 +63,8 @@ export type VoicePackParts = {
   injectMoment?: boolean;
   injectDossier?: boolean;
   historyWindow?: number;
+  /** Open plans from the previous turn, shown only in the state block. */
+  plansText?: string;
   /** Legacy rebuild only. Notes are not injected on the live path. */
   showMemories?: boolean;
   mindText?: string;
@@ -179,6 +181,7 @@ function voiceVars(parts: {
   userText: string;
   mindText: string;
   memoriesText: string;
+  plansText: string;
 }): Record<string, string> {
   return {
     system_prompt: parts.charter.trim() || FALLBACK_CHARTER,
@@ -194,6 +197,7 @@ function voiceVars(parts: {
     longing: parts.moment.longing.trim(),
     now: parts.moment.now.trim(),
     glow: parts.moment.glow.trim(),
+    plans: parts.plansText.trim() || "（没有）",
     mind: parts.mindText,
     memories: parts.memoriesText,
     user_text: parts.userText,
@@ -220,6 +224,7 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
     showMemories: parts.showMemories === true && (strip === "none" || strip === "moment"),
     mindText: strip === "none" ? parts.mindText : "",
     memoriesText: strip === "none" || strip === "moment" ? parts.memoriesText : "",
+    plansText: parts.plansText,
     inject: {
       moment: inject.moment && strip === "none",
       dossier: inject.dossier && dossierOn,
@@ -231,11 +236,12 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
     role: "system" as const,
     content: systemCharter(parts.charter, parts.voiceTemplate),
   };
+  const state = rendered.find((message) => message.content.includes("⟦心⟧"));
   const cap = inject.history <= 0 ? 0 : Math.min(VOICE_THIN_HISTORY, inject.history);
   const history = voiceHistoryMessages(parts.history, cap);
   const last = rendered[rendered.length - 1];
   const user = last?.role === "user" ? last : { role: "user" as const, content: parts.userText };
-  return [head, ...history, user];
+  return state ? [head, ...history, state, user] : [head, ...history, user];
 }
 
 export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
@@ -335,6 +341,7 @@ export function buildVoiceMessages(opts: {
   showMemories?: boolean;
   mindText?: string;
   memoriesText?: string;
+  plansText?: string;
   /** Rebuild of an older saved template may still pass these. */
   mind?: Mind;
   notes?: Note[];
@@ -360,6 +367,7 @@ export function buildVoiceMessages(opts: {
     userText: opts.userText,
     mindText: opts.mindText ?? opts.mind?.insight ?? "",
     memoriesText: opts.showMemories ? opts.memoriesText ?? "" : "",
+    plansText: opts.plansText ?? "",
   });
   messages = messages
     .map((message) => ({ ...message, content: prepareMomentTemplate(message.content, moment, inject.moment) }))

@@ -643,7 +643,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
               [
-                ["清然", ["voice", "reflect", "reach", "editor", "busy", "busy_tool"]],
+                ["清然", ["voice", "reach", "editor", "busy", "busy_tool"]],
                 ["日记", ["archive", "dusk", "assign", "synth", "ask", "report", "experiments", "backfill"]],
                 ["评审", ["judge"]],
               ].map(([title, keys]) => (
