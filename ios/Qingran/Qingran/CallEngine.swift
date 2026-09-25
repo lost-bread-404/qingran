@@ -8,12 +8,14 @@ final class CallEngine: NSObject, ObservableObject {
   @Published private(set) var inCall = false
 
   var onSystemHangup: (() -> Void)?
+  var nativeSession = false
 
   private let provider: CXProvider
   private let controller = CXCallController()
   private var callUUID: UUID?
   private var holdPlayer: AVAudioPlayer?
   private var endingFromWeb = false
+  private var callGeneration = 0
 
   override init() {
     let config = CXProviderConfiguration()
@@ -43,13 +45,19 @@ final class CallEngine: NSObject, ObservableObject {
   }
 
   func startCall() {
+    callGeneration += 1
+    let generation = callGeneration
     requestMic { [weak self] allowed in
-      guard let self else { return }
+      guard let self, self.callGeneration == generation else { return }
       self.prepareAudioSession()
-      guard allowed else { return }
+      guard allowed else {
+        self.nativeSession = false
+        NativePipeline.shared.permissionDenied()
+        return
+      }
       if self.callUUID != nil {
         self.inCall = true
-        self.startHoldLoop()
+        if !self.nativeSession { self.startHoldLoop() }
         return
       }
       let uuid = UUID()
@@ -65,14 +73,31 @@ final class CallEngine: NSObject, ObservableObject {
       self.provider.reportOutgoingCall(with: uuid, startedConnectingAt: Date())
       self.provider.reportOutgoingCall(with: uuid, connectedAt: Date())
       self.inCall = true
-      self.startHoldLoop()
+      if self.nativeSession {
+        self.startHoldLoop(false)
+      } else {
+        self.startHoldLoop()
+      }
     }
   }
 
+  func beginNativeCall() {
+    nativeSession = true
+    startCall()
+  }
+
   func endCallFromWeb() {
+    callGeneration += 1
+    NativePipeline.shared.stop()
+    nativeSession = false
+    guard callUUID != nil else {
+      endingFromWeb = false
+      inCall = false
+      startHoldLoop(false)
+      return
+    }
     endingFromWeb = true
     finishCall()
-    endingFromWeb = false
   }
 
   private func finishCall() {
@@ -122,6 +147,9 @@ final class CallEngine: NSObject, ObservableObject {
 
 extension CallEngine: CXProviderDelegate {
   func providerDidReset(_ provider: CXProvider) {
+    callGeneration += 1
+    NativePipeline.shared.stop()
+    nativeSession = false
     callUUID = nil
     inCall = false
     startHoldLoop(false)
@@ -133,10 +161,15 @@ extension CallEngine: CXProviderDelegate {
   }
 
   func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+    if !endingFromWeb { callGeneration += 1 }
+    let notifyWeb = !endingFromWeb
+    endingFromWeb = false
+    NativePipeline.shared.stop()
+    nativeSession = false
     callUUID = nil
     inCall = false
     startHoldLoop(false)
-    if !endingFromWeb {
+    if notifyWeb {
       onSystemHangup?()
     }
     action.fulfill()
@@ -144,7 +177,12 @@ extension CallEngine: CXProviderDelegate {
 
   func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
     prepareAudioSession()
-    startHoldLoop()
+    if nativeSession {
+      startHoldLoop(false)
+      NativePipeline.shared.startEngine()
+    } else {
+      startHoldLoop()
+    }
   }
 
   func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {

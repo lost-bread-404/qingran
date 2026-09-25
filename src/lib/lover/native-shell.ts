@@ -3,6 +3,8 @@ export type NativeBridge = {
   startCall?: () => void;
   endCall?: () => void;
   prepareAudio?: () => void;
+  startNativeCall?: () => void;
+  endNativeCall?: () => void;
   keepAwake?: (on: boolean) => void;
 };
 
@@ -12,14 +14,15 @@ declare global {
   }
 }
 
-export type NativeCallStart = "startCall" | "prepareAudio";
-export type NativeCallEnd = "endCall" | "none";
+export type NativeCallStart = "startNativeCall" | "prepareAudio";
+export type NativeCallEnd = "endNativeCall" | "none";
 
-/** CallKit is off until the native call pipeline exists. The saved switch is ignored. */
-export function nativeCallPlan(_callKitBackground: boolean): {
+/** Native pipeline only inside the iOS shell, and only when Rosie turned the switch on. */
+export function nativeCallPlan(callKitBackground: boolean): {
   callStart: NativeCallStart;
   callEnd: NativeCallEnd;
 } {
+  if (callKitBackground && isNativeShell()) return { callStart: "startNativeCall", callEnd: "endNativeCall" };
   return { callStart: "prepareAudio", callEnd: "none" };
 }
 
@@ -53,14 +56,14 @@ export function nativeKeepAwake(on: boolean) {
 
 export function nativeStartCall(callKitBackground: boolean) {
   const plan = nativeCallPlan(callKitBackground);
-  if (plan.callStart === "startCall") post((bridge) => bridge.startCall?.());
+  if (plan.callStart === "startNativeCall") post((bridge) => bridge.startNativeCall?.());
   else nativePrepareAudio();
 }
 
 export function nativeEndCall(callKitBackground: boolean) {
   const plan = nativeCallPlan(callKitBackground);
   if (plan.callEnd === "none") return;
-  post((bridge) => bridge.endCall?.());
+  post((bridge) => bridge.endNativeCall?.());
 }
 
 let holdAudioPrepared = false;

@@ -28,7 +28,7 @@ import { callListenStuck, CALL_STUCK_MS } from "@/lib/lover/call-phase";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { recordCuts } from "@/lib/lover/hearing/sense";
 import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
-import { listenNativeHangup, nativeEndCall, nativeKeepAwake, nativeStartCall } from "@/lib/lover/native-shell";
+import { listenNativeHangup, nativeCallPlan, nativeEndCall, nativeKeepAwake, nativeStartCall } from "@/lib/lover/native-shell";
 import { attachPcmTap, peakRms, peakTimedRms, PRE_ROLL_SEC, pushTimedRms, wavFromTap, type PcmTap, type TimedRms } from "@/lib/lover/pcm-tap";
 import { keepPlaybackAlive, isPlaybackActive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
@@ -113,6 +113,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const interimRef = useRef("");
   const framesRef = useRef<ProsodyFrame[]>([]);
   const nativeHangupRef = useRef(false);
+  const nativeOwnedRef = useRef(false);
   const callKitRef = useRef(Boolean(callKitBackground));
   callKitRef.current = Boolean(callKitBackground);
   const speechStartWallRef = useRef(0);
@@ -192,6 +193,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
 
   const hangup = useCallback(() => {
     liveRef.current = false;
+    nativeOwnedRef.current = false;
     setDeafBoth(true);
     setActive(false);
     setPhaseBoth("idle");
@@ -597,7 +599,17 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const start = useCallback(async () => {
     if (liveRef.current) return;
     setError(null);
+    const nativeOwned = nativeCallPlan(callKitRef.current).callStart === "startNativeCall";
+    nativeOwnedRef.current = nativeOwned;
     nativeStartCall(callKitRef.current);
+    if (nativeOwned) {
+      liveRef.current = true;
+      setDeafBoth(false);
+      setActive(true);
+      setPhaseBoth("listening");
+      nativeKeepAwake(true);
+      return;
+    }
     void unlockPlayback();
     try {
       const stream = await acquireMicFromGesture();
@@ -663,7 +675,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   }, [hangup, tick]);
 
   const deafen = useCallback(() => {
-    if (!liveRef.current) return;
+    if (!liveRef.current || nativeOwnedRef.current) return;
     setDeafBoth(true);
     logCallAudio("deafen");
     speechRiseAtRef.current = 0;
@@ -686,7 +698,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   }, []);
 
   const hear = useCallback(() => {
-    if (!liveRef.current) return;
+    if (!liveRef.current || nativeOwnedRef.current) return;
     setDeafBoth(false);
     setMicEnabled(streamRef.current, true);
     setPhaseBoth("listening");
@@ -701,6 +713,10 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
 
   const revive = useCallback(async (opts?: { gesture?: boolean }) => {
     if (!liveRef.current) return;
+    if (nativeCallPlan(callKitRef.current).callStart === "startNativeCall") {
+      if (!pageIsHidden()) nativeKeepAwake(true);
+      return;
+    }
     if (pageIsHidden() && !opts?.gesture) {
       nativeKeepAwake(false);
       keepPlaybackAlive();
@@ -805,7 +821,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
     let since = 0;
     let reported = false;
     const id = window.setInterval(() => {
-      if (!liveRef.current) return;
+      if (!liveRef.current || nativeOwnedRef.current) return;
       const playing = isPlaybackActive();
       const generating = Boolean(isGeneratingRef.current?.());
       const recognizing = recognizingRef.current;
@@ -856,6 +872,19 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   }, [active, revive]);
 
   useEffect(() => () => hangup(), [hangup]);
+
+  useEffect(() => {
+    const onNative = (event: Event) => {
+      if (!liveRef.current) return;
+      const detail = (event as CustomEvent<{ type?: string; phase?: CallPhase }>).detail;
+      const phaseNow = detail?.phase;
+      if (detail?.type === "phase" && (phaseNow === "listening" || phaseNow === "speaking-you" || phaseNow === "transcribing")) {
+        setPhaseBoth(phaseNow);
+      }
+    };
+    window.addEventListener("qingran-native-call", onNative);
+    return () => window.removeEventListener("qingran-native-call", onNative);
+  }, []);
 
   useEffect(() => {
     return listenNativeHangup(() => {

@@ -256,11 +256,36 @@ export function VoiceRoom() {
     window.addEventListener("qingran-push", reload);
     window.addEventListener("focus", reload);
     document.addEventListener("visibilitychange", onVisible);
+    const onNativeCall = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; id?: string; text?: string; at?: number; replyTo?: string }>).detail;
+      if (!detail?.type || !detail.id) return;
+      if (detail.type === "heard" && detail.text) {
+        const id = detail.id;
+        const text = detail.text;
+        const at = detail.at || Date.now();
+        setMessages((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, { id, role: "user", text, createdAt: at }]));
+      } else if (detail.type === "reply" && detail.text) {
+        const id = detail.id;
+        const text = detail.text;
+        const replyTo = detail.replyTo;
+        setMessages((prev) => {
+          const index = prev.findIndex((m) => m.id === id);
+          if (index >= 0) {
+            const next = prev.slice();
+            next[index] = { ...next[index], text };
+            return next;
+          }
+          return [...prev, { id, role: "assistant", text, createdAt: Date.now(), replyTo }];
+        });
+      }
+    };
+    window.addEventListener("qingran-native-call", onNativeCall);
     return () => {
       window.removeEventListener("qingran-push-token", onToken);
       window.removeEventListener("qingran-push", reload);
       window.removeEventListener("focus", reload);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("qingran-native-call", onNativeCall);
     };
   }, []);
 

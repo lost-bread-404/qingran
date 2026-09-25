@@ -50,53 +50,55 @@ export const speakAsLover = createServerFn({ method: "POST" })
     };
   });
 
+export async function transcribeVoiceAudio(data: SttInput) {
+  const apiKey = process.env.XAI_API_KEY;
+  if (!apiKey) return { ok: false as const, error: "stt-unavailable" };
+
+  const mime = sanitizeMime(data.mimeType);
+  const bytes = Buffer.from(data.audioBase64, "base64");
+  if (bytes.length < 20) return { ok: false as const, error: "太短了。" };
+  if (bytes.length > 12_000_000) return { ok: false as const, error: "这段有点太长。" };
+
+  const form = new FormData();
+  form.append("model", HEARING.xai.model);
+  form.append("filler_words", "true");
+  form.append("vad_threshold", String(xaiVadThreshold()));
+  for (const term of STT_KEYTERMS) form.append("keyterm", term);
+  const blob = new Blob([new Uint8Array(bytes)], { type: mime });
+  form.append("file", blob, filenameFor(mime));
+
+  const res = await fetch("https://api.x.ai/v1/stt", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    const hint = await readXaiFail(res);
+    return { ok: false as const, error: isQuotaHint(hint) ? hint : `没听清（${res.status}）。` };
+  }
+
+  const body = (await res.json()) as {
+    text?: string;
+    transcript?: string;
+    words?: { text?: string; start?: number; end?: number }[];
+  };
+  const raw = body.text || body.transcript || "";
+  let text = restoreSpeechText(raw, body.words);
+  if (!text) {
+    const fallback = (body.words ?? []).map((w) => w.text ?? "").join("").trim();
+    text = restoreSpeechText(fallback);
+  }
+  const lastEnd = (body.words ?? []).reduce((m, w) => Math.max(m, Number(w.end) || 0), 0);
+  const seconds = lastEnd > 0 ? lastEnd : bytes.length / (VOICE_IO.sampleRate * 2);
+  void recordSttSpend(seconds, false);
+  return { ok: true as const, text, words: body.words ?? [] };
+}
+
 export const transcribeVoice = createServerFn({ method: "POST" })
   .validator((input: SttInput) => input)
-  .handler(async ({ data }) => {
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) return { ok: false as const, error: "stt-unavailable" };
-
-    const mime = sanitizeMime(data.mimeType);
-    const bytes = Buffer.from(data.audioBase64, "base64");
-    if (bytes.length < 20) return { ok: false as const, error: "太短了。" };
-    if (bytes.length > 12_000_000) return { ok: false as const, error: "这段有点太长。" };
-
-    const form = new FormData();
-    form.append("model", HEARING.xai.model);
-    form.append("filler_words", "true");
-    form.append("vad_threshold", String(xaiVadThreshold()));
-    for (const term of STT_KEYTERMS) form.append("keyterm", term);
-    const blob = new Blob([new Uint8Array(bytes)], { type: mime });
-    form.append("file", blob, filenameFor(mime));
-
-    const res = await fetch("https://api.x.ai/v1/stt", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    if (!res.ok) {
-      const hint = await readXaiFail(res);
-      return { ok: false as const, error: isQuotaHint(hint) ? hint : `没听清（${res.status}）。` };
-    }
-
-    const body = (await res.json()) as {
-      text?: string;
-      transcript?: string;
-      words?: { text?: string; start?: number; end?: number }[];
-    };
-    const raw = body.text || body.transcript || "";
-    let text = restoreSpeechText(raw, body.words);
-    if (!text) {
-      const fallback = (body.words ?? []).map((w) => w.text ?? "").join("").trim();
-      text = restoreSpeechText(fallback);
-    }
-    const lastEnd = (body.words ?? []).reduce((m, w) => Math.max(m, Number(w.end) || 0), 0);
-    const seconds = lastEnd > 0 ? lastEnd : bytes.length / (VOICE_IO.sampleRate * 2);
-    void recordSttSpend(seconds, false);
-    return { ok: true as const, text, words: body.words ?? [] };
-  });
+  .handler(async ({ data }) => transcribeVoiceAudio(data));
 
 function sanitizeMime(mime: string): string {
   const base = mime.split(";")[0]?.trim().toLowerCase() || "audio/webm";

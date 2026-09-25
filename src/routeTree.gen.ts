@@ -14,6 +14,8 @@ import { Route as DiaryRouteImport } from './routes/diary'
 import { Route as LabRouteImport } from './routes/lab'
 import { Route as ApiTalkRouteImport } from './routes/api/talk'
 import { Route as ApiWarmRouteImport } from './routes/api/warm'
+import { Route as ApiSttRouteImport } from './routes/api/stt'
+import { Route as ApiNativeLogRouteImport } from './routes/api/native-log'
 import { Route as ApiCronBrainRouteImport } from './routes/api/cron/brain'
 import { Route as ApiCronWakeRouteImport } from './routes/api/cron/wake'
 import { Route as ApiPushRegisterRouteImport } from './routes/api/push/register'
@@ -43,6 +45,16 @@ const ApiWarmRoute = ApiWarmRouteImport.update({
   path: '/api/warm',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSttRoute = ApiSttRouteImport.update({
+  id: '/api/stt',
+  path: '/api/stt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiNativeLogRoute = ApiNativeLogRouteImport.update({
+  id: '/api/native-log',
+  path: '/api/native-log',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCronBrainRoute = ApiCronBrainRouteImport.update({
   id: '/api/cron/brain',
   path: '/api/cron/brain',
@@ -65,6 +77,8 @@ export interface FileRoutesByFullPath {
   '/lab': typeof LabRoute
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
+  '/api/stt': typeof ApiSttRoute
+  '/api/native-log': typeof ApiNativeLogRoute
   '/api/cron/brain': typeof ApiCronBrainRoute
   '/api/cron/wake': typeof ApiCronWakeRoute
   '/api/push/register': typeof ApiPushRegisterRoute
@@ -75,6 +89,8 @@ export interface FileRoutesByTo {
   '/lab': typeof LabRoute
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
+  '/api/stt': typeof ApiSttRoute
+  '/api/native-log': typeof ApiNativeLogRoute
   '/api/cron/brain': typeof ApiCronBrainRoute
   '/api/cron/wake': typeof ApiCronWakeRoute
   '/api/push/register': typeof ApiPushRegisterRoute
@@ -86,6 +102,8 @@ export interface FileRoutesById {
   '/lab': typeof LabRoute
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
+  '/api/stt': typeof ApiSttRoute
+  '/api/native-log': typeof ApiNativeLogRoute
   '/api/cron/brain': typeof ApiCronBrainRoute
   '/api/cron/wake': typeof ApiCronWakeRoute
   '/api/push/register': typeof ApiPushRegisterRoute
@@ -98,6 +116,8 @@ export interface FileRouteTypes {
     | '/lab'
     | '/api/talk'
     | '/api/warm'
+    | '/api/stt'
+    | '/api/native-log'
     | '/api/cron/brain'
     | '/api/cron/wake'
     | '/api/push/register'
@@ -108,6 +128,8 @@ export interface FileRouteTypes {
     | '/lab'
     | '/api/talk'
     | '/api/warm'
+    | '/api/stt'
+    | '/api/native-log'
     | '/api/cron/brain'
     | '/api/cron/wake'
     | '/api/push/register'
@@ -118,6 +140,8 @@ export interface FileRouteTypes {
     | '/lab'
     | '/api/talk'
     | '/api/warm'
+    | '/api/stt'
+    | '/api/native-log'
     | '/api/cron/brain'
     | '/api/cron/wake'
     | '/api/push/register'
@@ -129,6 +153,8 @@ export interface RootRouteChildren {
   LabRoute: typeof LabRoute
   ApiTalkRoute: typeof ApiTalkRoute
   ApiWarmRoute: typeof ApiWarmRoute
+  ApiSttRoute: typeof ApiSttRoute
+  ApiNativeLogRoute: typeof ApiNativeLogRoute
   ApiCronBrainRoute: typeof ApiCronBrainRoute
   ApiCronWakeRoute: typeof ApiCronWakeRoute
   ApiPushRegisterRoute: typeof ApiPushRegisterRoute
@@ -171,6 +197,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiWarmRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/stt': {
+      id: '/api/stt'
+      path: '/api/stt'
+      fullPath: '/api/stt'
+      preLoaderRoute: typeof ApiSttRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/native-log': {
+      id: '/api/native-log'
+      path: '/api/native-log'
+      fullPath: '/api/native-log'
+      preLoaderRoute: typeof ApiNativeLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/cron/brain': {
       id: '/api/cron/brain'
       path: '/api/cron/brain'
@@ -201,6 +241,8 @@ const rootRouteChildren: RootRouteChildren = {
   LabRoute: LabRoute,
   ApiTalkRoute: ApiTalkRoute,
   ApiWarmRoute: ApiWarmRoute,
+  ApiSttRoute: ApiSttRoute,
+  ApiNativeLogRoute: ApiNativeLogRoute,
   ApiCronBrainRoute: ApiCronBrainRoute,
   ApiCronWakeRoute: ApiCronWakeRoute,
   ApiPushRegisterRoute: ApiPushRegisterRoute,

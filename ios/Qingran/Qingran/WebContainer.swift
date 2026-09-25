@@ -19,8 +19,10 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
   private var webView: WKWebView!
   private var failed = false
   private var foregroundObserver: NSObjectProtocol?
+  private var activeObserver: NSObjectProtocol?
   private var tokenObserver: NSObjectProtocol?
   private var pushObserver: NSObjectProtocol?
+  private var hangupNeedsReplay = false
 
   init(url: URL, onChangeURL: @escaping () -> Void) {
     self.startURL = url
@@ -63,10 +65,13 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     webView = wv
 
     CallEngine.shared.onSystemHangup = { [weak self] in
-      self?.webView?.evaluateJavaScript(
-        "window.dispatchEvent(new CustomEvent('qingran-native-hangup'))",
-        completionHandler: nil
-      )
+      self?.postHangupEvent()
+    }
+    NativePipeline.shared.onHangup = { [weak self] in
+      self?.postHangupEvent()
+    }
+    NativePipeline.shared.prepare { [weak self] detail in
+      self?.postNativeCall(detail)
     }
 
     wv.load(URLRequest(url: startURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 45))
@@ -77,6 +82,13 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       queue: .main
     ) { [weak self] _ in
       self?.reloadIfIdle()
+    }
+    activeObserver = NotificationCenter.default.addObserver(
+      forName: UIApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.replayHangupIfNeeded()
     }
     tokenObserver = NotificationCenter.default.addObserver(
       forName: .qingranPushToken,
@@ -97,6 +109,9 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
   deinit {
     if let foregroundObserver {
       NotificationCenter.default.removeObserver(foregroundObserver)
+    }
+    if let activeObserver {
+      NotificationCenter.default.removeObserver(activeObserver)
     }
     if let tokenObserver {
       NotificationCenter.default.removeObserver(tokenObserver)
@@ -128,6 +143,13 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       CallEngine.shared.endCallFromWeb()
     case "prepareAudio":
       CallEngine.shared.prepareAudioSession()
+    case "startNativeCall":
+      NativePipeline.shared.prepare { [weak self] detail in
+        self?.postNativeCall(detail)
+      }
+      CallEngine.shared.beginNativeCall()
+    case "endNativeCall":
+      CallEngine.shared.endCallFromWeb()
     case "keepAwake":
       var on = false
       if let body = message.body as? [String: Any], let flag = body["on"] as? Bool {
@@ -171,6 +193,34 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
     failed = false
     deliverPushToken()
+  }
+
+  private func postHangupEvent() {
+    if UIApplication.shared.applicationState != .active {
+      hangupNeedsReplay = true
+    }
+    webView?.evaluateJavaScript(
+      "window.dispatchEvent(new CustomEvent('qingran-native-hangup'))",
+      completionHandler: nil
+    )
+  }
+
+  private func replayHangupIfNeeded() {
+    guard hangupNeedsReplay else { return }
+    hangupNeedsReplay = false
+    webView?.evaluateJavaScript(
+      "window.dispatchEvent(new CustomEvent('qingran-native-hangup'))",
+      completionHandler: nil
+    )
+  }
+
+  private func postNativeCall(_ detail: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: detail),
+          let json = String(data: data, encoding: .utf8) else { return }
+    let js = "window.dispatchEvent(new CustomEvent('qingran-native-call', {detail:\(json)}))"
+    DispatchQueue.main.async { [weak self] in
+      self?.webView?.evaluateJavaScript(js, completionHandler: nil)
+    }
   }
 
   private func deliverPushToken() {
@@ -232,6 +282,8 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       startCall: function () { post('startCall'); },
       endCall: function () { post('endCall'); },
       prepareAudio: function () { post('prepareAudio'); },
+      startNativeCall: function () { post('startNativeCall'); },
+      endNativeCall: function () { post('endNativeCall'); },
       keepAwake: function (on) { post('keepAwake', { on: !!on }); }
     };
   })();

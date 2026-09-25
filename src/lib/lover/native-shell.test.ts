@@ -17,9 +17,18 @@ describe("native call bridge", { concurrency: 1 }, () => {
     assert.equal(isNativeShell(), false);
   });
 
-  test("CallKit stays off until the native pipeline exists", () => {
+  test("native shell takes the call only when the switch is on", () => {
     assert.deepEqual(nativeCallPlan(false), { callStart: "prepareAudio", callEnd: "none" });
     assert.deepEqual(nativeCallPlan(true), { callStart: "prepareAudio", callEnd: "none" });
+    const prev = globalThis.window;
+    (globalThis as { window?: Window }).window = { QingranNative: { present: true } } as unknown as Window;
+    try {
+      assert.deepEqual(nativeCallPlan(false), { callStart: "prepareAudio", callEnd: "none" });
+      assert.deepEqual(nativeCallPlan(true), { callStart: "startNativeCall", callEnd: "endNativeCall" });
+    } finally {
+      if (prev === undefined) delete (globalThis as { window?: Window }).window;
+      else (globalThis as { window?: Window }).window = prev;
+    }
   });
 
   test("start and end call the bridge only for the planned action", () => {
@@ -29,6 +38,8 @@ describe("native call bridge", { concurrency: 1 }, () => {
       startCall: () => calls.push("startCall"),
       endCall: () => calls.push("endCall"),
       prepareAudio: () => calls.push("prepareAudio"),
+      startNativeCall: () => calls.push("startNativeCall"),
+      endNativeCall: () => calls.push("endNativeCall"),
     };
     const prev = globalThis.window;
     (globalThis as { window?: Window }).window = { QingranNative: bridge } as unknown as Window;
@@ -41,7 +52,7 @@ describe("native call bridge", { concurrency: 1 }, () => {
       if (prev === undefined) delete (globalThis as { window?: Window }).window;
       else (globalThis as { window?: Window }).window = prev;
     }
-    assert.deepEqual(calls, ["prepareAudio", "prepareAudio"]);
+    assert.deepEqual(calls, ["prepareAudio", "startNativeCall", "endNativeCall"]);
   });
 
   test("push-to-talk prepares audio once", () => {
@@ -65,7 +76,7 @@ describe("native call bridge", { concurrency: 1 }, () => {
     assert.deepEqual(calls, ["prepareAudio"]);
   });
 
-  test("background calls stay saved but the switch and CallKit path are hidden", () => {
+  test("background calls use the native pipeline when the shell is present", () => {
     assert.equal(lockedProfile().callKitBackground, false);
     assert.equal(lockedProfile({ callKitBackground: true }).callKitBackground, true);
     const call = readFileSync(new URL("../../hooks/use-call.ts", import.meta.url), "utf8");
@@ -76,15 +87,25 @@ describe("native call bridge", { concurrency: 1 }, () => {
     const app = readFileSync(new URL("../../../ios/Qingran/Qingran/AppDelegate.swift", import.meta.url), "utf8");
     assert.match(call, /nativeStartCall\(callKitRef\.current\)/);
     assert.match(call, /nativeEndCall\(callKitRef\.current\)/);
+    assert.match(call, /nativeOwned/);
     assert.match(call, /nativeKeepAwake\(true\)/);
     assert.match(call, /nativeKeepAwake\(false\)/);
     assert.doesNotMatch(call, /nativeStartCall\(\)/);
     assert.match(voice, /nativePrepareHoldToTalk\(\)/);
     assert.match(room, /callKitBackground: profile\.callKitBackground/);
-    assert.doesNotMatch(settings, /切到后台也继续通话/);
+    assert.match(room, /qingran-native-call/);
+    assert.match(settings, /切到后台也继续通话/);
+    assert.match(settings, /开启后通话由手机原生处理/);
     assert.match(web, /case "keepAwake"/);
     assert.match(web, /isIdleTimerDisabled = on/);
     assert.match(web, /keepAwake: function/);
+    assert.match(web, /startNativeCall/);
+    assert.match(web, /endNativeCall/);
+    const native = readFileSync(new URL("../../../ios/Qingran/Qingran/NativeCall.swift", import.meta.url), "utf8");
+    assert.match(native, /api\/stt/);
+    assert.match(native, /api\/talk/);
+    assert.match(native, /api\/native-log/);
+    assert.match(native, /NativeVad.silenceMs/);
     assert.match(app, /func applicationDidEnterBackground/);
     assert.match(app, /isIdleTimerDisabled = false/);
   });

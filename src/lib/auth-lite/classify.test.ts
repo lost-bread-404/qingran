@@ -29,6 +29,8 @@ test("protected paths are not public", () => {
   assert.equal(isPublicPath("GET", "/diary"), false);
   assert.equal(isPublicPath("GET", "/lab"), false);
   assert.equal(isPublicPath("POST", "/api/talk"), false);
+  assert.equal(isPublicPath("POST", "/api/stt"), false);
+  assert.equal(isPublicPath("POST", "/api/native-log"), false);
   assert.equal(isPublicPath("GET", "/api/warm"), false);
   assert.equal(isPublicPath("POST", "/_serverFn/abc"), false);
   assert.equal(isPublicPath("GET", "/login.js"), false);
@@ -41,6 +43,8 @@ test("classifyRequest: cookie / html / api", () => {
   assert.equal(classifyRequest("GET", "/diary", "text/html,application/xhtml+xml", false), "redirect");
   assert.equal(classifyRequest("GET", "/lab", "text/html,application/xhtml+xml", false), "redirect");
   assert.equal(classifyRequest("POST", "/api/talk", "application/json", false), "unauthorized");
+  assert.equal(classifyRequest("POST", "/api/stt", "application/json", false), "unauthorized");
+  assert.equal(classifyRequest("POST", "/api/native-log", "application/json", false), "unauthorized");
   assert.equal(classifyRequest("GET", "/api/warm", "*/*", false), "unauthorized");
   assert.equal(classifyRequest("POST", "/_serverFn/x", "application/json", false), "unauthorized");
   assert.equal(classifyRequest("GET", "/login", "text/html", false), "next");

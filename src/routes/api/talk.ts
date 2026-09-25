@@ -6,7 +6,7 @@ import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
 import { drainJobs } from "@/lib/lover/brain/jobs";
 import { commitReplyInner } from "@/lib/lover/brain/reply-inner";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
-import { upsertMessage } from "@/lib/lover/brain/store";
+import { upsertMessage, getProfileData } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
 import { loadHotContext } from "@/lib/lover/brain/voice/pack";
 import { runVoiceWithFallback, formatVoiceLogNote } from "@/lib/lover/brain/voice/voice-fallback";
@@ -16,7 +16,8 @@ import { checkSpend } from "@/lib/lover/brain/spend/check";
 import { talkRateHit } from "@/lib/lover/brain/spend/rate";
 import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
-import { formatVoiceInjectLine, lockedProfile, type Profile } from "@/lib/lover/types";
+import { formatVoiceInjectLine, type Profile } from "@/lib/lover/types";
+import { resolveTalkProfile } from "@/lib/lover/talk-profile";
 import { lookupBusyRange } from "@/lib/lover/brain/busy";
 import { loadPrompt } from "@/lib/lover/brain/prompts/store";
 import { parsePromptBody, renderVariant } from "@/lib/lover/brain/prompts/doc";
@@ -98,7 +99,7 @@ export const Route = createFileRoute("/api/talk")({
             }
             try {
               const text = String(body.text ?? "");
-              const profile = lockedProfile(body.profile);
+              const profile = resolveTalkProfile(body.profile, body.profile == null ? await getProfileData() : undefined);
               const nowMs = Number(body.nowMs) || Date.now();
               userMsgId = String(body.userMsgId || newId());
               userCreatedAt = Number(body.userCreatedAt) || nowMs;
