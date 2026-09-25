@@ -7,7 +7,7 @@ import {
   type StoredProsody,
   type ToneThresholds,
 } from "../prosody.ts";
-import { clampEndWaitMs, clampMaxUtteranceMs, clampNoiseFloorCap, MAX_UTTERANCE_MS, NOISE_FLOOR_CAP } from "../vad.ts";
+import { clampEndWaitMs, clampNoiseFloorCap, MAX_UTTERANCE_MS, NOISE_FLOOR_CAP } from "../vad.ts";
 import type { VadCuts } from "../vad.ts";
 
 export type SenseGear = "low" | "mid" | "high" | "custom";
@@ -185,7 +185,8 @@ export function lockHearingSense(
   const pitchHoldMs = clampPitchHoldMs(src.pitchHoldMs);
   const floorCap = clampNoiseFloorCap(src.floorCap);
   const endWaitMs = clampEndWaitMs(src.endWaitMs ?? legacy?.endWaitMs);
-  const maxUtteranceMs = clampMaxUtteranceMs(src.maxUtteranceMs);
+  // No longer adjustable: record until she stops. Older saved caps (30s etc.) are ignored.
+  const maxUtteranceMs = MAX_UTTERANCE_MS;
   return {
     recordGear: recordGearFor(fine),
     ...fine,
