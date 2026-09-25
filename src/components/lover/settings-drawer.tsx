@@ -40,6 +40,9 @@ import { DossierPanel } from "@/components/lover/dossier-panel";
 import { BrainSpendPage } from "@/components/lover/brain-spend-page";
 import { BrainSystemArchive } from "@/components/lover/brain-system-archive";
 import { ReplayPanel } from "@/components/lover/replay-panel";
+import { ProfileHistory, VersionConflict } from "@/components/lover/profile-history";
+import { saveProfilePatch } from "@/lib/lover/room";
+import type { FieldRevs, VersionedField } from "@/lib/lover/profile-patch";
 import {
   HeartEditor,
   IdentityField,
@@ -70,7 +73,8 @@ type Page =
   | "spend"
   | "archive"
   | "status"
-  | "replay";
+  | "replay"
+  | "history";
 
 type PromptItem = PromptEditorItem;
 
@@ -135,9 +139,11 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   profile: Profile;
+  revs: FieldRevs;
   callPhase?: string | null;
   callDeaf?: boolean;
-  onSave: (next: Profile) => void;
+  onPatch: (patch: Partial<Profile>) => void;
+  onApply: (profile: Profile, revs: FieldRevs) => void;
   onClearChat: () => void;
 };
 
@@ -166,7 +172,7 @@ function LabelModeSwitch({
   );
 }
 
-export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, callDeaf = false, onSave, onClearChat }: Props) {
+export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = null, callDeaf = false, onPatch, onApply, onClearChat }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
   const personaDirty = useRef(false);
   const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
@@ -180,14 +186,20 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
   const [voiceModels, setVoiceModels] = useState<VoiceModelOption[] | null>(null);
   const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
   const [promptModels, setPromptModels] = useState(profile.promptModels);
-  const [hearingInstruction, setHearingInstruction] = useState(profile.hearingInstruction);
   const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
   const [injectMind, setInjectMind] = useState(profile.injectMind);
-  const [injectMemories, setInjectMemories] = useState(profile.injectMemories);
   const [injectLongterm, setInjectLongterm] = useState(profile.injectLongterm);
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
   const [callKitBackground, setCallKitBackground] = useState(profile.callKitBackground);
   const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
+  const [identityDraft, setIdentityDraft] = useState(profile.identity);
+  const identityDirty = useRef(false);
+  const intimateDirty = useRef(false);
+  const [conflict, setConflict] = useState<{ field: VersionedField; latest: string } | null>(null);
+  const revsRef = useRef(revs);
+  const loadedPersona = useRef(profile.systemPrompt);
+  const loadedIntimate = useRef(profile.intimateNotes);
+  const loadedIdentity = useRef(profile.identity);
   const [keytermDraft, setKeytermDraft] = useState(profile.sttKeyterms.join("\n"));
   const historySyncRef = useRef(0);
   const [promptItems, setPromptItems] = useState<PromptItem[]>([]);
@@ -206,20 +218,18 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
 
   useEffect(() => {
     if (!open) return;
-    setDraft(profile.systemPrompt);
-    personaDirty.current = false;
+    if (!personaDirty.current) setDraft(profile.systemPrompt);
     setDebugHearing(profile.debugHearing);
     setVoiceModel(profile.voiceModel);
     setVoiceEffort(profile.voiceEffort);
     setPromptModels(profile.promptModels);
-    setHearingInstruction(profile.hearingInstruction);
     setSense(profile.hearingSense);
     setInjectMind(profile.injectMind);
-    setInjectMemories(profile.injectMemories);
     setInjectLongterm(profile.injectLongterm);
     setHistoryWindow(profile.historyWindow);
     setCallKitBackground(profile.callKitBackground);
-    setIntimateDraft(profile.intimateNotes);
+    if (!intimateDirty.current) setIntimateDraft(profile.intimateNotes);
+    if (!identityDirty.current) setIdentityDraft(profile.identity);
     setKeytermDraft(profile.sttKeyterms.join("\n"));
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setPage("home");
@@ -304,34 +314,53 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
     savedTimer.current = window.setTimeout(() => setSavedFlash(false), 1200);
   }
 
-  function persistProfile(patch: Partial<Profile>) {
+  function rememberLoaded(next: Profile) {
+    loadedPersona.current = next.systemPrompt;
+    loadedIntimate.current = next.intimateNotes;
+    loadedIdentity.current = next.identity;
+  }
+
+  async function commitProfile(patch: Partial<Profile>) {
+    const baseRevs: Partial<FieldRevs> = {};
+    if ("systemPrompt" in patch) baseRevs.systemPrompt = revsRef.current.systemPrompt;
+    if ("intimateNotes" in patch) baseRevs.intimateNotes = revsRef.current.intimateNotes;
+    if ("identity" in patch) baseRevs.identity = revsRef.current.identity;
     try {
-      onSave({
-      ...profile,
-      systemPrompt: draft.trim(),
-      hearingProvider: "xai",
-      captureAudio: debugHearing,
-      debugHearing,
-      voiceModel,
-      voiceEffort,
-      promptModels,
-      hearingInstruction,
-      silenceMs: sense.endWaitMs,
-      nightVoicedMin: sense.voicedMin,
-      nightMinMs: sense.noiseMinMs,
-      hearingSense: sense,
-      injectMind,
-      injectMemories,
-      injectLongterm,
-      historyWindow,
-      callKitBackground,
-      sttKeyterms: lockSttKeyterms(keytermDraft.split("\n")),
-      ...patch,
-    });
+      const result = await saveProfilePatch({ data: { patch, baseRevs } });
+      if (!result.ok) {
+        revsRef.current = result.revs;
+        rememberLoaded(result.profile);
+        onApply(result.profile, result.revs);
+        setConflict({ field: result.field, latest: result.latest });
+        setSaveError(null);
+        return;
+      }
+      revsRef.current = result.revs;
+      rememberLoaded(result.profile);
+      if ("systemPrompt" in patch && draftRef.current.trim() === String(patch.systemPrompt ?? "").trim()) {
+        personaDirty.current = false;
+      }
+      if ("intimateNotes" in patch && intimateRef.current.trim() === String(patch.intimateNotes ?? "").trim()) {
+        intimateDirty.current = false;
+      }
+      if ("identity" in patch && identityRef.current.trim() === String(patch.identity ?? "").trim()) {
+        identityDirty.current = false;
+      }
+      onApply(result.profile, result.revs);
+      setConflict((cur) => (cur && cur.field in patch ? null : cur));
       flashSaved();
     } catch {
       setSaveError("没记下。");
     }
+  }
+
+  function persistProfile(patch: Partial<Profile>) {
+    const fast = { ...patch };
+    delete fast.systemPrompt;
+    delete fast.intimateNotes;
+    delete fast.identity;
+    if (Object.keys(fast).length) onPatch(fast);
+    void commitProfile(patch);
   }
 
   function commitSense(next: HearingSense) {
@@ -501,22 +530,63 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
   }
 
   const persistRef = useRef<(patch: Partial<Profile>) => void>(() => undefined);
+  const draftRef = useRef(draft);
+  const intimateRef = useRef(intimateDraft);
+  const identityRef = useRef(identityDraft);
   persistRef.current = persistProfile;
+  draftRef.current = draft;
+  intimateRef.current = intimateDraft;
+  identityRef.current = identityDraft;
 
   useEffect(() => {
-    if (personaDirty.current) return;
-    setDraft(profile.systemPrompt);
+    revsRef.current = revs;
+  }, [revs]);
+
+  useEffect(() => {
+    if (!personaDirty.current) {
+      loadedPersona.current = profile.systemPrompt;
+      setDraft(profile.systemPrompt);
+      return;
+    }
+    if (profile.systemPrompt !== loadedPersona.current) {
+      loadedPersona.current = profile.systemPrompt;
+      setConflict((cur) => (cur && cur.field !== "systemPrompt" ? cur : { field: "systemPrompt", latest: profile.systemPrompt }));
+    }
   }, [profile.systemPrompt]);
 
   useEffect(() => {
-    if (!open || !personaDirty.current) return;
+    if (!intimateDirty.current) {
+      loadedIntimate.current = profile.intimateNotes;
+      setIntimateDraft(profile.intimateNotes);
+      return;
+    }
+    if (profile.intimateNotes !== loadedIntimate.current) {
+      loadedIntimate.current = profile.intimateNotes;
+      setConflict((cur) => (cur && cur.field !== "intimateNotes" ? cur : { field: "intimateNotes", latest: profile.intimateNotes }));
+    }
+  }, [profile.intimateNotes]);
+
+  useEffect(() => {
+    if (!identityDirty.current) {
+      loadedIdentity.current = profile.identity;
+      setIdentityDraft(profile.identity);
+      return;
+    }
+    if (profile.identity !== loadedIdentity.current) {
+      loadedIdentity.current = profile.identity;
+      setConflict((cur) => (cur && cur.field !== "identity" ? cur : { field: "identity", latest: profile.identity }));
+    }
+  }, [profile.identity]);
+
+  useEffect(() => {
+    if (!open || !personaDirty.current || conflict?.field === "systemPrompt") return;
     const next = draft.trim();
     if (next === profile.systemPrompt.trim()) return;
     const timer = window.setTimeout(() => {
       persistRef.current({ systemPrompt: next });
     }, 1500);
     return () => window.clearTimeout(timer);
-  }, [draft, open, profile.systemPrompt]);
+  }, [draft, open, profile.systemPrompt, conflict]);
 
   if (!open) return null;
 
@@ -536,6 +606,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
     archive: "系统存档",
     status: "状态",
     replay: "重放对比",
+    history: "改动记录",
   };
   const tier = hearingTierOf(sense);
 
@@ -548,7 +619,23 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
         <button
           type="button"
           aria-label={page === "home" ? "关闭" : "返回"}
-          onClick={() => (page === "home" ? onOpenChange(false) : setPage(page === "prompts" || page === "context" || page === "hearing" || page === "log" || page === "spend" || page === "archive" || page === "status" || page === "replay" ? "advanced" : "home"))}
+          onClick={() =>
+            page === "home"
+              ? onOpenChange(false)
+              : setPage(
+                  page === "prompts" ||
+                    page === "context" ||
+                    page === "hearing" ||
+                    page === "log" ||
+                    page === "spend" ||
+                    page === "archive" ||
+                    page === "status" ||
+                    page === "replay" ||
+                    page === "history"
+                    ? "advanced"
+                    : "home",
+                )
+          }
           className="grid size-11 place-items-center rounded-md text-muted"
         >
           <X className={cn("size-5", page !== "home" && "hidden")} />
@@ -587,13 +674,40 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
             <SettingsLink label="费用" onClick={() => setPage("spend")} />
             <SettingsLink label="系统存档" onClick={() => setPage("archive")} />
             <SettingsLink label="状态" onClick={() => setPage("status")} />
+            <SettingsLink label="改动记录" hint="人设、亲密设定、身份" onClick={() => setPage("history")} />
           </div>
         </div>
       ) : page === "who" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
             <p className="text-xs text-subtle">身份是他在现实里是谁。人设是他怎么说话。</p>
-            <IdentityField value={profile.identity} onSave={(identity) => persistProfile({ identity })} />
+            <IdentityField
+              value={identityDraft}
+              paused={conflict?.field === "identity"}
+              onChange={(next) => {
+                identityDirty.current = true;
+                setIdentityDraft(next);
+              }}
+              onCommit={() => {
+                const next = identityDraft.trim();
+                if (next === profile.identity.trim()) {
+                  identityDirty.current = false;
+                  return;
+                }
+                persistProfile({ identity: next });
+              }}
+            />
+            {conflict?.field === "identity" ? (
+              <VersionConflict
+                latest={conflict.latest}
+                onUseLatest={() => {
+                  identityDirty.current = false;
+                  setIdentityDraft(conflict.latest);
+                  setConflict(null);
+                }}
+                onKeepMine={() => persistProfile({ identity: identityDraft.trim() })}
+              />
+            ) : null}
             <label className="flex flex-col gap-2">
               <span className="text-sm">人设</span>
           <Textarea
@@ -615,19 +729,52 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
             className="min-h-64 resize-none font-mono leading-relaxed"
             placeholder="写给他的人设。空着时只会告诉他：你是清然。"
           />
+          {conflict?.field === "systemPrompt" ? (
+            <VersionConflict
+              latest={conflict.latest}
+              onUseLatest={() => {
+                personaDirty.current = false;
+                setDraft(conflict.latest);
+                setConflict(null);
+              }}
+              onKeepMine={() => persistProfile({ systemPrompt: draft.trim() })}
+            />
+          ) : null}
           <p className="mt-2 text-xs text-subtle">「我记得的」会另外附上，不用写进这段。其他步骤的指令在「指令」页。</p>
             </label>
             <label className="flex flex-col gap-2">
               <span className="text-sm">亲密设定</span>
               <Textarea
                 value={intimateDraft}
-                onChange={(e) => setIntimateDraft(e.target.value)}
-                onBlur={() => persistProfile({ intimateNotes: intimateDraft })}
+                onChange={(e) => {
+                  intimateDirty.current = true;
+                  setIntimateDraft(e.target.value);
+                }}
+                onBlur={() => {
+                  if (conflict?.field === "intimateNotes") return;
+                  const next = intimateDraft.trim();
+                  if (next === profile.intimateNotes.trim()) {
+                    intimateDirty.current = false;
+                    return;
+                  }
+                  persistProfile({ intimateNotes: next });
+                }}
                 maxLength={8000}
                 className="min-h-36 resize-none leading-relaxed"
                 placeholder="只在亲密场景时给他看"
               />
               <p className="text-xs text-subtle">只在亲密场景时给他看。平时他只知道自己有这一面。</p>
+              {conflict?.field === "intimateNotes" ? (
+                <VersionConflict
+                  latest={conflict.latest}
+                  onUseLatest={() => {
+                    intimateDirty.current = false;
+                    setIntimateDraft(conflict.latest);
+                    setConflict(null);
+                  }}
+                  onKeepMine={() => persistProfile({ intimateNotes: intimateDraft.trim() })}
+                />
+              ) : null}
             </label>
           </div>
         </div>
@@ -896,6 +1043,21 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
       ) : page === "replay" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <ReplayPanel profile={profile} />
+        </div>
+      ) : page === "history" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <ProfileHistory
+            onRestored={(next, nextRevs, field) => {
+              if (field === "systemPrompt") personaDirty.current = false;
+              if (field === "intimateNotes") intimateDirty.current = false;
+              if (field === "identity") identityDirty.current = false;
+              revsRef.current = nextRevs;
+              rememberLoaded(next);
+              onApply(next, nextRevs);
+              setConflict(null);
+              flashSaved();
+            }}
+          />
         </div>
       ) : page === "hearing" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">

@@ -22,6 +22,7 @@ import {
 } from "../store.ts";
 import { formatClock } from "../time.ts";
 import { InnerCutBuffer } from "./inner-cut.ts";
+import { applyProfilePatch } from "../../profile-patch.ts";
 import { buildVoiceMessages, renderDossierBlock, renderVoiceLongterm } from "./pack-build.ts";
 
 export type ReplaySide = {
@@ -164,14 +165,12 @@ export async function adoptPersona(nextPersona: string): Promise<void> {
      on conflict (hash) do update set last_seen = excluded.last_seen`,
     [hash, current, ts],
   );
-  await db.query(
-    `insert into qingran_profile (id, data, updated_at)
-     values (1, jsonb_build_object('systemPrompt', $1::text), now())
-     on conflict (id) do update
-       set data = jsonb_set(coalesce(qingran_profile.data, '{}'::jsonb), '{systemPrompt}', to_jsonb($1::text), true),
-           updated_at = now()`,
-    [next],
-  );
+  await applyProfilePatch({
+    patch: { systemPrompt: next },
+    force: true,
+    source: "replay",
+    at: ts,
+  });
 }
 
 export async function listPersonaVersions(limit = 8): Promise<Array<{ hash: string; body: string; at: number }>> {

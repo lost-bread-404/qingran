@@ -6,6 +6,7 @@ import type { InnerPlan, InnerState, LongingItem } from "./types.ts";
 import { calendarDay, localDay } from "./time.ts";
 import { getMeta } from "./store.ts";
 import { resolveTz } from "./tz.ts";
+import { applyProfilePatch } from "../profile-patch.ts";
 import { zonedWallMs } from "./spend/policy.ts";
 
 function asInt(value: unknown, fallback = 0): number {
@@ -60,40 +61,25 @@ export async function readIdentity(): Promise<{ identity: string; updatedAt: num
 }
 
 export async function writeIdentity(identity: string, at = now()): Promise<void> {
-  const text = identity.trim().slice(0, 2000);
-  const db = await getSql();
-  const rows = await db.query<{ data: unknown; identity: string }>(
-    `select data, identity from qingran_profile where id = 1`,
-  );
-  const prev = String(rows[0]?.identity ?? "");
-  const raw = rows[0]?.data;
-  const data = raw && typeof raw === "object" ? { ...(raw as Record<string, unknown>) } : {};
-  data.identity = text;
-  const changed = prev.trim() !== text;
-  await db.query(
-    `insert into qingran_profile (id, data, identity, identity_updated_at, updated_at)
-     values (1, $1::jsonb, $2, $3, now())
-     on conflict (id) do update set
-       data = excluded.data,
-       identity = excluded.identity,
-       identity_updated_at = case when $4 then excluded.identity_updated_at else qingran_profile.identity_updated_at end,
-       updated_at = now()`,
-    [JSON.stringify(data), text, at, changed],
-  );
+  await applyProfilePatch({
+    patch: { identity: identity.trim().slice(0, 2000) },
+    force: true,
+    source: "server",
+    at,
+  });
 }
 
 export async function writeRhythm(rhythm: string): Promise<void> {
   const text = rhythm.trim().slice(0, 500);
   const db = await getSql();
-  const rows = await db.query<{ data: unknown }>(`select data from qingran_profile where id = 1`);
-  const raw = rows[0]?.data;
-  const data = raw && typeof raw === "object" ? { ...(raw as Record<string, unknown>) } : {};
-  data.rhythm = text;
   await db.query(
     `insert into qingran_profile (id, data, rhythm, updated_at)
-     values (1, $1::jsonb, $2, now())
-     on conflict (id) do update set data = excluded.data, rhythm = excluded.rhythm, updated_at = now()`,
-    [JSON.stringify(data), text],
+     values (1, jsonb_build_object('rhythm', $1::text), $1, now())
+     on conflict (id) do update set
+       data = coalesce(qingran_profile.data, '{}'::jsonb) || jsonb_build_object('rhythm', $1::text),
+       rhythm = excluded.rhythm,
+       updated_at = now()`,
+    [text],
   );
 }
 

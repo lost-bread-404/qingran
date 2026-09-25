@@ -7,7 +7,6 @@ import {
   brainGetLife,
   brainListManualEdits,
   brainSaveHeart,
-  brainSaveIdentity,
   brainSetReach,
   brainTestPush,
   brainWakeNow,
@@ -83,35 +82,29 @@ export function SettingsLink({
 
 export function IdentityField({
   value,
-  onSave,
+  onChange,
+  onCommit,
+  paused,
 }: {
   value: string;
-  onSave: (identity: string) => void;
+  onChange: (next: string) => void;
+  onCommit: () => void;
+  paused?: boolean;
 }) {
-  const [text, setText] = useState(value);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => setText(value), [value]);
   return (
     <label className="flex flex-col gap-2">
       <span className="text-sm">身份</span>
       <span className="text-xs text-subtle">和人设分开。空着就不放进回复。</span>
       <Textarea
-        value={text}
+        value={value}
         maxLength={2000}
         className="min-h-28"
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         onBlur={() => {
-          const next = text.trim();
-          if (next === value.trim()) return;
-          void brainSaveIdentity({ data: { identity: next } })
-            .then(() => {
-              setError(null);
-              onSave(next);
-            })
-            .catch(() => setError("身份没记下。"));
+          if (paused) return;
+          onCommit();
         }}
       />
-      {error ? <span className="text-xs text-live">{error}</span> : null}
     </label>
   );
 }

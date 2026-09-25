@@ -33,7 +33,7 @@ import {
   deleteRoomMessages,
   loadRoom,
   restoreRoomBackup,
-  saveRoomProfile,
+  saveProfilePatch,
   updateRoomMessage,
 } from "@/lib/lover/room";
 import { registerNativePush } from "@/lib/lover/push-client";
@@ -79,6 +79,7 @@ import {
   type Profile,
   type SessionStatus,
 } from "@/lib/lover/types";
+import type { FieldRevs } from "@/lib/lover/profile-patch";
 import { cn } from "@/lib/utils";
 
 function lastUserSay(messages: ChatMessage[]): ChatMessage | null {
@@ -93,9 +94,10 @@ function lastUserSay(messages: ChatMessage[]): ChatMessage | null {
 
 export function VoiceRoom() {
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
+  const [revs, setRevs] = useState<FieldRevs>({ systemPrompt: 0, intimateNotes: 0, identity: 0 });
+  const revsRef = useRef(revs);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hydrated, setHydrated] = useState(false);
-  const [profileReady, setProfileReady] = useState(false);
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [draft, setDraft] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
@@ -230,8 +232,9 @@ export function VoiceRoom() {
           return;
         }
         setProfile(lockedProfile(room.profile));
+        revsRef.current = room.revs ?? { systemPrompt: 0, intimateNotes: 0, identity: 0 };
+        setRevs(revsRef.current);
         setMessages(room.messages);
-        setProfileReady(true);
         setHydrated(true);
       })
       .catch(() => {
@@ -244,13 +247,17 @@ export function VoiceRoom() {
   }, []);
 
   useEffect(() => {
+    const applyRoom = (room: Awaited<ReturnType<typeof loadRoom>>) => {
+      if ("loadFailed" in room && room.loadFailed) return;
+      const next = lockedProfile(room.profile);
+      profileRef.current = next;
+      revsRef.current = room.revs ?? { systemPrompt: 0, intimateNotes: 0, identity: 0 };
+      setProfile(next);
+      setRevs(revsRef.current);
+      setMessages(room.messages);
+    };
     const reload = () => {
-      void loadRoom()
-        .then((room) => {
-          if ("loadFailed" in room && room.loadFailed) return;
-          setMessages(room.messages);
-        })
-        .catch(() => undefined);
+      void loadRoom().then(applyRoom).catch(() => undefined);
     };
     const onToken = (event: Event) => {
       const detail = (event as CustomEvent).detail;
@@ -302,14 +309,6 @@ export function VoiceRoom() {
       if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     };
   }, []);
-
-  useEffect(() => {
-    if (!profileReady) return;
-    const timer = window.setTimeout(() => {
-      void saveRoomProfile({ data: lockedProfile(profile) });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [profileReady, profile]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -397,6 +396,13 @@ export function VoiceRoom() {
     profileRef.current = profile;
     setProfile(profile);
     spokenCacheRef.current.clear();
+    void saveProfilePatch({ data: { patch: { voiceSpeed: next.speed } } })
+      .then((result) => {
+        if (!result?.ok) return;
+        revsRef.current = result.revs;
+        setRevs(result.revs);
+      })
+      .catch(() => undefined);
     if (status !== "speaking" && status !== "thinking") return;
     const live = inflightRef.current;
     const last = [...chatRef.current].reverse().find((m) => m.role === "assistant");
@@ -1276,7 +1282,19 @@ export function VoiceRoom() {
               variant="ghost"
               size="icon"
               aria-label={profile.muted ? "打开声音" : "关闭声音"}
-              onClick={() => setProfile((p) => ({ ...p, muted: !p.muted }))}
+              onClick={() => {
+                const muted = !profileRef.current.muted;
+                const next = lockedProfile({ ...profileRef.current, muted });
+                profileRef.current = next;
+                setProfile(next);
+                void saveProfilePatch({ data: { patch: { muted } } })
+                  .then((result) => {
+                    if (!result?.ok) return;
+                    revsRef.current = result.revs;
+                    setRevs(result.revs);
+                  })
+                  .catch(() => undefined);
+              }}
             >
               {profile.muted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
             </Button>
@@ -1524,14 +1542,43 @@ export function VoiceRoom() {
 
         <SettingsDrawer
           open={settingsOpen}
-          onOpenChange={setSettingsOpen}
+          onOpenChange={(nextOpen) => {
+            setSettingsOpen(nextOpen);
+            if (!nextOpen) return;
+            void loadRoom()
+              .then((room) => {
+                if ("loadFailed" in room && room.loadFailed) return;
+                const next = lockedProfile(room.profile);
+                profileRef.current = next;
+                revsRef.current = room.revs ?? { systemPrompt: 0, intimateNotes: 0, identity: 0 };
+                setProfile(next);
+                setRevs(revsRef.current);
+              })
+              .catch(() => undefined);
+          }}
           profile={profile}
+          revs={revs}
           callPhase={call.active ? call.phase : null}
           callDeaf={call.deaf}
-          onSave={(next) => setProfile(lockedProfile(next))}
+          onPatch={(patch) => {
+            setProfile((prev) => {
+              const next = lockedProfile({ ...prev, ...patch });
+              profileRef.current = next;
+              return next;
+            });
+          }}
+          onApply={(next, nextRevs) => {
+            profileRef.current = next;
+            revsRef.current = nextRevs;
+            setProfile(next);
+            setRevs(nextRevs);
+          }}
           onClearChat={() => {
             setMessages([]);
-            setProfile((p) => lockedProfile({ ...p, memoryCursor: "" }));
+            const next = lockedProfile({ ...profileRef.current, memoryCursor: "" });
+            profileRef.current = next;
+            setProfile(next);
+            void saveProfilePatch({ data: { patch: { memoryCursor: "" } } });
             void clearRoomMessages();
           }}
         />

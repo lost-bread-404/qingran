@@ -2,6 +2,15 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { decodeStoredBody, encodeStoredMessage } from "./message-markup";
 import {
+  applyProfilePatch,
+  emptyFieldRevs,
+  listProfileVersions,
+  readProfileSnapshot,
+  restoreProfileVersion,
+  writeProfileDocument,
+  type FieldRevs,
+} from "./profile-patch.ts";
+import {
   applyMemoryCursor,
   lockedProfile,
   type ChatMessage,
@@ -12,61 +21,65 @@ import { sortConversation } from "./pair-messages";
 
 type Room = {
   profile: Profile;
+  revs: FieldRevs;
   messages: ChatMessage[];
   memories: Memory[];
 };
 
 const EMPTY_ROOM: Room = {
   profile: lockedProfile(),
+  revs: emptyFieldRevs(),
   messages: [],
   memories: [],
 };
 
+async function clientSource(): Promise<string> {
+  try {
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const ua = (getRequest()?.headers.get("user-agent") ?? "").replace(/\s+/g, " ").trim();
+    const kind = /QingranNative/i.test(ua) ? "ios" : "web";
+    return ua ? `${kind} ${ua}`.slice(0, 300) : kind;
+  } catch {
+    return "web";
+  }
+}
+
 export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
   try {
     const sql = await getSql();
-    const [profileRow] = await sql<{ data: Profile | string; identity?: string | null; rhythm?: string | null }>`
-      select data, identity, rhythm from qingran_profile where id = 1
-    `;
-    const messages = await sql<{
-      id: string;
-      role: ChatMessage["role"];
-      body: string;
-      created_at: number;
-      kind?: string;
-    }>`
-      select id, role, body, created_at, kind
-      from qingran_messages
-      where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
-        and forgotten_at is null
-      order by created_at desc,
-        case when role = 'user' then 1 else 0 end desc,
-        id desc
-      limit 240
-    `;
-    const memories = await sql<{
-      id: string;
-      body: string;
-      created_at: number;
-      updated_at: number;
-    }>`
-      select id, body, created_at, updated_at
-      from qingran_memories
-      order by updated_at asc
-    `;
-
-    const raw = profileRow?.data;
-    const stored =
-      typeof raw === "string" ? (safeJson(raw) as Partial<Profile> | null) : raw;
-    const profile = lockedProfile(stored ?? {});
-    if (typeof profileRow?.identity === "string" && profileRow.identity.trim()) {
-      profile.identity = profileRow.identity.trim().slice(0, 2000);
-    }
-    if (typeof profileRow?.rhythm === "string" && profileRow.rhythm.trim()) {
-      profile.rhythm = profileRow.rhythm.trim().slice(0, 500);
-    }
+    const [saved, messages, memories] = await Promise.all([
+      readProfileSnapshot(),
+      sql<{
+        id: string;
+        role: ChatMessage["role"];
+        body: string;
+        created_at: number;
+        kind?: string;
+      }>`
+        select id, role, body, created_at, kind
+        from qingran_messages
+        where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
+          and forgotten_at is null
+        order by created_at desc,
+          case when role = 'user' then 1 else 0 end desc,
+          id desc
+        limit 240
+      `,
+      sql<{
+        id: string;
+        body: string;
+        created_at: number;
+        updated_at: number;
+      }>`
+        select id, body, created_at, updated_at
+        from qingran_memories
+        order by updated_at asc
+      `,
+    ]);
+    const profile = saved.profile;
     return {
       profile,
+      revs: saved.revs,
       messages: sortConversation(
         applyMemoryCursor(
           messages.reverse().map((m) => decodeStoredMessage(m)),
@@ -85,24 +98,42 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
   }
 });
 
-export const saveRoomProfile = createServerFn({ method: "POST" })
-  .validator((input: Profile) => input)
+export const saveProfilePatch = createServerFn({ method: "POST" })
+  .validator((input: { patch?: Partial<Profile>; baseRevs?: Partial<FieldRevs> }) => ({
+    patch: input?.patch && typeof input.patch === "object" ? input.patch : {},
+    baseRevs: input?.baseRevs && typeof input.baseRevs === "object" ? input.baseRevs : {},
+  }))
   .handler(async ({ data }) => {
-    const sql = await getSql();
-    const profile = lockedProfile(data);
-    const prev = await sql<{ identity: string | null }>`select identity from qingran_profile where id = 1`;
-    const changed = String(prev[0]?.identity ?? "").trim() !== profile.identity.trim();
-    const stamp = Date.now();
-    await sql`
-      insert into qingran_profile (id, data, identity, identity_updated_at, updated_at)
-      values (1, ${JSON.stringify(profile)}::jsonb, ${profile.identity}, ${changed ? stamp : 0}, now())
-      on conflict (id) do update
-        set data = excluded.data,
-            identity = excluded.identity,
-            identity_updated_at = case when ${changed} then ${stamp} else qingran_profile.identity_updated_at end,
-            updated_at = now()
-    `;
-    return { ok: true as const };
+    const result = await applyProfilePatch({
+      patch: data.patch,
+      baseRevs: data.baseRevs,
+      source: await clientSource(),
+    });
+    if (result.ok && Object.prototype.hasOwnProperty.call(data.patch, "identity")) {
+      try {
+        const { enqueueBusyRefresh } = await import("./brain/busy.ts");
+        await enqueueBusyRefresh();
+      } catch {
+        /* identity is already saved */
+      }
+    }
+    return result;
+  });
+
+export const loadProfileVersions = createServerFn({ method: "POST" })
+  .validator((input: { field?: string }) => ({ field: String(input?.field ?? "") }))
+  .handler(async ({ data }) => {
+    const rows = await listProfileVersions(data.field);
+    return { ok: true as const, rows };
+  });
+
+export const restoreProfileField = createServerFn({ method: "POST" })
+  .validator((input: { id?: number }) => ({ id: Number(input?.id) }))
+  .handler(async ({ data }) => {
+    if (!Number.isFinite(data.id)) return { ok: false as const };
+    const result = await restoreProfileVersion(data.id, await clientSource());
+    if (!result) return { ok: false as const };
+    return result;
   });
 
 export const appendRoomMessage = createServerFn({ method: "POST" })
@@ -140,13 +171,7 @@ export const restoreRoomBackup = createServerFn({ method: "POST" })
   .validator((input: { profile: Profile; memories: Memory[]; messages: ChatMessage[] }) => input)
   .handler(async ({ data }) => {
     const sql = await getSql();
-    const profile = lockedProfile(data.profile);
-    await sql`
-      insert into qingran_profile (id, data, updated_at)
-      values (1, ${JSON.stringify(profile)}::jsonb, now())
-      on conflict (id) do update
-        set data = excluded.data, updated_at = now()
-    `;
+    await writeProfileDocument(lockedProfile(data.profile), "backup");
     const memories = data.memories.slice(-80);
     for (const m of memories) {
       await sql`
@@ -234,12 +259,4 @@ function decodeStoredMessage(row: {
     interrupted: decoded.interrupted || undefined,
     nightNoise: decoded.nightNoise || undefined,
   };
-}
-
-function safeJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
 }

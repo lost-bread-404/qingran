@@ -150,11 +150,9 @@ export const brainGetDiary = createServerFn({ method: "GET" }).handler(async () 
 export const brainSetDiary = createServerFn({ method: "POST" })
   .validator((input: { enabled: boolean }) => ({ enabled: input.enabled === true }))
   .handler(async ({ data }) => {
-    const { loadProfile, saveProfile } = await import("./backup");
-    const profile = await loadProfile();
-    profile.diaryEnabled = data.enabled;
-    await saveProfile(profile);
-    return { enabled: profile.diaryEnabled };
+    const { applyProfilePatch } = await import("../profile-patch.ts");
+    await applyProfilePatch({ patch: { diaryEnabled: data.enabled }, source: "diary" });
+    return { enabled: data.enabled };
   });
 
 /** Diary 页面打开时调用：把到期的日/周/月任务排上，drain 放到后台，请求立刻返回。 */

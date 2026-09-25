@@ -3,6 +3,7 @@
  * ios-microphone's src/lib/lover/backup.ts (v1).
  */
 import { getSql } from "../../db.ts";
+import { writeProfileDocument } from "../profile-patch.ts";
 import { lockedProfile, type Profile } from "../types.ts";
 import { now } from "./clock.ts";
 import { enqueue } from "./jobs.ts";
@@ -688,21 +689,7 @@ async function loadProfile(): Promise<Profile> {
 }
 
 async function saveProfile(profile: Profile): Promise<void> {
-  const db = await getSql();
-  const locked = lockedProfile(profile);
-  const prev = await db.query<{ identity: string | null }>("select identity from qingran_profile where id = 1");
-  const changed = String(prev[0]?.identity ?? "").trim() !== locked.identity.trim();
-  await db.query(
-    `insert into qingran_profile (id, data, identity, rhythm, identity_updated_at, updated_at)
-     values (1, $1::jsonb, $2, $3, $4, now())
-     on conflict (id) do update set
-       data = excluded.data,
-       identity = excluded.identity,
-       rhythm = excluded.rhythm,
-       identity_updated_at = case when $5 then $4 else qingran_profile.identity_updated_at end,
-       updated_at = now()`,
-    [JSON.stringify(locked), locked.identity, locked.rhythm, changed ? now() : 0, changed],
-  );
+  await writeProfileDocument(profile, "backup");
 }
 
 export type ExportPage = {
