@@ -286,6 +286,7 @@ export async function lastVisibleMessageAt(): Promise<number | null> {
      where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
        and forgotten_at is null
        and kind is distinct from 'system_notice'
+       and kind is distinct from 'proactive'
      order by created_at desc limit 1`,
   );
   return rows[0] ? asInt(rows[0].created_at) : null;

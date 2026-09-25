@@ -32,7 +32,7 @@ export function apnsJwt(config: ApnsConfig, at = Date.now()): string {
   const sign = createSign("SHA256");
   sign.update(`${header}.${body}`);
   sign.end();
-  const token = `${header}.${body}.${b64url(sign.sign(config.key))}`;
+  const token = `${header}.${body}.${b64url(sign.sign({ key: config.key, dsaEncoding: "ieee-p1363" }))}`;
   cached = { token, until: at + 50 * 60_000 };
   return token;
 }

@@ -273,7 +273,8 @@ export async function runWake(opts: {
   await saveInnerForced(applied.next);
   const hours = applied.nextReach && typeof applied.nextReach === "object" ? applied.nextReach.inHours : applied.nextReach === null ? null : null;
   const intent = applied.nextReach && typeof applied.nextReach === "object" ? applied.nextReach.intent : "";
-  const nextAt = hours == null ? null : clampNextReachAt(at, hours, silence.unanswered);
+  const send = json.send === true && String(json.text ?? "").trim();
+  const nextAt = hours == null ? null : clampNextReachAt(at, hours, silence.unanswered + (send ? 1 : 0));
   await saveReach({
     nextAt,
     intent,
@@ -281,7 +282,6 @@ export async function runWake(opts: {
     setAt: at,
     retry: 0,
   });
-  const send = json.send === true && String(json.text ?? "").trim();
   let messageId: string | null = null;
   let pushResult: string | null = null;
   if (send) {
