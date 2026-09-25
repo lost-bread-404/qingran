@@ -785,24 +785,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
                 persistProfile({ debugHearing: next, captureAudio: next });
               }}
             />
-            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={callKitBackground}
-                onChange={(e) => {
-                  const next = e.target.checked;
-                  setCallKitBackground(next);
-                  persistProfile({ callKitBackground: next });
-                }}
-              />
-              <span>
-                <span className="block text-sm">切到后台也继续通话</span>
-                <span className="block text-xs text-subtle">
-                  开启后会显示系统通话界面，锁屏或切到其他 app 也不会断。
-                </span>
-              </span>
-            </label>
             <div className="flex flex-col gap-2">
               <p className="text-sm">听力灵敏度</p>
               {(["low", "mid", "high"] as const).map((id) => (

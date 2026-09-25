@@ -29,6 +29,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
   }
 
+  func applicationDidEnterBackground(_ application: UIApplication) {
+    application.isIdleTimerDisabled = false
+  }
+
   func application(
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data

@@ -3,6 +3,7 @@ export type NativeBridge = {
   startCall?: () => void;
   endCall?: () => void;
   prepareAudio?: () => void;
+  keepAwake?: (on: boolean) => void;
 };
 
 declare global {
@@ -14,12 +15,11 @@ declare global {
 export type NativeCallStart = "startCall" | "prepareAudio";
 export type NativeCallEnd = "endCall" | "none";
 
-/** CallKit only when Rosie turned on background calls. Otherwise just arm the audio session. */
-export function nativeCallPlan(callKitBackground: boolean): {
+/** CallKit is off until the native call pipeline exists. The saved switch is ignored. */
+export function nativeCallPlan(_callKitBackground: boolean): {
   callStart: NativeCallStart;
   callEnd: NativeCallEnd;
 } {
-  if (callKitBackground) return { callStart: "startCall", callEnd: "endCall" };
   return { callStart: "prepareAudio", callEnd: "none" };
 }
 
@@ -45,6 +45,10 @@ function post(fn: ((bridge: NativeBridge) => void) | null) {
 
 export function nativePrepareAudio() {
   post((bridge) => bridge.prepareAudio?.());
+}
+
+export function nativeKeepAwake(on: boolean) {
+  post((bridge) => bridge.keepAwake?.(on));
 }
 
 export function nativeStartCall(callKitBackground: boolean) {

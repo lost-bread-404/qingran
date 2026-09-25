@@ -6,6 +6,7 @@ import {
   isNativeShell,
   nativeCallPlan,
   nativeEndCall,
+  nativeKeepAwake,
   nativePrepareHoldToTalk,
   nativeStartCall,
   resetNativeHoldPrep,
@@ -16,9 +17,9 @@ describe("native call bridge", { concurrency: 1 }, () => {
     assert.equal(isNativeShell(), false);
   });
 
-  test("CallKit stays off unless the background switch is on", () => {
+  test("CallKit stays off until the native pipeline exists", () => {
     assert.deepEqual(nativeCallPlan(false), { callStart: "prepareAudio", callEnd: "none" });
-    assert.deepEqual(nativeCallPlan(true), { callStart: "startCall", callEnd: "endCall" });
+    assert.deepEqual(nativeCallPlan(true), { callStart: "prepareAudio", callEnd: "none" });
   });
 
   test("start and end call the bridge only for the planned action", () => {
@@ -40,7 +41,7 @@ describe("native call bridge", { concurrency: 1 }, () => {
       if (prev === undefined) delete (globalThis as { window?: Window }).window;
       else (globalThis as { window?: Window }).window = prev;
     }
-    assert.deepEqual(calls, ["prepareAudio", "startCall", "endCall"]);
+    assert.deepEqual(calls, ["prepareAudio", "prepareAudio"]);
   });
 
   test("push-to-talk prepares audio once", () => {
@@ -64,19 +65,46 @@ describe("native call bridge", { concurrency: 1 }, () => {
     assert.deepEqual(calls, ["prepareAudio"]);
   });
 
-  test("background calls default off and the page wires the switch", () => {
+  test("background calls stay saved but the switch and CallKit path are hidden", () => {
     assert.equal(lockedProfile().callKitBackground, false);
     assert.equal(lockedProfile({ callKitBackground: true }).callKitBackground, true);
     const call = readFileSync(new URL("../../hooks/use-call.ts", import.meta.url), "utf8");
     const voice = readFileSync(new URL("../../hooks/use-voice-input.ts", import.meta.url), "utf8");
     const settings = readFileSync(new URL("../../components/lover/settings-drawer.tsx", import.meta.url), "utf8");
     const room = readFileSync(new URL("../../components/lover/voice-room.tsx", import.meta.url), "utf8");
+    const web = readFileSync(new URL("../../../ios/Qingran/Qingran/WebContainer.swift", import.meta.url), "utf8");
+    const app = readFileSync(new URL("../../../ios/Qingran/Qingran/AppDelegate.swift", import.meta.url), "utf8");
     assert.match(call, /nativeStartCall\(callKitRef\.current\)/);
     assert.match(call, /nativeEndCall\(callKitRef\.current\)/);
+    assert.match(call, /nativeKeepAwake\(true\)/);
+    assert.match(call, /nativeKeepAwake\(false\)/);
     assert.doesNotMatch(call, /nativeStartCall\(\)/);
     assert.match(voice, /nativePrepareHoldToTalk\(\)/);
     assert.match(room, /callKitBackground: profile\.callKitBackground/);
-    assert.match(settings, /切到后台也继续通话/);
-    assert.match(settings, /开启后会显示系统通话界面，锁屏或切到其他 app 也不会断。/);
+    assert.doesNotMatch(settings, /切到后台也继续通话/);
+    assert.match(web, /case "keepAwake"/);
+    assert.match(web, /isIdleTimerDisabled = on/);
+    assert.match(web, /keepAwake: function/);
+    assert.match(app, /func applicationDidEnterBackground/);
+    assert.match(app, /isIdleTimerDisabled = false/);
+  });
+
+  test("keepAwake forwards the flag", () => {
+    const calls: boolean[] = [];
+    const prev = globalThis.window;
+    (globalThis as { window?: Window }).window = {
+      QingranNative: {
+        present: true,
+        keepAwake: (on: boolean) => calls.push(on),
+      },
+    } as unknown as Window;
+    try {
+      nativeKeepAwake(true);
+      nativeKeepAwake(false);
+    } finally {
+      if (prev === undefined) delete (globalThis as { window?: Window }).window;
+      else (globalThis as { window?: Window }).window = prev;
+    }
+    assert.deepEqual(calls, [true, false]);
   });
 });

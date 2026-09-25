@@ -28,7 +28,7 @@ import { callListenStuck, CALL_STUCK_MS } from "@/lib/lover/call-phase";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { recordCuts } from "@/lib/lover/hearing/sense";
 import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
-import { listenNativeHangup, nativeEndCall, nativeStartCall } from "@/lib/lover/native-shell";
+import { listenNativeHangup, nativeEndCall, nativeKeepAwake, nativeStartCall } from "@/lib/lover/native-shell";
 import { attachPcmTap, peakRms, peakTimedRms, PRE_ROLL_SEC, pushTimedRms, wavFromTap, type PcmTap, type TimedRms } from "@/lib/lover/pcm-tap";
 import { keepPlaybackAlive, isPlaybackActive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
@@ -203,6 +203,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
       /* ignore */
     }
     wakeLockRef.current = null;
+    nativeKeepAwake(false);
     if (!nativeHangupRef.current) nativeEndCall(callKitRef.current);
     if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
     heartbeatRef.current = 0;
@@ -637,6 +638,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
     listenReadyAtRef.current = hearAtRef.current + CALL_START_WARMUP_MS;
     setActive(true);
     setPhaseBoth("listening");
+    nativeKeepAwake(true);
     setMicEnabled(streamRef.current, true);
     startSpeechRec();
     rafRef.current = requestAnimationFrame(tick);
@@ -700,9 +702,11 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const revive = useCallback(async (opts?: { gesture?: boolean }) => {
     if (!liveRef.current) return;
     if (pageIsHidden() && !opts?.gesture) {
+      nativeKeepAwake(false);
       keepPlaybackAlive();
       return;
     }
+    nativeKeepAwake(true);
     try {
       if (ctxRef.current?.state === "closed") ctxRef.current = null;
       else if (ctxRef.current?.state === "suspended") await ctxRef.current.resume();

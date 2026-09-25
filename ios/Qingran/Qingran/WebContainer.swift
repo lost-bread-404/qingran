@@ -128,6 +128,14 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       CallEngine.shared.endCallFromWeb()
     case "prepareAudio":
       CallEngine.shared.prepareAudioSession()
+    case "keepAwake":
+      var on = false
+      if let body = message.body as? [String: Any], let flag = body["on"] as? Bool {
+        on = flag
+      }
+      DispatchQueue.main.async {
+        UIApplication.shared.isIdleTimerDisabled = on
+      }
     case "changeURL":
       DispatchQueue.main.async { self.onChangeURL() }
     default:
@@ -212,16 +220,19 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
   private static let bridgeJS = """
   (function () {
     if (window.QingranNative && window.QingranNative.present) return;
-    function post(type) {
+    function post(type, extra) {
       try {
-        window.webkit.messageHandlers.qingran.postMessage({ type: type });
+        var body = extra || {};
+        body.type = type;
+        window.webkit.messageHandlers.qingran.postMessage(body);
       } catch (e) {}
     }
     window.QingranNative = {
       present: true,
       startCall: function () { post('startCall'); },
       endCall: function () { post('endCall'); },
-      prepareAudio: function () { post('prepareAudio'); }
+      prepareAudio: function () { post('prepareAudio'); },
+      keepAwake: function (on) { post('keepAwake', { on: !!on }); }
     };
   })();
   """
