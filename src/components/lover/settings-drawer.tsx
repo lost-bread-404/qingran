@@ -777,7 +777,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
             ) : (
               <div className="flex flex-col gap-2">
                 <p className="text-sm text-subtle">
-                  清然只忘掉还没整理进「我记得的」的最近对话。已经写进文档的事还在。聊天记录本身不会删。
+                  清掉屏幕上的聊天和最近还没整理进记忆的对话，并放下他手上的计划，适合他轴在一个话题上的时候用。他的心事、心情和已经记住的事都还在。
                 </p>
                 <div className="flex gap-2">
                   <Button

@@ -48,7 +48,7 @@ test("settings hearing tab is sensitivity, the live request, and labeling", () =
   assert.doesNotMatch(src, /听力引擎/);
   assert.doesNotMatch(src, /HEARING_INSTRUCTION/);
   assert.doesNotMatch(src, /发给 Qwen/);
-  assert.match(src, /清然只忘掉还没整理进「我记得的」的最近对话/);
+  assert.match(src, /放下他手上的计划/);
   assert.match(src, /clearArmed/);
   assert.match(src, /确定清空/);
   assert.match(src, /logFailFirstLine/);

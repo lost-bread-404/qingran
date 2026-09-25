@@ -74,12 +74,20 @@ test("clear keeps archived notes and only forgets unarchived turns", async () =>
         choice: "先听",
         now: "听她说",
         longing: "一直惦记",
-        plans: [keptPlan],
+        plans: [keptPlan, { id: "p-done", what: "已经问过", why: "", status: "done" }],
+        glow: 7,
+        glow_at: t0,
         turn_seq: t1,
         updated_at: t1,
         longing_updated_at: t0,
       },
       t1,
+    );
+    await (await sql()).query(
+      `insert into qr_reach (id, next_at, intent, set_by, set_at, enabled, retry)
+       values (1, $1, '接着问睡得怎么样', 'reply', $2, true, 1)
+       on conflict (id) do update set next_at = excluded.next_at, intent = excluded.intent, set_by = excluded.set_by, set_at = excluded.set_at`,
+      [tClear + 3_600_000, t1],
     );
 
     setClock(() => tClear);
@@ -97,8 +105,23 @@ test("clear keeps archived notes and only forgets unarchived turns", async () =>
     assert.equal(inner.choice, "");
     assert.equal(inner.now, "");
     assert.equal(inner.longing, "一直惦记");
-    assert.equal(inner.plans[0]?.id, "p1");
-    assert.equal(inner.plans[0]?.status, "open");
+    assert.equal(inner.glow, 7);
+    const dropped = inner.plans.find((plan) => plan.id === "p1");
+    const done = inner.plans.find((plan) => plan.id === "p-done");
+    assert.equal(dropped?.status, "dropped");
+    assert.equal(dropped?.what, "明天早上问她睡得怎么样");
+    assert.equal(done?.status, "done");
+    const logs = await (await sql()).query<{ data: { kind?: string; dropped?: string[] } }>(
+      `select data from qr_inner_log order by id desc limit 1`,
+    );
+    assert.equal(logs[0]?.data.kind, "cleared_by_rosie");
+    assert.deepEqual(logs[0]?.data.dropped, ["p1"]);
+    const reach = await (await sql()).query<{ next_at: number | null; intent: string; set_by: string }>(
+      `select next_at, intent, set_by from qr_reach where id = 1`,
+    );
+    assert.equal(reach[0]?.next_at, null);
+    assert.equal(reach[0]?.intent, "");
+    assert.equal(reach[0]?.set_by, "rosie");
 
     const rows = await (await sql()).query<{ id: string; forgotten_at: number | null; archived_at: number | null }>(
       `select id, forgotten_at, archived_at from qingran_messages order by id`,

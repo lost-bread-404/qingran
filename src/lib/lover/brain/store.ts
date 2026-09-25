@@ -431,12 +431,38 @@ export async function setRoomClearedAt(at: number): Promise<void> {
   );
 }
 
-/** Hide recent unarchived turns from the screen and from Qingran; keep rows for analysis. */
+/** Hide recent unarchived turns from the screen and from Qingran; keep rows for analysis.
+ * Open plans are dropped and the next reach is cleared. Longings, glow, and the dossier stay. */
 export async function clearRecentConversation(): Promise<void> {
   const ts = now();
+  const inner = await getInner();
   await setRoomClearedAt(ts);
   await forgetUnarchivedMessages(ts);
   await resetInnerTurn();
+  const plans = inner.plans.map((plan) =>
+    plan.status === "open" ? { ...plan, status: "dropped" as const } : plan,
+  );
+  const dropped = inner.plans.filter((plan) => plan.status === "open").map((plan) => plan.id);
+  if (dropped.length) await saveInnerPlans(plans);
+  await appendInnerLog({
+    turnSeq: inner.turn_seq,
+    data: { kind: "cleared_by_rosie", dropped },
+  });
+  await clearReachOnRosieClear(ts);
+}
+
+async function clearReachOnRosieClear(at: number): Promise<void> {
+  const db = await getSql();
+  await db.query(
+    `insert into qr_reach (id, next_at, intent, set_by, set_at)
+     values (1, null, '', 'rosie', $1)
+     on conflict (id) do update set
+       next_at = null,
+       intent = '',
+       set_by = 'rosie',
+       set_at = excluded.set_at`,
+    [at],
+  );
 }
 
 function rowMessage(r: Record<string, unknown>): StoredMessage {
