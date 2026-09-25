@@ -10,4 +10,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ask Qingran if he wants to reach out
-        run: curl -fsS -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" https://qingran.app/api/cron/wake
+        run: |
+          curl -fsS -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" https://qingran.app/api/cron/wake
