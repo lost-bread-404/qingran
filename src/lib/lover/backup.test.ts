@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { backupFilename, makeBackup, parseBackup } from "./backup.ts";
-import { DEFAULT_SYSTEM_PROMPT, lockedProfile } from "./types.ts";
+import { lockedProfile } from "./types.ts";
 
 test("round-trips prompt, memories, and chat", () => {
   const backup = makeBackup({
@@ -36,7 +36,7 @@ test("rejects random json so a wrong file cannot wipe the room", () => {
   assert.equal(parseBackup({ kind: "qingran-backup", version: 99, memories: [], messages: [] }), null);
 });
 
-test("empty prompt in a backup still becomes the default after lock", () => {
+test("empty prompt in a backup stays empty after lock", () => {
   const parsed = parseBackup(
     makeBackup({
       profile: lockedProfile({ systemPrompt: "", muted: false, autoRemember: true, memoryCursor: "" }),
@@ -45,7 +45,7 @@ test("empty prompt in a backup still becomes the default after lock", () => {
     }),
   );
   assert.ok(parsed);
-  assert.equal(parsed.profile.systemPrompt, DEFAULT_SYSTEM_PROMPT);
+  assert.equal(parsed.profile.systemPrompt, "");
 });
 
 test("debug switch owns captureAudio", () => {

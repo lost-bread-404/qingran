@@ -46,6 +46,7 @@ export type TurnTraceInput = {
     intimateInjected?: boolean;
     personaPlacement?: "system" | "first_user";
     unexpected_state_block?: boolean;
+    persona_missing?: boolean;
     inner?: {
       feel: string;
       desire?: string;

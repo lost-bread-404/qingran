@@ -5,6 +5,7 @@ import type { MomentText } from "../mind-parse.ts";
 import type { Mind, Note, PortraitRow, StoredMessage, VoiceChatMessage } from "../types.ts";
 import { isNightNoiseBody, modelFacingText } from "../../message-markup.ts";
 import {
+  NEUTRAL_PERSONA,
   formatVoiceInjectLine,
   voiceInjectFromProfile,
   type VoiceInjectFlags,
@@ -81,7 +82,7 @@ export type VoiceInputChars = {
   user: number;
 };
 
-const FALLBACK_CHARTER = "你就是清然。正在和 Rosie 语音通话。";
+const FALLBACK_CHARTER = NEUTRAL_PERSONA;
 const MOMENT_FIELD = /\{(feel|desire|want|longing|now|glow)\}/;
 const DOSSIER_TOKEN = /\{(?:dossier|self|bond|portrait)\}/;
 const OTHER_VOICE_TOKEN = /\{(?:system_prompt|identity_block|user_text|history_messages|clock|feel|desire|want|longing|now|glow|mind|memories)\}/;

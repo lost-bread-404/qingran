@@ -81,7 +81,7 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
       })),
     } satisfies Room;
   } catch {
-    return EMPTY_ROOM;
+    return { ...EMPTY_ROOM, loadFailed: true as const };
   }
 });
 

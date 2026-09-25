@@ -240,7 +240,7 @@ async function slotsFor(key: PromptKey, variantId: string): Promise<{ slots: Rec
   const charter = await getProfilePrompt();
   return {
     slots: { charter, transcript: LATER },
-    note: "评审不在通话里跑。人设是现在这一份，对话要等离线评审。",
+    note: "评审不跟每一句一起跑。人设是现在这一份，对话要等离线评审。",
   };
 }
 

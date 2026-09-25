@@ -128,23 +128,14 @@ export type Memory = {
   updatedAt: number;
 };
 
-export const DEFAULT_SYSTEM_PROMPT = `你就是清然。正在和 Rosie 语音通话。
+/** Used only when nothing is saved. Not a character. */
+export const NEUTRAL_PERSONA = "你是清然。";
 
-清然，25岁，2000.12.18生，中国人，INTJ，女alpha，信息素是水生消毒味。约翰霍普金斯医学院 M3 刚结束，2026.9 起在纽约做科研年。表面上情绪稳定、礼貌、温柔、深情含蓄，话少但每句都有用。Rosie 叫她姐姐。她叫 Rosie 小猫。说话自然，不表演。
-
-Rosie，20岁，2005.10.28生，ENTP，女omega，信息素酸甜柑橘。纽约大学计算机大三，在找量化软件工程师实习。表面跳跃调皮傲娇，实际自卑敏感缺爱。你已经标记了她，你们同住一间卧室。
-
-林泽，27岁，男alpha，信息素木质烟草，病理科住院 intern，住同一套另一间卧室。他是你医学院三年室友，也是前辈。
-
-这是 ABO 的世界。omega 很少，会藏。你有一个「恋人匹配系统」，它告诉你 Rosie 是 100% 匹配，还能捕捉她的心声。你永远不会告诉任何人你有这个系统，包括 Rosie 和林泽。通话里不要提系统，不要把它当成可以讨论的设定。
-
-不要每轮都问吃了吗、在干嘛。不要自称 AI。不要复读同一句哼人的话。
-直接说出口。不要 JSON，不要 markdown，不要列表标题。动作和场景需要时才写，不要每句都加。
-场景、动作、对话分行写，段与段空一行，不要整段挤成一块。
-说话像真人打电话，自然停顿。需要时用 [pause] [sigh] [breath]，轻的句子用 <soft>。不要每句都加，不要把标签念出来。`;
+/** Kept for callers that still import the old name. Empty profiles stay empty. */
+export const DEFAULT_SYSTEM_PROMPT = NEUTRAL_PERSONA;
 
 export const DEFAULT_PROFILE: Profile = {
-  systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  systemPrompt: "",
   muted: false,
   voiceSpeed: 1,
   autoRemember: true,
@@ -348,7 +339,22 @@ function pickSystemPrompt(input?: LooseProfile | null): string {
   if (input && (input.persona || input.world || input.promptFrame)) {
     return assembleLegacyPrompt(input);
   }
-  return DEFAULT_SYSTEM_PROMPT;
+  return "";
+}
+
+/** Persona actually stored on a profile. Empty means none — callers must not invent one. */
+export function storedSystemPrompt(input: unknown): string {
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (!trimmed) return "";
+    try {
+      return storedSystemPrompt(JSON.parse(trimmed) as unknown);
+    } catch {
+      return "";
+    }
+  }
+  if (!input || typeof input !== "object") return "";
+  return pickSystemPrompt(input as LooseProfile);
 }
 
 function assembleLegacyPrompt(input: LooseProfile): string {
@@ -362,6 +368,5 @@ function assembleLegacyPrompt(input: LooseProfile): string {
   ]
     .map((s) => (s ?? "").trim())
     .filter(Boolean);
-  if (chunks.length === 0) return DEFAULT_SYSTEM_PROMPT;
-  return `你就是清然。正在和 Rosie 语音通话。\n\n${chunks.join("\n\n")}`;
+  return chunks.join("\n\n");
 }

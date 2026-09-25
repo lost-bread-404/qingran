@@ -148,7 +148,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   }
   const turns = JSON.parse(readFileSync(transcriptPath, "utf8")) as Turn[];
-  const charter = charterPath ? readFileSync(charterPath, "utf8") : "你就是清然。";
+  const charter = charterPath ? readFileSync(charterPath, "utf8") : "你是清然。";
   judgeTranscript(turns, charter).then(
     (r) => console.log(r.markdown),
     (err) => {

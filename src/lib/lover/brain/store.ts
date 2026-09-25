@@ -1,4 +1,5 @@
 import { getSql, type Sql } from "../../db.ts";
+import { NEUTRAL_PERSONA, storedSystemPrompt } from "../types.ts";
 import { newId } from "../storage.ts";
 import { collapseReplyVariants } from "../pair-messages.ts";
 import { HISTORY_WINDOW, INDEX_MAX_ITEMS, SESSION_GAP_MS, clampHistoryWindow } from "./config.ts";
@@ -2039,8 +2040,23 @@ export async function getProfileData(): Promise<unknown> {
 
 export async function getProfilePrompt(): Promise<string> {
   const data = asJson<Record<string, unknown>>(await getProfileData(), {});
-  const direct = typeof data.systemPrompt === "string" ? data.systemPrompt.trim() : "";
-  return direct || "你就是清然。正在和 Rosie 语音通话。";
+  const direct = storedSystemPrompt(data);
+  if (direct) return direct;
+  await warnPersonaMissing();
+  return NEUTRAL_PERSONA;
+}
+
+async function warnPersonaMissing(): Promise<void> {
+  try {
+    await appendBrainLog({
+      step: "persona_missing",
+      ok: false,
+      note: "persona_missing",
+      error: "persona_missing",
+    });
+  } catch (err) {
+    console.error("[persona] missing", err);
+  }
 }
 
 export { SESSION_GAP_MS, newId };

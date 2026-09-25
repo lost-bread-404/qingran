@@ -95,6 +95,7 @@ export function VoiceRoom() {
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [profileReady, setProfileReady] = useState(false);
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [draft, setDraft] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
@@ -224,8 +225,13 @@ export function VoiceRoom() {
     void loadRoom()
       .then((room) => {
         if (cancelled) return;
+        if ("loadFailed" in room && room.loadFailed) {
+          setHydrated(true);
+          return;
+        }
         setProfile(lockedProfile(room.profile));
         setMessages(room.messages);
+        setProfileReady(true);
         setHydrated(true);
       })
       .catch(() => {
@@ -241,6 +247,7 @@ export function VoiceRoom() {
     const reload = () => {
       void loadRoom()
         .then((room) => {
+          if ("loadFailed" in room && room.loadFailed) return;
           setMessages(room.messages);
         })
         .catch(() => undefined);
@@ -297,12 +304,12 @@ export function VoiceRoom() {
   }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!profileReady) return;
     const timer = window.setTimeout(() => {
       void saveRoomProfile({ data: lockedProfile(profile) });
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [hydrated, profile]);
+  }, [profileReady, profile]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -311,6 +318,7 @@ export function VoiceRoom() {
         return;
       }
       void loadRoom().then((room) => {
+        if ("loadFailed" in room && room.loadFailed) return;
         setMessages((prev) => (room.messages.length > prev.length ? room.messages : prev));
       });
     }, 15000);

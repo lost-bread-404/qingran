@@ -1,4 +1,4 @@
-import type { Profile } from "./types";
+import { NEUTRAL_PERSONA, type Profile } from "./types";
 import { defaultPrompt } from "./brain/prompts/catalog.ts";
 import { fillTemplate } from "./brain/prompts/fill.ts";
 
@@ -15,7 +15,7 @@ export function hearingTagGuide(): string {
 }
 
 export function buildSystemPrompt(profile: Profile, clock: string): string {
-  const base = profile.systemPrompt.trim() || "你就是清然。正在和 Rosie 语音通话。";
+  const base = profile.systemPrompt.trim() || NEUTRAL_PERSONA;
   return `${fillTemplate(defaultPrompt("voice"), { system_prompt: base }).trim()}
 
 现在是${clock}。`;

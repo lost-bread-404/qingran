@@ -43,7 +43,7 @@ test("voice messages keep charter, dossier, then history, clock, and user", () =
     clock: "星期二 21:00",
   });
   assert.equal(msgs[0]!.role, "system");
-  assert.match(msgs[0]!.content, /你就是清然/);
+  assert.match(msgs[0]!.content, /你是清然。/);
   assert.match(msgs[1]!.content, /【我记得的】/);
   assert.match(msgs[1]!.content, /【我自己】/);
   assert.match(msgs[1]!.content, /我在医学院/);
@@ -120,7 +120,7 @@ test("stale moment fields are omitted by momentForVoice", () => {
 
 function sampleParts(): VoicePackParts {
   return {
-    charter: "你就是清然。正在和 Rosie 语音通话。",
+    charter: "保存的人设。",
     longterm: "【我自己】医学生\n叫她小猫",
     history: Array.from({ length: 12 }, (_, i) => ({
       id: `m${i}`,
@@ -161,7 +161,7 @@ test("voiceMessagesForStrip drops moment then dossier then thins history", () =>
 
   const thin = voiceMessagesForStrip(parts, "thin");
   assert.equal(thin[0]!.role, "system");
-  assert.match(thin[0]!.content, /你就是清然/);
+  assert.match(thin[0]!.content, /保存的人设。/);
   assert.doesNotMatch(joined("thin"), /【我自己】/);
   assert.doesNotMatch(joined("thin"), /【我此刻】/);
   assert.doesNotMatch(joined("thin"), /⟦心⟧/);
@@ -236,7 +236,7 @@ test("voice inject switches omit moment, dossier, and history independently", ()
 
 test("reply slots keep stored wording; charter, history, and this turn stay", () => {
   const msgs = buildVoiceMessages({
-    charter: "你就是清然。正在和 Rosie 语音通话。",
+    charter: "保存的人设。",
     selfSummary: "清然在医学院",
     bondSummary: "叫她小猫",
     portrait: [
@@ -270,8 +270,7 @@ test("reply slots keep stored wording; charter, history, and this turn stay", ()
     moment: { ...EMPTY_MOMENT, now: "听 Rosie 把今天说完" },
   });
   const joined = msgs.map((m) => m.content).join("\n");
-  assert.match(msgs[0]!.content, /你就是清然/);
-  assert.match(msgs[0]!.content, /正在和 Rosie 语音通话/);
+  assert.match(msgs[0]!.content, /保存的人设。/);
   assert.match(joined, /清然在医学院/);
   assert.match(joined, /叫她小猫/);
   assert.match(joined, /Rosie 今天日程很满/);

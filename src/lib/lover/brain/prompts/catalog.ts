@@ -118,7 +118,7 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
   {
     key: "judge",
     name: "评审",
-    blurb: "离线评审回复，不在通话里跑。用深思考档。",
+    blurb: "离线评审回复，不跟每一句一起跑。用深思考档。",
   },
 ];
 

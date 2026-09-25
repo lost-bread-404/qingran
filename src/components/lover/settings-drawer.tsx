@@ -50,7 +50,7 @@ import {
 } from "@/components/lover/settings-life";
 import { applyHearingTier, hearingTierOf, HEARING_TIER_BLURB } from "@/lib/lover/hearing/sense";
 import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
-import { DEFAULT_SYSTEM_PROMPT, clampHistoryWindow, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
+import { clampHistoryWindow, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
 import { defaultPromptModel } from "@/lib/lover/brain/prompts/models";
 import { parseSenseLine } from "@/lib/lover/hearing/sense";
 import { cn } from "@/lib/utils";
@@ -168,6 +168,7 @@ function LabelModeSwitch({
 
 export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, callDeaf = false, onSave, onClearChat }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
+  const personaDirty = useRef(false);
   const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
   const [labPassword, setLabPassword] = useState("");
   const [page, setPage] = useState<Page>("home");
@@ -206,6 +207,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
   useEffect(() => {
     if (!open) return;
     setDraft(profile.systemPrompt);
+    personaDirty.current = false;
     setDebugHearing(profile.debugHearing);
     setVoiceModel(profile.voiceModel);
     setVoiceEffort(profile.voiceEffort);
@@ -306,7 +308,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
     try {
       onSave({
       ...profile,
-      systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT,
+      systemPrompt: draft.trim(),
       hearingProvider: "xai",
       captureAudio: debugHearing,
       debugHearing,
@@ -502,10 +504,16 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
   persistRef.current = persistProfile;
 
   useEffect(() => {
-    if (!open) return;
-    if ((draft.trim() || DEFAULT_SYSTEM_PROMPT) === profile.systemPrompt) return;
+    if (personaDirty.current) return;
+    setDraft(profile.systemPrompt);
+  }, [profile.systemPrompt]);
+
+  useEffect(() => {
+    if (!open || !personaDirty.current) return;
+    const next = draft.trim();
+    if (next === profile.systemPrompt.trim()) return;
     const timer = window.setTimeout(() => {
-      persistRef.current({ systemPrompt: draft.trim() || DEFAULT_SYSTEM_PROMPT });
+      persistRef.current({ systemPrompt: next });
     }, 1500);
     return () => window.clearTimeout(timer);
   }, [draft, open, profile.systemPrompt]);
@@ -591,6 +599,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
           <Textarea
             value={draft}
             onChange={(e) => {
+              personaDirty.current = true;
               setDraft(e.target.value);
               keepCaretVisible(e.currentTarget);
             }}
@@ -604,7 +613,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, callPhase = null, 
             }}
             maxLength={8000}
             className="min-h-64 resize-none font-mono leading-relaxed"
-            placeholder="写给模型的 system prompt"
+            placeholder="写给他的人设。空着时只会告诉他：你是清然。"
           />
           <p className="mt-2 text-xs text-subtle">「我记得的」会另外附上，不用写进这段。其他步骤的指令在「指令」页。</p>
             </label>

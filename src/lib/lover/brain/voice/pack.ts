@@ -1,5 +1,5 @@
 import { mergeEditedUserBody } from "../../message-markup.ts";
-import { voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
+import { NEUTRAL_PERSONA, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getInner, getMessage, getMeta, listHistoryWindow, listPortrait, upsertMessage } from "../store.ts";
 import { intimateNotesForVoice, momentForVoice } from "../mind-parse.ts";
@@ -152,7 +152,7 @@ export async function loadHotContext(input: {
     intimateNotes: intimate,
   };
   const [charterHash, longtermHash] = await Promise.all([
-    rememberCharter(charter.trim() || "你就是清然。正在和 Rosie 语音通话。"),
+    rememberCharter(charter.trim() || NEUTRAL_PERSONA),
     rememberBlock("voice_longterm", longterm),
   ]);
 
