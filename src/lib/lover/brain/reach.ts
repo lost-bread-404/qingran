@@ -46,15 +46,15 @@ const REACH_SCHEMA = {
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["send", "text", "desire", "read_her", "feel", "now", "scene", "longings", "glow", "next_reach"],
+    required: ["send", "text", "desire", "read_her", "feel", "choice", "now", "longings", "plans", "scene", "glow", "next_reach"],
     properties: {
       send: { type: "boolean" },
       text: { type: "string" },
       desire: { type: "string" },
       read_her: { type: "string" },
       feel: { type: "string" },
+      choice: { type: "string" },
       now: { type: "string" },
-      scene: { type: "string", enum: ["daily", "intimate"] },
       longings: {
         type: "array",
         items: {
@@ -68,6 +68,21 @@ const REACH_SCHEMA = {
           },
         },
       },
+      plans: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "what", "why", "status"],
+          properties: {
+            id: { type: "string" },
+            what: { type: "string" },
+            why: { type: "string" },
+            status: { type: "string", enum: ["open", "done", "dropped"] },
+          },
+        },
+      },
+      scene: { type: "string", enum: ["daily", "intimate"] },
       glow: {
         type: "object",
         additionalProperties: false,
@@ -261,11 +276,11 @@ export async function runWake(opts: {
     read_her: json.read_her,
     feel: json.feel,
     want: json.want,
-    choice: inner.choice,
+    choice: "choice" in json ? json.choice : inner.choice,
     now: json.now,
     scene: json.scene,
     longings: json.longings,
-    plans: inner.plans,
+    plans: "plans" in json ? json.plans : inner.plans,
     glow: json.glow,
     next_reach: json.next_reach,
   }, at, inner.turn_seq);

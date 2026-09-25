@@ -70,9 +70,9 @@ export const REFLECT_OUTPUT_KEYS = [
   "feel",
   "choice",
   "now",
-  "scene",
   "longings",
   "plans",
+  "scene",
   "glow",
   "next_reach",
 ] as const;
@@ -83,17 +83,6 @@ export function formatLongingsLine(inner: InnerState): string {
   return items
     .map((item) => `${item.text.trim()}${item.since ? `（从 ${item.since} 起）` : ""}`)
     .join("；");
-}
-
-export function formatPlansForPrompt(plans: InnerPlan[]): string {
-  const open = plans.filter((plan) => plan.status === "open" && plan.what.trim());
-  if (!open.length) return "（没有）";
-  return open
-    .map((plan) => {
-      const why = plan.why?.trim() ? ` why=${plan.why.trim()}` : "";
-      return `- id=${plan.id} what=${plan.what.trim()}${why} status=${plan.status}`;
-    })
-    .join("\n");
 }
 
 export function nowNotActionReason(nowText: string): string | null {
@@ -331,15 +320,16 @@ function mergePlans(
     const existing = requested ? prevById.get(requested) : undefined;
     const id = existing ? existing.id : requested && !used.has(requested) ? requested : makePlanId(nowMs, index, used);
     if (used.has(id)) return;
-    used.add(id);
     const rejected = nowRejectedReason(what);
     if (rejected) {
-      const list = Array.isArray(discarded.plan_not_positive)
-        ? (discarded.plan_not_positive as Array<{ id: string; reason: string; text: string }>)
+      const list = Array.isArray(discarded.plan_rejected)
+        ? (discarded.plan_rejected as Array<{ id: string; reason: string; text: string }>)
         : [];
-      list.push({ id, reason: rejected, text: what });
-      discarded.plan_not_positive = list;
+      list.push({ id: existing?.id || requested, reason: rejected, text: what });
+      discarded.plan_rejected = list;
+      return;
     }
+    used.add(id);
     const status = planStatus(row.status, existing?.status ?? "open");
     next.push({
       id,

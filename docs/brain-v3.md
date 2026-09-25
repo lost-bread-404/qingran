@@ -16,7 +16,7 @@ Rosie ──► ① 回答 ◄──── ② 内心 ───────┘
 | 部分 | 写入方 | 频率 | 读取方 |
 |---|---|---|---|
 | ① 回答 | `voice` | 每轮 | Rosie |
-| ② 内心 | `voice` 同一条输出末尾的 `⟦心⟧` JSON | 每轮，回复说完立刻写，下一轮才注入 | ①，以及 reach |
+| ② 内心 | `reflect`，回复结束之后单独跑 | 每轮，异步，不挡回复。下一轮才注入 | ①，以及 reach |
 | ③ Dossier | `editor` | 第一次自动生效；之后约每 20 轮 Rosie 的消息，或隔了一次会话再开口，或设置里「现在整理」 | ① ② |
 | 日记 | `report` | 默认暂停。打开开关后，每月第一天写上个月。日记页也可以手动生成本月 | 只给日记页。清然不读 |
 
@@ -33,7 +33,7 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 | 表 | 谁写 | 说明 |
 |---|---|---|
 | `qingran_messages` | 通话 | 只追加。清空聊天是 `forgotten_at` + `room_cleared_at`，不是 DELETE |
-| `qr_inner` | 回复末尾的隐藏 JSON | desire / read_her / feel / choice / now_text / longing / plans。旧的 `want` 列保留，不再写入；0030 把已有的 `want` 复制进 `desire`。清空聊天清掉 desire、read_her、feel、choice、now，留 longing 和 plans |
+| `qr_inner` | reflect | desire / read_her / feel / choice / now_text / scene / longing / plans。旧的 `want` 列保留，不再写入；0030 把已有的 `want` 复制进 `desire`。清空聊天清掉 desire、read_her、feel、choice、now，并把 scene 放回 daily；open 的 plans 标成 dropped |
 | `qr_inner_log` | reflect | 每轮完整输出，包括被丢掉的 `now` |
 | `qr_dossier` | editor、Rosie | 一份 markdown。`cursor_at` 是已经读过的最后一条消息。`active` 见下面的偏差 |
 | `qr_dossier_versions` | 每次成功写入 | author：`editor` / `rosie` / `seed` / `compact` |
@@ -47,15 +47,16 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 
 1. `{system_prompt}`，外加 `{A|B}` 那句听力说明
 2. `【我记得的】`：生效之后是全文；还没生效时是旧的「我自己 / 我们 / 我眼中的她」
-3. `【我此刻】`：想要（desire）、心里（feel）、正在做（now）、心情（glow 词）。某一行空了就删掉那一行；四行都空就整块删掉。desire / feel / now 超过 30 分钟不注入。旧的「一直惦记着」不再出现在默认热路径里。
+3. `【我此刻】`：想要（desire）、心里（feel）、正在做（now）、心情（glow 词）、惦记（longings，带日期）。某一行空了就删掉那一行；想要、心里、正在做、心情都空就整块删掉。desire / feel / now 超过 30 分钟不注入；惦记按自己的更新时间，默认能留一周。
 4. `现在是{clock}。`
 5. 最近 N 条 history
-6. 状态说明（可编辑，在 voice 模板里）：让模型在说完后另起一行写 `⟦心⟧` 和 JSON。里面带上一次的 plans，只用来延续。
-7. user：这一句
+6. user：这一句
 
-`read_her` 和 `choice` 不进【我此刻】。忙碌程度不进回复。降级顺序仍是：去掉【我此刻】→ 去掉【我记得的】→ 只留人设 + 最近 8 条 + 状态说明 + 这一句。分隔符后面的 JSON 不进屏幕、不进 TTS、不进 `qingran_messages`。
+`read_her`、`choice` 和 `plans` 不进回复。忙碌程度也不进回复，只进 reflect，用来决定下一次什么时候找她。亲密设定只在上一轮 scene 是 intimate、并且没过 30 分钟时，跟在【我此刻】后面。降级顺序仍是：去掉【我此刻】→ 去掉【我记得的】→ 只留人设 + 最近 8 条 + 这一句。
 
-没有分隔符或 JSON 不完整时，内心保持上一轮，`qr_inner_log` 记 `inner_missing` 或 `inner_parse_error`。不再为内心单独排 reflect job。
+回复模型不再写心思。如果它还是输出了 `⟦心⟧`，分隔符后面的内容不进屏幕、不进 TTS、不进 `qingran_messages`，也不拿来更新状态。turn trace 记 `unexpected_state_block`。
+
+每轮回复成功之后 enqueue `reflect`。失败就留着上一轮的状态，记 `qr_inner_log`（`kind='reflect'`），不重试。`now` 写成否定式会被丢掉。`plans` 的 what 写成否定式时这一条不保存，原文记 `plan_rejected`；同一条旧计划如果还在，保留旧的正向写法。glow 事件的 source 是 `reflect`。`next_reach` 写入 `qr_reach`，`set_by='reflect'`。
 
 ## 每个 prompt
 
@@ -63,8 +64,8 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 
 | key | 何时跑 | 输入 | 输出 |
 |---|---|---|---|
-| `voice` | 每轮回复 | 人设、我记得的、我此刻、时间、history、状态说明（含上一次的 plans）、这一句 | 说出来的话，然后 `⟦心⟧` 加 desire / read_her / feel / choice / now / longings / plans / glow / next_reach |
-| `reflect` | 不再入队 | 旧任务如果还在队列里，仍按原来的输入跑完 | 同上面的内心字段。新的一轮不再调用 |
+| `voice` | 每轮回复 | 人设、我记得的、我此刻、时间、history、这一句。不包含 plans、read_her、choice，也不再要求写 `⟦心⟧` | 说出来的话 |
+| `reflect` | 每轮回复结束后 | 人设、我记得的、时钟（带时间段）、忙碌行、上一次的全部内心字段（含 read_her、choice、plans）、最近 16 条对话 | desire / read_her / feel / choice / now / longings / plans / scene / glow / next_reach。默认 grok-4.3 medium |
 | `editor` main | 见上 | 人设、当前文档、longing、cursor 之后没被遗忘的对话（一批最多约 12000 字）、字数上限 | `{ops:[{section,action,old,new}]}` |
 | `editor` compact | 应用后超过上限 | 全文、上限 | `{body}`，author=`compact` |
 | `editor` seed | `active` 仍是 false 且没有草稿时，自动跑一次 | 人设、`seed/story.json`、还在用的画像和 self/bond、最近 60 天 weight≥3 的笔记最多 150 条、longing | `{body}`，写进版本历史后立刻生效 |
@@ -82,7 +83,7 @@ History 会自我模仿。窗口里一半是清然自己的旧回复，他就跟
 | desire, feel, now, 心情词 | 看得到（未过期、开关开着） | 这是要长成话的结论。desire 是他自己的欲望，不是对她的分析 |
 | read_her | 看不到 | 对她的理解留在这里，避免挤进欲望和动作 |
 | choice | 看不到 | 否定句和取舍过程留在这里，避免被念出来 |
-| plans | 状态说明块里看得到上一次的 open plans | 只用来延续，不进【我此刻】 |
+| plans | 看不到 | 只给 reflect 和 reach 延续。否定句不保存 |
 | Dossier 全文 | 生效后看得到 | 一份当前成立的理解，不是流水账 |
 
 ## 生效之前和之后

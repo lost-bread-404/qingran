@@ -52,9 +52,10 @@ test("voice messages keep charter, dossier, then history, clock, and user", () =
   assert.doesNotMatch(msgs[2]!.content, /想要：/);
   assert.equal(msgs[3]!.content, "现在是星期二 21:00。");
   assert.equal(msgs[4]!.content, "嗯");
-  assert.match(msgs[5]!.content, /⟦心⟧/);
-  assert.match(msgs[5]!.content, /（没有）/);
-  assert.equal(msgs.at(-1)!.content, "今晚不想动");
+  assert.equal(msgs[5]!.content, "今晚不想动");
+  const joined = msgs.map((m) => m.content).join("\n");
+  assert.doesNotMatch(joined, /⟦心⟧/);
+  assert.doesNotMatch(joined, /read_her|choice|\{plans\}|你上一次的计划/);
   const moment = msgs[2]!.content;
   assert.doesNotMatch(moment, /不要复述/);
   assert.doesNotMatch(moment, /choice/);
@@ -163,11 +164,11 @@ test("voiceMessagesForStrip drops moment then dossier then thins history", () =>
   assert.match(thin[0]!.content, /你就是清然/);
   assert.doesNotMatch(joined("thin"), /【我自己】/);
   assert.doesNotMatch(joined("thin"), /【我此刻】/);
-  assert.match(joined("thin"), /⟦心⟧/);
-  assert.equal(thin.length, 1 + 8 + 1 + 1);
+  assert.doesNotMatch(joined("thin"), /⟦心⟧/);
+  assert.equal(thin.length, 1 + 8 + 1);
   assert.equal(thin[1]!.content, "msg4");
   assert.equal(thin.at(-1)!.content, "今晚不想动");
-  assert.match(thin.at(-2)!.content, /⟦心⟧/);
+  assert.doesNotMatch(thin.at(-2)!.content, /⟦心⟧/);
 });
 
 test("voiceInputChars splits system moment dossier history user", () => {
@@ -279,7 +280,7 @@ test("reply slots keep stored wording; charter, history, and this turn stay", ()
   assert.equal(msgs.at(-1)!.content, "清然在吗");
 });
 
-test("a saved voice template keeps its own text and gains the state block before the user line", () => {
+test("a saved voice template keeps its own text and does not gain a state block", () => {
   const custom = JSON.stringify({
     v: 2,
     variants: [
@@ -289,6 +290,7 @@ test("a saved voice template keeps its own text and gains the state block before
         messages: [
           { role: "system", content: "自定义开头 {system_prompt}" },
           { role: "system", content: "【我此刻】\n想要：{desire}\n心里：{feel}" },
+          { role: "system", content: "说完话之后，另起一行写 ⟦心⟧\n{plans}\n- id=p1 what=我要抱着她" },
           { role: "system", content: "{history_messages}" },
           { role: "user", content: "{user_text}" },
         ],
@@ -304,16 +306,17 @@ test("a saved voice template keeps its own text and gains the state block before
     moment: { ...EMPTY_MOMENT, desire: "想抱她", feel: "心软" },
     clock: "星期二 21:00",
     voiceTemplate: custom,
-    plansText: "- id=p1 what=我要抱着她 status=open",
   });
   assert.match(msgs[0]!.content, /自定义开头/);
   const moment = msgs.find((m) => m.content.includes("【我此刻】"))!.content;
   assert.match(moment, /想要：想抱她/);
   assert.doesNotMatch(moment, /read_her|choice/);
+  const joined = msgs.map((m) => m.content).join("\n");
+  assert.doesNotMatch(joined, /⟦心⟧/);
+  assert.doesNotMatch(joined, /我要抱着她/);
+  assert.doesNotMatch(joined, /\{plans\}/);
+  assert.doesNotMatch(joined, /忙碌/);
   const hist = msgs.findIndex((m) => m.content === "嗯");
-  const state = msgs.findIndex((m) => m.content.includes("⟦心⟧"));
   const user = msgs.findIndex((m) => m.content === "今晚不想动");
-  assert.ok(hist < state && state < user);
-  assert.match(msgs[state]!.content, /我要抱着她/);
-  assert.doesNotMatch(msgs.map((m) => m.content).join("\n"), /忙碌/);
+  assert.ok(hist >= 0 && hist < user);
 });

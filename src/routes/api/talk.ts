@@ -3,8 +3,7 @@ import { noteRosieTurn } from "@/lib/lover/brain/dossier";
 import { enqueueArchiveIfNeeded } from "@/lib/lover/brain/archivist";
 import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } from "@/lib/lover/brain/config";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
-import { drainJobs } from "@/lib/lover/brain/jobs";
-import { commitReplyInner } from "@/lib/lover/brain/reply-inner";
+import { drainJobs, enqueueReflect } from "@/lib/lover/brain/jobs";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
 import { upsertMessage, getProfileData } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
@@ -266,6 +265,7 @@ export const Route = createFileRoute("/api/talk")({
                   injectLine: formatVoiceInjectLine(ctx.inject),
                   intimateInjected: ctx.intimateInjected,
                   personaPlacement: ctx.personaPlacement,
+                  unexpected_state_block: streamResult.innerCut === true,
                   inner: ctx.injected,
                   tool: toolStarted.name
                     ? { name: toolStarted.name, arguments: toolStarted.args, ms: toolStarted.ms }
@@ -278,14 +278,7 @@ export const Route = createFileRoute("/api/talk")({
                 },
               });
 
-              if (!failed && display) {
-                await commitReplyInner({
-                  turnSeq: userCreatedAt,
-                  tail: streamResult.innerCut ? (streamResult.innerTail ?? "") : null,
-                  model: streamResult.model || null,
-                  ms: streamResult.ms,
-                });
-              }
+              if (!failed && display) await enqueueReflect(userCreatedAt);
               await noteRosieTurn(userCreatedAt);
               await enqueueArchiveIfNeeded(userCreatedAt, ctx.inject.history);
               await enqueuePeriodicIfDue(nowMs, timeZone);

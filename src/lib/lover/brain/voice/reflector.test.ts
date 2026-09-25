@@ -4,7 +4,7 @@ import { INDEX_CORE_MAX, INDEX_RELATED_MAX } from "../config.ts";
 import { EMPTY_MIND, type IndexItem } from "../types.ts";
 import { coerceMind, insightDirectiveReason, validateMind } from "../mind-parse.ts";
 import { assembleRelatedIndex, resolveCoreIndex } from "./retrieve.ts";
-import { buildReflectorInput } from "./reflector.ts";
+import { buildReflectorInput, formatReflectConversation } from "./reflector.ts";
 import { defaultDoc, serializeDoc } from "../prompts/doc.ts";
 
 function item(id: string, extra: Partial<IndexItem> = {}): IndexItem {
@@ -128,6 +128,66 @@ test("reflect user text comes from the template, not a hardcoded block", () => {
   assert.equal(packed.stable, "自定义稳定 我在医学院。");
   assert.match(packed.turn, /【上一次的心思】/);
   assert.doesNotMatch(packed.stable, /【我自己】/);
+});
+
+test("reflect turn carries private fields and the busy line, not a reply state block", () => {
+  const packed = buildReflectorInput({
+    charter: "你就是清然。",
+    dossier: "我在医学院。",
+    clock: "星期二 21:00（晚上）",
+    busyLine: "（只用于决定下一次什么时候找她）我这段时间：考试（很忙）。",
+    oldInner: "desire：想抱\nread_her：她累\nchoice：先不催\nplans：\n- id=p1 what=我要问",
+    conversation: "清然：过来",
+  });
+  const all = `${packed.system}\n${packed.stable}\n${packed.turn}`;
+  assert.match(packed.turn, /只用于决定下一次什么时候找她/);
+  assert.match(packed.turn, /read_her：她累/);
+  assert.match(packed.turn, /choice：先不催/);
+  assert.match(packed.turn, /我要问/);
+  assert.match(packed.system, /scene/);
+  assert.doesNotMatch(all, /⟦心⟧/);
+});
+
+test("reflect conversation drops markup, night noise, and system notices", () => {
+  const text = formatReflectConversation(
+    [
+      {
+        id: "n",
+        role: "assistant",
+        text: "⟦夜噪⟧咳",
+        createdAt: 1,
+        kind: "say",
+        archivedAt: null,
+        sessionId: null,
+        localDay: null,
+      },
+      {
+        id: "s",
+        role: "assistant",
+        text: "系统",
+        createdAt: 2,
+        kind: "system_notice",
+        archivedAt: null,
+        sessionId: null,
+        localDay: null,
+      },
+      {
+        id: "a",
+        role: "assistant",
+        text: "⟦回:u1⟧过来。",
+        createdAt: 3,
+        kind: "say",
+        archivedAt: null,
+        sessionId: null,
+        localDay: null,
+      },
+    ],
+    "UTC",
+  );
+  assert.match(text, /过来/);
+  assert.doesNotMatch(text, /⟦回:/);
+  assert.doesNotMatch(text, /系统/);
+  assert.doesNotMatch(text, /咳/);
 });
 
 test("core index caps at 60, sorted by id; related caps at 30 and excludes core", () => {

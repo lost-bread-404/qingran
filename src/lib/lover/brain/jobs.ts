@@ -7,6 +7,7 @@ import {
 import { now } from "./clock.ts";
 import { canStartJob, retryDelayMs, timeoutFor } from "./jobs-policy.ts";
 import {
+  appendInnerLog,
   claimJob,
   cleanupOldJobs,
   deferJob,
@@ -50,6 +51,12 @@ export async function enqueue(
     ? (await upsertReflectJob(Number(payload.turnSeq ?? 0)), true)
     : await insertJob(job, force);
   return inserted;
+}
+
+/** One reflect for the latest reply. A newer turn replaces a pending one; failures are not retried. */
+export async function enqueueReflect(turnSeq: number): Promise<void> {
+  if (!Number.isFinite(turnSeq) || turnSeq <= 0) return;
+  await enqueue("reflect", "reflect", { turnSeq });
 }
 
 async function runOne(job: BrainJob): Promise<void> {
@@ -149,7 +156,13 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
       }
       if (job.type === "reflect") {
         const turnSeq = Number(job.payload.turnSeq ?? 0);
+        await appendInnerLog({
+          turnSeq,
+          data: { kind: "reflect", error: message },
+        }).catch(() => undefined);
         if ((await finishReflectJob(job.id, turnSeq)) === "pending") continue;
+        await finishJob(job.id, "failed", { error: message });
+        continue;
       }
       if (job.attempts < JOB_MAX_ATTEMPTS) {
         const delay = retryDelayMs(job.attempts);

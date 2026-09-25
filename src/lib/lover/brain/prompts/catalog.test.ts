@@ -62,11 +62,18 @@ test("reflect archive editor defaults close the memory loop", () => {
   assert.match(compact?.messages.map((m) => m.content).join("\n") ?? "", /先压缩抽象的描述/);
   assert.match(defaultPrompt("archive"), /第一人称/);
   assert.match(defaultPrompt("reflect"), /所有"不……"都写在这里/);
+  assert.match(defaultPrompt("reflect"), /我要/);
+  const reflect = PROMPT_CATALOG.find((s) => s.key === "reflect");
+  assert.match(reflect?.blurb ?? "", /单独跑/);
   const voice = PROMPT_CATALOG.find((s) => s.key === "voice");
   const voiceBody = voice?.variants[0]?.messages.map((message) => message.content).join("\n") ?? "";
   assert.match(voiceBody, /【我此刻】/);
   assert.match(voiceBody, /【我记得的】/);
   assert.doesNotMatch(voiceBody, /不要复述/);
+  assert.doesNotMatch(voiceBody, /⟦心⟧/);
+  assert.doesNotMatch(voiceBody, /\{plans\}/);
+  assert.doesNotMatch(voiceBody, /read_her/);
+  assert.equal(voice?.placeholders.some((p) => p.token === "plans"), false);
   assert.match(defaultPrompt("dusk"), /第一人称/);
   assert.match(defaultPrompt("synth"), /第一人称/);
   assert.ok(voice?.placeholders.some((p) => p.token === "feel"));

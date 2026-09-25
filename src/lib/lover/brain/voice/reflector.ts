@@ -1,5 +1,5 @@
 import { REFLECT_WINDOW } from "../config.ts";
-import { callModel, classifyReflectFailure } from "../llm.ts";
+import { callModel, classifyReflectFailure, type CallModelResult } from "../llm.ts";
 import { applyReflectOutput, expireOpenPlans, formatOldInner, REFLECT_OUTPUT_KEYS } from "../mind-parse.ts";
 import {
   appendInnerLog,
@@ -16,7 +16,7 @@ import { formatClock } from "../time.ts";
 import { now } from "../clock.ts";
 import { fillReflectTurn } from "../observability.ts";
 import { patchTurnTraceReflector } from "../turn-trace.ts";
-import { isNightNoiseBody } from "../../message-markup.ts";
+import { isNightNoiseBody, modelFacingText } from "../../message-markup.ts";
 import { rememberBlock, rememberCharter, type ReflectRefs } from "../log-refs.ts";
 import { resolveTz } from "../tz.ts";
 import type { InnerState, StoredMessage } from "../types.ts";
@@ -40,7 +40,6 @@ export const INNER_SCHEMA = {
       feel: { type: "string" },
       choice: { type: "string" },
       now: { type: "string" },
-      scene: { type: "string", enum: ["daily", "intimate"] },
       longings: {
         type: "array",
         items: {
@@ -68,6 +67,7 @@ export const INNER_SCHEMA = {
           },
         },
       },
+      scene: { type: "string", enum: ["daily", "intimate"] },
       glow: {
         type: "object",
         additionalProperties: false,
@@ -98,7 +98,7 @@ export const INNER_SCHEMA = {
 export function formatReflectConversation(history: StoredMessage[], timeZone: string): string {
   const lines = history
     .filter((m) => m.kind !== "system_notice" && !isNightNoiseBody(m.text))
-    .map((m) => `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "Rosie" : "清然"}：${m.text}`);
+    .map((m) => `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "Rosie" : "清然"}：${modelFacingText(m.text)}`);
   return lines.join("\n");
 }
 
@@ -147,7 +147,11 @@ export function buildReflectorInput(parts: ReflectorParts, template?: string | n
   };
 }
 
-export async function runReflector(turnSeq: number, jobId?: string): Promise<InnerState | null> {
+export async function runReflector(
+  turnSeq: number,
+  jobId?: string,
+  complete: typeof callModel = callModel,
+): Promise<InnerState | null> {
   const loadedInner = await getInner();
   if (loadedInner.turn_seq >= turnSeq) return loadedInner;
 
@@ -200,7 +204,7 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Inn
     timeZone: tz,
   };
 
-  const result = await callModel("reflect", {
+  const result: CallModelResult = await complete("reflect", {
     system: packed.system,
     input: packed.stable,
     inputParts: [packed.stable, packed.turn],
@@ -215,7 +219,7 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Inn
   if (!result.ok || !result.json) {
     await appendInnerLog({
       turnSeq,
-      data: { error: classifyReflectFailure(result), expired_before: expired.dropped },
+      data: { kind: "reflect", error: classifyReflectFailure(result), expired_before: expired.dropped },
       model: result.model,
       ms: result.ms,
     });
@@ -254,7 +258,7 @@ export async function runReflector(turnSeq: number, jobId?: string): Promise<Inn
   const saved = await saveInner(applied.next, turnSeq, {
     model: result.model,
     ms: result.ms,
-    log: { output: result.json, applied: applied.next, discarded: applied.discarded },
+    log: { kind: "reflect", output: result.json, applied: applied.next, discarded: applied.discarded },
   });
   if (!saved) {
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });

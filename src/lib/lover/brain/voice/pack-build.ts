@@ -63,8 +63,6 @@ export type VoicePackParts = {
   injectMoment?: boolean;
   injectDossier?: boolean;
   historyWindow?: number;
-  /** Open plans from the previous turn, shown only in the state block. */
-  plansText?: string;
   personaPlacement?: "system" | "first_user";
   personaAck?: string;
   /** Already decided: empty means do not inject. */
@@ -185,7 +183,6 @@ function voiceVars(parts: {
   userText: string;
   mindText: string;
   memoriesText: string;
-  plansText: string;
   placement?: "system" | "first_user";
 }): Record<string, string> {
   const personaInSystem = parts.placement !== "first_user";
@@ -203,7 +200,7 @@ function voiceVars(parts: {
     longing: parts.moment.longing.trim(),
     now: parts.moment.now.trim(),
     glow: parts.moment.glow.trim(),
-    plans: parts.plansText.trim() || "（没有）",
+    plans: "",
     mind: parts.mindText,
     memories: parts.memoriesText,
     user_text: parts.userText,
@@ -230,7 +227,6 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
     showMemories: parts.showMemories === true && (strip === "none" || strip === "moment"),
     mindText: strip === "none" ? parts.mindText : "",
     memoriesText: strip === "none" || strip === "moment" ? parts.memoriesText : "",
-    plansText: parts.plansText,
     personaPlacement: parts.personaPlacement,
     personaAck: parts.personaAck,
     intimateNotes: parts.intimateNotes,
@@ -245,7 +241,6 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
     role: "system" as const,
     content: systemCharter(parts.charter, parts.voiceTemplate),
   };
-  const state = rendered.find((message) => message.content.includes("⟦心⟧"));
   const cap = inject.history <= 0 ? 0 : Math.min(VOICE_THIN_HISTORY, inject.history);
   const history = voiceHistoryMessages(parts.history, cap);
   const last = rendered[rendered.length - 1];
@@ -263,7 +258,7 @@ export function voiceMessagesForStrip(parts: VoicePackParts, strip: VoiceStrip):
         )
       : [];
   const middle = [...(intimate ? [intimate] : []), ...persona, ...history];
-  return state ? [head, ...middle, state, user] : [head, ...middle, user];
+  return [head, ...middle, user];
 }
 
 export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
@@ -363,7 +358,6 @@ export function buildVoiceMessages(opts: {
   showMemories?: boolean;
   mindText?: string;
   memoriesText?: string;
-  plansText?: string;
   personaPlacement?: "system" | "first_user";
   personaAck?: string;
   intimateNotes?: string;
@@ -392,7 +386,6 @@ export function buildVoiceMessages(opts: {
     userText: opts.userText,
     mindText: opts.mindText ?? opts.mind?.insight ?? "",
     memoriesText: opts.showMemories ? opts.memoriesText ?? "" : "",
-    plansText: opts.plansText ?? "",
     placement: opts.personaPlacement,
   });
   messages = messages
@@ -423,8 +416,7 @@ export function insertIntimateNotes<T extends { role: string; content: string }>
   const block = { role: "system", content: `【此刻的我】\n${text}` } as T;
   const moment = messages.findIndex((message) => message.content.includes("【我此刻】"));
   if (moment >= 0) return [...messages.slice(0, moment + 1), block, ...messages.slice(moment + 1)];
-  const state = messages.findIndex((message) => message.content.includes("⟦心⟧"));
-  const at = state >= 0 ? state : messages.findIndex((message) => message.role !== "system");
+  const at = messages.findIndex((message) => message.role !== "system");
   const index = at < 0 ? messages.length : at;
   return [...messages.slice(0, index), block, ...messages.slice(index)];
 }

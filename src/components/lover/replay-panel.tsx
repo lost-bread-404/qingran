@@ -181,7 +181,7 @@ function SideCard({ title, side, open }: { title: string; side: Side; open: bool
       <p className="whitespace-pre-wrap text-sm leading-relaxed">{side.speech || "（没有正文）"}</p>
       {open ? (
         <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[10px]">
-          {side.innerJson ? side.innerJson : "（没有心思）"}
+          {side.innerJson ? side.innerJson : "重放只比较说出来的话。心思在这句之后另写，这里不生成。"}
         </pre>
       ) : null}
     </div>

@@ -53,7 +53,8 @@ test("route overrides class, env route beats class", () => {
   assert.equal(report.effort, "medium");
   const reflect = resolveRoute("reflect");
   assert.equal(reflect.cls, "FAST_THINKER");
-  assert.equal(reflect.effort, "low");
+  assert.equal(reflect.model, "grok-4.3");
+  assert.equal(reflect.effort, "medium");
   assert.equal(MODEL_CLASSES.FAST_THINKER.model, "grok-4.3");
 });
 

@@ -126,16 +126,28 @@ test("open plans are not dropped just because an old expires_at passed", () => {
   assert.deepEqual(dropped, []);
 });
 
-test("a negative plan is kept and only logged", () => {
+test("a negative plan is not saved, and the previous wording of that plan stays", () => {
+  const prev = [plan({ id: "keep", what: "我要问她睡了没" })];
   const { next, discarded } = applyReflectOutput(
-    EMPTY_INNER,
-    { plans: [{ id: "", what: "不要催她", why: "她累", status: "open" }] },
+    { ...EMPTY_INNER, plans: prev },
+    {
+      plans: [
+        { id: "keep", what: "不要催她", why: "她累", status: "open" },
+        { id: "", what: "不要再提", status: "open" },
+        { id: "", what: "我要等她靠过来", status: "open" },
+      ],
+    },
     10,
     1,
   );
-  assert.equal(next.plans[0]?.what, "不要催她");
-  const logged = discarded.plan_not_positive as Array<{ text: string }>;
-  assert.equal(logged[0]?.text, "不要催她");
+  assert.equal(next.plans.some((item) => item.what.includes("不要")), false);
+  assert.equal(next.plans.find((item) => item.id === "keep")?.what, "我要问她睡了没");
+  assert.ok(next.plans.some((item) => item.what === "我要等她靠过来"));
+  const logged = discarded.plan_rejected as Array<{ text: string }>;
+  assert.deepEqual(
+    logged.map((item) => item.text),
+    ["不要催她", "不要再提"],
+  );
 });
 
 test("longing timestamp moves only when the text changes", () => {

@@ -445,8 +445,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
         ms: Date.now() - t0,
         chars: 0,
         otherEvents,
-        innerTail: null,
-        innerCut: false,
+        innerTail,
+        innerCut,
       };
     }
     emit({ t: "text_end", speech });
@@ -463,8 +463,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       ms: Date.now() - t0,
       chars: speech.length,
       otherEvents,
-      innerTail: null,
-      innerCut: false,
+      innerTail,
+      innerCut,
     };
   }
   emit({ t: "text_end", speech });
@@ -505,8 +505,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     ms: Date.now() - t0,
     chars: speech.length,
     otherEvents,
-    innerTail: null,
-    innerCut: false,
+    innerTail,
+    innerCut,
   };
 }
 

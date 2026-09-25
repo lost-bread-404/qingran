@@ -7,7 +7,7 @@ import { now } from "../clock.ts";
 import type { Effort } from "../config.ts";
 import { getDossier } from "../dossier.ts";
 import { identityBlock } from "../life.ts";
-import { formatPlansForPrompt, intimateNotesForVoice, momentForVoice } from "../mind-parse.ts";
+import { intimateNotesForVoice, momentForVoice } from "../mind-parse.ts";
 import { personaAckText } from "../prompts/doc.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import {
@@ -21,7 +21,7 @@ import {
   listRecentMessages,
 } from "../store.ts";
 import { formatClock } from "../time.ts";
-import { InnerCutBuffer, parseInnerPayload } from "./inner-cut.ts";
+import { InnerCutBuffer } from "./inner-cut.ts";
 import { buildVoiceMessages, renderDossierBlock, renderVoiceLongterm } from "./pack-build.ts";
 
 export type ReplaySide = {
@@ -88,7 +88,6 @@ export async function replayMessages(opts: {
     clock: clockText,
     identity: identityBlock(opts.profile.identity),
     voiceTemplate: voicePrompt.body,
-    plansText: formatPlansForPrompt(inner.plans),
     personaPlacement: opts.placement,
     personaAck: personaAckText(ackPrompt.body),
     intimateNotes: intimateNotesForVoice(inner, nowMs, opts.profile.intimateNotes),
@@ -101,10 +100,10 @@ function sideFrom(result: CallModelResult, placement: Profile["personaPlacement"
   const cut = new InnerCutBuffer();
   cut.push(result.text || "");
   cut.finish();
-  const parsed = parseInnerPayload(cut.tail);
+  const tail = cut.seen ? cut.tail.trim() : "";
   return {
     speech: cut.speech.trim(),
-    innerJson: parsed.ok ? JSON.stringify(parsed.value) : null,
+    innerJson: tail || null,
     error: result.ok ? null : result.failKind || "error",
     model: result.model,
     placement,

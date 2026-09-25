@@ -2,7 +2,7 @@ import { mergeEditedUserBody } from "../../message-markup.ts";
 import { voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getInner, getMessage, getMeta, listHistoryWindow, listPortrait, upsertMessage } from "../store.ts";
-import { formatPlansForPrompt, intimateNotesForVoice, momentForVoice } from "../mind-parse.ts";
+import { intimateNotesForVoice, momentForVoice } from "../mind-parse.ts";
 import { formatClock } from "../time.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadPrompt } from "../prompts/store.ts";
@@ -147,7 +147,6 @@ export async function loadHotContext(input: {
     injectDossier: inject.dossier,
     historyWindow: inject.history,
     identity: identityBlock(input.profile.identity),
-    plansText: formatPlansForPrompt(inner.plans),
     personaPlacement: input.profile.personaPlacement,
     personaAck: personaAckText(ackPrompt.body),
     intimateNotes: intimate,

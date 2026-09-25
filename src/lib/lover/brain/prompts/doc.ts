@@ -1,9 +1,9 @@
 import { defaultPrompt, promptSpec, type PromptKey } from "./catalog.ts";
 import { fillTemplate } from "./fill.ts";
 import type { PromptMessage, PromptRole } from "./templates.ts";
-import { VOICE_STATE_BLOCK } from "./templates.ts";
 
 export const HISTORY_SLOT = "{history_messages}";
+const INNER_MARK = "⟦心⟧";
 
 export type PromptDoc = {
   v: 2;
@@ -83,45 +83,38 @@ function normalizeDoc(key: PromptKey, doc: PromptDoc): PromptDoc {
   };
 }
 
-export function ensureVoiceStateBlock(doc: PromptDoc): PromptDoc {
+/** A saved voice template may still contain the old hidden-tail instructions. Drop them. */
+export function stripVoiceStateBlock(doc: PromptDoc): PromptDoc {
+  const fallback = defaultDoc("voice");
   let changed = false;
   const variants = doc.variants.map((variant) => {
-    const hasMark = variant.messages.some((message) => message.content.includes("⟦心⟧"));
-    if (!hasMark) {
-      changed = true;
-      const messages = variant.messages.map((message) => ({ ...message }));
-      const block: PromptMessage = { role: "system", content: VOICE_STATE_BLOCK };
-      const userAt = messages.findIndex((message) => message.content.includes("{user_text}"));
-      if (userAt >= 0) messages.splice(userAt, 0, block);
-      else messages.push(block);
-      return { ...variant, messages };
-    }
-    const messages = variant.messages.map((message) => {
-      const content = ensureSceneLine(message.content);
-      if (content !== message.content) changed = true;
-      return { ...message, content };
-    });
-    return changed ? { ...variant, messages } : variant;
+    const messages = variant.messages
+      .map((message) => {
+        const content = stripStateTail(message.content);
+        if (content !== message.content) changed = true;
+        return { ...message, content };
+      })
+      .filter((message) => message.content.trim());
+    if (messages.length !== variant.messages.length) changed = true;
+    if (messages.length) return { ...variant, messages };
+    changed = true;
+    const fresh = fallback.variants.find((item) => item.id === variant.id)?.messages ?? [];
+    return { ...variant, messages: fresh.map((message) => ({ ...message })) };
   });
   return changed ? { ...doc, variants } : doc;
 }
 
-const SCENE_LINE = "- scene：现在是日常还是亲密场景。写 daily 或 intimate。\n";
-
-function ensureSceneLine(content: string): string {
-  if (!content.includes("⟦心⟧") || content.includes("scene：") || content.includes("- scene")) return content;
-  const needle = "- now：";
-  const at = content.indexOf(needle);
-  if (at < 0) return `${content.trimEnd()}\n${SCENE_LINE}`;
-  const end = content.indexOf("\n", at);
-  if (end < 0) return `${content}\n${SCENE_LINE}`;
-  return `${content.slice(0, end + 1)}${SCENE_LINE}${content.slice(end + 1)}`;
+function stripStateTail(content: string): string {
+  const at = content.indexOf(INNER_MARK);
+  if (at < 0) return content;
+  const lineStart = content.lastIndexOf("\n", at - 1);
+  return content.slice(0, lineStart < 0 ? 0 : lineStart).trimEnd();
 }
 
 export function parsePromptBody(key: PromptKey, body: string | null | undefined): PromptDoc {
   const fallback = defaultDoc(key);
   const raw = (body ?? "").replace(/\r\n/g, "\n").trim();
-  const finish = (doc: PromptDoc) => (key === "voice" ? ensureVoiceStateBlock(doc) : doc);
+  const finish = (doc: PromptDoc) => (key === "voice" ? stripVoiceStateBlock(doc) : doc);
   if (!raw) return finish(fallback);
   if (raw.startsWith("{")) {
     try {
