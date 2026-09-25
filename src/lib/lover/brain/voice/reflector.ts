@@ -117,8 +117,8 @@ async function applyModePlan(json: Record<string, unknown>, at: number, tz: stri
 const MAX_PLAN_HOURS = 24;
 
 const MAX_REACH_PLANS = 5;
-/** Plans the mind may rewrite each turn. The end-of-rest wake and Rosie's own plans are left alone. */
-const MIND_PLAN_AUTHORS = ["reflect", "reach", "planned", "random", "manual"];
+/** Plans the mind may rewrite each turn (the end-of-rest wake is now one of its own reaches). Rosie's own plans are left alone. */
+const MIND_PLAN_AUTHORS = ["reflect", "reach", "planned", "random", "manual", "mode"];
 
 /** reflect gives the full list of plans it still means to keep; it replaces its own earlier ones. */
 async function applyReaches(json: Record<string, unknown>, at: number): Promise<void> {
