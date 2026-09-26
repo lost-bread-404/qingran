@@ -7,12 +7,12 @@ import {
   type StoredProsody,
   type ToneThresholds,
 } from "../prosody.ts";
-import { clampEndWaitMs, clampNoiseFloorCap, MAX_UTTERANCE_MS, NOISE_FLOOR_CAP } from "../vad.ts";
+import { clampEndWaitMs, MAX_UTTERANCE_MS } from "../vad.ts";
 import type { VadCuts } from "../vad.ts";
 
 export type SenseGear = "low" | "mid" | "high" | "custom";
 
-export type RecordFine = VadCuts & { minVoicedMs: number };
+export type RecordFine = VadCuts;
 
 export type HearingSense = {
   recordGear: SenseGear;
@@ -20,10 +20,6 @@ export type HearingSense = {
   startMult: number;
   holdMin: number;
   holdMult: number;
-  cueMin: number;
-  cueMult: number;
-  clarityCut: number;
-  brightCut: number;
   minVoicedMs: number;
   endWaitMs: number;
   /** Hard stop. The clip is sent to recognition even if the room is still loud. */
@@ -35,8 +31,6 @@ export type HearingSense = {
   voicedClarity: number;
   /** A run of human pitch at least this long is speech even when the ratio is low. */
   pitchHoldMs: number;
-  /** Ambient floor is not allowed to climb past this. Qingran's own voice is not learned into it. */
-  floorCap: number;
   toneOn: boolean;
   riseQuestion: number;
   glideRatio: number;
@@ -53,10 +47,6 @@ export const RECORD_PRESETS: Record<Exclude<SenseGear, "custom">, RecordFine> = 
     startMult: 1.95,
     holdMin: 0.008,
     holdMult: 1.65,
-    cueMin: 0.0075,
-    cueMult: 1.4,
-    clarityCut: 0.42,
-    brightCut: 0.2,
     minVoicedMs: 180,
   },
   mid: {
@@ -64,10 +54,6 @@ export const RECORD_PRESETS: Record<Exclude<SenseGear, "custom">, RecordFine> = 
     startMult: 1.35,
     holdMin: 0.0045,
     holdMult: 1.25,
-    cueMin: 0.003,
-    cueMult: 1.12,
-    clarityCut: 0.28,
-    brightCut: 0.1,
     minVoicedMs: 0,
   },
   high: {
@@ -75,10 +61,6 @@ export const RECORD_PRESETS: Record<Exclude<SenseGear, "custom">, RecordFine> = 
     startMult: 1.12,
     holdMin: 0.003,
     holdMult: 1.1,
-    cueMin: 0.002,
-    cueMult: 1.02,
-    clarityCut: 0.18,
-    brightCut: 0.06,
     minVoicedMs: 0,
   },
 };
@@ -123,7 +105,6 @@ export const DEFAULT_HEARING_SENSE: HearingSense = {
   ...NOISE_PRESETS.mid,
   voicedClarity: 0.58,
   pitchHoldMs: 200,
-  floorCap: NOISE_FLOOR_CAP,
   ...TONE_DEFAULTS,
 };
 
@@ -173,17 +154,12 @@ export function lockHearingSense(
     startMult: num(src.startMult, RECORD_PRESETS.mid.startMult, 1, 3, 0.01),
     holdMin: num(src.holdMin, RECORD_PRESETS.mid.holdMin, 0.001, 0.05, 0.0005),
     holdMult: num(src.holdMult, RECORD_PRESETS.mid.holdMult, 1, 3, 0.01),
-    cueMin: num(src.cueMin, RECORD_PRESETS.mid.cueMin, 0.001, 0.05, 0.0005),
-    cueMult: num(src.cueMult, RECORD_PRESETS.mid.cueMult, 1, 3, 0.01),
-    clarityCut: num(src.clarityCut, RECORD_PRESETS.mid.clarityCut, 0.05, 0.9, 0.01),
-    brightCut: num(src.brightCut, RECORD_PRESETS.mid.brightCut, 0.02, 0.8, 0.01),
     minVoicedMs: num(src.minVoicedMs, RECORD_PRESETS.mid.minVoicedMs, 0, 800, 10),
   };
   const voicedMin = clampNightVoicedRatio(src.voicedMin ?? legacy?.voicedMin);
   const noiseMinMs = clampNightMinMs(src.noiseMinMs ?? legacy?.noiseMinMs);
   const voicedClarity = clampVoicedClarity(src.voicedClarity);
   const pitchHoldMs = clampPitchHoldMs(src.pitchHoldMs);
-  const floorCap = clampNoiseFloorCap(src.floorCap);
   const endWaitMs = clampEndWaitMs(src.endWaitMs ?? legacy?.endWaitMs);
   // No longer adjustable: record until she stops. Older saved caps (30s etc.) are ignored.
   const maxUtteranceMs = MAX_UTTERANCE_MS;
@@ -197,7 +173,6 @@ export function lockHearingSense(
     noiseMinMs,
     voicedClarity,
     pitchHoldMs,
-    floorCap,
     toneOn: src.toneOn === true,
     riseQuestion: num(src.riseQuestion, TONE_DEFAULTS.riseQuestion, 1, 2, 0.01),
     glideRatio: num(src.glideRatio, TONE_DEFAULTS.glideRatio, 0, 0.3, 0.005),
@@ -279,10 +254,7 @@ export function recordCuts(sense: HearingSense): VadCuts {
     startMult: sense.startMult,
     holdMin: sense.holdMin,
     holdMult: sense.holdMult,
-    cueMin: sense.cueMin,
-    cueMult: sense.cueMult,
-    clarityCut: sense.clarityCut,
-    brightCut: sense.brightCut,
+    minVoicedMs: sense.minVoicedMs,
   };
 }
 

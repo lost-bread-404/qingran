@@ -58,8 +58,6 @@ export type Profile = {
   hearingInstruction: string;
   /** Fixed words sent to xAI as keyterm. Recent dialogue terms are added on top. */
   sttKeyterms: string[];
-  /** iOS only. When on, a phone call uses CallKit so it survives background and the lock screen. */
-  callKitBackground: boolean;
   /** Dossier character cap. 2000–8000, default 4000. */
   dossierMaxChars: number;
   /** Fixed life, separate from the system prompt. Empty omits the identity line. */
@@ -213,7 +211,6 @@ export const DEFAULT_PROFILE: Profile = {
   promptModels: {},
   hearingInstruction: "",
   sttKeyterms: lockSttKeyterms(undefined),
-  callKitBackground: false,
   dossierMaxChars: 4000,
   identity: "",
   rhythm: "",
@@ -256,7 +253,6 @@ type LooseProfile = Partial<Profile> & {
   promptModels?: unknown;
   hearingInstruction?: unknown;
   sttKeyterms?: unknown;
-  callKitBackground?: boolean;
   dossierMaxChars?: number;
   identity?: string;
   rhythm?: string;
@@ -298,7 +294,6 @@ export function lockedProfile(input?: unknown): Profile {
     promptModels: lockPromptModels(raw.promptModels),
     hearingInstruction: lockHearingInstruction(raw.hearingInstruction),
     sttKeyterms: lockSttKeyterms(raw.sttKeyterms),
-    callKitBackground: raw.callKitBackground === true,
     dossierMaxChars: clampDossierMaxChars(raw.dossierMaxChars),
     identity: typeof raw.identity === "string" ? raw.identity.slice(0, 2000) : "",
     rhythm: typeof raw.rhythm === "string" ? raw.rhythm.slice(0, 500) : "",

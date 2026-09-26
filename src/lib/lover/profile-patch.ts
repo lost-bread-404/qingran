@@ -47,7 +47,6 @@ const PATCH_KEYS = [
   "promptModels",
   "hearingInstruction",
   "sttKeyterms",
-  "callKitBackground",
   "dossierMaxChars",
   "identity",
   "rhythm",

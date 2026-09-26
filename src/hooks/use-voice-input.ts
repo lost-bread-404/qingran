@@ -20,7 +20,7 @@ import { warmupHearing } from "@/lib/lover/hearing/store";
 import { attachPcmTap, peakRms, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
-import { holdThreshold, nextFloor } from "@/lib/lover/vad";
+import { FLOOR_START, holdBar, nextFloor } from "@/lib/lover/vad";
 import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
 import { nativePrepareHoldToTalk } from "@/lib/lover/native-shell";
 
@@ -108,8 +108,9 @@ export function useVoiceInput({ lang, prompt }: Options) {
 
   const startPulse = useCallback(async (stream: MediaStream) => {
     framesRef.current = [];
-    noiseFloorRef.current = 0.008;
+    noiseFloorRef.current = FLOOR_START;
     const t0 = performance.now();
+    let lastAt = t0;
     const Ctor =
       window.AudioContext ||
       (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -138,14 +139,11 @@ export function useVoiceInput({ lang, prompt }: Options) {
         getHearingSession().sense.voicedClarity,
       );
       framesRef.current.push(frame);
-      noiseFloorRef.current = nextFloor(
-        noiseFloorRef.current,
-        frame.rms,
-        true,
-        getHearingSession().sense.floorCap,
-      );
+      const now = performance.now();
+      noiseFloorRef.current = nextFloor(noiseFloorRef.current, frame.rms, Math.min(100, now - lastAt), true);
+      lastAt = now;
       const cuts = recordCuts(getHearingSession().sense);
-      const cut = holdThreshold(noiseFloorRef.current, false, cuts);
+      const cut = holdBar(noiseFloorRef.current, cuts);
       setLevel(Math.min(1, frame.rms * 8));
       setThreshold(Math.min(1, cut * 8));
       rafRef.current = requestAnimationFrame(tick);

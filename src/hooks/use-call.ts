@@ -28,7 +28,14 @@ import { callListenStuck, CALL_STUCK_MS } from "@/lib/lover/call-phase";
 import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
 import { recordCuts } from "@/lib/lover/hearing/sense";
 import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
-import { listenNativeHangup, nativeCallPlan, nativeEndCall, nativeKeepAwake, nativeStartCall } from "@/lib/lover/native-shell";
+import {
+  listenNativeHangup,
+  nativeCallPlan,
+  nativeEndCall,
+  nativeKeepAwake,
+  nativeStartCall,
+  type NativeCallParams,
+} from "@/lib/lover/native-shell";
 import { attachPcmTap, peakRms, peakTimedRms, PRE_ROLL_SEC, pushTimedRms, wavFromTap, type PcmTap, type TimedRms } from "@/lib/lover/pcm-tap";
 import { keepPlaybackAlive, isPlaybackActive, startCallHold, stopCallHold, unlockPlayback } from "@/lib/lover/playback";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
@@ -37,23 +44,35 @@ import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
 import {
   LISTEN_WARMUP_MS,
   CALL_START_WARMUP_MS,
+  FLOOR_START,
   POST_QINGRAN_MS,
-  canBeginUtterance,
-  holdThreshold,
-  isCallSpeechStart,
-  callStartThreshold,
-  nextFloor,
   floorUpdateAllowed,
+  holdBar,
+  nextFloor,
   shouldEndUtterance,
-  stepUtteranceEnd,
-  CALL_START_HOLD_MS,
-  VOICE_SPIKE_MS,
-  type UtteranceEndState,
+  smoothLevel,
+  startBar,
+  startHoldMs,
 } from "@/lib/lover/vad";
 
 export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing";
 
 const FFT_SIZE = 2048;
+
+/** The iPhone shell runs the same VAD; it gets her numbers when the call starts. */
+function nativeCallParams(): NativeCallParams {
+  const session = getHearingSession();
+  const cuts = recordCuts(session.sense);
+  return {
+    startMin: cuts.startMin,
+    startMult: cuts.startMult,
+    holdMin: cuts.holdMin,
+    holdMult: cuts.holdMult,
+    startHoldMs: startHoldMs(cuts),
+    endWaitMs: session.silenceMs,
+    maxUtteranceMs: session.sense.maxUtteranceMs,
+  };
+}
 
 type Options = {
   onUtterance: (heard: HeardUtterance) => Promise<void>;
@@ -61,11 +80,9 @@ type Options = {
   isGenerating?: () => boolean;
   isLabeling?: () => boolean;
   onStuck?: (info: { phase: string; deaf: boolean }) => void;
-  /** iOS CallKit. Off by default so the call stays on Qingran's page. */
-  callKitBackground?: boolean;
 };
 
-export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck, callKitBackground }: Options) {
+export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck }: Options) {
   const [active, setActive] = useState(false);
   const [phase, setPhase] = useState<CallPhase>("idle");
   const [level, setLevel] = useState(0);
@@ -74,7 +91,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const [rmsNow, setRmsNow] = useState(0);
   const [holdNow, setHoldNow] = useState(0);
   const [deaf, setDeaf] = useState(true);
-  const [noiseFloor, setNoiseFloor] = useState(0.008);
+  const [noiseFloor, setNoiseFloor] = useState(FLOOR_START);
   const [error, setError] = useState<string | null>(null);
 
   const liveRef = useRef(false);
@@ -85,9 +102,8 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const chunksRef = useRef<Blob[]>([]);
   const speechStartRef = useRef(0);
   const lastVoiceRef = useRef(0);
-  const voiceBurstAtRef = useRef(0);
-  const utteranceEndRef = useRef<UtteranceEndState>({ peak: 0 });
-  const utteranceEndAtRef = useRef(0);
+  const levelRef = useRef(0);
+  const tickAtRef = useRef(0);
   const lastTextAtRef = useRef(0);
   const listenReadyAtRef = useRef(0);
   const speechRiseAtRef = useRef(0);
@@ -103,8 +119,8 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const isGeneratingRef = useRef(isGenerating);
   const isLabelingRef = useRef(isLabeling);
   const onStuckRef = useRef(onStuck);
-  const noiseFloorRef = useRef(0.008);
-  const triggerFloorRef = useRef(0.008);
+  const noiseFloorRef = useRef(FLOOR_START);
+  const triggerFloorRef = useRef(FLOOR_START);
   const hearAtRef = useRef(0);
   const hearToTriggerRef = useRef<number | null>(null);
   const prerollPeakRef = useRef<number | null>(null);
@@ -117,8 +133,6 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const framesRef = useRef<ProsodyFrame[]>([]);
   const nativeHangupRef = useRef(false);
   const nativeOwnedRef = useRef(false);
-  const callKitRef = useRef(Boolean(callKitBackground));
-  callKitRef.current = Boolean(callKitBackground);
   const speechStartWallRef = useRef(0);
   const heartbeatRef = useRef(0);
   const recognizingRef = useRef(false);
@@ -191,7 +205,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
     setListenSec(0);
     setRmsNow(0);
     setHoldNow(0);
-    setNoiseFloor(0.008);
+    setNoiseFloor(FLOOR_START);
   }, []);
 
   const hangup = useCallback(() => {
@@ -209,7 +223,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
     }
     wakeLockRef.current = null;
     nativeKeepAwake(false);
-    if (!nativeHangupRef.current) nativeEndCall(callKitRef.current);
+    if (!nativeHangupRef.current) nativeEndCall();
     if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
     heartbeatRef.current = 0;
   }, [teardownMedia]);
@@ -257,9 +271,6 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
     hearToTriggerRef.current = hearAtRef.current ? Math.round(now - hearAtRef.current) : null;
     prerollPeakRef.current = peakTimedRms(prerollLevelsRef.current);
     lastVoiceRef.current = now;
-    voiceBurstAtRef.current = now;
-    utteranceEndRef.current = { peak: 0 };
-    utteranceEndAtRef.current = now;
     if (!lastTextAtRef.current || now - lastTextAtRef.current > 400) {
       finalTextRef.current = "";
       interimRef.current = "";
@@ -298,24 +309,6 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
         finish();
       }
     });
-  }, []);
-
-  const abortUtterance = useCallback(() => {
-    try {
-      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
-    } catch {
-      /* ignore */
-    }
-    recorderRef.current = null;
-    chunksRef.current = [];
-    void pcmTapRef.current?.stop();
-    framesRef.current = [];
-    finalTextRef.current = "";
-    interimRef.current = "";
-    lastTextAtRef.current = 0;
-    speechRiseAtRef.current = 0;
-    listenReadyAtRef.current = performance.now() + LISTEN_WARMUP_MS;
-    setPhaseBoth("listening");
   }, []);
 
   const flushUtterance = useCallback(async () => {
@@ -409,6 +402,8 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
     if (!liveRef.current) return;
     const analyser = analyserRef.current;
     const now = performance.now();
+    const dtMs = tickAtRef.current ? Math.min(100, Math.max(0, now - tickAtRef.current)) : 16;
+    tickAtRef.current = now;
     if (analyser) {
       const speaking = phaseRef.current === "speaking-you";
       const session = getHearingSession();
@@ -424,8 +419,9 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
         framesRef.current.push(frame);
       }
       const cuts = recordCuts(session.sense);
-      const rms = frame.rms;
-      pushTimedRms(prerollLevelsRef.current, { t: now, rms }, PRE_ROLL_SEC * 1000);
+      const level = smoothLevel(levelRef.current, frame.rms, dtMs);
+      levelRef.current = level;
+      pushTimedRms(prerollLevelsRef.current, { t: now, rms: frame.rms }, PRE_ROLL_SEC * 1000);
       const playingBack = isPlaybackActive();
       if (playingBack) playbackIdleAtRef.current = Number.POSITIVE_INFINITY;
       else if (!Number.isFinite(playbackIdleAtRef.current)) playbackIdleAtRef.current = now;
@@ -441,33 +437,25 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
           msSinceStatusQuiet,
         })
       ) {
-        noiseFloorRef.current = nextFloor(noiseFloorRef.current, rms, speaking, session.sense.floorCap);
+        noiseFloorRef.current = nextFloor(noiseFloorRef.current, level, dtMs, speaking);
       }
       const floor = noiseFloorRef.current;
-      const rising = isCallSpeechStart(rms, floor);
-      const cut = speaking ? holdThreshold(floor, false, cuts) : callStartThreshold(floor);
-      setLevel(Math.min(1, rms * 8));
+      const cut = speaking ? holdBar(floor, cuts) : startBar(floor, cuts);
+      setLevel(Math.min(1, level * 8));
       setThreshold(Math.min(1, cut * 8));
       setNoiseFloor(floor);
       if (speaking) {
         setListenSec(Math.max(0, Math.floor((now - speechStartRef.current) / 1000)));
-        setRmsNow(rms);
+        setRmsNow(level);
         setHoldNow(cut);
       } else {
         setListenSec(0);
       }
       if (deafRef.current || phaseRef.current !== "listening" || now < listenReadyAtRef.current) {
         speechRiseAtRef.current = 0;
-      } else if (rising) {
+      } else if (level >= cut) {
         if (!speechRiseAtRef.current) speechRiseAtRef.current = now;
-        if (
-          canBeginUtterance({
-            rising: true,
-            heldMs: now - speechRiseAtRef.current,
-            requireHold: true,
-            minMs: CALL_START_HOLD_MS,
-          })
-        ) {
+        if (now - speechRiseAtRef.current >= startHoldMs(cuts)) {
           speechRiseAtRef.current = 0;
           beginUtterance();
         }
@@ -475,41 +463,19 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
         speechRiseAtRef.current = 0;
       }
       if (speaking) {
-        const dtMs = utteranceEndAtRef.current
-          ? Math.min(100, Math.max(0, now - utteranceEndAtRef.current))
-          : 16;
-        utteranceEndAtRef.current = now;
-        const stepped = stepUtteranceEnd({
-          state: utteranceEndRef.current,
-          rms,
-          floor,
-          dtMs,
-          cuts,
-        });
-        utteranceEndRef.current = stepped.state;
-        const voiced = stepped.talking;
-        if (voiced) {
-          if (!voiceBurstAtRef.current) voiceBurstAtRef.current = now;
-          if (now - voiceBurstAtRef.current >= VOICE_SPIKE_MS) lastVoiceRef.current = now;
-        } else {
-          voiceBurstAtRef.current = 0;
-        }
-        const hasText = Boolean((finalTextRef.current || interimRef.current).trim());
+        const voiced = level >= cut;
+        if (voiced) lastVoiceRef.current = now;
         if (
           shouldEndUtterance({
             now,
             startAt: speechStartRef.current,
             lastVoiceAt: lastVoiceRef.current,
             voiced,
-            hasText,
-            lastTextAt: lastTextAtRef.current,
-            silenceMs: getHearingSession().silenceMs,
+            silenceMs: session.silenceMs,
             maxUtteranceMs: session.sense.maxUtteranceMs,
           })
         ) {
-          const spoken = now - speechStartRef.current;
-          if (!getHearingSession().debugHearing && !hasText && spoken < 500) abortUtterance();
-          else void flushUtterance();
+          void flushUtterance();
         }
       }
     } else if (phaseRef.current === "speaking-you") {
@@ -519,8 +485,6 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
           startAt: speechStartRef.current,
           lastVoiceAt: lastVoiceRef.current,
           voiced: false,
-          hasText: Boolean((finalTextRef.current || interimRef.current).trim()),
-          lastTextAt: lastTextAtRef.current,
           silenceMs: getHearingSession().silenceMs,
           maxUtteranceMs: getHearingSession().sense.maxUtteranceMs,
         })
@@ -529,7 +493,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
       }
     }
     rafRef.current = requestAnimationFrame(tick);
-  }, [abortUtterance, beginUtterance, flushUtterance]);
+  }, [beginUtterance, flushUtterance]);
 
   const startSpeechRec = () => {
     if (pageIsHidden()) return;
@@ -609,9 +573,9 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const start = useCallback(async () => {
     if (liveRef.current) return;
     setError(null);
-    const nativeOwned = nativeCallPlan(callKitRef.current).callStart === "startNativeCall";
+    const nativeOwned = nativeCallPlan().callStart === "startNativeCall";
     nativeOwnedRef.current = nativeOwned;
-    nativeStartCall(callKitRef.current);
+    nativeStartCall(nativeCallParams());
     if (nativeOwned) {
       liveRef.current = true;
       setDeafBoth(false);
@@ -646,16 +610,18 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
         }
       }
     } catch (err) {
-      nativeEndCall(callKitRef.current);
+      nativeEndCall();
       setError(micFailHint(err));
       hangup();
       return;
     }
     liveRef.current = true;
     setDeafBoth(false);
-    noiseFloorRef.current = 0.008;
+    noiseFloorRef.current = FLOOR_START;
+    levelRef.current = 0;
+    tickAtRef.current = 0;
     playbackIdleAtRef.current = 0;
-    setNoiseFloor(0.008);
+    setNoiseFloor(FLOOR_START);
     hearAtRef.current = performance.now();
     listenReadyAtRef.current = hearAtRef.current + CALL_START_WARMUP_MS;
     setActive(true);
@@ -723,7 +689,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
 
   const revive = useCallback(async (opts?: { gesture?: boolean }) => {
     if (!liveRef.current) return;
-    if (nativeCallPlan(callKitRef.current).callStart === "startNativeCall") {
+    if (nativeOwnedRef.current) {
       if (!pageIsHidden()) nativeKeepAwake(true);
       return;
     }

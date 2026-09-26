@@ -1,27 +1,70 @@
-import { HUMAN_F0_MAX_HZ, HUMAN_F0_MIN_HZ } from "./hearing/night-voice.ts";
+/**
+ * Call voice detection. The same rules run in the browser (src/hooks/use-call.ts)
+ * and in the iPhone shell (ios/Qingran/Qingran/NativeCall.swift, NativeVad).
+ *
+ * - The level is rms smoothed over LEVEL_MS, so one click does not open a turn
+ *   and the gap between two syllables does not close one.
+ * - The room floor falls fast and rises slowly: quicker between turns, slower
+ *   inside one. Speech keeps dipping between words and pulls it back down; steady
+ *   noise does not, so noise that starts mid-sentence is learned and the turn
+ *   still ends.
+ * - A turn opens when the level stays over the start bar for startHoldMs, and
+ *   stays open while the level is over the (lower) hold bar. Both bars are a
+ *   multiple of the floor with an absolute minimum, from her 听力 tier.
+ * - Loudness only decides when to cut. Whether a clip was her voice or noise is
+ *   decided afterwards by pitch (hearing/night-voice.ts).
+ */
 
 export const MIN_SPEECH_MS = 220;
 export const SILENCE_MS = 1500;
 export const END_WAIT_MIN = 800;
 export const END_WAIT_MAX = 3000;
 export const END_WAIT_STEP = 100;
-export const SILENCE_MS_OPTIONS = [1000, 1500, 2000] as const;
-export type SilenceMs = (typeof SILENCE_MS_OPTIONS)[number];
-export const VOICE_SPIKE_MS = 80;
 export const LISTEN_WARMUP_MS = 380;
 /** First 500ms after getUserMedia: iOS mic is often still muted/silent. */
 export const CALL_START_WARMUP_MS = 500;
 /** After Qingran finishes speaking, ignore VAD starts and floor updates for this long. */
 export const POST_QINGRAN_MS = 300;
 export const FLOOR_FREEZE_TAIL_MS = POST_QINGRAN_MS;
-/** Noise floor is not allowed to climb past this. Lower floors still fall. */
-export const NOISE_FLOOR_CAP = 0.02;
+/** One utterance is cut and sent to recognition after this long, even if the room is still noisy. */
+export const MAX_UTTERANCE_MS = 600_000;
+export const MAX_UTTERANCE_MIN = 5_000;
+export const MAX_UTTERANCE_MAX = 600_000;
+export const MAX_UTTERANCE_STEP = 1_000;
 
-export function clampNoiseFloorCap(value: unknown, fallback = NOISE_FLOOR_CAP): number {
+export const LEVEL_MS = 60;
+export const FLOOR_FALL_MS = 250;
+/** The floor may grow by a factor of e every this many ms, never past the level itself. */
+export const FLOOR_RISE_MS = 6000;
+/** Between turns the room is all there is, so the floor catches up faster. */
+export const FLOOR_RISE_IDLE_MS = 1500;
+export const FLOOR_MIN = 0.0015;
+export const FLOOR_MAX = 0.05;
+export const FLOOR_START = 0.006;
+/** A start must hold at least this long. The pre-roll keeps the sound before it. */
+export const START_HOLD_MS = 80;
+
+export type VadCuts = {
+  startMin: number;
+  startMult: number;
+  holdMin: number;
+  holdMult: number;
+  /** 最短有声: a start must hold this long when it is longer than START_HOLD_MS. */
+  minVoicedMs: number;
+};
+
+export function clampEndWaitMs(value: unknown, fallback = SILENCE_MS): number {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
-  const stepped = Math.round(n * 1000) / 1000;
-  return Math.min(0.045, Math.max(0.006, stepped));
+  const stepped = Math.round(n / END_WAIT_STEP) * END_WAIT_STEP;
+  return Math.min(END_WAIT_MAX, Math.max(END_WAIT_MIN, stepped));
+}
+
+export function clampMaxUtteranceMs(value: unknown, fallback = MAX_UTTERANCE_MS): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const stepped = Math.round(n / MAX_UTTERANCE_STEP) * MAX_UTTERANCE_STEP;
+  return Math.min(MAX_UTTERANCE_MAX, Math.max(MAX_UTTERANCE_MIN, stepped));
 }
 
 export function shouldTrackNoiseFloor(input: {
@@ -48,208 +91,34 @@ export function floorUpdateAllowed(input: {
   });
 }
 
-/** Production start: low enough for a murmur. Noise is rejected later by voiced ratio, not by loudness. */
-export const START_FLOOR_MIN = 0.004;
-export const START_FLOOR_MULT = 1.35;
-export const START_CUE_MIN = 0.003;
-export const START_CUE_MULT = 1.12;
-export const HOLD_FLOOR_MIN = 0.0045;
-export const HOLD_FLOOR_MULT = 1.25;
-/** One utterance is cut and sent to recognition after this long, even if the room is still noisy. */
-export const MAX_UTTERANCE_MS = 600_000;
-export const MAX_UTTERANCE_MIN = 5_000;
-export const MAX_UTTERANCE_MAX = 600_000;
-export const MAX_UTTERANCE_STEP = 1_000;
-
-export const DEBUG_START_FLOOR_MIN = 0.003;
-export const DEBUG_START_FLOOR_MULT = 1.25;
-export const DEBUG_START_CUE_MIN = 0.0025;
-export const DEBUG_START_CUE_MULT = 1.05;
-export const DEBUG_HOLD_FLOOR_MIN = 0.005;
-export const DEBUG_HOLD_FLOOR_MULT = 1.4;
-
-/** Call open-bar. Well above the tracked floor so room hiss does not flash「在听你」. */
-export const CALL_START_FLOOR_MIN = 0.012;
-export const CALL_START_FLOOR_MULT = 2.2;
-/** Must stay over the bar this long. One noisy frame is not a sentence. */
-export const CALL_START_HOLD_MS = 160;
-
-export function callStartThreshold(floor: number): number {
-  const base = Number.isFinite(floor) && floor > 0 ? floor : 0.008;
-  return Math.max(CALL_START_FLOOR_MIN, base * CALL_START_FLOOR_MULT);
+export function smoothLevel(prev: number, rms: number, dtMs: number): number {
+  const level = Number.isFinite(rms) ? Math.max(0, rms) : 0;
+  const base = Number.isFinite(prev) && prev > 0 ? prev : level;
+  const k = 1 - Math.exp(-Math.max(0, dtMs) / LEVEL_MS);
+  return base + (level - base) * k;
 }
 
-/** Energy only. The old cue path treated a bright hiss just over the floor as speech. */
-export function isCallSpeechStart(rms: number, floor: number): boolean {
-  return rms >= callStartThreshold(floor);
-}
-
-export function isSilenceMs(value: unknown): value is SilenceMs {
-  return value === 1000 || value === 1500 || value === 2000;
-}
-
-export function clampEndWaitMs(value: unknown, fallback = SILENCE_MS): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  const stepped = Math.round(n / END_WAIT_STEP) * END_WAIT_STEP;
-  return Math.min(END_WAIT_MAX, Math.max(END_WAIT_MIN, stepped));
-}
-
-export function clampMaxUtteranceMs(value: unknown, fallback = MAX_UTTERANCE_MS): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  const stepped = Math.round(n / MAX_UTTERANCE_STEP) * MAX_UTTERANCE_STEP;
-  return Math.min(MAX_UTTERANCE_MAX, Math.max(MAX_UTTERANCE_MIN, stepped));
-}
-
-export type VadCuts = {
-  startMin: number;
-  startMult: number;
-  holdMin: number;
-  holdMult: number;
-  cueMin: number;
-  cueMult: number;
-  clarityCut: number;
-  brightCut: number;
-};
-
-export function clampFloor(value: number) {
-  return Math.min(0.045, Math.max(0.004, value));
-}
-
-export function nextFloor(floor: number, rms: number, speaking: boolean, cap = NOISE_FLOOR_CAP) {
-  const limit = clampNoiseFloorCap(cap);
-  const next = !speaking
-    ? clampFloor(floor * 0.94 + rms * 0.06)
-    : rms < floor * 1.2
-      ? clampFloor(floor * 0.88 + rms * 0.12)
-      : floor;
-  if (next > floor && next > limit) return Math.min(Math.max(floor, limit), next);
-  return next;
-}
-
-export function startThreshold(floor: number, debug = false, cuts?: VadCuts | null) {
-  if (cuts) return Math.max(cuts.startMin, floor * cuts.startMult);
-  if (debug) return Math.max(DEBUG_START_FLOOR_MIN, floor * DEBUG_START_FLOOR_MULT);
-  return Math.max(START_FLOOR_MIN, floor * START_FLOOR_MULT);
-}
-
-export function holdThreshold(floor: number, debug = false, cuts?: VadCuts | null) {
-  if (cuts) return Math.max(cuts.holdMin, floor * cuts.holdMult);
-  if (debug) return Math.max(DEBUG_HOLD_FLOOR_MIN, floor * DEBUG_HOLD_FLOOR_MULT);
-  return Math.max(HOLD_FLOOR_MIN, floor * HOLD_FLOOR_MULT);
-}
-
-export function isSpeechStart(
-  rms: number,
-  floor: number,
-  clarity: number,
-  bright: number,
-  debug = false,
-  cuts?: VadCuts | null,
-) {
-  if (rms > startThreshold(floor, debug, cuts)) return true;
-  const cue = cuts
-    ? Math.max(cuts.cueMin, floor * cuts.cueMult)
-    : debug
-      ? Math.max(DEBUG_START_CUE_MIN, floor * DEBUG_START_CUE_MULT)
-      : Math.max(START_CUE_MIN, floor * START_CUE_MULT);
-  const clarityCut = cuts ? cuts.clarityCut : debug ? 0.22 : 0.28;
-  const brightCut = cuts ? cuts.brightCut : debug ? 0.08 : 0.1;
-  return rms > cue && (clarity >= clarityCut || bright >= brightCut);
-}
-
-export function isHoldVoiced(rms: number, floor: number, debug = false, cuts?: VadCuts | null) {
-  return rms > holdThreshold(floor, debug, cuts);
-}
-
-/** Loud enough, and a stable fundamental inside the human band. Noise fails the second half. */
-export function isStableHumanPitch(hz: number, clarity: number, clarityCut: number): boolean {
-  return hz >= HUMAN_F0_MIN_HZ && hz <= HUMAN_F0_MAX_HZ && clarity >= clarityCut;
-}
-
-/** Forget a shout this fast while she is still above the bar, so the bar follows the phrase, not one plosive. */
-export const PEAK_ATTACK_MS = 70;
-export const PEAK_RELEASE_MS = 700;
-/**
- * A frame still counts as her voice when it stays within this fraction of the
- * phrase's own level. The noise floor stays frozen while she is considered to
- * be talking, and a pitched room tone above that floor used to refresh the
- * silence timer forever (the "在听你" counter ran on for a minute). 0.45 is
- * under a normal syllable and above leftover room noise.
- */
-export const END_LIVE_RATIO = 0.45;
-
-export type UtteranceEndState = { peak: number };
-
-/** Rises quickly toward a syllable, falls toward the phrase. A one-frame click cannot pin the bar. */
-export function followSpeechPeak(
-  prev: number,
-  rms: number,
-  dtMs: number,
-  attackMs = PEAK_ATTACK_MS,
-  releaseMs = PEAK_RELEASE_MS,
-): number {
-  const level = Math.max(0, rms);
+export function nextFloor(floor: number, level: number, dtMs: number, inTurn: boolean): number {
+  const f = Number.isFinite(floor) && floor > 0 ? floor : FLOOR_START;
   const dt = Math.max(0, dtMs);
-  const base = prev > 0 ? prev : 0;
-  if (level >= base) {
-    const k = 1 - Math.pow(0.5, dt / attackMs);
-    return base + (level - base) * k;
-  }
-  return Math.max(level, base * Math.pow(0.5, dt / releaseMs));
+  const rise = inTurn ? FLOOR_RISE_MS : FLOOR_RISE_IDLE_MS;
+  const next =
+    level <= f
+      ? f + (level - f) * (1 - Math.exp(-dt / FLOOR_FALL_MS))
+      : Math.min(level, f * Math.exp(dt / rise));
+  return Math.min(FLOOR_MAX, Math.max(FLOOR_MIN, next));
 }
 
-/** Energy that still belongs to this phrase, not to the room underneath it. */
-export function liveSpeechBar(floor: number, peak: number, debug = false, cuts?: VadCuts | null): number {
-  return Math.max(holdThreshold(floor, debug, cuts), Math.max(0, peak) * END_LIVE_RATIO);
+export function startBar(floor: number, cuts: VadCuts): number {
+  return Math.max(cuts.startMin, floor * cuts.startMult);
 }
 
-export function stepUtteranceEnd(input: {
-  state: UtteranceEndState;
-  rms: number;
-  floor: number;
-  dtMs: number;
-  debug?: boolean;
-  cuts?: VadCuts | null;
-}): { state: UtteranceEndState; talking: boolean } {
-  const peakPrev = Math.max(0, input.state.peak);
-  const bar = liveSpeechBar(input.floor, peakPrev, input.debug ?? false, input.cuts);
-  const dt = Math.max(0, input.dtMs);
-  if (input.rms >= bar) {
-    return {
-      state: { peak: followSpeechPeak(peakPrev, input.rms, dt) },
-      talking: true,
-    };
-  }
-  // Freeze the peak. Letting it fall here would walk the bar down onto the
-  // room and the silence timer would never elapse.
-  return { state: { peak: peakPrev }, talking: false };
+export function holdBar(floor: number, cuts: VadCuts): number {
+  return Math.max(cuts.holdMin, floor * cuts.holdMult);
 }
 
-export function holdCountsAsSpeech(input: {
-  rms: number;
-  floor: number;
-  hz: number;
-  clarity: number;
-  clarityCut: number;
-  debug?: boolean;
-  cuts?: VadCuts | null;
-}): boolean {
-  if (!isHoldVoiced(input.rms, input.floor, input.debug ?? false, input.cuts)) return false;
-  return isStableHumanPitch(input.hz, input.clarity, input.clarityCut);
-}
-
-/** Annotation mode keeps the lowered start threshold but needs a held burst before recording. */
-export function canBeginUtterance(input: {
-  rising: boolean;
-  heldMs: number;
-  requireHold: boolean;
-  minMs?: number;
-}): boolean {
-  if (!input.rising) return false;
-  if (!input.requireHold) return true;
-  return input.heldMs >= (input.minMs ?? MIN_SPEECH_MS);
+export function startHoldMs(cuts: VadCuts): number {
+  return Math.max(START_HOLD_MS, cuts.minVoicedMs || 0);
 }
 
 export type EndpointInput = {
@@ -257,8 +126,6 @@ export type EndpointInput = {
   startAt: number;
   lastVoiceAt: number;
   voiced: boolean;
-  hasText: boolean;
-  lastTextAt: number;
   silenceMs?: number;
   maxUtteranceMs?: number;
 };

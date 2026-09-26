@@ -50,7 +50,7 @@ export const speakAsLover = createServerFn({ method: "POST" })
     };
   });
 
-export async function transcribeVoiceAudio(data: SttInput) {
+async function transcribeVoiceAudio(data: SttInput) {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) return { ok: false as const, error: "stt-unavailable" };
 

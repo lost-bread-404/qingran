@@ -345,234 +345,237 @@ export const getHearingTurnAudio = createServerFn({ method: "POST" })
 
 export const runHearing = createServerFn({ method: "POST" })
   .validator((input: RunHearingInput) => input)
-  .handler(async ({ data }): Promise<RunHearingOutput> => {
-    const provider = "xai" as const;
-    const turnId = data.turnId || newId();
-    const upload_start = data.upload_start || Date.now();
-    const callOpts: HearingCallOpts = {
-      context: data.context,
-      nbest: Boolean(data.nbest),
-      instruction: data.hearingInstruction,
-    };
-    const hot = hotPathHearingStt(data.extraKeyterms ?? []);
-    const extraKeyterms = hot.keyterms;
-    const confusionRules = hot.rules;
-    const sttStart = Date.now();
-    const xaiPromise = transcribeWithXai({
-      audioBase64: data.audioBase64,
-      mimeType: data.mimeType,
-      prompt: data.prompt,
-      extraKeyterms,
-      keyterms: data.keyterms,
-    });
-    const hearingPromise: Promise<AdapterOutcome | null> =
-      provider === "xai" ? Promise.resolve(null) : dispatchProvider(provider, data.audioBase64, callOpts);
-    const [xai, outcome] = await Promise.all([xaiPromise, hearingPromise]);
+  .handler(({ data }) => hearClip(data));
 
-    const picked = chooseHearing({ provider, outcome, xai });
-    const stt_done = Date.now();
-    const uploadMs = Math.max(0, sttStart - upload_start);
-    const sttMs = Math.max(0, stt_done - sttStart);
-    const silenceMs = data.silenceWaitMs ?? null;
-    const followup = (timing: {
-      ok: boolean;
-      correctMs: number;
-      engineUsed: string;
-      raw?: string | null;
-      error?: string | null;
-    }) => {
-      waitUntil(
-        (async () => {
-          await recordHearingTimingLog({
-            ok: timing.ok,
-            silenceMs,
-            uploadMs,
-            sttMs,
-            correctMs: timing.correctMs,
-            engineRequested: provider,
-            engineUsed: timing.engineUsed,
-            raw: timing.raw,
-            error: timing.error,
-            senseLine: data.senseLine,
-          });
-          if (hot.needsRefresh) await backgroundRefreshHearingStt();
-        })(),
-      );
-    };
-    if (!picked.hearing && !xai.ok && xai.quota) {
-      followup({ ok: false, correctMs: 0, engineUsed: "xai", error: "quota" });
-      return {
-        ok: true,
-        turnId,
-        provider: "xai",
-        model: HEARING.xai.model,
-        tagged: "",
-        text: "",
-        xaiText: "",
-        liveText: data.liveText ?? "",
-        noise_only: true,
-        disagreement: false,
-        fallback: false,
-        refusal: false,
-        latency_ms: xai.latency_ms,
-        words: [],
-        hearing: null,
-        quota: true,
-      };
-    }
+/** Transcribe one clip and record it. The browser reaches this through runHearing, the iPhone shell through /api/stt. */
+export async function hearClip(data: RunHearingInput): Promise<RunHearingOutput> {
+  const provider = "xai" as const;
+  const turnId = data.turnId || newId();
+  const upload_start = data.upload_start || Date.now();
+  const callOpts: HearingCallOpts = {
+    context: data.context,
+    nbest: Boolean(data.nbest),
+    instruction: data.hearingInstruction,
+  };
+  const hot = hotPathHearingStt(data.extraKeyterms ?? []);
+  const extraKeyterms = hot.keyterms;
+  const confusionRules = hot.rules;
+  const sttStart = Date.now();
+  const xaiPromise = transcribeWithXai({
+    audioBase64: data.audioBase64,
+    mimeType: data.mimeType,
+    prompt: data.prompt,
+    extraKeyterms,
+    keyterms: data.keyterms,
+  });
+  const hearingPromise: Promise<AdapterOutcome | null> =
+    provider === "xai" ? Promise.resolve(null) : dispatchProvider(provider, data.audioBase64, callOpts);
+  const [xai, outcome] = await Promise.all([xaiPromise, hearingPromise]);
 
-    const { used, hearing, words, refusal } = picked;
-    let fallback = picked.fallback;
-    let fallbackReason: string | undefined = picked.fallback_reason;
-    const originalXai = picked.xaiText;
-    const correctStart = Date.now();
-    const corrected = applyConfusions(originalXai, confusionRules);
-    const correctMs = Date.now() - correctStart;
-    let xaiText = corrected.text;
-    const durationSec = wavDurationMs(data.audioBase64) / 1000;
-    const peakRms = wavPeakRms(data.audioBase64);
-    const durationMs = Math.round(durationSec * 1000);
-    const clarity = clampVoicedClarity(data.voicedClarity);
-    const pitchHoldMs = clampPitchHoldMs(data.pitchHoldMs);
-    const storedProsody = prosodyFromWav(data.audioBase64, clarity) ?? parseStoredProsody(data.prosody);
-    const voice = measureVoiceStats(framesFromStored(storedProsody), durationMs, { clarity });
-    const liveText = data.liveText ?? "";
-    const holdToTalk = Boolean(data.holdToTalk) || data.mode === "text";
-    const scrubbed = scrubHallucination(originalXai, { durationSec, peakRms }, liveText, { holdToTalk });
-    if (scrubbed.suspect) {
-      fallback = true;
-      fallbackReason = scrubbed.reason;
-    } else if (scrubbed.reason === "prefer_apple_quiet") {
-      fallback = true;
-      fallbackReason = "prefer_apple_quiet";
-      xaiText = originalXai;
-    }
-    const providerNoise = Boolean(hearing?.noise_only && used !== "xai");
-    const disagreement = isNoiseDisagreement(providerNoise, xaiText);
-    const drop = shouldDropAsNoise(providerNoise, xaiText) || scrubbed.suspect;
-    const tagged = drop
-      ? ""
-      : scrubbed.reason === "prefer_apple_quiet"
-        ? liveText
-        : disagreement
-          ? xaiText
-          : used === "xai"
-            ? xaiText
-            : picked.tagged;
-    const latency_ms = hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0);
-    const audioLlmMs =
-      outcome && !outcome.ok
-        ? outcome.latency_ms
-        : used !== "xai"
-          ? hearing?.latency_ms
-          : null;
-    const engineFallback = picked.fallback ? picked.fallback_reason : undefined;
-    const engineErrorDetail = engineErrorDetailFromOutcome(outcome);
-    const model = hearing?.model || HEARING[used].model;
-    const commitSha = gitCommitSha() || null;
-    const promptHash = data.systemPrompt ? hashQingranPrompt(data.systemPrompt) : null;
-    logHearingTurn({
-      requested: provider,
-      used,
-      fallbackReason: engineFallback,
-      audioLlmMs,
-      errorDetail: engineErrorDetail,
-    });
-
-    const voiceNoise = nightIsNoise(voice, {
-      voicedMin: data.voicedMin ?? NIGHT_VOICED_MIN,
-      minMs: data.noiseMinMs ?? NIGHT_MIN_MS,
-      pitchHoldMs,
-    });
-
+  const picked = chooseHearing({ provider, outcome, xai });
+  const stt_done = Date.now();
+  const uploadMs = Math.max(0, sttStart - upload_start);
+  const sttMs = Math.max(0, stt_done - sttStart);
+  const silenceMs = data.silenceWaitMs ?? null;
+  const followup = (timing: {
+    ok: boolean;
+    correctMs: number;
+    engineUsed: string;
+    raw?: string | null;
+    error?: string | null;
+  }) => {
     waitUntil(
       (async () => {
-        const keptText = drop || voiceNoise ? "" : (tagged || xaiText || "").trim();
-        if (shouldRecordHearing({ debugHearing: Boolean(data.debugHearing), text: keptText })) {
-          await recordHearingTimingLog({
-            ok: !drop && Boolean(tagged || xaiText),
-            silenceMs,
-            uploadMs,
-            sttMs,
-            correctMs,
-            engineRequested: provider,
-            engineUsed: used,
-            raw: originalXai,
-            error: engineErrorDetail,
-            senseLine: data.senseLine,
-          });
-          await persistHearingTurn({
-            turnId,
-            used,
-            model,
-            data,
-            upload_start,
-            stt_done,
-            latency_ms,
-            hearing,
-            xaiText: originalXai,
-            pickedXaiText: originalXai,
-            tagged,
-            predictedTags: null,
-            commitSha,
-            promptHash,
-            fallback,
-            fallbackReason,
-            outcome,
-            scrubbedSuspect: scrubbed.suspect,
-            disagreement,
-            durationMs,
-            peakRms: data.peakRms ?? peakRms,
-            capture: Boolean(data.capture || data.debugHearing),
-            keepAllClips: Boolean(data.debugHearing),
-            refusal,
-            engineRequested: provider,
-            engineUsed: used,
-            engineFallback,
-            engineErrorDetail,
-            audioLlmMs,
-            sttCorrectedText: corrected.text,
-            sttCorrections: corrected.replacements,
-            prosody: storedProsody,
-            voice,
-            voiceNoise,
-          });
-        }
+        await recordHearingTimingLog({
+          ok: timing.ok,
+          silenceMs,
+          uploadMs,
+          sttMs,
+          correctMs: timing.correctMs,
+          engineRequested: provider,
+          engineUsed: timing.engineUsed,
+          raw: timing.raw,
+          error: timing.error,
+          senseLine: data.senseLine,
+        });
         if (hot.needsRefresh) await backgroundRefreshHearingStt();
       })(),
     );
-
+  };
+  if (!picked.hearing && !xai.ok && xai.quota) {
+    followup({ ok: false, correctMs: 0, engineUsed: "xai", error: "quota" });
     return {
       ok: true,
       turnId,
-      provider: used,
-      model,
-      tagged,
-      text: hearing?.text ?? xaiText,
-      xaiText: originalXai,
+      provider: "xai",
+      model: HEARING.xai.model,
+      tagged: "",
+      text: "",
+      xaiText: "",
       liveText: data.liveText ?? "",
-      noise_only: drop,
-      disagreement,
-      fallback,
-      fallback_reason: fallbackReason,
-      refusal,
-      latency_ms,
-      words,
-      hearing,
-      hallucinationSuspect: scrubbed.suspect,
-      hallucinationReason: scrubbed.suspect && (scrubbed.reason === "apple_empty" || scrubbed.reason === "short_quiet")
-        ? scrubbed.reason
-        : undefined,
-      predictedTags: undefined,
-      engine_requested: provider,
-      engine_fallback_reason: engineFallback,
-      engine_error_detail: engineErrorDetail ?? undefined,
-      audio_llm_ms: audioLlmMs ?? undefined,
-      correctedText: corrected.text,
-      sttCorrections: corrected.replacements,
-      voice: voice.frameCount ? voice : null,
+      noise_only: true,
+      disagreement: false,
+      fallback: false,
+      refusal: false,
+      latency_ms: xai.latency_ms,
+      words: [],
+      hearing: null,
+      quota: true,
     };
+  }
+
+  const { used, hearing, words, refusal } = picked;
+  let fallback = picked.fallback;
+  let fallbackReason: string | undefined = picked.fallback_reason;
+  const originalXai = picked.xaiText;
+  const correctStart = Date.now();
+  const corrected = applyConfusions(originalXai, confusionRules);
+  const correctMs = Date.now() - correctStart;
+  let xaiText = corrected.text;
+  const durationSec = wavDurationMs(data.audioBase64) / 1000;
+  const peakRms = wavPeakRms(data.audioBase64);
+  const durationMs = Math.round(durationSec * 1000);
+  const clarity = clampVoicedClarity(data.voicedClarity);
+  const pitchHoldMs = clampPitchHoldMs(data.pitchHoldMs);
+  const storedProsody = prosodyFromWav(data.audioBase64, clarity) ?? parseStoredProsody(data.prosody);
+  const voice = measureVoiceStats(framesFromStored(storedProsody), durationMs, { clarity });
+  const liveText = data.liveText ?? "";
+  const holdToTalk = Boolean(data.holdToTalk) || data.mode === "text";
+  const scrubbed = scrubHallucination(originalXai, { durationSec, peakRms }, liveText, { holdToTalk });
+  if (scrubbed.suspect) {
+    fallback = true;
+    fallbackReason = scrubbed.reason;
+  } else if (scrubbed.reason === "prefer_apple_quiet") {
+    fallback = true;
+    fallbackReason = "prefer_apple_quiet";
+    xaiText = originalXai;
+  }
+  const providerNoise = Boolean(hearing?.noise_only && used !== "xai");
+  const disagreement = isNoiseDisagreement(providerNoise, xaiText);
+  const drop = shouldDropAsNoise(providerNoise, xaiText) || scrubbed.suspect;
+  const tagged = drop
+    ? ""
+    : scrubbed.reason === "prefer_apple_quiet"
+      ? liveText
+      : disagreement
+        ? xaiText
+        : used === "xai"
+          ? xaiText
+          : picked.tagged;
+  const latency_ms = hearing?.latency_ms ?? (xai.ok ? xai.latency_ms : 0);
+  const audioLlmMs =
+    outcome && !outcome.ok
+      ? outcome.latency_ms
+      : used !== "xai"
+        ? hearing?.latency_ms
+        : null;
+  const engineFallback = picked.fallback ? picked.fallback_reason : undefined;
+  const engineErrorDetail = engineErrorDetailFromOutcome(outcome);
+  const model = hearing?.model || HEARING[used].model;
+  const commitSha = gitCommitSha() || null;
+  const promptHash = data.systemPrompt ? hashQingranPrompt(data.systemPrompt) : null;
+  logHearingTurn({
+    requested: provider,
+    used,
+    fallbackReason: engineFallback,
+    audioLlmMs,
+    errorDetail: engineErrorDetail,
   });
+
+  const voiceNoise = nightIsNoise(voice, {
+    voicedMin: data.voicedMin ?? NIGHT_VOICED_MIN,
+    minMs: data.noiseMinMs ?? NIGHT_MIN_MS,
+    pitchHoldMs,
+  });
+
+  waitUntil(
+    (async () => {
+      const keptText = drop || voiceNoise ? "" : (tagged || xaiText || "").trim();
+      if (shouldRecordHearing({ debugHearing: Boolean(data.debugHearing), text: keptText })) {
+        await recordHearingTimingLog({
+          ok: !drop && Boolean(tagged || xaiText),
+          silenceMs,
+          uploadMs,
+          sttMs,
+          correctMs,
+          engineRequested: provider,
+          engineUsed: used,
+          raw: originalXai,
+          error: engineErrorDetail,
+          senseLine: data.senseLine,
+        });
+        await persistHearingTurn({
+          turnId,
+          used,
+          model,
+          data,
+          upload_start,
+          stt_done,
+          latency_ms,
+          hearing,
+          xaiText: originalXai,
+          pickedXaiText: originalXai,
+          tagged,
+          predictedTags: null,
+          commitSha,
+          promptHash,
+          fallback,
+          fallbackReason,
+          outcome,
+          scrubbedSuspect: scrubbed.suspect,
+          disagreement,
+          durationMs,
+          peakRms: data.peakRms ?? peakRms,
+          capture: Boolean(data.capture || data.debugHearing),
+          keepAllClips: Boolean(data.debugHearing),
+          refusal,
+          engineRequested: provider,
+          engineUsed: used,
+          engineFallback,
+          engineErrorDetail,
+          audioLlmMs,
+          sttCorrectedText: corrected.text,
+          sttCorrections: corrected.replacements,
+          prosody: storedProsody,
+          voice,
+          voiceNoise,
+        });
+      }
+      if (hot.needsRefresh) await backgroundRefreshHearingStt();
+    })(),
+  );
+
+  return {
+    ok: true,
+    turnId,
+    provider: used,
+    model,
+    tagged,
+    text: hearing?.text ?? xaiText,
+    xaiText: originalXai,
+    liveText: data.liveText ?? "",
+    noise_only: drop,
+    disagreement,
+    fallback,
+    fallback_reason: fallbackReason,
+    refusal,
+    latency_ms,
+    words,
+    hearing,
+    hallucinationSuspect: scrubbed.suspect,
+    hallucinationReason: scrubbed.suspect && (scrubbed.reason === "apple_empty" || scrubbed.reason === "short_quiet")
+      ? scrubbed.reason
+      : undefined,
+    predictedTags: undefined,
+    engine_requested: provider,
+    engine_fallback_reason: engineFallback,
+    engine_error_detail: engineErrorDetail ?? undefined,
+    audio_llm_ms: audioLlmMs ?? undefined,
+    correctedText: corrected.text,
+    sttCorrections: corrected.replacements,
+    voice: voice.frameCount ? voice : null,
+  };
+}
 
 export const hearingLabeledCount = createServerFn({ method: "POST" })
   .validator((input: Record<string, never> = {}) => input)

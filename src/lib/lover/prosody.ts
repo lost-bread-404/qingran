@@ -45,6 +45,18 @@ export function spectralShape(freq: Uint8Array, sampleRate: number) {
   };
 }
 
+function floatRms(analyser: AnalyserNode): number | null {
+  if (typeof analyser.getFloatTimeDomainData !== "function") return null;
+  const data = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(data);
+  let sum = 0;
+  for (let i = 0; i < data.length; i += 1) {
+    const v = data[i] ?? 0;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / Math.max(1, data.length));
+}
+
 function rmsFromTimeDomain(data: Uint8Array): number {
   let sum = 0;
   for (let i = 0; i < data.length; i += 1) {
@@ -109,7 +121,8 @@ export function sampleProsody(
 ): ProsodyFrame {
   const time = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(time);
-  const rms = rmsFromTimeDomain(time);
+  // Loudness from float samples: 8-bit steps are 0.0078, as big as a soft 嗯 over a quiet room.
+  const rms = floatRms(analyser) ?? rmsFromTimeDomain(time);
   const freq = new Uint8Array(analyser.frequencyBinCount);
   analyser.getByteFrequencyData(freq);
   const shape = spectralShape(freq, sampleRate);

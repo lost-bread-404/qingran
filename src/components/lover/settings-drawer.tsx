@@ -189,7 +189,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   }, [profile.brainOn]);
   const [injectLongterm, setInjectLongterm] = useState(profile.injectLongterm);
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
-  const [callKitBackground, setCallKitBackground] = useState(profile.callKitBackground);
   const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
   const [storyDraft, setStoryDraft] = useState(profile.storyline);
   useEffect(() => {
@@ -229,7 +228,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     setInjectMind(profile.injectMind);
     setInjectLongterm(profile.injectLongterm);
     setHistoryWindow(profile.historyWindow);
-    setCallKitBackground(profile.callKitBackground);
     if (!intimateDirty.current) setIntimateDraft(profile.intimateNotes);
     if (!identityDirty.current) setIdentityDraft(profile.identity);
     setKeytermDraft(profile.sttKeyterms.join("\n"));
@@ -946,24 +944,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 persistProfile({ debugHearing: next, captureAudio: next });
               }}
             />
-            <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={callKitBackground}
-                onChange={(e) => {
-                  const next = e.target.checked;
-                  setCallKitBackground(next);
-                  persistProfile({ callKitBackground: next });
-                }}
-              />
-              <span>
-                <span className="block text-sm">切到后台也继续通话</span>
-                <span className="block text-xs text-subtle">
-                  开启后通话由手机原生处理，锁屏或切到其他 app 也不会断。通话时会显示系统通话界面，点界面上的清然图标可以回到聊天。
-                </span>
-              </span>
-            </label>
             <div className="flex flex-col gap-2">
               <p className="text-sm">听力灵敏度</p>
               {(["low", "mid", "high"] as const).map((id) => (

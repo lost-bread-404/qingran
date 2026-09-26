@@ -752,7 +752,6 @@ export function VoiceRoom() {
 
   const call = useCall({
     prompt: profile.systemPrompt,
-    callKitBackground: profile.callKitBackground,
     isGenerating: () => statusRef.current === "thinking" || busyRef.current,
     isLabeling: () => confirmOpenRef.current || editingRef.current,
     onStuck: ({ phase, deaf }) => {

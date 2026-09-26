@@ -227,47 +227,6 @@ export function HearingSensePanel({
             onChange={(holdMult) => onChange(withRecordFine(sense, { holdMult }))}
           />
           <Fine
-            label="轻声开口门槛"
-            value={sense.cueMin}
-            def={record.cueMin}
-            min={0.001}
-            max={0.05}
-            step={0.0005}
-            digits={4}
-            hint="比起始更轻时，要同时够清晰或够亮才开录。调低，气声和撒娇更容易被录上。"
-            onChange={(cueMin) => onChange(withRecordFine(sense, { cueMin }))}
-          />
-          <Fine
-            label="轻声开口倍数"
-            value={sense.cueMult}
-            def={record.cueMult}
-            min={1}
-            max={3}
-            step={0.01}
-            hint="轻声开口要超过底噪的多少倍。调低，安静里的轻声更容易开录。"
-            onChange={(cueMult) => onChange(withRecordFine(sense, { cueMult }))}
-          />
-          <Fine
-            label="清晰度门槛"
-            value={sense.clarityCut}
-            def={record.clarityCut}
-            min={0.05}
-            max={0.9}
-            step={0.01}
-            hint="走轻声开口时，清晰度至少要到这个。调低，含糊的声音也能开录。"
-            onChange={(clarityCut) => onChange(withRecordFine(sense, { clarityCut }))}
-          />
-          <Fine
-            label="明亮度门槛"
-            value={sense.brightCut}
-            def={record.brightCut}
-            min={0.02}
-            max={0.8}
-            step={0.01}
-            hint="走轻声开口时，明亮度到这个也算开口。调低，闷一点的声音也能开录。"
-            onChange={(brightCut) => onChange(withRecordFine(sense, { brightCut }))}
-          />
-          <Fine
             label="最短有声"
             value={sense.minVoicedMs}
             def={record.minVoicedMs}
@@ -275,22 +234,10 @@ export function HearingSensePanel({
             max={800}
             step={10}
             digits={0}
-            hint="连续有声多少毫秒才真正开录。0 是一有声就录。调高，短促的碰麦不会开录。语气词里也是这个数。"
+            hint="声音要连续高过起始门槛多少毫秒才开录（最少 80 毫秒）。开录前 1.5 秒的声音一直留着，所以轻轻的开头不会丢。调高，短促的碰麦不会开录。语气词里也是这个数。"
             onChange={(minVoicedMs) => onChange(withRecordFine(sense, { minVoicedMs }))}
           />
         </Fines>
-        <Fine
-          label="底噪上限"
-          value={sense.floorCap}
-          def={DEFAULT_HEARING_SENSE.floorCap}
-          min={0.006}
-          max={0.045}
-          step={0.001}
-          digits={3}
-          hint="底噪不会再被抬过这个。清然说话的时候，以及她说完后的 0.3 秒，底噪先冻住，不把扬声器的声音学进去。调低，吵一点的房间里轻声仍能开口。"
-          onChange={(floorCap) => onChange({ ...sense, floorCap })}
-        />
-
         <GearSlider
           label="噪音过滤"
           gear={sense.noiseGear}
@@ -373,7 +320,7 @@ export function HearingSensePanel({
 
       <Category
         title="断句"
-        hint="停多久算一句话说完。音量够、但这一帧没有稳定人声基频，按静音计，风扇和底噪撑不住「还在说」。超过最长一句就结束，送给识别。"
+        hint="声音落到保持门槛以下多久，算这句说完，送给识别。"
       >
         <div className="flex items-baseline justify-between gap-3">
           <p className="text-sm">说完等待</p>
@@ -415,7 +362,7 @@ export function HearingSensePanel({
           min={1}
           max={3}
           step={0.01}
-          hint="和轻声里是同一个数。音量还要超过底噪的这么多倍，并且这一帧有稳定人声基频，才算还在说。只有音量、没有基频，按静音倒计时。"
+          hint="和轻声里是同一个数。音量还要超过底噪的这么多倍才算还在说，不看基频，气声和呢喃也算。底噪会慢慢跟上房间里一直在响的声音，所以说到一半开了风扇，这句话也会在几秒后结束。"
           onChange={(holdMult) => onChange(withRecordFine(sense, { holdMult }))}
         />
       </Category>

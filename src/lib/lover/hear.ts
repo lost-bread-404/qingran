@@ -16,6 +16,7 @@ import {
 } from "./hearing/heard";
 import { stripAcousticTags } from "./hearing/tags.ts";
 import { applyNightVoiceGate, wavDurationMsFromBytes, type VoiceStats } from "./hearing/night-voice.ts";
+import { audioStats, finishHearing } from "./hearing/finish.ts";
 import { formatSenseLine, toneFromSense } from "./hearing/sense.ts";
 import { readTone } from "./prosody";
 
@@ -23,25 +24,6 @@ export { UNRECOGNIZED_TEXT, clipSaveBanner, voiceTurnIdForMessage };
 export type { HeardUtterance };
 
 type SttWord = { text?: string; start?: number; end?: number };
-
-function engineFields(
-  requested: string,
-  result?: {
-    provider?: string;
-    engine_requested?: string;
-    engine_fallback_reason?: string;
-    engine_error_detail?: string;
-    audio_llm_ms?: number;
-  },
-) {
-  return {
-    engineRequested: result?.engine_requested ?? requested,
-    engineUsed: result?.provider,
-    engineFallback: result?.engine_fallback_reason,
-    engineErrorDetail: result?.engine_error_detail,
-    audioLlmMs: result?.audio_llm_ms,
-  };
-}
 
 export async function hearUtterance(input: {
   wav: Blob | null;
@@ -146,41 +128,21 @@ export async function hearUtterance(input: {
     });
     ranHearing = true;
     if (result.quota) throw new Error(QUOTA_HINT);
-    const engine = engineFields(provider, result);
-    if (result.hallucinationSuspect) {
-      return seal(heardFromHearing({
-        debugHearing,
-        turnId,
-        tagged: "",
-        xaiText: result.xaiText,
-        noiseOnly: result.noise_only,
-        clipId: result.clipId,
-        saveError: result.saveError,
-        endpointFired: input.endpoint_fired,
-        sttDoneAt: Date.now(),
-        hallucinationSuspect: true,
-        hallucinationReason: result.hallucinationReason,
-        ...engine,
-      }), result.xaiText ?? "", result.voice);
-    }
-    const xaiForFinish = result.correctedText ?? result.xaiText;
-    const core =
-      result.provider !== "xai" && result.tagged
-        ? stripAcousticTags(result.tagged).trim() || finishHeard(xaiForFinish, input.liveText, result.words, input.frames, audioStats(input.frames), finishOpts)
-        : finishHeard(xaiForFinish, input.liveText, result.words, input.frames, audioStats(input.frames), finishOpts);
-    const tagged = stripAcousticTags(core).trim();
-    return seal(heardFromHearing({
+    return finishHearing(result, {
       debugHearing,
       turnId,
-      tagged,
-      xaiText: result.xaiText,
-      noiseOnly: result.noise_only,
-      clipId: result.clipId,
-      saveError: result.saveError,
+      provider,
+      liveText: input.liveText,
+      frames: input.frames,
+      holdToTalk: input.holdToTalk,
+      tone,
       endpointFired: input.endpoint_fired,
-      sttDoneAt: Date.now(),
-      ...engine,
-    }), result.correctedText || result.xaiText || tagged, result.voice);
+      durationMs,
+      voicedMin: session.nightVoicedMin,
+      minMs: session.nightMinMs,
+      pitchHoldMs: session.sense.pitchHoldMs,
+      clarity: session.sense.voicedClarity,
+    });
   } catch (err) {
     if (err instanceof Error && isQuotaHint(err.message)) throw err;
   }
@@ -231,12 +193,6 @@ export async function hearUtterance(input: {
     engineRequested: provider,
     engineUsed: "xai",
   }), text);
-}
-
-function audioStats(frames: ProsodyFrame[]) {
-  const durationSec = frames.at(-1)?.t ?? 0;
-  const peakRms = frames.reduce((max, frame) => Math.max(max, frame.rms), 0);
-  return { durationSec, peakRms };
 }
 
 async function clipDurationMs(blob: Blob): Promise<number> {

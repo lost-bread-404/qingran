@@ -4,7 +4,9 @@ import UIKit
 import UserNotifications
 import WebKit
 
-/// Owns the mic, a simple energy VAD, STT, /api/talk, and playback while CallKit is up.
+/// Owns every call inside the shell, like WeChat: mic, the same VAD as the web
+/// (src/lib/lover/vad.ts), hearing through /api/stt (the web's hearing pipeline on
+/// the server), /api/talk, and playback. Keeps going with the app in the background.
 final class NativePipeline {
   static let shared = NativePipeline()
 
@@ -16,26 +18,40 @@ final class NativePipeline {
   private var playerAttached = false
   private var running = false
   private var stopping = false
-  private var speaking = false
+  private var params = NativeVadParams()
+
+  // VAD
+  private var level: Float = 0
+  private var floor: Float = NativeVad.floorStart
+  private var riseMs: Float = 0
+  private var preroll: [Int16] = []
   private var inSpeech = false
-  private var speechMs = 0
-  private var silenceMs = 0
-  private var speechPeak: Float = 0
-  private var startHoldMs = 0
-  private var pending: [Int16] = []
-  private var spikeMs = 0
-  private var noiseFloor: Float = 0.008
   private var speech: [Int16] = []
+  private var speechMs: Float = 0
+  private var quietMs: Float = 0
+  private var speechStartAt = 0
+  private var triggerFloor: Float = 0
+
+  // Turn and playback
   private var busy = false
+  private var turnGen = 0
+  private var talkTask: Task<Void, Never>?
+  private var pendingBuffers = 0
+  /// Bumped whenever scheduled audio is thrown away, so late completion callbacks are ignored.
+  private var playGen = 0
+  private var playing: Bool { pendingBuffers > 0 }
+  private var playIdleAt = Date.distantPast
+  private var bargeMs: Float = 0
   private var failures = 0
-  private var playing = false
   private var emit: (([String: Any]) -> Void)?
 
   private init() {}
 
   var onHangup: (() -> Void)?
 
-  func prepare(emit: @escaping ([String: Any]) -> Void) {
+  func prepare(params raw: [String: Any]?, emit: @escaping ([String: Any]) -> Void) {
+    let next = NativeVadParams(raw)
+    queue.sync { self.params = next }
     self.emit = emit
     failures = 0
     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -84,6 +100,11 @@ final class NativePipeline {
       try engine.start()
       playerFormat = player.outputFormat(forBus: 0)
       player.play()
+      level = 0
+      floor = NativeVad.floorStart
+      riseMs = 0
+      preroll.removeAll()
+      playIdleAt = Date()
       running = true
       emit?(["type": "phase", "phase": "listening"])
     } catch {
@@ -97,15 +118,17 @@ final class NativePipeline {
     stopping = true
     defer { stopping = false }
     running = false
+    turnGen += 1
+    talkTask?.cancel()
+    talkTask = nil
     busy = false
     inSpeech = false
-    speechPeak = 0
-    startHoldMs = 0
-    pending.removeAll()
+    riseMs = 0
+    bargeMs = 0
+    dropPlayback()
+    preroll.removeAll()
     speech.removeAll()
-    playing = false
     engine.inputNode.removeTap(onBus: 0)
-    player.stop()
     engine.stop()
   }
 
@@ -136,6 +159,7 @@ final class NativePipeline {
     }
   }
 
+  /// Same steps as the tick in src/hooks/use-call.ts.
   private func feed(_ samples: [Int16]) {
     guard running, !samples.isEmpty else { return }
     var sum: Float = 0
@@ -144,115 +168,147 @@ final class NativePipeline {
       sum += x * x
     }
     let rms = sqrt(sum / Float(samples.count))
-    let chunkMs = max(1, samples.count * 1000 / NativeVad.sampleRate)
-    if !inSpeech && !playing {
-      noiseFloor = min(NativeVad.noiseFloorCap, noiseFloor * 0.95 + rms * 0.05)
+    let chunkMs = Float(samples.count) * 1000 / Float(NativeVad.sampleRate)
+
+    level += (rms - level) * (1 - exp(-chunkMs / NativeVad.levelMs))
+    if !playing && Float(Date().timeIntervalSince(playIdleAt) * 1000) >= NativeVad.postPlaybackMs {
+      floor = nextFloor(floor, level, chunkMs, inTurn: inSpeech)
     }
-    let start = max(NativeVad.startFloorMin, noiseFloor * NativeVad.startFloorMult)
-    if playing && rms >= start {
-      spikeMs += chunkMs
-      if spikeMs >= NativeVad.spikeMs {
-        interruptPlayback()
-      }
-    } else {
-      spikeMs = 0
-    }
-    if busy || playing { return }
-    if !inSpeech {
-      if rms >= start {
-        startHoldMs += chunkMs
-        pending.append(contentsOf: samples)
-        if startHoldMs < NativeVad.startHoldMs { return }
-        inSpeech = true
-        speechMs = startHoldMs
-        silenceMs = 0
-        speechPeak = 0
-        speech = pending
-        pending.removeAll(keepingCapacity: true)
-        startHoldMs = 0
-        emit?(["type": "phase", "phase": "speaking-you"])
+
+    let keep = NativeVad.sampleRate * NativeVad.preRollMs / 1000
+    preroll.append(contentsOf: samples)
+    if preroll.count > keep { preroll.removeFirst(preroll.count - keep) }
+
+    if playing {
+      if level >= max(NativeVad.bargeMin, floor * NativeVad.bargeMult) {
+        bargeMs += chunkMs
+        if bargeMs >= NativeVad.bargeHoldMs { interruptReply() }
       } else {
-        startHoldMs = 0
-        pending.removeAll(keepingCapacity: true)
-        return
+        bargeMs = 0
       }
-    } else {
-      speech.append(contentsOf: samples)
-      speechMs += chunkMs
     }
-    let bar = max(start, speechPeak * NativeVad.endLiveRatio)
-    if rms >= bar {
-      speechPeak = followPeak(speechPeak, rms, chunkMs)
-      silenceMs = 0
-    } else {
-      silenceMs += chunkMs
-    }
-    if speechMs >= NativeVad.maxUtteranceMs || (speechMs >= NativeVad.minSpeechMs && silenceMs >= NativeVad.silenceMs) {
-      let said = speech
-      inSpeech = false
-      speech.removeAll(keepingCapacity: true)
-      speechMs = 0
-      silenceMs = 0
-      speechPeak = 0
-      startHoldMs = 0
-      pending.removeAll(keepingCapacity: true)
-      busy = true
-      Task { await self.utter(said) }
-    }
-  }
-
-  private func followPeak(_ prev: Float, _ rms: Float, _ chunkMs: Int) -> Float {
-    let dt = Float(max(0, chunkMs))
-    if prev <= 0 {
-      let k = 1 - pow(0.5, dt / NativeVad.peakAttackMs)
-      return rms * k
-    }
-    if rms >= prev {
-      let k = 1 - pow(0.5, dt / NativeVad.peakAttackMs)
-      return prev + (rms - prev) * k
-    }
-    return max(rms, prev * pow(0.5, dt / NativeVad.peakReleaseMs))
-  }
-
-  private func interruptPlayback() {
-    playing = false
-    spikeMs = 0
-    player.stop()
-    player.play()
-  }
-
-  private func utter(_ samples: [Int16]) async {
-    guard running else {
-      queue.async { self.busy = false }
+    if busy || playing {
+      riseMs = 0
       return
     }
+
+    if !inSpeech {
+      if level >= max(params.startMin, floor * params.startMult) {
+        riseMs += chunkMs
+        if riseMs < params.startHoldMs { return }
+        inSpeech = true
+        riseMs = 0
+        speech = preroll
+        speechMs = 0
+        quietMs = 0
+        triggerFloor = floor
+        speechStartAt = Int(Date().timeIntervalSince1970 * 1000)
+        emit?(["type": "phase", "phase": "speaking-you"])
+      } else {
+        riseMs = 0
+      }
+      return
+    }
+
+    speech.append(contentsOf: samples)
+    speechMs += chunkMs
+    if level >= max(params.holdMin, floor * params.holdMult) {
+      quietMs = 0
+    } else {
+      quietMs += chunkMs
+    }
+    let capped = speechMs >= params.maxUtteranceMs
+    let ended = speechMs >= NativeVad.minSpeechMs && quietMs >= params.endWaitMs
+    if capped || ended {
+      let said = speech
+      let silenceWait = Int(quietMs)
+      inSpeech = false
+      speech.removeAll(keepingCapacity: true)
+      preroll.removeAll(keepingCapacity: true)
+      speechMs = 0
+      quietMs = 0
+      busy = true
+      turnGen += 1
+      let gen = turnGen
+      let start = speechStartAt
+      let vadFloor = triggerFloor
+      talkTask = Task { await self.utter(said, gen: gen, speechStart: start, silenceWaitMs: silenceWait, vadFloor: vadFloor) }
+    }
+  }
+
+  private func nextFloor(_ floor: Float, _ level: Float, _ dtMs: Float, inTurn: Bool) -> Float {
+    let f = floor > 0 ? floor : NativeVad.floorStart
+    let rise = inTurn ? NativeVad.floorRiseMs : NativeVad.floorRiseIdleMs
+    let next: Float
+    if level <= f {
+      next = f + (level - f) * (1 - exp(-dtMs / NativeVad.floorFallMs))
+    } else {
+      next = min(level, f * exp(dtMs / rise))
+    }
+    return min(NativeVad.floorMax, max(NativeVad.floorMin, next))
+  }
+
+  /// She talked over Qingran: stop his voice and the rest of that reply, and listen.
+  private func interruptReply() {
+    turnGen += 1
+    talkTask?.cancel()
+    talkTask = nil
+    busy = false
+    bargeMs = 0
+    dropPlayback()
+    player.play()
+    emit?(["type": "phase", "phase": "listening"])
+  }
+
+  private func dropPlayback() {
+    playGen += 1
+    pendingBuffers = 0
+    playIdleAt = Date()
+    player.stop()
+  }
+
+  private func current(_ gen: Int) -> Bool {
+    queue.sync { self.running && self.turnGen == gen }
+  }
+
+  private func utter(_ samples: [Int16], gen: Int, speechStart: Int, silenceWaitMs: Int, vadFloor: Float) async {
     emit?(["type": "phase", "phase": "transcribing"])
     defer {
       queue.async {
+        guard self.turnGen == gen else { return }
         self.busy = false
+        self.talkTask = nil
         if self.running && !self.playing { self.emit?(["type": "phase", "phase": "listening"]) }
       }
     }
     let wav = wavData(samples)
-    guard let text = await transcribe(wav) else {
-      softFail("stt")
+    let endpointFired = Int(Date().timeIntervalSince1970 * 1000)
+    guard let text = await transcribe(wav, speechStart: speechStart, endpointFired: endpointFired, silenceWaitMs: silenceWaitMs, vadFloor: vadFloor) else {
+      if current(gen) { softFail("stt") }
       return
     }
-    if text.isEmpty { return }
+    if text.isEmpty || !current(gen) { return }
     let userId = UUID().uuidString.lowercased()
     let replyId = UUID().uuidString.lowercased()
     let now = Int(Date().timeIntervalSince1970 * 1000)
     emit?(["type": "heard", "id": userId, "text": text, "at": now])
-    await talk(text: text, userId: userId, replyId: replyId, now: now)
+    await talk(text: text, userId: userId, replyId: replyId, now: now, gen: gen)
   }
 
-  private func transcribe(_ wav: Data) async -> String? {
+  private func transcribe(_ wav: Data, speechStart: Int, endpointFired: Int, silenceWaitMs: Int, vadFloor: Float) async -> String? {
     guard let url = endpoint("api/stt") else { return nil }
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.setValue(await cookieHeader(), forHTTPHeaderField: "Cookie")
-    let body: [String: Any] = ["audioBase64": wav.base64EncodedString(), "mimeType": "audio/wav"]
+    let body: [String: Any] = [
+      "audioBase64": wav.base64EncodedString(),
+      "mimeType": "audio/wav",
+      "speechStart": speechStart,
+      "endpointFired": endpointFired,
+      "silenceWaitMs": silenceWaitMs,
+      "vadFloor": vadFloor,
+    ]
     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
     do {
       let (data, res) = try await URLSession.shared.data(for: req)
@@ -266,12 +322,13 @@ final class NativePipeline {
       }
       return text.trimmingCharacters(in: .whitespacesAndNewlines)
     } catch {
+      if Task.isCancelled { return nil }
       note(ok: false, error: "stt \(error.localizedDescription)")
       return nil
     }
   }
 
-  private func talk(text: String, userId: String, replyId: String, now: Int) async {
+  private func talk(text: String, userId: String, replyId: String, now: Int, gen: Int) async {
     guard let url = endpoint("api/talk") else {
       softFail("talk-url")
       return
@@ -302,36 +359,58 @@ final class NativePipeline {
       var speech = ""
       let sep = Data([10, 10])
       for try await byte in bytes {
+        if Task.isCancelled { return }
         buf.append(byte)
         guard let range = buf.range(of: sep) else { continue }
         let frame = buf.subdata(in: 0..<range.lowerBound)
         buf.removeSubrange(0..<range.upperBound)
         guard let event = sseJSON(frame) else { continue }
-          let kind = event["t"] as? String ?? ""
-          if kind == "text", let delta = event["d"] as? String {
-            speech += delta
-            emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
-          } else if kind == "text_end", let full = event["speech"] as? String, !full.isEmpty {
+        let kind = event["t"] as? String ?? ""
+        if kind == "text", let delta = event["d"] as? String {
+          speech += delta
+          emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
+        } else if kind == "text_end", let full = event["speech"] as? String, !full.isEmpty {
+          speech = full
+          emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
+        } else if kind == "audio", let b64 = event["b"] as? String {
+          let replace = event["replace"] as? Bool ?? false
+          let mime = event["m"] as? String ?? ""
+          queue.async {
+            guard self.turnGen == gen else { return }
+            self.playPCM(b64, mime: mime, replace: replace)
+          }
+        } else if kind == "err" {
+          softFail((event["m"] as? String) ?? "talk")
+          return
+        } else if kind == "done" {
+          failures = 0
+          if speech.isEmpty, let full = event["speech"] as? String {
             speech = full
             emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
-          } else if kind == "audio", let b64 = event["b"] as? String {
-            let replace = event["replace"] as? Bool ?? false
-            let mime = event["m"] as? String ?? ""
-            queue.async { self.playPCM(b64, mime: mime, replace: replace) }
-          } else if kind == "err" {
-            softFail((event["m"] as? String) ?? "talk")
-            return
-          } else if kind == "done" {
-            failures = 0
-            if speech.isEmpty, let full = event["speech"] as? String {
-              speech = full
-              emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
-            }
           }
         }
+      }
     } catch {
+      if Task.isCancelled { return }
       softFail("talk \(error.localizedDescription)")
     }
+  }
+
+  private func schedule(_ buffer: AVAudioPCMBuffer) {
+    let gen = playGen
+    pendingBuffers += 1
+    player.scheduleBuffer(buffer, completionHandler: { [weak self] in
+      self?.queue.async {
+        guard let self, self.playGen == gen, self.pendingBuffers > 0 else { return }
+        self.pendingBuffers -= 1
+        if self.pendingBuffers == 0 {
+          self.playIdleAt = Date()
+          self.bargeMs = 0
+          if self.running && !self.busy { self.emit?(["type": "phase", "phase": "listening"]) }
+        }
+      }
+    })
+    if !player.isPlaying { player.play() }
   }
 
   private func playPCM(_ b64: String, mime: String, replace: Bool) {
@@ -354,17 +433,10 @@ final class NativePipeline {
     }
     guard let converted = convert(src, to: fmt) else { return }
     if replace {
-      player.stop()
+      dropPlayback()
       player.play()
     }
-    playing = true
-    player.scheduleBuffer(converted, completionHandler: { [weak self] in
-      self?.queue.async {
-        guard let self else { return }
-        if !self.player.isPlaying { self.playing = false }
-      }
-    })
-    if !player.isPlaying { player.play() }
+    schedule(converted)
   }
 
   private func convert(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
@@ -420,14 +492,7 @@ final class NativePipeline {
         }
       }
     }
-    playing = true
-    player.scheduleBuffer(dst, completionHandler: { [weak self] in
-      self?.queue.async {
-        guard let self else { return }
-        if !self.player.isPlaying { self.playing = false }
-      }
-    })
-    if !player.isPlaying { player.play() }
+    schedule(dst)
   }
 
   private func emitHangup() {

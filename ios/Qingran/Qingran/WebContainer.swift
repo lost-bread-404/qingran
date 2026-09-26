@@ -70,7 +70,7 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     NativePipeline.shared.onHangup = { [weak self] in
       self?.postHangupEvent()
     }
-    NativePipeline.shared.prepare { [weak self] detail in
+    NativePipeline.shared.prepare(params: nil) { [weak self] detail in
       self?.postNativeCall(detail)
     }
 
@@ -144,7 +144,8 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     case "prepareAudio":
       CallEngine.shared.prepareAudioSession()
     case "startNativeCall":
-      NativePipeline.shared.prepare { [weak self] detail in
+      let params = (message.body as? [String: Any])?["params"] as? [String: Any]
+      NativePipeline.shared.prepare(params: params) { [weak self] detail in
         self?.postNativeCall(detail)
       }
       CallEngine.shared.beginNativeCall()
@@ -279,10 +280,11 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     }
     window.QingranNative = {
       present: true,
+      nativeCall: 2,
       startCall: function () { post('startCall'); },
       endCall: function () { post('endCall'); },
       prepareAudio: function () { post('prepareAudio'); },
-      startNativeCall: function () { post('startNativeCall'); },
+      startNativeCall: function (params) { post('startNativeCall', { params: params || {} }); },
       endNativeCall: function () { post('endNativeCall'); },
       keepAwake: function (on) { post('keepAwake', { on: !!on }); }
     };
