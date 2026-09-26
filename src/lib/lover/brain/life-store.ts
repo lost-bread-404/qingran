@@ -110,12 +110,6 @@ export async function addReachPlan(plan: { at: number; intent: string; setBy: st
   ]);
 }
 
-export async function finishReachPlans(ids: number[], at: number): Promise<void> {
-  if (!ids.length) return;
-  const db = await getSql();
-  await db.query(`update qr_reach_plans set done_at = $2 where id = any($1::bigint[])`, [ids, at]);
-}
-
 export async function delayReachPlans(ids: number[], to: number): Promise<void> {
   if (!ids.length) return;
   const db = await getSql();

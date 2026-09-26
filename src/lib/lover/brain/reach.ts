@@ -10,7 +10,6 @@ import { getSql } from "../../db.ts";
 import { lockedProfile } from "../types.ts";
 import {
   delayReachPlans,
-  finishReachPlans,
   getReach,
   insertReachLog,
   profileClockZone,
@@ -74,10 +73,14 @@ function ago(ms: number): string {
   return `${Math.round(h / 24)} 天`;
 }
 
-/** What came due is handled either way (sent, or he let it go): every pending plan whose time has passed is done. */
-async function finishDuePlans(at: number): Promise<void> {
+/**
+ * A time only says when to think of it. Once it has come (whether he wrote to her or not), the plan stays
+ * on the list without a time, as the next thing to bring about; only the mind takes it off, when it is done
+ * or she really said no.
+ */
+async function untimeDuePlans(at: number): Promise<void> {
   const db = await getSql();
-  await db.query(`update qr_reach_plans set done_at = $1 where done_at is null and at is not null and at <= $1`, [at]);
+  await db.query(`update qr_reach_plans set at = null where done_at is null and at is not null and at <= $1`, [at]);
 }
 
 /**
@@ -133,7 +136,7 @@ export async function runWake(opts: {
     if (lastUser != null && at - lastUser < ACTIVE_MS) return skip("chatting");
   }
   if (!reach.enabled) {
-    await finishReachPlans(dueIds, at);
+    await untimeDuePlans(at);
     await insertReachLog({ at, trigger: "skip:disabled", intent: dueIntent, calledLlm: false, sent: false, nextAt: later[0]?.at ?? null });
     return skip("disabled");
   }
@@ -175,7 +178,7 @@ export async function runWake(opts: {
         kind: "system_notice",
         timeZone: zone,
       });
-      await finishReachPlans(dueIds, at);
+      await untimeDuePlans(at);
       await saveReach({ retry: 0 });
       await insertReachLog({ at, trigger: `skip:llm_fail:${reason}`, intent: dueIntent, calledLlm: true, sent: false, messageId: id, model: result.model, ms: result.ms, nextAt: null });
       return { ok: false, sent: false, brain, decision: { action: "call", trigger } };
@@ -187,8 +190,7 @@ export async function runWake(opts: {
     return { ok: false, sent: false, brain, decision: { action: "call", trigger } };
   }
 
-  await finishReachPlans(dueIds, at);
-  await finishDuePlans(at);
+  await untimeDuePlans(at);
   if (reach.retry) await saveReach({ retry: 0 });
   // The mind decided whether to reach her and what for; the words come from the voice that answers her.
   const intent = result.message;
