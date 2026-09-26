@@ -52,7 +52,7 @@ export function SettingsLink({
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-14 w-full items-center justify-between gap-3 rounded-md bg-surface-2 px-3 text-left"
+      className="settings-link flex min-h-14 w-full items-center justify-between gap-3 rounded-md bg-surface-2 px-3 text-left"
     >
       <span className="min-w-0">
         <span className="block text-sm">{label}</span>

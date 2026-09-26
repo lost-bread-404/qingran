@@ -1,11 +1,11 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { HomophoneEdits } from "@/components/lover/homophone-edits";
 import { ModesEditor } from "@/components/lover/modes-editor";
 import { Textarea } from "@/components/ui/textarea";
-import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
+import { keepCaretVisible, releaseStuckScroll, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD, lockSttKeyterms } from "@/lib/lover/hearing/config";
 import { RECENT_CLIP_KEEP } from "@/lib/lover/brain/config";
 import { formatHearingTimingSummary, parseHearingTimingLine } from "@/lib/lover/hearing/timing-format";
@@ -78,6 +78,18 @@ type Page =
   | "status"
   | "replay"
   | "history";
+
+const ADVANCED_CHILD: ReadonlySet<Page> = new Set([
+  "prompts",
+  "context",
+  "hearing",
+  "log",
+  "spend",
+  "archive",
+  "status",
+  "replay",
+  "history",
+]);
 
 type PromptItem = PromptEditorItem;
 
@@ -181,6 +193,11 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
   const [labPassword, setLabPassword] = useState("");
   const [page, setPage] = useState<Page>("home");
+  const [navDir, setNavDir] = useState<"forward" | "back" | "none">("none");
+  const [mounted, setMounted] = useState(false);
+  const [phase, setPhase] = useState<"in" | "out">("in");
+  const shellRef = useRef<HTMLDivElement>(null);
+  const scrollMem = useRef<Partial<Record<Page, number>>>({});
   const [openPrompt, setOpenPrompt] = useState<string | null>(null);
   const [log, setLog] = useState<BrainLogRow[]>([]);
   const [clearArmed, setClearArmed] = useState(false);
@@ -243,6 +260,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     if (!identityDirty.current) setIdentityDraft(profile.identity);
     setKeytermDraft(profile.sttKeyterms.join("\n"));
     setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
+    setNavDir("none");
+    scrollMem.current = {};
     setPage("home");
     setPromptItems([]);
     setPromptDrafts({});
@@ -261,6 +280,42 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     // Snapshot the open profile once. Later saves must not jump back to the first page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      setPhase("out");
+      const timer = window.setTimeout(() => setMounted(false), 190);
+      return () => window.clearTimeout(timer);
+    }
+    setMounted(true);
+    setPhase("in");
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!mounted) return;
+    const scroller = shellRef.current?.querySelector<HTMLElement>(".settings-scroll");
+    if (scroller) scroller.scrollTop = scrollMem.current[page] ?? 0;
+    let cancelled = false;
+    const kick = () => {
+      if (cancelled) return;
+      const node = shellRef.current?.querySelector<HTMLElement>(".settings-scroll");
+      if (!node) return;
+      const top = node.scrollTop;
+      // WebKit drops the paint of a freshly mounted overflow box after the
+      // keyboard dismisses. Toggling overflow forces the list back on screen.
+      node.style.overflowY = "hidden";
+      void node.offsetHeight;
+      node.style.overflowY = "auto";
+      node.scrollTop = top;
+    };
+    const raf = requestAnimationFrame(kick);
+    const timer = window.setTimeout(kick, 320);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [page, mounted]);
 
   useEffect(() => {
     if (!open) return;
@@ -599,7 +654,36 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     return () => window.clearTimeout(timer);
   }, [draft, open, profile.systemPrompt, conflict]);
 
-  if (!open) return null;
+  function rememberScroll() {
+    const scroller = shellRef.current?.querySelector<HTMLElement>(".settings-scroll");
+    if (scroller) scrollMem.current[page] = scroller.scrollTop;
+  }
+
+  function blurField() {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body) active.blur();
+    releaseStuckScroll();
+  }
+
+  function openPage(next: Page) {
+    rememberScroll();
+    blurField();
+    setNavDir("forward");
+    setPage(next);
+  }
+
+  function goBack() {
+    if (page === "home") {
+      onOpenChange(false);
+      return;
+    }
+    rememberScroll();
+    blurField();
+    setNavDir("back");
+    setPage(ADVANCED_CHILD.has(page) ? "advanced" : "home");
+  }
+
+  if (!mounted) return null;
 
   const pageTitle: Record<Page, string> = {
     home: "设置",
@@ -622,38 +706,19 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const tier = hearingTierOf(sense);
 
   return (
-    <div
-      className="fixed inset-x-0 z-50 flex flex-col bg-bg"
-      style={{ top: viewport.offsetTop, height: viewport.height }}
-    >
+    <div ref={shellRef} className="settings-shell" data-phase={phase}>
       <header className="flex shrink-0 items-center gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <button
           type="button"
           aria-label={page === "home" ? "关闭" : "返回"}
-          onClick={() =>
-            page === "home"
-              ? onOpenChange(false)
-              : setPage(
-                  page === "prompts" ||
-                    page === "context" ||
-                    page === "hearing" ||
-                    page === "log" ||
-                    page === "spend" ||
-                    page === "archive" ||
-                    page === "status" ||
-                    page === "replay" ||
-                    page === "history"
-                    ? "advanced"
-                    : "home",
-                )
-          }
-          className="grid size-11 place-items-center rounded-md text-muted"
+          onClick={goBack}
+          className="grid size-11 place-items-center rounded-md text-muted transition-transform duration-150 active:scale-95"
         >
           <X className={cn("size-5", page !== "home" && "hidden")} />
           <span className={cn("text-sm", page === "home" && "hidden")}>返回</span>
         </button>
         <div className="min-w-0 flex-1">
-          <p className="font-display text-lg font-medium tracking-tight">{pageTitle[page]}</p>
+          <p key={page} className="settings-title font-display text-lg font-medium tracking-tight">{pageTitle[page]}</p>
           <p className="text-xs text-subtle">
             {page === "home" ? "点进去改。改完自己会记下。" : "停一下就记下。"}
           </p>
@@ -662,34 +727,35 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         {saveError ? <span className="text-xs text-live">{saveError}</span> : null}
       </header>
 
+      <div key={page} className="settings-page" data-dir={navDir}>
       {page === "home" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
-            <SettingsLink label="清然是谁" hint="身份、人设" onClick={() => setPage("who")} />
-            <SettingsLink label="他的心" hint="心里、打算、模式、今天、记得的" onClick={() => setPage("heart")} />
-            <SettingsLink label="主动消息" hint="开关、下一次、记录" onClick={() => setPage("reach")} />
-            <SettingsLink label="声音和听力" hint="语速、静音、灵敏度" onClick={() => setPage("sound")} />
-            <SettingsLink label="数据" hint="导出、导入、清空、退出" onClick={() => setPage("data")} />
-            <SettingsLink label="高级" hint="指令、记录、费用" onClick={() => setPage("advanced")} />
+            <SettingsLink label="清然是谁" hint="身份、人设" onClick={() => openPage("who")} />
+            <SettingsLink label="他的心" hint="心里、打算、模式、今天、记得的" onClick={() => openPage("heart")} />
+            <SettingsLink label="主动消息" hint="开关、下一次、记录" onClick={() => openPage("reach")} />
+            <SettingsLink label="声音和听力" hint="语速、静音、灵敏度" onClick={() => openPage("sound")} />
+            <SettingsLink label="数据" hint="导出、导入、清空、退出" onClick={() => openPage("data")} />
+            <SettingsLink label="高级" hint="指令、记录、费用" onClick={() => openPage("advanced")} />
           </div>
         </div>
       ) : page === "advanced" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <p className="text-xs text-subtle">调试用，平时不用进。</p>
-            <SettingsLink label="指令" onClick={() => setPage("prompts")} />
-            <SettingsLink label="上下文" onClick={() => setPage("context")} />
-            <SettingsLink label="重放对比" onClick={() => setPage("replay")} />
-            <SettingsLink label="听力参数" onClick={() => setPage("hearing")} />
-            <SettingsLink label="调用记录" onClick={() => setPage("log")} />
-            <SettingsLink label="费用" onClick={() => setPage("spend")} />
-            <SettingsLink label="系统存档" onClick={() => setPage("archive")} />
-            <SettingsLink label="状态" onClick={() => setPage("status")} />
-            <SettingsLink label="改动记录" hint="人设、亲密设定、身份" onClick={() => setPage("history")} />
+            <SettingsLink label="指令" onClick={() => openPage("prompts")} />
+            <SettingsLink label="上下文" onClick={() => openPage("context")} />
+            <SettingsLink label="重放对比" onClick={() => openPage("replay")} />
+            <SettingsLink label="听力参数" onClick={() => openPage("hearing")} />
+            <SettingsLink label="调用记录" onClick={() => openPage("log")} />
+            <SettingsLink label="费用" onClick={() => openPage("spend")} />
+            <SettingsLink label="系统存档" onClick={() => openPage("archive")} />
+            <SettingsLink label="状态" onClick={() => openPage("status")} />
+            <SettingsLink label="改动记录" hint="人设、亲密设定、身份" onClick={() => openPage("history")} />
           </div>
         </div>
       ) : page === "who" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
             <p className="text-xs text-subtle">身份是他在现实里是谁。人设是他怎么说话。</p>
             <IdentityField
@@ -812,7 +878,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           </div>
         </div>
       ) : page === "context" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
             <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
               <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
@@ -893,7 +959,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           </div>
         </div>
       ) : page === "prompts" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
             <p className="text-xs text-subtle">
               点开一步改消息。人设在「清然是谁」，这里用 {"{system_prompt}"} 引用。记下后下一轮生效。
@@ -944,7 +1010,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           </div>
         </div>
       ) : page === "heart" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-6">
             <p className="text-xs text-subtle">这些都是他自己写的。你改的会记下来。</p>
             <HeartEditor />
@@ -952,13 +1018,13 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           </div>
         </div>
       ) : page === "reach" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto w-full max-w-md">
             <ReachPanel />
           </div>
         </div>
       ) : page === "sound" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
             <p className="text-xs text-subtle">语速和静音跟主屏幕是同一个。</p>
             <div className="flex items-center justify-between rounded-md bg-surface-2 px-3 py-3">
@@ -1028,7 +1094,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           </div>
         </div>
       ) : page === "data" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
             <StatePanel />
             <LogoutButton />
@@ -1059,18 +1125,18 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           </div>
         </div>
       ) : page === "spend" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <BrainSpendPage />
         </div>
       ) : page === "archive" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
             <BrainBackupPanel />
             <BrainSystemArchive />
           </div>
         </div>
       ) : page === "status" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto w-full max-w-md">
             <StatusPanel
               voiceModel={voiceModel}
@@ -1084,11 +1150,11 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           </div>
         </div>
       ) : page === "replay" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <ReplayPanel profile={profile} />
         </div>
       ) : page === "history" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <ProfileHistory
             onRestored={(next, nextRevs, field) => {
               if (field === "systemPrompt") personaDirty.current = false;
@@ -1103,7 +1169,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           />
         </div>
       ) : page === "hearing" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
             <details className="rounded-md bg-surface-2 px-3 py-2">
               <summary className="min-h-11 cursor-pointer text-sm">具体参数</summary>
@@ -1201,7 +1267,7 @@ maxAlternatives: 3`}
           </div>
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
+        <div className="settings-scroll px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <p className="text-xs text-subtle">
               {callPhase ? `通话 phase ${callPhase}${callDeaf ? " · 麦关" : ""}` : "当前不在通话"}
@@ -1390,6 +1456,7 @@ maxAlternatives: 3`}
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
