@@ -36,10 +36,6 @@ type TotalsSnap = {
 
 let snap: TotalsSnap | null = null;
 
-export function resetSpendSnap() {
-  snap = null;
-}
-
 export async function loadTotals(force = false): Promise<TotalsSnap> {
   const meta = await getMeta();
   const tz = resolveTz(meta.timeZone);

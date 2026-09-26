@@ -2,7 +2,7 @@ import { getSql, type Sql } from "../../db.ts";
 import { NEUTRAL_PERSONA, storedSystemPrompt } from "../types.ts";
 import { newId } from "../storage.ts";
 import { collapseReplyVariants } from "../pair-messages.ts";
-import { HISTORY_WINDOW, SESSION_GAP_MS, clampHistoryWindow } from "./config.ts";
+import { HISTORY_WINDOW, SESSION_GAP_MS } from "./config.ts";
 import { clipLogRecord } from "./log-clip.ts";
 import { now } from "./clock.ts";
 import { localDay, sessionIdFor } from "./time.ts";
@@ -12,12 +12,9 @@ import type {
   BrainMeta,
   JobStatus,
   JobType,
-  InnerPlan,
-  InnerState,
-  LongingItem,
   StoredMessage,
 } from "./types.ts";
-import { EMPTY_INNER, EMPTY_META } from "./types.ts";
+import { EMPTY_META } from "./types.ts";
 
 
 export function pgTextArray(values: string[]): string {
@@ -114,78 +111,6 @@ export async function patchMeta(patch: Partial<BrainMeta>): Promise<BrainMeta> {
   return next;
 }
 
-function parsePlans(raw: unknown): InnerPlan[] {
-  const value = typeof raw === "string" ? JSON.parse(raw) : raw;
-  if (!Array.isArray(value)) return [];
-  const plans: InnerPlan[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") continue;
-    const row = item as Record<string, unknown>;
-    const status = row.status === "done" || row.status === "dropped" ? row.status : "open";
-    if (typeof row.id !== "string" || !row.id) continue;
-    plans.push({
-      id: row.id,
-      what: typeof row.what === "string" ? row.what : "",
-      why: typeof row.why === "string" ? row.why : "",
-      trigger: typeof row.trigger === "string" ? row.trigger : undefined,
-      expires_at: row.expires_at == null ? undefined : asInt(row.expires_at),
-      status,
-    });
-  }
-  return plans;
-}
-
-function parseLongings(raw: unknown, legacy: string): LongingItem[] {
-  const value = typeof raw === "string" ? JSON.parse(raw) : raw;
-  const items: LongingItem[] = [];
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      if (!item || typeof item !== "object") continue;
-      const row = item as Record<string, unknown>;
-      const text = typeof row.text === "string" ? row.text.trim() : "";
-      if (!text) continue;
-      items.push({
-        id: typeof row.id === "string" && row.id ? row.id : `l${items.length + 1}`,
-        text,
-        since: typeof row.since === "string" ? row.since : "",
-      });
-    }
-  }
-  if (!items.length && legacy.trim()) return [{ id: "legacy", text: legacy.trim(), since: "" }];
-  return items.slice(0, 5);
-}
-
-function rowToInner(row: Record<string, unknown> | undefined): InnerState {
-  if (!row) return { ...EMPTY_INNER, plans: [], longings: [] };
-  const longings = parseLongings(row.longings, String(row.longing ?? ""));
-  return {
-    desire: String(row.desire ?? ""),
-    readHer: String(row.read_her ?? ""),
-    feel: String(row.feel ?? ""),
-    want: String(row.want ?? ""),
-    choice: String(row.choice ?? ""),
-    now: String(row.now_text ?? ""),
-    scene: row.scene === "intimate" ? "intimate" : "daily",
-    longing: longings.map((item) => item.text).join("；"),
-    longings,
-    plans: parsePlans(row.plans),
-    glow: Number(row.glow ?? 0) || 0,
-    glow_at: asInt(row.glow_at),
-    turn_seq: asInt(row.turn_seq),
-    updated_at: asInt(row.updated_at),
-    longing_updated_at: asInt(row.longing_updated_at),
-  };
-}
-
-export async function getInner(): Promise<InnerState> {
-  const db = await getSql();
-  const rows = await db.query<Record<string, unknown>>(
-    `select feel, desire, read_her, want, choice, now_text, scene, longing, longings, plans, glow, glow_at, turn_seq, updated_at, longing_updated_at
-     from qr_inner where id = 1`,
-  );
-  return rowToInner(rows[0]);
-}
-
 export async function appendInnerLog(entry: {
   turnSeq: number;
   data: unknown;
@@ -199,66 +124,10 @@ export async function appendInnerLog(entry: {
   );
 }
 
-export async function saveInner(
-  inner: InnerState,
-  expectedTurn: number,
-  meta?: { model?: string; ms?: number; log?: unknown },
-): Promise<boolean> {
-  const db = await getSql();
-  const longings = inner.longings?.length
-    ? inner.longings.slice(0, 5)
-    : inner.longing.trim()
-      ? [{ id: "legacy", text: inner.longing.trim(), since: "" }]
-      : [];
-  const rows = await db.query<{ id: number }>(
-    `update qr_inner
-     set feel = $1, desire = $2, read_her = $3, choice = $4, now_text = $5, scene = $6, longings = $7::jsonb, plans = $8::jsonb,
-         turn_seq = $9, updated_at = $10, longing_updated_at = $11, glow = $12, glow_at = $13
-     where id = 1 and turn_seq < $9
-     returning id`,
-    [
-      inner.feel,
-      inner.desire,
-      inner.readHer,
-      inner.choice,
-      inner.now,
-      inner.scene === "intimate" ? "intimate" : "daily",
-      JSON.stringify(longings),
-      JSON.stringify(inner.plans),
-      expectedTurn,
-      inner.updated_at,
-      inner.longing_updated_at,
-      inner.glow ?? 0,
-      inner.glow_at ?? 0,
-    ],
-  );
-  if (meta?.log !== undefined) {
-    await appendInnerLog({
-      turnSeq: expectedTurn,
-      data: meta.log,
-      model: meta.model,
-      ms: meta.ms,
-    });
-  }
-  return rows.length > 0;
-}
-
+/** Clearing the room also clears what he had in mind right now (the plans with a time stay). */
 export async function resetInnerTurn(): Promise<void> {
   const db = await getSql();
-  await db.query(
-    `update qr_inner
-     set feel = '', desire = '', read_her = '', choice = '', now_text = '', scene = 'daily', turn_seq = 0, updated_at = $1
-     where id = 1`,
-    [now()],
-  );
-}
-
-export async function getRoomClearedAt(): Promise<number> {
-  const db = await getSql();
-  const rows = await db.query<{ room_cleared_at: number | null }>(
-    "select room_cleared_at from qingran_profile where id = 1",
-  );
-  return asInt(rows[0]?.room_cleared_at, 0);
+  await db.query(`update qr_inner set now_text = '', focus = '', turn_seq = 0, updated_at = $1 where id = 1`, [now()]);
 }
 
 export async function forgetUnarchivedMessages(at: number): Promise<number> {
@@ -292,20 +161,6 @@ export async function forgetUnarchivedMessages(at: number): Promise<number> {
   return asInt(rows[0]?.n);
 }
 
-export async function forgetAllMessages(at: number): Promise<number> {
-  const db = await getSql();
-  const rows = await db.query<{ n: number }>(
-    `with u as (
-       update qingran_messages
-       set forgotten_at = coalesce(forgotten_at, $1)
-       where forgotten_at is null
-       returning id
-     ) select count(*)::int as n from u`,
-    [at],
-  );
-  return asInt(rows[0]?.n);
-}
-
 export async function setRoomClearedAt(at: number): Promise<void> {
   const db = await getSql();
   await db.query(
@@ -321,15 +176,14 @@ export async function setRoomClearedAt(at: number): Promise<void> {
  * Plans with a time (dinner, bedtime), plans she added, and the memory stay. */
 export async function clearRecentConversation(): Promise<void> {
   const ts = now();
-  const inner = await getInner();
+  const { dropUntimedPlans, getHeart } = await import("./heart.ts");
+  const heart = await getHeart();
   await setRoomClearedAt(ts);
   await forgetUnarchivedMessages(ts);
   await resetInnerTurn();
-  const { dropUntimedPlans, setFocus } = await import("./heart.ts");
   await dropUntimedPlans();
-  await setFocus("");
   await appendInnerLog({
-    turnSeq: inner.turn_seq,
+    turnSeq: heart.turnSeq,
     data: { kind: "cleared_by_rosie" },
   });
 }
@@ -402,18 +256,6 @@ export async function getMessage(id: string): Promise<StoredMessage | null> {
   return rows[0] ? rowMessage(rows[0]) : null;
 }
 
-export async function listMessagesByIds(ids: string[]): Promise<StoredMessage[]> {
-  if (!ids.length) return [];
-  const db = await getSql();
-  const rows = await db.query<Record<string, unknown>>(
-    `select id, role, body, created_at, kind, archived_at, session_id, local_day
-     from qingran_messages where id = any($1::text[])`,
-    [pgTextArray(ids)],
-  );
-  const map = new Map(rows.map((r) => [String(r.id), rowMessage(r)]));
-  return ids.map((id) => map.get(id)).filter((m): m is StoredMessage => Boolean(m));
-}
-
 export async function lastMessage(): Promise<StoredMessage | null> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
@@ -422,20 +264,6 @@ export async function lastMessage(): Promise<StoredMessage | null> {
      where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
      order by created_at desc, id desc
      limit 1`,
-  );
-  return rows[0] ? rowMessage(rows[0]) : null;
-}
-
-export async function lastMessageBefore(createdAt: number): Promise<StoredMessage | null> {
-  const db = await getSql();
-  const rows = await db.query<Record<string, unknown>>(
-    `select id, role, body, created_at, kind, archived_at, session_id, local_day
-     from qingran_messages
-     where created_at < $1
-       and created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
-     order by created_at desc, id desc
-     limit 1`,
-    [createdAt],
   );
   return rows[0] ? rowMessage(rows[0]) : null;
 }
@@ -723,16 +551,6 @@ export async function restoreClaim(id: string, attempts: number): Promise<void> 
   );
 }
 
-export async function skipOldReflect(turnSeq: number): Promise<void> {
-  const db = await getSql();
-  await db.query(
-    `update brain_jobs set status = 'done', locked_until = null, updated_at = $2
-     where type = 'reflect' and status = 'pending'
-       and coalesce((payload->>'turnSeq')::bigint, 0) < $1`,
-    [turnSeq, now()],
-  );
-}
-
 export const REFLECT_DEDUPE_KEY = "reflect";
 
 export async function upsertReflectJob(turnSeq: number): Promise<void> {
@@ -755,26 +573,6 @@ export async function upsertReflectJob(turnSeq: number): Promise<void> {
        locked_until = case when brain_jobs.status = 'running' then brain_jobs.locked_until else null end,
        updated_at = excluded.updated_at`,
     [newId(), REFLECT_DEDUPE_KEY, JSON.stringify({ turnSeq }), ts],
-  );
-}
-
-export async function reflectFollowUpSeq(jobId: string, ranSeq: number): Promise<number | null> {
-  const db = await getSql();
-  const rows = await db.query<{ seq: string | number | null }>(
-    `select payload->>'turnSeq' as seq from brain_jobs where id = $1`,
-    [jobId],
-  );
-  const latest = Number(rows[0]?.seq ?? 0);
-  return Number.isFinite(latest) && latest > ranSeq ? latest : null;
-}
-
-export async function reopenReflectFollowUp(jobId: string): Promise<void> {
-  const db = await getSql();
-  await db.query(
-    `update brain_jobs
-     set status = 'pending', attempts = 0, run_after = $2, locked_until = null, last_error = null, updated_at = $2
-     where id = $1`,
-    [jobId, now()],
   );
 }
 
@@ -804,17 +602,6 @@ export async function finishReflectJob(id: string, ranSeq: number): Promise<"pen
     [id, ranSeq, ts],
   );
   return rows[0]?.status === "pending" ? "pending" : "done";
-}
-
-export async function newerReflectExists(turnSeq: number): Promise<boolean> {
-  const db = await getSql();
-  const rows = await db.query<{ n: number }>(
-    `select count(*)::int as n from brain_jobs
-     where type = 'reflect' and status in ('pending','running')
-       and coalesce((payload->>'turnSeq')::bigint, 0) > $1`,
-    [turnSeq],
-  );
-  return asInt(rows[0]?.n) > 0;
 }
 
 export async function cleanupOldJobs(now: number): Promise<void> {

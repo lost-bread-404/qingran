@@ -6,5 +6,5 @@ export const REACH_RETRY_MS = 15 * 60 * 1000;
 /** His identity (kept apart from the persona), as the line models see. */
 export function identityBlock(identity: string): string {
   const text = identity.trim();
-  return text ? `【我的身份】\n${text}` : "";
+  return text ? `【你的身份】\n${text}` : "";
 }

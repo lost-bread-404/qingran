@@ -16,6 +16,3 @@ export function goldTierFor(input: {
   return 0;
 }
 
-export function inEvalSet(source?: string | null): boolean {
-  return isGoldSource(source);
-}

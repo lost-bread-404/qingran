@@ -204,6 +204,7 @@ export const Route = createFileRoute("/api/talk")({
                 userMsgId,
                 localDay: localDay(userCreatedAt, timeZone),
                 ttsChars: streamResult.ttsChars,
+                paidBy: streamResult.paidBy,
                 finishReason: streamResult.finishReason,
                 effort: streamResult.effort == null ? null : String(streamResult.effort),
                 note: formatVoiceLogNote({

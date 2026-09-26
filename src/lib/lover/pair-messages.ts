@@ -1,7 +1,6 @@
 import { UNRECOGNIZED_TEXT } from "./hearing/heard.ts";
-import { withInterruptedMark } from "./interrupt.ts";
 import { decodeStoredBody } from "./message-markup.ts";
-import { CONTEXT_WINDOW, type ChatMessage } from "./types.ts";
+import { type ChatMessage } from "./types.ts";
 
 export type ChatPair = {
   user?: ChatMessage;
@@ -102,17 +101,6 @@ export function skipsQingran(msg: ChatMessage): boolean {
   if (msg.role !== "user") return false;
   if (msg.kind === "unheard") return true;
   return msg.text.trim() === UNRECOGNIZED_TEXT;
-}
-
-export function historyForQingran(messages: ChatMessage[], limit = CONTEXT_WINDOW): ChatMessage[] {
-  return collapseReplyVariants(messages)
-    .filter((msg) => msg.kind !== "steer" && msg.kind !== "setting" && msg.kind !== "system_notice" && !skipsQingran(msg))
-    .slice(-limit)
-    .map((msg) =>
-      msg.role === "assistant" && msg.interrupted
-        ? { ...msg, text: withInterruptedMark(msg.text) }
-        : msg,
-    );
 }
 
 /** Lay out turns in time order. Replies to the same user message stay on one page stack. */

@@ -50,11 +50,3 @@ export async function recordMode(input: { at: number; mode: TalkMode; until: num
   ]);
 }
 
-export async function recentModeLog(limit = 20): Promise<ModeRow[]> {
-  const db = await sql();
-  const rows = await db.query<Record<string, unknown>>(
-    `select at::float8 as at, mode, until_at::float8 as until_at, then_mode, why from qr_mode_log order by at desc, id desc limit $1`,
-    [limit],
-  );
-  return rows.map(rowOf);
-}

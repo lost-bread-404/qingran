@@ -10,6 +10,7 @@ import { appendBrainLog } from "./store.ts";
 import { extractJson } from "./text.ts";
 import { parseUsage, settleLlmCost } from "./usage.ts";
 import { recordLlmSpend } from "./spend/check.ts";
+import { xaiCreds, xaiFetch } from "../xai-auth.ts";
 import { jobRateHit, SPEND_RATE_ERR } from "./spend/rate.ts";
 import { codeVersion, maybeWriteRawLog, xaiStoreEnabled } from "./log-refs.ts";
 import { applyPromptModel } from "./prompts/models.ts";
@@ -246,6 +247,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
   const started = Date.now();
   const apiKey = process.env.XAI_API_KEY;
   await checkModelAvailability(apiKey);
+  const creds = await xaiCreds();
   const overrideKey = (input.promptKey && input.promptKey.trim()) || route;
   const override = input.model ? null : await storedPromptModel(overrideKey);
   let resolved = applyAvailabilityFallback(applyPromptModel(resolveRoute(route), override));
@@ -294,7 +296,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     }
   }
 
-  if (!apiKey) {
+  if (!creds.length) {
     const result = fail("no-key");
     const logId = await appendBrainLog({ ...failLog, ms: result.ms, note: "no-key", error: "no-key" });
     await maybeWriteRawLog(logId, { messages: logMessagesOf(input) });
@@ -340,15 +342,14 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
   };
 
   try {
-    const res = await fetch("https://api.x.ai/v1/responses", {
+    const sent = await xaiFetch("https://api.x.ai/v1/responses", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(resolved.timeoutMs),
     });
+    if (!sent) throw new Error("no-key");
+    const { res, cred } = sent;
     const raw = await res.json().catch(() => null);
     const text = outputText(raw);
     const toolCalls = outputToolCalls(raw);
@@ -366,7 +367,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       ms,
       inputChars: inputCharsOf(input),
       raw: text.slice(0, 4000),
-      note: failNote ?? (finish ? `finish_reason=${finish}` : null),
+      note: [failNote ?? (finish ? `finish_reason=${finish}` : null), cred.kind === "sub" ? "SuperGrok" : null].filter(Boolean).join(" · ") || null,
       outputText: text,
       tokensIn: usage.tokensIn ?? settled.tokensIn ?? null,
       tokensCached: usage.tokensCached,
@@ -378,6 +379,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     });
     await maybeWriteRawLog(logId, { messages: logMessagesOf(input) });
     await recordLlmSpend({
+      paidBy: cred.kind,
       route,
       model: resolved.model,
       usage,

@@ -1,6 +1,6 @@
 import { REFLECT_WINDOW } from "../config.ts";
 import { callModel, classifyReflectFailure, type CallModelResult } from "../llm.ts";
-import { appendInnerLog, getInner, getMeta, getProfilePrompt, listHistoryWindow, patchBrainLog, getProfileData } from "../store.ts";
+import { appendInnerLog, getMeta, getProfilePrompt, listHistoryWindow, patchBrainLog, getProfileData } from "../store.ts";
 import { formatClock, localDay } from "../time.ts";
 import { now } from "../clock.ts";
 import { fillReflectTurn } from "../observability.ts";
@@ -8,7 +8,7 @@ import { patchTurnTraceReflector } from "../turn-trace.ts";
 import { isNightNoiseBody, modelFacingText } from "../../message-markup.ts";
 import { rememberBlock, rememberCharter, type ReflectRefs } from "../log-refs.ts";
 import { resolveTz } from "../tz.ts";
-import type { InnerState, StoredMessage } from "../types.ts";
+import type { StoredMessage } from "../types.ts";
 import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { dossierTextForModel } from "../dossier.ts";
@@ -21,6 +21,7 @@ import {
   dayWindow,
   daysText,
   getHeart,
+  type Heart,
   hasDay,
   listPlans,
   markSilenceSeen,
@@ -125,7 +126,7 @@ export function reflectVars(parts: ReflectorParts): Record<string, string> {
     identity_block: parts.identity?.trim() ? `${parts.identity.trim()}\n` : "",
     story: parts.story.trim() || "（没有）",
     dossier: parts.dossier.trim() || "（还没有）",
-    trigger: parts.trigger.trim() || "她刚说完话。",
+    trigger: parts.trigger.trim() || "我刚说完话。",
     facts: parts.facts.trim() || "（没有）",
     days: parts.days.trim() || "（还没有）",
     today: parts.today.trim() || "（还没有）",
@@ -162,10 +163,10 @@ export type ReflectTrigger = { kind: ReflectKind; silentSince?: number; since?: 
 
 function triggerText(t: ReflectTrigger, at: number): string {
   if (t.kind === "silence" && t.silentSince) {
-    return `她已经 ${gapText(at - t.silentSince)} 没说话了。这是她沉默后，你心里过的一遍。`;
+    return `我已经 ${gapText(at - t.silentSince)} 没说话了。这是我沉默后，你心里过的一遍。`;
   }
-  if (t.kind === "due") return `到时间了。她现在不在和你聊天。\n${t.dueText?.trim() || ""}`.trim();
-  return "她刚说完话，你也刚回了她。";
+  if (t.kind === "due") return `到时间了。我现在不在和你聊天。\n${t.dueText?.trim() || ""}`.trim();
+  return "我刚说完话，你也刚回了我。";
 }
 
 /** The talk since `from`; never fewer than the usual window, so a short stretch still has its context. */
@@ -244,7 +245,7 @@ export function parsePlans(raw: unknown, tz: string, at: number): ParsedPlan[] {
 
 export type ReflectResult = {
   ok: boolean;
-  inner: InnerState | null;
+  inner: Heart | null;
   /** Only for `due`: what he decided to send her ("" = nothing). */
   message: string;
   failKind: string | null;
@@ -263,7 +264,7 @@ export async function runReflector(
   const kind = trigger.kind;
   const heartBefore = await getHeart();
   if (kind === "turn" && heartBefore.turnSeq >= turnSeq) {
-    return { ok: true, inner: await getInner(), message: "", failKind: null, model: "", ms: 0 };
+    return { ok: true, inner: heartBefore, message: "", failKind: null, model: "", ms: 0 };
   }
 
   const at = now();
@@ -326,7 +327,7 @@ export async function runReflector(
   if (kind === "silence" && trigger.silentSince) await markSilenceSeen(trigger.silentSince);
 
   await appendInnerLog({ turnSeq, data: { kind: kindLog(kind), output: result.json }, model: result.model, ms: result.ms });
-  const inner = await getInner();
+  const inner = await getHeart();
   if (kind === "turn") {
     await fillReflectTurn(turnSeq, true, result.ms, null);
     await patchTurnTraceReflector({ turnSeq, inner, model: result.model, ms: result.ms });

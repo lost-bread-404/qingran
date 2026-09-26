@@ -21,27 +21,6 @@ function norm(s: string): string {
   return s.replace(/[^\u4e00-\u9fffa-zA-Z0-9]/g, "").toLowerCase();
 }
 
-export function tokenizeMemory(text: string): string[] {
-  const tokens: string[] = [];
-  const lower = text.toLowerCase();
-  const words = lower.match(/[a-z0-9]+/g) ?? [];
-  tokens.push(...words);
-  const chars = [...lower].filter((c) => /[\u4e00-\u9fff]/.test(c));
-  for (let i = 0; i < chars.length - 1; i++) tokens.push(chars[i]! + chars[i + 1]!);
-  if (chars.length === 1) tokens.push(chars[0]!);
-  return tokens.length ? tokens : ["_"];
-}
-
-export function formatIndexLine(item: {
-  id: string;
-  localDay: string;
-  subject: string;
-  text: string;
-}): string {
-  const md = item.localDay.slice(5) || "--";
-  return `${item.id}|${md}|${item.subject}|${item.text.slice(0, 30)}`;
-}
-
 export function extractJson(text: string): string {
   const trimmed = text.trim();
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;

@@ -142,18 +142,6 @@ export function getPlaybackElement(): HTMLAudioElement {
   return el;
 }
 
-function clearElement(el: HTMLAudioElement) {
-  try {
-    el.pause();
-    el.muted = true;
-    el.removeAttribute("src");
-    el.src = "";
-    el.load();
-  } catch {
-    /* ignore */
-  }
-}
-
 function looksLikeMpeg(bytes: Uint8Array) {
   if (bytes.length >= 3 && bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) return true;
   return bytes.length >= 2 && bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0;
@@ -426,10 +414,6 @@ export function stopCallHold() {
   } catch {
     /* ignore */
   }
-}
-
-export function isCallHoldPlaying() {
-  return holdPlaying;
 }
 
 export function keepPlaybackAlive() {
@@ -733,10 +717,3 @@ export async function playMp3Bytes(
   return gen === playGen;
 }
 
-export function isPlaybackUnlocked() {
-  return unlocked;
-}
-
-export function currentPlayGen() {
-  return playGen;
-}

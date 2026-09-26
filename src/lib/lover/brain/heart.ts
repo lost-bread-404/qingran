@@ -98,12 +98,6 @@ export async function replaceMindPlans(plans: Array<{ at: number | null; text: s
   }
 }
 
-export async function finishPlans(ids: number[], at: number): Promise<void> {
-  if (!ids.length) return;
-  const db = await sql();
-  await db.query(`update qr_reach_plans set done_at = $2 where id = any($1::bigint[])`, [ids, at]);
-}
-
 export async function removePlan(id: number): Promise<void> {
   const db = await sql();
   await db.query(`delete from qr_reach_plans where id = $1 and done_at is null`, [id]);
@@ -176,15 +170,15 @@ export async function todaySpans(nowMs: number, timeZone: string): Promise<strin
     if (last && at - last[1] <= 20 * 60_000) last[1] = at;
     else spans.push([at, at]);
   }
-  if (!spans.length) return "今天她还没来找过你。";
-  return `今天她来找你的时段：${spans.map(([a, b]) => (a === b ? clockOf(a, timeZone) : `${clockOf(a, timeZone)}–${clockOf(b, timeZone)}`)).join("、")}`;
+  if (!spans.length) return "今天我还没来找过你。";
+  return `今天我来找你的时段：${spans.map(([a, b]) => (a === b ? clockOf(a, timeZone) : `${clockOf(a, timeZone)}–${clockOf(b, timeZone)}`)).join("、")}`;
 }
 
 /** Plain facts a person would just know: the time, how long she has been quiet, when she was around today. */
 export async function timeFacts(nowMs: number, timeZone: string, excludeAfter?: number): Promise<string> {
   const [last, spans] = await Promise.all([lastUserAt(excludeAfter ?? nowMs - 5_000), todaySpans(nowMs, timeZone)]);
   const lines = [formatClock(nowMs, timeZone)];
-  if (last) lines.push(`她上一次说话是 ${clockOf(last, timeZone)}，距现在 ${gap(nowMs - last)}。`);
+  if (last) lines.push(`我上一次说话是 ${clockOf(last, timeZone)}，距现在 ${gap(nowMs - last)}。`);
   lines.push(spans);
   return lines.join("\n");
 }
@@ -224,7 +218,7 @@ export function plansText(plans: Plan[], nowMs: number, timeZone: string, opts: 
   return rows
     .map((p) => {
       const when = p.at == null ? "" : p.at <= nowMs ? "（到时间了）" : `（${formatLocal(p.at, timeZone)}）`;
-      const who = p.setBy === "rosie" ? "（她定的）" : "";
+      const who = p.setBy === "rosie" ? "（我定的）" : "";
       return `- ${when}${p.text}${who}`;
     })
     .join("\n");

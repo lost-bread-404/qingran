@@ -1,4 +1,3 @@
-import { MODEL_PRICES } from "./config.ts";
 import { llmCostFromText, llmCostUsd } from "./spend/cost.ts";
 
 export const TICKS_PER_USD = 10_000_000_000;
@@ -11,7 +10,7 @@ export type TokenUsage = {
   costTicks?: number | null;
 };
 
-export type CostSource = "xai" | "price_table" | "char_estimate";
+export type CostSource = "xai" | "price_table" | "char_estimate" | "supergrok";
 
 export function ticksToUsd(ticks: number): number {
   return ticks / TICKS_PER_USD;
@@ -57,11 +56,6 @@ export function parseUsage(raw: unknown): TokenUsage {
   };
 }
 
-export function estimateCostUsd(model: string, usage: TokenUsage): number | null {
-  if (!MODEL_PRICES[model]) return null;
-  return llmCostUsd(model, usage)?.usd ?? null;
-}
-
 export function settleLlmCost(
   model: string,
   usage: TokenUsage,
@@ -99,8 +93,3 @@ export function settleLlmCost(
   };
 }
 
-export function formatMindAge(ms: number): string {
-  if (ms < 3_600_000) return `${Math.max(0, Math.floor(ms / 60_000))} 分钟`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)} 小时`;
-  return `${Math.floor(ms / 86_400_000)} 天`;
-}

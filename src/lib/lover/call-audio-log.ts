@@ -35,10 +35,6 @@ function stamp(at: number) {
   return `${hh}:${mm}:${ss}.${ms}`;
 }
 
-export function formatCallAudioLog(rows = recentCallAudioLog(6)): string {
-  return rows.map((row) => `${stamp(row.at).slice(3)} ${row.event}`).join(" · ");
-}
-
 export function formatCallAudioLogLines(rows = recentCallAudioLog(AUDIO_LOG_MAX)): string {
   return rows.map((row) => `${stamp(row.at)} ${row.event}`).join("\n");
 }

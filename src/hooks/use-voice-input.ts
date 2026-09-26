@@ -14,9 +14,8 @@ import { closeAudioContext, watchAudioContext } from "@/lib/lover/audio-session"
 import { logCallAudio } from "@/lib/lover/call-audio-log";
 import { hearUtterance } from "@/lib/lover/hear";
 import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
-import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { getHearingSession } from "@/lib/lover/hearing/session";
 import { recordCuts } from "@/lib/lover/hearing/sense";
-import { warmupHearing } from "@/lib/lover/hearing/store";
 import { attachPcmTap, peakRms, wavFromTap, type PcmTap } from "@/lib/lover/pcm-tap";
 import { sampleProsody, type ProsodyFrame } from "@/lib/lover/prosody";
 import { mergeSpeech, pickSpokenAlt } from "@/lib/lover/stt-text";
@@ -249,11 +248,6 @@ export function useVoiceInput({ lang, prompt }: Options) {
     speechStartWallRef.current = Date.now();
     triggerFloorRef.current = noiseFloorRef.current;
     setStatus("recording");
-    if (getHearingSession().provider === "selfhost") {
-      void warmupHearing({ data: { provider: "selfhost" } }).then((result) => {
-        if (result.cold) setHearingSession({ coldStartMs: result.latency_ms });
-      });
-    }
   }, [lang, recorderSupported, speechSupported, startPulse]);
 
   const stop = useCallback(async (): Promise<HeardUtterance> => {

@@ -5,6 +5,7 @@ import { ttsRequestBody, ttsSpeed } from "./tts";
 import { isQuotaHint, readXaiFail } from "./xai-error";
 import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./hearing/config";
 import { recordSttSpend, recordTtsSpend } from "./brain/spend/check";
+import { xaiFetch } from "./xai-auth";
 import { VOICE_IO } from "./brain/config";
 
 type TtsInput = {
@@ -21,28 +22,24 @@ type SttInput = {
 export const speakAsLover = createServerFn({ method: "POST" })
   .validator((input: TtsInput) => input)
   .handler(async ({ data }) => {
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) return { ok: false as const, error: "voice-unavailable" };
-
     const text = spokenForTts(data.text.trim());
     if (!text) return { ok: false as const, error: "empty" };
 
-    const res = await fetch(VOICE_IO.ttsUrl, {
+    const sent = await xaiFetch(VOICE_IO.ttsUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(ttsRequestBody(text, VOICE_IO.language, ttsSpeed(data.speed ?? 1))),
       signal: AbortSignal.timeout(40_000),
     });
+    if (!sent) return { ok: false as const, error: "voice-unavailable" };
+    const { res, cred } = sent;
 
     if (!res.ok) {
       return { ok: false as const, error: await readXaiFail(res) };
     }
 
     const buf = Buffer.from(await res.arrayBuffer());
-    void recordTtsSpend(text.length);
+    void recordTtsSpend(text.length, null, cred.kind);
     return {
       ok: true as const,
       mimeType: res.headers.get("content-type") || `audio/pcm;rate=${VOICE_IO.sampleRate}`,
@@ -51,9 +48,6 @@ export const speakAsLover = createServerFn({ method: "POST" })
   });
 
 async function transcribeVoiceAudio(data: SttInput) {
-  const apiKey = process.env.XAI_API_KEY;
-  if (!apiKey) return { ok: false as const, error: "stt-unavailable" };
-
   const mime = sanitizeMime(data.mimeType);
   const bytes = Buffer.from(data.audioBase64, "base64");
   if (bytes.length < 20) return { ok: false as const, error: "太短了。" };
@@ -67,12 +61,13 @@ async function transcribeVoiceAudio(data: SttInput) {
   const blob = new Blob([new Uint8Array(bytes)], { type: mime });
   form.append("file", blob, filenameFor(mime));
 
-  const res = await fetch("https://api.x.ai/v1/stt", {
+  const sent = await xaiFetch("https://api.x.ai/v1/stt", {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
     signal: AbortSignal.timeout(60_000),
   });
+  if (!sent) return { ok: false as const, error: "stt-unavailable" };
+  const { res, cred } = sent;
 
   if (!res.ok) {
     const hint = await readXaiFail(res);
@@ -92,7 +87,7 @@ async function transcribeVoiceAudio(data: SttInput) {
   }
   const lastEnd = (body.words ?? []).reduce((m, w) => Math.max(m, Number(w.end) || 0), 0);
   const seconds = lastEnd > 0 ? lastEnd : bytes.length / (VOICE_IO.sampleRate * 2);
-  void recordSttSpend(seconds, false);
+  void recordSttSpend(seconds, false, null, cred.kind);
   return { ok: true as const, text, words: body.words ?? [] };
 }
 

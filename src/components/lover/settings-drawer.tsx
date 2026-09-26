@@ -855,6 +855,20 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                     <span className="text-sm">{id === "system" ? "系统提示" : "第一条消息"}</span>
                   </label>
                 ))}
+                {profile.personaPlacement === "first_user" ? (
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs text-subtle">人设之后他接的那一句（固定的一句，不调用模型）</span>
+                    <Textarea
+                      key={profile.personaAck}
+                      defaultValue={profile.personaAck}
+                      className="min-h-11"
+                      onBlur={(e) => {
+                        const next = e.target.value.trim() || "嗯。";
+                        if (next !== profile.personaAck) persistProfile({ personaAck: next });
+                      }}
+                    />
+                  </label>
+                ) : null}
               </div>
             </div>
             <p className="text-xs text-subtle">
@@ -865,7 +879,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
               [
-                ["清然", ["voice", "reflect", "editor", "persona_ack"]],
+                ["清然", ["voice", "reflect", "editor"]],
                 ["日记", ["report"]],
               ].map(([title, keys]) => (
                 <div key={String(title)} className="flex flex-col gap-2">

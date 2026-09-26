@@ -71,12 +71,6 @@ type HashCache = { hash: string; text: string };
 const charterCache: HashCache = { hash: "", text: "" };
 const blockCache = new Map<string, HashCache>();
 
-export function resetLogRefCache() {
-  charterCache.hash = "";
-  charterCache.text = "";
-  blockCache.clear();
-}
-
 export async function rememberCharter(text: string): Promise<string> {
   const hash = sha256Text(text);
   if (charterCache.hash === hash) return hash;
@@ -107,25 +101,6 @@ export async function rememberBlock(kind: "voice_longterm" | "reflect_b", text: 
   );
   blockCache.set(kind, { hash, text });
   return hash;
-}
-
-export async function getCharterByHash(hash: string): Promise<string | null> {
-  if (charterCache.hash === hash) return charterCache.text;
-  const db = await getSql();
-  const rows = await db.query<{ text: string }>(`select text from qr_charter_versions where hash = $1`, [hash]);
-  return rows[0]?.text ?? null;
-}
-
-export async function getBlockByHash(hash: string): Promise<{ kind: string; text: string } | null> {
-  for (const [kind, c] of blockCache) {
-    if (c.hash === hash) return { kind, text: c.text };
-  }
-  const db = await getSql();
-  const rows = await db.query<{ kind: string; text: string }>(
-    `select kind, text from qr_block_snapshots where hash = $1`,
-    [hash],
-  );
-  return rows[0] ?? null;
 }
 
 export async function maybeWriteRawLog(logId: number | null, input: unknown): Promise<void> {

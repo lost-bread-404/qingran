@@ -21,6 +21,7 @@ import {
   type SpendEventRow,
 } from "@/lib/lover/brain/spend/api";
 import { routePriority } from "@/lib/lover/brain/spend/policy";
+import { SuperGrokPanel } from "@/components/lover/supergrok-panel";
 import { cn } from "@/lib/utils";
 
 function asNum(v: unknown): number {
@@ -90,6 +91,7 @@ export function BrainSpendPage() {
 
   return (
     <section className="flex flex-col gap-6">
+      <SuperGrokPanel />
       <div className="rounded-xl bg-surface p-4 text-sm leading-relaxed">
         <p>
           今天 ${data.dayUsd.toFixed(3)} · 本月 ${data.monthUsd.toFixed(3)} · 预测 ${data.forecast.toFixed(2)}

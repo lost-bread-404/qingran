@@ -47,12 +47,6 @@ export function serializeDoc(doc: PromptDoc): string {
   });
 }
 
-export function personaAckText(body: string | null | undefined): string {
-  const messages = variantMessages(parsePromptBody("persona_ack", body), "main");
-  const ack = messages.find((message) => message.role === "assistant") ?? messages[0];
-  return ack?.content.trim() || "嗯。";
-}
-
 export function variantMessages(doc: PromptDoc, variantId: string): PromptMessage[] {
   return (
     doc.variants.find((variant) => variant.id === variantId)?.messages ??

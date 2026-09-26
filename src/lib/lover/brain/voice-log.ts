@@ -20,6 +20,8 @@ export async function recordVoiceTurn(opts: {
   userMsgId: string;
   localDay: string;
   ttsChars?: number;
+  /** Who paid for this turn (SuperGrok subscription or API key). */
+  paidBy?: "sub" | "api";
   finishReason?: string | null;
   note?: string | null;
   effort?: string | null;
@@ -74,8 +76,9 @@ export async function recordVoiceTurn(opts: {
     outputText: opts.display,
     turnSeq: opts.userCreatedAt,
     logId,
+    paidBy: opts.paidBy,
   });
-  if (opts.ttsChars) await recordTtsSpend(opts.ttsChars, opts.userCreatedAt);
+  if (opts.ttsChars) await recordTtsSpend(opts.ttsChars, opts.userCreatedAt, opts.paidBy);
   await insertBrainTurn({
     turnSeq: opts.userCreatedAt,
     userMsgId: opts.userMsgId,

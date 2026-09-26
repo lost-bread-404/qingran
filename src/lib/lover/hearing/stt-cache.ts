@@ -21,10 +21,6 @@ export type HotPathHearingStt = {
 let cache: HearingSttSnapshot | null = null;
 let refreshInFlight: Promise<HearingSttSnapshot> | null = null;
 
-export function peekHearingSttCache(): HearingSttSnapshot | null {
-  return cache;
-}
-
 export function hotPathHearingStt(extra: string[] = []): HotPathHearingStt {
   const snap = cache;
   const ageMs = snap ? Date.now() - snap.fetchedAt : null;
@@ -67,12 +63,3 @@ export async function backgroundRefreshHearingStt(): Promise<void> {
   }
 }
 
-export function resetHearingSttCacheForTests() {
-  cache = null;
-  refreshInFlight = null;
-}
-
-export function seedHearingSttCacheForTests(snap: HearingSttSnapshot) {
-  cache = snap;
-  refreshInFlight = null;
-}

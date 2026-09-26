@@ -3,23 +3,6 @@ export type HearingAlternative = {
   candidates: string[];
 };
 
-export function clipAlternatives(raw: unknown): HearingAlternative[] {
-  if (!Array.isArray(raw)) return [];
-  const out: HearingAlternative[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const row = item as { span?: unknown; candidates?: unknown };
-    const span = typeof row.span === "string" ? row.span.trim() : "";
-    const candidates = Array.isArray(row.candidates)
-      ? row.candidates.map((c) => String(c ?? "").trim()).filter(Boolean).slice(0, 2)
-      : [];
-    if (!span || candidates.length < 2) continue;
-    out.push({ span, candidates });
-    if (out.length >= 2) break;
-  }
-  return out;
-}
-
 export function applyAltTags(text: string, alts: HearingAlternative[]): string {
   let used = text;
   for (const alt of alts) {

@@ -107,10 +107,6 @@ export function pitchWithClarity(data: Uint8Array, sampleRate: number, minClarit
   return { hz: sampleRate / tau, clarity: best };
 }
 
-export function pitchFromTimeDomain(data: Uint8Array, sampleRate: number): number {
-  return pitchWithClarity(data, sampleRate).hz;
-}
-
 export function sampleProsody(
   analyser: AnalyserNode,
   sampleRate: number,
@@ -371,16 +367,6 @@ export function classifyCue(frames: ProsodyFrame[]): CueKind {
   if (hum || (bright < 0.2 && centroid < 720 && peak < 0.055 && rms < 0.04)) return "嗯";
   if (centroid < 1080 && bright < 0.38 && falling) return "呜";
   return "啊";
-}
-
-export function leadingCueFrames(frames: ProsodyFrame[]): ProsodyFrame[] | null {
-  const islands = voicedIslands(frames);
-  const first = islands[0];
-  if (!first) return null;
-  const dur = first.end - first.start;
-  if (dur <= 0.45) return first.frames;
-  if (islands[1] && islands[1].start - first.end >= 0.1) return first.frames;
-  return first.frames.filter((f) => f.t <= first.start + 0.28);
 }
 
 export function glueCueParts(parts: string[], islands: Island[], tight = false) {

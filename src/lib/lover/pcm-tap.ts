@@ -111,11 +111,6 @@ export function snapshotSampleRing(ring: SampleRing): Float32Array {
   return concatFloats(ring.chunks);
 }
 
-/** Next capture starts with the current pre-roll. hear() must not clear the ring first. */
-export function beginCaptureSamples(ring: SampleRing, live: Float32Array[] = []): Float32Array {
-  return concatFloats([snapshotSampleRing(ring), ...live]);
-}
-
 export type TimedRms = { t: number; rms: number };
 
 export function pushTimedRms(rows: TimedRms[], sample: TimedRms, windowMs: number): TimedRms[] {

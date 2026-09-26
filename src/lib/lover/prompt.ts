@@ -1,24 +1,8 @@
-import { NEUTRAL_PERSONA, type Profile } from "./types.ts";
 import { defaultPrompt } from "./brain/prompts/catalog.ts";
 import { fillTemplate } from "./brain/prompts/fill.ts";
 
-function hearingTagGuideFromVoice(): string {
-  return defaultPrompt("voice").replace(/\{system_prompt\}\s*/g, "").trim();
-}
-
 export function promptFingerprint(systemPrompt: string): string {
   return fillTemplate(defaultPrompt("voice"), { system_prompt: systemPrompt.trim() }).trim();
-}
-
-export function hearingTagGuide(): string {
-  return hearingTagGuideFromVoice();
-}
-
-export function buildSystemPrompt(profile: Profile, clock: string): string {
-  const base = profile.systemPrompt.trim() || NEUTRAL_PERSONA;
-  return `${fillTemplate(defaultPrompt("voice"), { system_prompt: base }).trim()}
-
-现在是${clock}。`;
 }
 
 export function extractJson(text: string): string {

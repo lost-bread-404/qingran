@@ -9,7 +9,6 @@ import { dossierTextForModel } from "../dossier.ts";
 import { resolveTz } from "../tz.ts";
 import { identityBlock } from "../life.ts";
 import { mindForReply, timeFacts, todayText } from "../heart.ts";
-import { personaAckText } from "../prompts/doc.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import {
   getMessage,
@@ -56,11 +55,10 @@ export async function replayMessages(opts: {
   const brainOn = opts.profile.brainOn;
   const meta = await getMeta();
   const tz = resolveTz(meta.timeZone);
-  const [history, dossier, voicePrompt, ackPrompt, mind, today, clockText] = await Promise.all([
+  const [history, dossier, voicePrompt, mind, today, clockText] = await Promise.all([
     listHistoryWindow(user.id, inject.history, user.createdAt),
     inject.dossier && brainOn ? dossierTextForModel() : Promise.resolve(""),
     loadPrompt("voice"),
-    loadPrompt("persona_ack"),
     inject.moment && brainOn ? mindForReply(nowMs, tz) : Promise.resolve(""),
     inject.moment && brainOn ? todayText(nowMs, tz) : Promise.resolve(""),
     timeFacts(nowMs, tz, user.createdAt),
@@ -78,7 +76,7 @@ export async function replayMessages(opts: {
     userText: user.text,
     voiceTemplate: voicePrompt.body,
     personaPlacement: opts.placement,
-    personaAck: personaAckText(ackPrompt.body),
+    personaAck: opts.profile.personaAck,
   });
   return { messages, userText: user.text };
 }

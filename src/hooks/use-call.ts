@@ -25,9 +25,8 @@ import { hearUtterance } from "@/lib/lover/hear";
 import { clipSaveBanner, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { logCallAudio } from "@/lib/lover/call-audio-log";
 import { callListenStuck, CALL_STUCK_MS } from "@/lib/lover/call-phase";
-import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
+import { getHearingSession } from "@/lib/lover/hearing/session";
 import { recordCuts } from "@/lib/lover/hearing/sense";
-import { patchHearingTurn, warmupHearing } from "@/lib/lover/hearing/store";
 import {
   listenNativeHangup,
   nativeCallPlan,
@@ -134,7 +133,6 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const nativeHangupRef = useRef(false);
   const nativeOwnedRef = useRef(false);
   const speechStartWallRef = useRef(0);
-  const heartbeatRef = useRef(0);
   const recognizingRef = useRef(false);
   /** performance.now() when playback last stopped. Infinity while audio is going out. */
   const playbackIdleAtRef = useRef(0);
@@ -224,27 +222,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
     wakeLockRef.current = null;
     nativeKeepAwake(false);
     if (!nativeHangupRef.current) nativeEndCall();
-    if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
-    heartbeatRef.current = 0;
   }, [teardownMedia]);
-
-  const keepSelfhostWarm = () => {
-    if (getHearingSession().provider !== "selfhost") return;
-    const ping = () => {
-      void warmupHearing({ data: { provider: "selfhost" } }).then((result) => {
-        if (result.cold) setHearingSession({ coldStartMs: result.latency_ms });
-        const turnId = getHearingSession().turnId;
-        if (result.cold && turnId) {
-          void patchHearingTurn({
-            data: { id: turnId, cold_start_ms: result.latency_ms },
-          });
-        }
-      });
-    };
-    ping();
-    if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
-    heartbeatRef.current = window.setInterval(ping, 25_000);
-  };
 
   const beginUtterance = useCallback(() => {
     const stream = streamRef.current;
@@ -635,7 +613,6 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
       if (liveRef.current && !rafRef.current) rafRef.current = requestAnimationFrame(tick);
     }, 80);
     startCallHold();
-    keepSelfhostWarm();
     if (warmupTimerRef.current) window.clearTimeout(warmupTimerRef.current);
     warmupTimerRef.current = window.setTimeout(() => {
       warmupTimerRef.current = 0;

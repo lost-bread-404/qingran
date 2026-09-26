@@ -57,6 +57,7 @@ const PATCH_KEYS = [
   "mode",
   "modes",
   "personaPlacement",
+  "personaAck",
 ] as const satisfies readonly (keyof Profile)[];
 
 const PATCH_KEY_SET = new Set<string>(PATCH_KEYS);
@@ -273,36 +274,6 @@ export async function applyProfilePatch(input: {
     await insertVersion(field, String(clamped[field] ?? ""), source, at);
   }
   return okResult(snapshotFrom(rows[0]));
-}
-
-export async function writeProfileDocument(profile: Profile, source = "backup"): Promise<void> {
-  const locked = lockedProfile(profile);
-  const before = await readProfileSnapshot();
-  const at = Date.now();
-  const revs = { ...before.revs };
-  const changed: VersionedField[] = [];
-  for (const field of VERSIONED_FIELDS) {
-    if (before.profile[field] === locked[field]) continue;
-    revs[field] = before.revs[field] + 1;
-    changed.push(field);
-  }
-  const identChanged = before.profile.identity !== locked.identity;
-  const db = await getSql();
-  await db.query(
-    `insert into qingran_profile (id, data, identity, rhythm, identity_updated_at, field_revs, updated_at)
-     values (1, $1::jsonb, $2, $3, $4, $5::jsonb, now())
-     on conflict (id) do update set
-       data = excluded.data,
-       identity = excluded.identity,
-       rhythm = excluded.rhythm,
-       identity_updated_at = case when $6::boolean then excluded.identity_updated_at else qingran_profile.identity_updated_at end,
-       field_revs = excluded.field_revs,
-       updated_at = now()`,
-    [JSON.stringify(locked), locked.identity, locked.rhythm, identChanged ? at : 0, JSON.stringify(revs), identChanged],
-  );
-  for (const field of changed) {
-    await insertVersion(field, locked[field], source, at);
-  }
 }
 
 export async function listProfileVersions(

@@ -130,16 +130,6 @@ export function aggregateEngineUse(
   return { n, used, fallback };
 }
 
-export function formatEngineMix(stats: EngineUseStats | null | undefined): string {
-  if (!stats?.n) return "无数据";
-  const mix = stats.used
-    .map((row) => `${row.engine} ${Math.round((row.n / stats.n) * 100)}%`)
-    .join(" · ");
-  if (!stats.fallback.length) return mix;
-  const fb = stats.fallback.map((row) => `${row.reason} ${row.n}`).join(" · ");
-  return `${mix} · 退回 ${fb}`;
-}
-
 export function slowEngineHint(provider?: string | null): string {
   const id = (provider ?? "").trim();
   if (!id || id === "xai") return "";

@@ -28,7 +28,7 @@
 | `plans` | 数组 `{text, at?, setBy?}` | 全部待办换掉 | `at` 为空 = 接下来就做；有时间 = 到点才做。`setBy` 写 `"rosie"` 表示她加的，心思不会删 |
 | `days` | 数组 `{day, timeline}` | 全部换掉 | 每天一段文字，`day` 形如 `"2026-09-25"`。今天那一条是心思写的「今天到现在」（她的事、他说过编过的关于自己的事、还欠着的事）；过去的每一天是夜里整理定稿的时间线。心思读最近 7 天看规律，月报也从这里算 |
 | `dayNotes` | 数组 `{at, text}` | 并进那天的 `days` | 只有旧文件（version 3）才有：一句一条的随手记，导入时按天并成那天的文字（那天已经有文字就不动） |
-| `prompts` | 对象 `{key: 正文}` | 只覆盖写了的键 | 自定义指令。key 是 `voice`、`reflect`、`editor`、`report`、`persona_ack`。一般不用写，用代码里的默认 |
+| `prompts` | 对象 `{key: 正文}` | 只覆盖写了的键 | 自定义指令。key 是 `voice`、`reflect`、`editor`、`report`。一般不用写，用代码里的默认 |
 | `messages` | 数组 | 加上 / 按 id 更新 | `{id?, role: "user"｜"assistant", text, at, kind?, forgotten?}`。`kind` 默认 `"say"`，主动消息是 `"proactive"` |
 
 ### `profile` 里常用的键

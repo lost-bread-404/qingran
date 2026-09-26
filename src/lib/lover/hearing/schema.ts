@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { applyAltTags, clipAlternatives } from "./nbest.ts";
-import { cueEventToTag } from "./tags.ts";
+import { applyAltTags } from "./nbest.ts";
 
 export const CONTOURS = ["rising", "falling", "flat", "wavering"] as const;
 export const LENGTHS = ["short", "long"] as const;
@@ -75,51 +74,6 @@ export function stripCueTags(text: string): string {
   return text.replace(TAG_RE, "");
 }
 
-export function extractJsonObject(text: string): string {
-  const trimmed = text.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) return fenced[1].trim();
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-  if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
-  return trimmed;
-}
-
-export function looksLikeRefusal(raw: string): boolean {
-  const text = raw.trim();
-  if (!text) return true;
-  if (text.startsWith("{") || text.includes("```")) return false;
-  return /sorry|cannot|can't|unable|i'm not able|无法|不能转写|拒绝|对不起/i.test(text);
-}
-
-export function parseHearingJson(raw: string): HearingModelOutput {
-  const parsed = JSON.parse(extractJsonObject(raw)) as unknown;
-  return hearingModelSchema.parse(normalizeHearingJson(parsed));
-}
-
-function normalizeHearingJson(value: unknown): unknown {
-  if (!value || typeof value !== "object") return value;
-  const row = value as Record<string, unknown>;
-  const cues = Array.isArray(row.cues)
-    ? row.cues.map((cue) => {
-        if (!cue || typeof cue !== "object") return cue;
-        const item = cue as Record<string, unknown>;
-        const next = { ...item };
-        if (next.event === "" || next.event === null) delete next.event;
-        if (typeof next.token === "string") next.token = next.token.trim();
-        return next;
-      })
-    : row.cues;
-  return {
-    text: typeof row.text === "string" ? row.text : "",
-    cues,
-    utterance_emotion: row.utterance_emotion ?? "neutral",
-    noise_only: Boolean(row.noise_only),
-    alternatives: clipAlternatives(row.alternatives),
-  };
-}
-
 export function formatTaggedText(result: HearingModelOutput): string {
   const text = result.text.trim();
   if (result.noise_only) return "";
@@ -129,22 +83,3 @@ export function formatTaggedText(result: HearingModelOutput): string {
   return used.trim();
 }
 
-export function formatCueTag(cue: HearingCue): string {
-  const voice = cue.voice === "whisper" ? "breathy" : cue.voice;
-  const event = cueEventToTag(cue.event) ?? "";
-  return `〔${cue.length}·${cue.contour}·${voice}｜${event}〕`;
-}
-
-export function emptyHearing(provider: string, model: string, latency_ms: number): HearingResult {
-  return {
-    text: "",
-    cues: [],
-    utterance_emotion: "neutral",
-    noise_only: true,
-    raw: "",
-    latency_ms,
-    provider,
-    model,
-    refusal: false,
-  };
-}

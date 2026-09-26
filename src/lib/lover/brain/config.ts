@@ -394,10 +394,6 @@ export async function checkModelAvailability(apiKey: string | undefined): Promis
   }
 }
 
-export function resetAvailabilityForTests() {
-  availability = { checked: false, unavailable: new Set() };
-}
-
 export type VoiceCatalogModel = {
   id: string;
   blurb: string;
@@ -480,7 +476,3 @@ export async function listVoiceCatalog(apiKey?: string): Promise<VoiceCatalogMod
   return voiceCatalogInflight;
 }
 
-export function resetVoiceCatalogForTests() {
-  voiceCatalog = null;
-  voiceCatalogInflight = null;
-}

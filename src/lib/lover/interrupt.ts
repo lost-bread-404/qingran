@@ -20,9 +20,3 @@ export function planInterruptQingran(input: {
   };
 }
 
-export function withInterruptedMark(text: string): string {
-  const trimmed = text.trimEnd();
-  if (!trimmed) return INTERRUPTED_MARK;
-  if (trimmed.endsWith(INTERRUPTED_MARK)) return trimmed;
-  return `${trimmed}${INTERRUPTED_MARK}`;
-}

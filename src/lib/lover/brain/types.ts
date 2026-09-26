@@ -1,89 +1,12 @@
-export type InnerPlanStatus = "open" | "done" | "dropped";
-export type InnerScene = "daily" | "intimate";
 export type JobType = "reflect" | "report" | "wake" | "night";
 export type JobStatus = "pending" | "running" | "done" | "failed";
 
-export type InnerPlan = {
-  id: string;
-  what: string;
-  /** Why he wants this. Old rows may still have trigger / expires_at; those are not used. */
-  why: string;
-  status: InnerPlanStatus;
-  trigger?: string;
-  expires_at?: number;
-};
-
-export type LongingItem = {
-  id: string;
-  text: string;
-  since: string;
-};
-
-/** Private inner state. The reply sees desire / feel / now / glow word only. */
-export type InnerState = {
-  desire: string;
-  readHer: string;
-  feel: string;
-  /** Legacy column. Not written. Copied into desire by 0030. */
-  want: string;
-  choice: string;
-  now: string;
-  scene: InnerScene;
-  /** Joined from longings so older callers still have a single string. */
-  longing: string;
-  longings: LongingItem[];
-  plans: InnerPlan[];
-  glow: number;
-  glow_at: number;
-  turn_seq: number;
-  updated_at: number;
-  longing_updated_at: number;
-};
-
-export const EMPTY_INNER: InnerState = {
-  desire: "",
-  readHer: "",
-  feel: "",
-  want: "",
-  choice: "",
-  now: "",
-  scene: "daily",
-  longing: "",
-  longings: [],
-  plans: [],
-  glow: 0,
-  glow_at: 0,
-  turn_seq: 0,
-  updated_at: 0,
-  longing_updated_at: 0,
-};
-
 export type BrainMeta = {
-  selfSummary: string;
-  bondSummary: string;
-  notesVersion: number;
-  lastDuskDay: string;
-  lastSynthWeek: string;
   lastReportMonth: string;
   timeZone: string;
-  hygieneMemoryLoopAt?: number;
-  coreIndex?: { version: number; day: string; ids: string[] };
-  spendLimits?: {
-    daySoft: number;
-    dayHard: number;
-    dayBreaker: number;
-    monthSoft: number;
-    monthHard: number;
-    monthBreaker: number;
-  };
 };
 
 export const EMPTY_META: BrainMeta = {
-  selfSummary: "",
-  bondSummary: "",
-  notesVersion: 0,
-  lastDuskDay: "",
-  lastSynthWeek: "",
   lastReportMonth: "",
   timeZone: "America/New_York",
 };

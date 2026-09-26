@@ -1,6 +1,5 @@
 import {
   getAudioSession,
-  micStreamHearing,
   micStreamUsable,
   claimListenSession,
   yieldAudioSession,
@@ -45,12 +44,6 @@ export function concatBytes(chunks: Uint8Array<ArrayBuffer>[]): Uint8Array<Array
   return out;
 }
 
-export function base64ToAudioUrl(base64: string, mimeType: string): string {
-  const bytes = base64ToBytes(base64);
-  const blob = new Blob([bytes], { type: mimeType });
-  return URL.createObjectURL(blob);
-}
-
 export function pickRecorderMime(): string {
   if (typeof MediaRecorder === "undefined") return "";
   const candidates = [
@@ -70,12 +63,6 @@ export function startRecorder(recorder: MediaRecorder, timeslice = 250) {
   }
 }
 
-export function qingranNativePresent() {
-  if (typeof window === "undefined") return false;
-  const native = (window as Window & { QingranNative?: { present?: boolean } }).QingranNative;
-  return Boolean(native?.present);
-}
-
 export function micAudioConstraints(): MediaTrackConstraints {
   return {
     echoCancellation: true,
@@ -89,13 +76,6 @@ export function micAudioConstraints(): MediaTrackConstraints {
 let sharedMic: MediaStream | null = null;
 let micGen = 0;
 const micListeners = new Set<(event: "mute" | "unmute" | "ended") => void>();
-
-export function onMicEvent(listener: (event: "mute" | "unmute" | "ended") => void) {
-  micListeners.add(listener);
-  return () => {
-    micListeners.delete(listener);
-  };
-}
 
 function emitMicEvent(event: "mute" | "unmute" | "ended") {
   logCallAudio(`track ${event}`);
@@ -136,10 +116,6 @@ export function stopRecognition(rec: SpeechRecognitionLike | null): Promise<void
 
 export function micUsable(stream: MediaStream | null) {
   return micStreamUsable(stream);
-}
-
-export function micHearing(stream: MediaStream | null) {
-  return micStreamHearing(stream);
 }
 
 export function currentMic(): MediaStream | null {
@@ -261,38 +237,10 @@ export function releaseMic() {
   if (had || sessionType === "play-and-record") yieldAudioSession();
 }
 
-export async function getMicStream(): Promise<MediaStream> {
-  return acquireMic();
-}
-
 export function setMicEnabled(stream: MediaStream | null, enabled: boolean) {
   stream?.getAudioTracks().forEach((track) => {
     track.enabled = enabled;
   });
-}
-
-export function createAudioContext(): AudioContext | null {
-  const Ctor =
-    window.AudioContext ||
-    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctor) return null;
-  const next = new Ctor();
-  watchAudioContext(next);
-  try {
-    void next.resume();
-  } catch {
-    /* ignore */
-  }
-  return next;
-}
-
-export async function resumeOrReplaceContext(ctx: AudioContext | null): Promise<AudioContext | null> {
-  if (ctx && (ctx.state as string) !== "closed") {
-    const ok = await resumeAudioContext(ctx);
-    if (ok) return ctx;
-    closeAudioContext(ctx);
-  }
-  return createAudioContext();
 }
 
 export { getAudioSession, claimListenSession, yieldAudioSession, resumeAudioContext, watchAudioContext, closeAudioContext };

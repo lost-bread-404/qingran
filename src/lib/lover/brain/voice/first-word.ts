@@ -4,7 +4,6 @@ import { mindForReply, timeFacts, todayText } from "../heart.ts";
 import { identityBlock } from "../life.ts";
 import { callModel } from "../llm.ts";
 import { effectiveMode } from "../mode.ts";
-import { personaAckText } from "../prompts/doc.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { getProfileData, listHistoryWindow } from "../store.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
@@ -35,14 +34,13 @@ export async function speakFirst(input: {
   const mode = await effectiveMode(input.nowMs, input.timeZone, ids);
   const { profile } = resolveTalkProfile(undefined, saved, mode);
   const inject = voiceInjectFromProfile(profile);
-  const [history, dossier, mind, today, clock, voicePrompt, ackPrompt] = await Promise.all([
+  const [history, dossier, mind, today, clock, voicePrompt] = await Promise.all([
     listHistoryWindow(null, inject.history),
     inject.dossier ? dossierTextForModel() : Promise.resolve(""),
     inject.moment ? mindForReply(input.nowMs, input.timeZone) : Promise.resolve(""),
     inject.moment ? todayText(input.nowMs, input.timeZone) : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.nowMs),
     loadPrompt("voice"),
-    loadPrompt("persona_ack"),
   ]);
   const modeDef = profile.modes.find((m) => m.id === profile.mode);
   const parts: VoicePackParts = {
@@ -62,7 +60,7 @@ export async function speakFirst(input: {
     },
     voiceTemplate: voicePrompt.body,
     personaPlacement: profile.personaPlacement,
-    personaAck: personaAckText(ackPrompt.body),
+    personaAck: profile.personaAck,
   };
   const messages = buildVoiceMessages(parts, "none");
   const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);

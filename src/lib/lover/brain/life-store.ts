@@ -1,10 +1,8 @@
 import { getSql } from "../../db.ts";
 import { now } from "./clock.ts";
-import type { InnerPlan, InnerState, LongingItem } from "./types.ts";
 import { localDay } from "./time.ts";
 import { getMeta } from "./store.ts";
 import { resolveTz } from "./tz.ts";
-import { applyProfilePatch } from "../profile-patch.ts";
 import { zonedWallMs } from "./spend/policy.ts";
 
 function asInt(value: unknown, fallback = 0): number {
@@ -41,15 +39,6 @@ export async function readIdentity(): Promise<{ identity: string; updatedAt: num
     updatedAt: asInt(row?.identity_updated_at),
     rhythm: rhythmCol || rhythmJson,
   };
-}
-
-export async function writeIdentity(identity: string, at = now()): Promise<void> {
-  await applyProfilePatch({
-    patch: { identity: identity.trim().slice(0, 2000) },
-    force: true,
-    source: "server",
-    at,
-  });
 }
 
 export async function getReach(): Promise<ReachRow> {
@@ -119,18 +108,6 @@ export async function addReachPlan(plan: { at: number; intent: string; setBy: st
     plan.setBy,
     plan.setAt,
   ]);
-}
-
-/** Drop the pending plans written by these authors and put the new list in their place. */
-export async function replaceReachPlans(
-  setBy: string[],
-  plans: Array<{ at: number; intent: string }>,
-  author: string,
-  setAt: number,
-): Promise<void> {
-  const db = await getSql();
-  await db.query(`delete from qr_reach_plans where done_at is null and set_by = any($1::text[])`, [setBy]);
-  for (const plan of plans) await addReachPlan({ ...plan, setBy: author, setAt });
 }
 
 export async function finishReachPlans(ids: number[], at: number): Promise<void> {
@@ -293,27 +270,4 @@ export async function markPushDevice(token: string, error: string | null): Promi
 
 export async function profileClockZone(): Promise<string> {
   return resolveTz((await getMeta()).timeZone);
-}
-
-export type ManualInnerPatch = {
-  desire?: string;
-  readHer?: string;
-  feel?: string;
-  now?: string;
-  choice?: string;
-  plans?: InnerPlan[];
-  longings?: LongingItem[];
-};
-
-export function innerSnapshot(inner: InnerState): Record<string, unknown> {
-  return {
-    desire: inner.desire,
-    readHer: inner.readHer,
-    feel: inner.feel,
-    now: inner.now,
-    choice: inner.choice,
-    plans: inner.plans,
-    longings: inner.longings,
-    glow: inner.glow,
-  };
 }

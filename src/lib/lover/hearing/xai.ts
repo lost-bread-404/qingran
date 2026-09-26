@@ -1,7 +1,7 @@
 import { restoreSpeechText } from "../stt-text.ts";
 import { isQuotaHint, readXaiFail } from "../xai-error.ts";
 import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./config.ts";
-import type { AdapterOutcome } from "./http.ts";
+import { xaiFetch } from "../xai-auth.ts";
 
 type SttWord = { text?: string; start?: number; end?: number };
 
@@ -28,10 +28,6 @@ export async function transcribeWithXai(input: {
   keyterms?: readonly string[];
 }): Promise<XaiStt | XaiSttFail> {
   const started = Date.now();
-  const apiKey = process.env.XAI_API_KEY;
-  if (!apiKey) {
-    return { ok: false, error: "stt-unavailable", latency_ms: 0 };
-  }
   const mime = sanitizeMime(input.mimeType);
   const bytes = Buffer.from(input.audioBase64, "base64");
   if (bytes.length < 20) return { ok: false, error: "太短了。", latency_ms: Date.now() - started };
@@ -59,12 +55,13 @@ export async function transcribeWithXai(input: {
   form.append("file", blob, filenameFor(mime));
 
   try {
-    const res = await fetch(HEARING.xai.sttUrl, {
+    const sent = await xaiFetch(HEARING.xai.sttUrl, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
       body: form,
       signal: AbortSignal.timeout(60_000),
     });
+    if (!sent) return { ok: false, error: "stt-unavailable", latency_ms: Date.now() - started };
+    const res = sent.res;
     const latency_ms = Date.now() - started;
     if (!res.ok) {
       const hint = await readXaiFail(res);
@@ -94,23 +91,6 @@ export async function transcribeWithXai(input: {
       latency_ms: Date.now() - started,
     };
   }
-}
-
-export function xaiAsHearing(text: string, latency_ms: number, raw = ""): AdapterOutcome {
-  return {
-    ok: true,
-    result: {
-      text,
-      cues: [],
-      utterance_emotion: "neutral",
-      noise_only: !text.trim(),
-      raw,
-      latency_ms,
-      provider: "xai",
-      model: HEARING.xai.model,
-      refusal: false,
-    },
-  };
 }
 
 function sanitizeMime(mime: string): string {

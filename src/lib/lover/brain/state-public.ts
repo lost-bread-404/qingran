@@ -37,7 +37,7 @@ export type StateFile = {
   days?: StateDay[];
   /** Older files (version ≤ 3): a list of notes; imported as lines in that day's text. */
   dayNotes?: StateNote[];
-  /** Custom prompt bodies by key (voice, reflect, editor, report, persona_ack). Keys left out keep their current text. */
+  /** Custom prompt bodies by key (voice, reflect, editor, report). Keys left out keep their current text. */
   prompts?: Record<string, string>;
   messages?: StateMessage[];
 };

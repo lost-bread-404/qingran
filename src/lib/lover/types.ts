@@ -78,6 +78,8 @@ export type Profile = {
   modes: TalkModeDef[];
   /** Where the persona text sits: system prompt, or the first user message. */
   personaPlacement: "system" | "first_user";
+  /** With the persona as the first message: his line right after it (a fixed line, no model call). */
+  personaAck: string;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -221,6 +223,7 @@ export const DEFAULT_PROFILE: Profile = {
   mode: "play",
   modes: DEFAULT_MODES,
   personaPlacement: "system",
+  personaAck: "嗯。",
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -263,6 +266,7 @@ type LooseProfile = Partial<Profile> & {
   mode?: string;
   modes?: unknown;
   personaPlacement?: string;
+  personaAck?: string;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -304,6 +308,7 @@ export function lockedProfile(input?: unknown): Profile {
     mode: typeof raw.mode === "string" && raw.mode.trim() ? raw.mode.trim().slice(0, 40) : "play",
     modes: lockModes(raw.modes),
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
+    personaAck: typeof raw.personaAck === "string" && raw.personaAck.trim() ? raw.personaAck.trim().slice(0, 200) : "嗯。",
   };
 }
 

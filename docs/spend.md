@@ -1,6 +1,10 @@
 # 费用记账
 
-清然只记账，不在 app 里设花费上限：Rosie 每月在 xAI 预付约 $100，预付额度就是硬上限（见 requirements 第 0 节）。主动消息另有每天的软上限（`REACH_LLM_DAY_MAX` / `REACH_SENT_DAY_MAX`）。
+清然只记账，不在 app 里设花费上限：Rosie 每月在 xAI 预付约 $100，预付额度就是硬上限（见 requirements 第 0 节）。
+
+## SuperGrok 先付
+
+费用页顶上可以连接她的 SuperGrok 订阅（xAI 设备登录，和 Grok CLI / Hermes / Warp 用的是同一种）。连上后每个 xAI 请求先用订阅的 token；返回 401 / 402 / 403 / 429 时，同一个请求马上改用 `XAI_API_KEY` 再发一次，订阅歇 15 分钟（429）或 60 分钟（402 / 403）再试，401 下次先刷新 token。走订阅的调用照样记一条，`usd = 0`、`cost_source = supergrok`，`usd_est` 仍按价格表算，方便看省了多少。token 存在 `qr_xai_login`（约 6 小时过期，提前 1 小时自动刷新）；登录失效时费用页会提示重新连接。主动消息另有每天的软上限（`REACH_LLM_DAY_MAX` / `REACH_SENT_DAY_MAX`）。
 
 ## 价格表与实际金额
 

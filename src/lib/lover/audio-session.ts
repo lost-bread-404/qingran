@@ -62,10 +62,6 @@ export function micTrackUsable(track: { readyState: string; muted: boolean }) {
   return track.readyState === "live";
 }
 
-export function micTrackHearing(track: { readyState: string; muted: boolean }) {
-  return track.readyState === "live" && !track.muted;
-}
-
 export function micStreamUsable(
   stream: {
     active: boolean;
@@ -74,16 +70,6 @@ export function micStreamUsable(
 ) {
   if (!stream?.active) return false;
   return stream.getAudioTracks().some(micTrackUsable);
-}
-
-export function micStreamHearing(
-  stream: {
-    active: boolean;
-    getAudioTracks: () => Array<{ readyState: string; muted: boolean }>;
-  } | null,
-) {
-  if (!stream?.active) return false;
-  return stream.getAudioTracks().some(micTrackHearing);
 }
 
 type NavAudioSession = {
@@ -96,10 +82,6 @@ type NavAudioSession = {
 export function getAudioSession(): NavAudioSession | null {
   if (typeof navigator === "undefined") return null;
   return (navigator as Navigator & { audioSession?: NavAudioSession }).audioSession ?? null;
-}
-
-export function audioSessionIsInterrupted() {
-  return isInterruptedState(getAudioSession()?.state);
 }
 
 export function setAudioSessionKind(kind: AudioSessionKind) {
@@ -129,10 +111,6 @@ export function claimListenSession() {
 
 export function yieldAudioSession() {
   setAudioSessionKind("yield");
-}
-
-export function primeAudioSession() {
-  claimListenSession();
 }
 
 export async function resumeAudioContext(ctx: AudioContext): Promise<boolean> {

@@ -5,7 +5,7 @@ import {
   type PromptVariantTemplate,
 } from "./templates.ts";
 
-export type PromptKey = "voice" | "reflect" | "editor" | "persona_ack" | "report";
+export type PromptKey = "voice" | "reflect" | "editor" | "report";
 
 export type { PromptMessage, PromptPlaceholder };
 
@@ -35,11 +35,6 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
     key: "editor",
     name: "整理记忆",
     blurb: "每天凌晨 4 点后跑一次（main），整篇重写「他记得的」，写这一天的时间线、明天的打算、明早的心里和明早的模式。也可以在「他的心」里手动整理今天。",
-  },
-  {
-    key: "persona_ack",
-    name: "人设之后",
-    blurb: "人设放在第一条消息时，紧跟着的那一句回应。人设在系统提示里时用不到。",
   },
   {
     key: "report",

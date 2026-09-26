@@ -1,11 +1,10 @@
-import { mindForReply, timeFacts, todayText } from "../heart.ts";
+import { getHeart, mindForReply, timeFacts, todayText } from "../heart.ts";
 import { mergeEditedUserBody } from "../../message-markup.ts";
 import { NEUTRAL_PERSONA, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
-import { getInner, getMessage, listHistoryWindow, upsertMessage } from "../store.ts";
+import { getMessage, listHistoryWindow, upsertMessage } from "../store.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadPrompt } from "../prompts/store.ts";
-import { personaAckText } from "../prompts/doc.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { identityBlock } from "../life.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
@@ -61,15 +60,14 @@ export async function loadHotContext(input: {
   const inject = voiceInjectFromProfile(input.profile);
   inject.moment = inject.moment && brainOn;
   inject.dossier = inject.dossier && brainOn;
-  const [history, inner, dossier, mind, today, clockText, voicePrompt, ackPrompt] = await Promise.all([
+  const [history, heart, dossier, mind, today, clockText, voicePrompt] = await Promise.all([
     listHistoryWindow(input.userMsgId, inject.history),
-    getInner(),
+    getHeart(),
     inject.dossier ? dossierTextForModel() : Promise.resolve(""),
     inject.moment ? mindForReply(input.nowMs, input.timeZone) : Promise.resolve(""),
     inject.moment ? todayText(input.nowMs, input.timeZone) : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
     loadPrompt("voice"),
-    loadPrompt("persona_ack"),
   ]);
   const charter = input.profile.systemPrompt;
   // Intimate notes follow the mode: shown while the current mode is marked intimate.
@@ -88,19 +86,19 @@ export async function loadHotContext(input: {
     userText: input.text,
     voiceTemplate: voicePrompt.body,
     personaPlacement: input.profile.personaPlacement,
-    personaAck: personaAckText(ackPrompt.body),
+    personaAck: input.profile.personaAck,
   };
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(charter.trim() || NEUTRAL_PERSONA),
     rememberBlock("voice_longterm", dossier),
   ]);
   const historyIds = history.map((m) => m.id);
-  const mindAgeMs = inner.updated_at ? input.nowMs - inner.updated_at : 0;
+  const mindAgeMs = heart.updatedAt ? input.nowMs - heart.updatedAt : 0;
   const refs: VoiceRefs = {
     charterHash,
     longtermHash,
     historyIds,
-    mindTurnSeq: inner.turn_seq,
+    mindTurnSeq: heart.turnSeq,
     mindStale: false,
     pickedIds: [],
     fallbackIds: [],
@@ -125,7 +123,7 @@ export async function loadHotContext(input: {
     dbFirstMs,
     sessionId: user.sessionId,
     user,
-    mindTurnSeq: inner.turn_seq,
+    mindTurnSeq: heart.turnSeq,
     mindAgeMs,
     charterHash,
     longtermHash,

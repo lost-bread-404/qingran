@@ -5,6 +5,3 @@ export function fillTemplate(template: string, vars: Record<string, string>): st
   );
 }
 
-export function templateHas(template: string, token: string): boolean {
-  return template.includes(`{${token}}`);
-}

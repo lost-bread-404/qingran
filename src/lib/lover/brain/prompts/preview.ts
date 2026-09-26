@@ -4,8 +4,7 @@ import { getMeta, getProfileData, getProfilePrompt, listHistoryWindow } from "..
 import { localDay } from "../time.ts";
 import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
-import { parsePromptBody, personaAckText, renderVariant, type RenderedMessage } from "./doc.ts";
-import { loadPrompt } from "./store.ts";
+import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
 import { buildVoiceMessages, voiceHistoryMessages } from "../voice/pack-build.ts";
 import { gatherReflectParts, modesText, reflectVars } from "../voice/reflector.ts";
 import { getHeart, listPlans, mindForReply, plansText, timeFacts, todayText } from "../heart.ts";
@@ -23,7 +22,7 @@ export type PromptPreview = {
 async function voicePreview(body: string | undefined, variantId: string): Promise<Omit<PromptPreview, "variantId">> {
   const first = variantId === "first" ? { quiet: "25 分钟", intent: "（到时间时心思写的那件事）" } : undefined;
   const at = now();
-  const [meta, charter, profileData, ackPrompt] = await Promise.all([getMeta(), getProfilePrompt(), getProfileData(), loadPrompt("persona_ack")]);
+  const [meta, charter, profileData] = await Promise.all([getMeta(), getProfilePrompt(), getProfileData()]);
   const profile = lockedProfile(profileData);
   const tz = resolveTz(meta.timeZone);
   const inject = voiceInjectFromProfile(profile);
@@ -49,7 +48,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
     first,
     voiceTemplate: body,
     personaPlacement: profile.personaPlacement,
-    personaAck: personaAckText(ackPrompt.body),
+    personaAck: profile.personaAck,
   });
   const historyText =
     voiceHistoryMessages(history, inject.history)

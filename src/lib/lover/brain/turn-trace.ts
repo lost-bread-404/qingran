@@ -2,7 +2,7 @@ import { getSql } from "../../db.ts";
 import { gitCommitSha } from "../hearing/eval-meta.ts";
 import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
 import { fromPgArray, pgTextArray } from "./store.ts";
-import type { InnerState } from "./types.ts";
+import type { Heart } from "./heart.ts";
 
 export const TRACE_FIELD_LIMIT = 100 * 1024;
 
@@ -150,7 +150,7 @@ export async function recordTurnTrace(input: TurnTraceInput): Promise<void> {
 
 export async function patchTurnTraceReflector(opts: {
   turnSeq: number;
-  inner: InnerState | null;
+  inner: Heart | null;
   model?: string | null;
   ms?: number | null;
 }): Promise<void> {
@@ -205,45 +205,6 @@ export async function markTurnInterrupted(turnId: string): Promise<void> {
   } catch (err) {
     console.error("[turn-trace] interrupt patch failed", err);
   }
-}
-
-function rowTrace(r: Record<string, unknown>): TurnTraceRow {
-  return {
-    turnId: String(r.turn_id),
-    userMsgId: r.user_msg_id ? String(r.user_msg_id) : null,
-    turnSeq: r.turn_seq == null ? null : Number(r.turn_seq),
-    createdAt: String(r.created_at ?? ""),
-    retrieve: (r.retrieve ?? null) as JsonValue,
-    reflector: (r.reflector ?? null) as JsonValue,
-    live: (r.live ?? null) as JsonValue,
-    reply: (r.reply ?? null) as JsonValue,
-    commitSha: r.commit_sha ? String(r.commit_sha) : null,
-    truncated: Boolean(r.truncated),
-  };
-}
-
-export async function getTurnTrace(turnId: string): Promise<TurnTraceRow | null> {
-  const db = await getSql();
-  const rows = await db.query<Record<string, unknown>>(
-    `select turn_id, user_msg_id, turn_seq, created_at::text as created_at,
-            retrieve, reflector, live, reply, commit_sha, truncated
-     from turn_traces where turn_id = $1`,
-    [turnId],
-  );
-  return rows[0] ? rowTrace(rows[0]) : null;
-}
-
-export async function listTurnTraces(limit = 200): Promise<TurnTraceRow[]> {
-  const db = await getSql();
-  const rows = await db.query<Record<string, unknown>>(
-    `select turn_id, user_msg_id, turn_seq, created_at::text as created_at,
-            retrieve, reflector, live, reply, commit_sha, truncated
-     from turn_traces
-     order by created_at desc
-     limit $1`,
-    [limit],
-  );
-  return rows.map(rowTrace);
 }
 
 export type TurnFeedbackRow = {

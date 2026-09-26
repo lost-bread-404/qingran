@@ -96,10 +96,6 @@ export function nativePrepareHoldToTalk() {
   return true;
 }
 
-export function resetNativeHoldPrep() {
-  holdAudioPrepared = false;
-}
-
 export function listenNativeHangup(onHangup: () => void) {
   if (typeof window === "undefined") return () => undefined;
   const fn = () => onHangup();

@@ -267,3 +267,25 @@ export const brainArchiveOldSpend = createServerFn({ method: "POST" }).handler(a
   return { ok: true as const, deleted: asNum(rows[0]?.n) };
 });
 
+
+// ---------- SuperGrok subscription first, API key after it ----------
+
+export const brainXaiLoginStatus = createServerFn({ method: "GET" }).handler(async () => {
+  const { xaiLoginStatus } = await import("../../xai-auth.ts");
+  return xaiLoginStatus();
+});
+
+export const brainXaiLoginStart = createServerFn({ method: "POST" }).handler(async () => {
+  const { xaiLoginStart } = await import("../../xai-auth.ts");
+  return xaiLoginStart();
+});
+
+export const brainXaiLoginPoll = createServerFn({ method: "POST" }).handler(async () => {
+  const { xaiLoginPoll } = await import("../../xai-auth.ts");
+  return xaiLoginPoll();
+});
+
+export const brainXaiLogout = createServerFn({ method: "POST" }).handler(async () => {
+  const { xaiLogout } = await import("../../xai-auth.ts");
+  return xaiLogout();
+});

@@ -14,6 +14,7 @@ import {
   talkFailFromResult,
 } from "./talk-fail.ts";
 import { recordTtsSpend } from "./brain/spend/check";
+import { xaiCreds, xaiFetch, type XaiCred } from "./xai-auth";
 import { InnerCutBuffer, replyBodyMissing } from "./brain/voice/inner-cut";
 
 const MAX_INPUT = 2000;
@@ -86,6 +87,8 @@ export type TalkStreamResult = {
   /** Text after ⟦心⟧. null when the model never wrote the mark. */
   innerTail?: string | null;
   innerCut?: boolean;
+  /** Who paid: her SuperGrok subscription or the API key. */
+  paidBy?: "sub" | "api";
 };
 
 function emptyResult(partial: Partial<TalkStreamResult> = {}): TalkStreamResult {
@@ -108,10 +111,12 @@ function emptyResult(partial: Partial<TalkStreamResult> = {}): TalkStreamResult 
 
 export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<TalkStreamResult> {
   const apiKey = process.env.XAI_API_KEY;
-  if (!apiKey) {
+  if (!(await xaiCreds()).length) {
     emit({ t: "err", m: "这会儿连不上。" });
-    return emptyResult({ otherEvents: "no XAI_API_KEY" });
+    return emptyResult({ otherEvents: "no xAI credential" });
   }
+  // Whoever paid for the words also speaks them (SuperGrok first, the API key after it).
+  let cred: XaiCred = { kind: "api", token: apiKey ?? "" };
 
   const say = data.text.trim().slice(0, MAX_INPUT);
   if (!say) {
@@ -154,7 +159,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   };
   const live: { tts: LiveTts | null } = { tts: null };
   const ensureTts = () => {
-    live.tts ??= new LiveTts(apiKey, timedEmit, speed);
+    live.tts ??= new LiveTts(cred, timedEmit, speed);
     return live.tts;
   };
 
@@ -188,15 +193,15 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       body.tool_choice = "auto";
     }
     t0 = Date.now();
-    res = await fetch("https://api.x.ai/v1/chat/completions", {
+    const sent = await xaiFetch("https://api.x.ai/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(route.timeoutMs),
     });
+    if (!sent) throw new Error("no xAI credential");
+    res = sent.res;
+    cred = sent.cred;
   } catch (err) {
     const outcome = talkFailFromResult({ kind: "exception", threw: err, ms: Date.now() - t0 });
     fail(outcome.message ?? TALK_FAIL.network, outcome.log);
@@ -288,7 +293,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     releaseWait = (async () => {
       if (live.tts) await live.tts.finish();
       if (!live.tts?.complete) {
-        const clip = await speakRest(apiKey, speech, speed);
+        const clip = await speakRest(speech, speed);
         if (clip?.b) {
           timedEmit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
         } else {
@@ -422,6 +427,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       model: route.model,
       effort: route.effort,
       ttsChars: live.tts?.chars ?? spokenForTts(speech).length,
+      paidBy: cred.kind,
       status,
       finishReason,
       ms: Date.now() - t0,
@@ -460,6 +466,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       model: route.model,
       effort: route.effort,
       ttsChars: live.tts?.chars ?? 0,
+      paidBy: cred.kind,
       status,
       finishReason,
       ms: Date.now() - t0,
@@ -476,7 +483,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   let ttsChars = live.tts?.chars ?? 0;
   if (!live.tts?.complete) {
-    const clip = await speakRest(apiKey, speech, speed);
+    const clip = await speakRest(speech, speed);
     if (clip?.b) {
       timedEmit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
       ttsChars = spokenForTts(speech).length;
@@ -502,6 +509,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     model: route.model,
     effort: route.effort,
     ttsChars,
+    paidBy: cred.kind,
     status,
     finishReason,
     ms: Date.now() - t0,
@@ -526,12 +534,12 @@ class LiveTts {
   private resolveDone = () => undefined as void;
   private rejectDone = (_err: Error) => undefined as void;
 
-  private apiKey: string;
+  private cred: XaiCred;
   private emit: Emit;
   private speed: number;
 
-  constructor(apiKey: string, emit: Emit, speed = 1) {
-    this.apiKey = apiKey;
+  constructor(cred: XaiCred, emit: Emit, speed = 1) {
+    this.cred = cred;
     this.emit = emit;
     this.speed = speed;
     this.waitDone = new Promise<void>((resolve, reject) => {
@@ -551,7 +559,7 @@ class LiveTts {
     const url = `${VOICE_IO.ttsWsUrl}?${params.toString()}`;
     try {
       const socket = new WebSocket(url, {
-        headers: { Authorization: `Bearer ${this.apiKey}` },
+        headers: { Authorization: `Bearer ${this.cred.token}` },
       });
       this.socket = socket;
       socket.on("open", () => {
@@ -658,7 +666,7 @@ class LiveTts {
     if (this.closed) return;
     this.closed = true;
     this.resolveDone();
-    if (this.chars) void recordTtsSpend(this.chars);
+    if (this.chars) void recordTtsSpend(this.chars, null, this.cred.kind);
     try {
       this.socket?.close();
     } catch {
@@ -668,21 +676,19 @@ class LiveTts {
   }
 }
 
-async function speakRest(apiKey: string, text: string, speed: number): Promise<{ b: string; m: string } | null> {
+async function speakRest(text: string, speed: number): Promise<{ b: string; m: string } | null> {
   const spoken = spokenForTts(text);
   if (!spoken) return null;
   try {
-    const res = await fetch(VOICE_IO.ttsUrl, {
+    const sent = await xaiFetch(VOICE_IO.ttsUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(ttsRequestBody(spoken, VOICE_IO.language, speed)),
       signal: AbortSignal.timeout(40_000),
     });
-    if (!res.ok) return null;
-    void recordTtsSpend(spoken.length);
+    if (!sent?.res.ok) return null;
+    const res = sent.res;
+    void recordTtsSpend(spoken.length, null, sent.cred.kind);
     const buf = Buffer.from(await res.arrayBuffer());
     return {
       b: buf.toString("base64"),

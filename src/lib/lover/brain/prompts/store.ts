@@ -108,20 +108,6 @@ export async function loadPrompt(key: PromptKey): Promise<LoadedPrompt> {
   };
 }
 
-export async function loadPromptBody(key: PromptKey): Promise<string> {
-  return (await loadPrompt(key)).body;
-}
-
-export async function getPromptVersion(hash: string): Promise<string | null> {
-  try {
-    const db = await getSql();
-    const rows = await db.query<{ body: string }>(`select body from qr_prompt_versions where hash = $1`, [hash]);
-    return rows[0]?.body ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export async function listPromptVersions(key: PromptKey, limit = 5): Promise<PromptVersionHit[]> {
   try {
     const db = await getSql();

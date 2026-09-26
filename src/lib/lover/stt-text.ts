@@ -169,29 +169,6 @@ function isCueToken(text: string): boolean {
   return Boolean(core) && [...core].every((ch) => FILLER.test(ch));
 }
 
-export function needsPunctuationHelp(text: string): boolean {
-  const t = text.trim();
-  if (t.length < 24) return false;
-  if (isMostlyFiller(t)) return false;
-  const marks = t.match(/[，。！？、；：]/g)?.length ?? 0;
-  return marks === 0 || marks < Math.max(1, Math.floor(stripMarks(t).length / 40));
-}
-
-export function extractKeyterms(prompt: string): string[] {
-  const found = new Set<string>();
-  const text = prompt ?? "";
-  for (const match of text.match(/[A-Z][a-zA-Z]{2,}/g) ?? []) found.add(match);
-  for (const match of text.match(/[“「『"]([^“」』"]{2,12})[”」』"]/g) ?? []) {
-    const inner = match.replace(/[“”「」『』"]/g, "").trim();
-    if (inner.length >= 2 && inner.length <= 12) found.add(inner);
-  }
-  for (const match of text.match(/(?:叫|名叫|是)\s*([\u4e00-\u9fff]{2,4})/g) ?? []) {
-    const name = match.replace(/^(?:叫|名叫|是)\s*/, "");
-    if (name.length >= 2) found.add(name);
-  }
-  return [...found].filter((term) => term.length >= 2 && term.length <= 16).slice(0, 32);
-}
-
 export function sttKeyterms(_prompt?: string): string[] {
   return [...STT_KEYTERMS];
 }
@@ -200,12 +177,6 @@ export function isMostlyFiller(text: string): boolean {
   const stripped = text.replace(/[，。！？……～~\s]/g, "");
   if (!stripped) return true;
   return [...stripped].every((ch) => FILLER.test(ch));
-}
-
-export function browserSttReady(text: string): boolean {
-  const t = text.trim();
-  if (!t) return false;
-  return !isMostlyFiller(t);
 }
 
 function isPunctToken(text: string): boolean {
@@ -368,20 +339,6 @@ export function hallucinationReason(input: {
   return "apple_empty";
 }
 
-export function isHallucinationSuspect(input: {
-  durationSec: number;
-  peakRms: number;
-  xaiText: string;
-  liveText?: string;
-  holdToTalk?: boolean;
-}): boolean {
-  return hallucinationReason(input) != null;
-}
-
-export function hallucinationFallback(xaiText: string, browser = ""): string {
-  return salvageCues(`${browser} ${xaiText}`) || "";
-}
-
 export type HallucinationScrub = {
   text: string;
   suspect: boolean;
@@ -514,14 +471,6 @@ function rewriteMisheardCues(text: string, frames?: ProsodyFrame[]) {
   const islands = voicedIslands(frames);
   if (!islands.length) return "嗯";
   return "嗯".repeat(Math.min(3, Math.max(1, islands.length)));
-}
-
-export function refineCueWords(
-  text: string,
-  _frames?: ProsodyFrame[],
-  _words?: CueWord[],
-): string {
-  return text;
 }
 
 export function finishHeard(

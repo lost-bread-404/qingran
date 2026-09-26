@@ -113,25 +113,3 @@ export function listenVocal(frames: ProsodyFrame[]): VocalEvent {
   return { kind: "vocal", text: "" };
 }
 
-export function expandHeardCues(stt: string, islands: Island[]) {
-  const chars = [...stt.replace(/[，。！？、,.!?;；：:\s………~～"'“”‘’]+/g, "")];
-  if (!chars.length || !islands.length) return stt.trim();
-  if (new Set(chars).size === 1) return renderBursts(chars[0]!, islands);
-  const parts: string[] = [];
-  const total = islands.reduce((sum, island) => sum + Math.max(0.08, island.end - island.start), 0);
-  let used = 0;
-  for (let i = 0; i < islands.length; i += 1) {
-    const island = islands[i]!;
-    const share = Math.max(0.08, island.end - island.start) / total;
-    let take = i === islands.length - 1 ? chars.length - used : Math.max(1, Math.round(chars.length * share));
-    if (used + take > chars.length) take = chars.length - used;
-    if (take <= 0) continue;
-    const piece = chars.slice(used, used + take).join("");
-    used += take;
-    let mark = markForFrames(island.frames);
-    const next = islands[i + 1];
-    if (!mark && next && next.start - island.end >= 0.1) mark = "…";
-    parts.push(`${piece}${mark}`);
-  }
-  return parts.join("") || stt.trim();
-}
