@@ -1,12 +1,7 @@
 import { parseUsage, type TokenUsage } from "../usage.ts";
 import { runTalkStream, type TalkStreamEvent, type TalkStreamInput, type TalkStreamResult } from "../../stream-talk.ts";
 import { classifyTalkException, isRetryableEmptyTalk, TALK_FAIL, talkExceptionHint } from "../../talk-fail.ts";
-import {
-  VOICE_STRIPS,
-  voiceMessagesForStrip,
-  type VoicePackParts,
-  type VoiceStrip,
-} from "./pack-build.ts";
+import { buildVoiceMessages, VOICE_STRIPS, type VoicePackParts, type VoiceStrip } from "./pack-build.ts";
 import type { VoiceChatMessage } from "../types.ts";
 import { formatVoiceLogNote, type VoiceAttemptNote, type VoiceModelFallbackNote } from "./voice-log-note.ts";
 import { sameVoicePick, type VoiceModelPick } from "../config.ts";
@@ -157,7 +152,7 @@ export async function runVoiceWithFallback(
 ): Promise<VoiceFallbackResult> {
   const attempts: VoiceAttemptNote[] = [];
   let last: TalkStreamResult | null = null;
-  let lastMessages = voiceMessagesForStrip(data.parts, "none");
+  let lastMessages = buildVoiceMessages(data.parts, "none");
   let speech = "";
   let failMessage: string | null = null;
   let model = data.primary;
@@ -254,7 +249,7 @@ export async function runVoiceWithFallback(
   for (let i = 0; i < VOICE_STRIPS.length; i++) {
     const strip = VOICE_STRIPS[i]!;
     const lastStrip = i === VOICE_STRIPS.length - 1;
-    const messages = voiceMessagesForStrip(data.parts, strip);
+    const messages = buildVoiceMessages(data.parts, strip);
     lastMessages = messages;
     const safetyAvailable = !safetyTried && !sameVoicePick(data.primary, data.safety);
     const withTools = i === 0 && data.tools?.length ? data.tools : undefined;

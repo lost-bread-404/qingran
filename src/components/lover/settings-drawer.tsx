@@ -19,7 +19,6 @@ import {
   brainRestorePrompt,
   brainRollbackPrompt,
   brainSavePrompt,
-  brainSyncHistoryWindow,
 } from "@/lib/lover/brain/api";
 import type { BrainLogRow } from "@/lib/lover/brain/types";
 import { parseVoiceInputCharsLine } from "@/lib/lover/brain/voice/pack-build";
@@ -36,12 +35,10 @@ import {
 } from "@/lib/lover/call-log-view";
 import { PromptStepEditor, type PromptEditorItem, type PromptModelChoice } from "@/components/lover/prompt-step-editor";
 import { HearingSensePanel } from "@/components/lover/hearing-sense-panel";
-import { BrainBackupPanel } from "@/components/lover/brain-backup-panel";
 import { StatePanel } from "@/components/lover/state-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
 import { DossierPanel } from "@/components/lover/dossier-panel";
 import { BrainSpendPage } from "@/components/lover/brain-spend-page";
-import { BrainSystemArchive } from "@/components/lover/brain-system-archive";
 import { ReplayPanel } from "@/components/lover/replay-panel";
 import { ProfileHistory, VersionConflict } from "@/components/lover/profile-history";
 import { saveProfilePatch } from "@/lib/lover/room";
@@ -70,14 +67,9 @@ type Page =
   | "data"
   | "advanced"
   | "prompts"
-  | "context"
   | "hearing"
   | "log"
-  | "spend"
-  | "archive"
-  | "status"
-  | "replay"
-  | "history";
+  | "spend";
 
 type PromptItem = PromptEditorItem;
 
@@ -212,7 +204,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const loadedIntimate = useRef(profile.intimateNotes);
   const loadedIdentity = useRef(profile.identity);
   const [keytermDraft, setKeytermDraft] = useState(profile.sttKeyterms.join("\n"));
-  const historySyncRef = useRef(0);
   const [promptItems, setPromptItems] = useState<PromptItem[]>([]);
   const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({});
   const [promptBusy, setPromptBusy] = useState<string | null>(null);
@@ -294,7 +285,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   }, [open, page]);
 
   useEffect(() => {
-    if (!open || (page !== "log" && page !== "status")) return;
+    if (!open || page !== "log") return;
     let cancelled = false;
     if (page === "log" && logRoute !== "manual") {
       const to = Date.now();
@@ -410,10 +401,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     const next = clampHistoryWindow(nextRaw);
     setHistoryWindow(next);
     persistProfile({ historyWindow: next });
-    window.clearTimeout(historySyncRef.current);
-    historySyncRef.current = window.setTimeout(() => {
-      void brainSyncHistoryWindow({ data: { historyWindow: next } }).catch(() => undefined);
-    }, 400);
   }
 
   async function savePromptItem(key: string) {
@@ -610,14 +597,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     data: "数据",
     advanced: "高级",
     prompts: "指令",
-    context: "上下文",
     hearing: "听力参数",
-    log: "调用记录",
+    log: "记录",
     spend: "费用",
-    archive: "系统存档",
-    status: "状态",
-    replay: "重放对比",
-    history: "改动记录",
   };
   const tier = hearingTierOf(sense);
 
@@ -634,15 +616,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             page === "home"
               ? onOpenChange(false)
               : setPage(
-                  page === "prompts" ||
-                    page === "context" ||
-                    page === "hearing" ||
-                    page === "log" ||
-                    page === "spend" ||
-                    page === "archive" ||
-                    page === "status" ||
-                    page === "replay" ||
-                    page === "history"
+                  page === "prompts" || page === "hearing" || page === "log" || page === "spend"
                     ? "advanced"
                     : "home",
                 )
@@ -677,15 +651,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <p className="text-xs text-subtle">调试用，平时不用进。</p>
-            <SettingsLink label="指令" onClick={() => setPage("prompts")} />
-            <SettingsLink label="上下文" onClick={() => setPage("context")} />
-            <SettingsLink label="重放对比" onClick={() => setPage("replay")} />
-            <SettingsLink label="听力参数" onClick={() => setPage("hearing")} />
-            <SettingsLink label="调用记录" onClick={() => setPage("log")} />
+            <SettingsLink label="指令" hint="心思开关、上下文、每一步的 prompt 和模型" onClick={() => setPage("prompts")} />
+            <SettingsLink label="记录" hint="调用记录、改动记录、重放对比" onClick={() => setPage("log")} />
             <SettingsLink label="费用" onClick={() => setPage("spend")} />
-            <SettingsLink label="系统存档" onClick={() => setPage("archive")} />
-            <SettingsLink label="状态" onClick={() => setPage("status")} />
-            <SettingsLink label="改动记录" hint="人设、亲密设定、身份" onClick={() => setPage("history")} />
+            <SettingsLink label="听力参数" onClick={() => setPage("hearing")} />
           </div>
         </div>
       ) : page === "who" ? (
@@ -811,7 +780,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             </label>
           </div>
         </div>
-      ) : page === "context" ? (
+      ) : page === "prompts" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
             <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
@@ -890,11 +859,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 ))}
               </div>
             </div>
-          </div>
-        </div>
-      ) : page === "prompts" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
-          <div className="mx-auto flex w-full max-w-md flex-col gap-3">
             <p className="text-xs text-subtle">
               点开一步改消息。人设在「清然是谁」，这里用 {"{system_prompt}"} 引用。记下后下一轮生效。
             </p>
@@ -903,7 +867,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
               [
-                ["清然", ["voice", "reflect", "editor", "reach", "persona_ack"]],
+                ["清然", ["voice", "reflect", "editor", "persona_ack"]],
                 ["日记", ["report"]],
               ].map(([title, keys]) => (
                 <div key={String(title)} className="flex flex-col gap-2">
@@ -1062,46 +1026,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <BrainSpendPage />
         </div>
-      ) : page === "archive" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-            <BrainBackupPanel />
-            <BrainSystemArchive />
-          </div>
-        </div>
-      ) : page === "status" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto w-full max-w-md">
-            <StatusPanel
-              voiceModel={voiceModel}
-              injectLine={formatVoiceInjectLine(voiceInjectFromProfile({ injectMind, injectLongterm, historyWindow }))}
-              phase={callPhase ? `通话 phase ${callPhase}${callDeaf ? " · 麦关" : ""}` : "当前不在通话"}
-            />
-            <p className="mt-3 text-xs text-subtle">
-              占用 {formatDbBytes(dbSize?.totalBytes ?? null)}
-              {dbSize?.limitMb ? ` / ${dbSize.limitMb} MB` : ""}
-            </p>
-          </div>
-        </div>
-      ) : page === "replay" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-          <ReplayPanel profile={profile} />
-        </div>
-      ) : page === "history" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-          <ProfileHistory
-            onRestored={(next, nextRevs, field) => {
-              if (field === "systemPrompt") personaDirty.current = false;
-              if (field === "intimateNotes") intimateDirty.current = false;
-              if (field === "identity") identityDirty.current = false;
-              revsRef.current = nextRevs;
-              rememberLoaded(next);
-              onApply(next, nextRevs);
-              setConflict(null);
-              flashSaved();
-            }}
-          />
-        </div>
       ) : page === "hearing" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
@@ -1203,9 +1127,11 @@ maxAlternatives: 3`}
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
-            <p className="text-xs text-subtle">
-              {callPhase ? `通话 phase ${callPhase}${callDeaf ? " · 麦关" : ""}` : "当前不在通话"}
-            </p>
+            <StatusPanel
+              voiceModel={voiceModel}
+              injectLine={formatVoiceInjectLine(voiceInjectFromProfile({ injectMind, injectLongterm, historyWindow }))}
+              phase={callPhase ? `通话 phase ${callPhase}${callDeaf ? " · 麦关" : ""}` : "当前不在通话"}
+            />
             <p className="text-xs text-subtle">
               占用 {formatDbBytes(dbSize?.totalBytes ?? null)}
               {dbSize?.limitMb ? ` / ${dbSize.limitMb} MB` : ""}
@@ -1387,6 +1313,29 @@ maxAlternatives: 3`}
                 );
               })
             )}
+            <details className="mt-4 rounded-md bg-surface-2 px-3 py-2">
+              <summary className="min-h-11 cursor-pointer text-sm">改动记录（人设、亲密设定、身份）</summary>
+              <div className="mt-2">
+                <ProfileHistory
+                onRestored={(next, nextRevs, field) => {
+                  if (field === "systemPrompt") personaDirty.current = false;
+                  if (field === "intimateNotes") intimateDirty.current = false;
+                  if (field === "identity") identityDirty.current = false;
+                  revsRef.current = nextRevs;
+                  rememberLoaded(next);
+                  onApply(next, nextRevs);
+                  setConflict(null);
+                  flashSaved();
+                }}
+                />
+              </div>
+            </details>
+            <details className="rounded-md bg-surface-2 px-3 py-2">
+              <summary className="min-h-11 cursor-pointer text-sm">重放对比（同一句换个人设再生成一次）</summary>
+              <div className="mt-2">
+                <ReplayPanel profile={profile} />
+              </div>
+            </details>
           </div>
         </div>
       )}

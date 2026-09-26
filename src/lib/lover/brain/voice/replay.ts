@@ -5,9 +5,10 @@ import { lockedProfile, voiceInjectFromProfile, type Profile } from "../../types
 import { asModelInput, callModel, type CallModelResult } from "../llm.ts";
 import { now } from "../clock.ts";
 import type { Effort } from "../config.ts";
-import { getDossier } from "../dossier.ts";
+import { dossierTextForModel } from "../dossier.ts";
+import { resolveTz } from "../tz.ts";
 import { identityBlock } from "../life.ts";
-import { mindForReply, timeFacts } from "../heart.ts";
+import { mindForReply, timeFacts, todayText } from "../heart.ts";
 import { personaAckText } from "../prompts/doc.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import {
@@ -16,12 +17,11 @@ import {
   getProfileData,
   getProfilePrompt,
   listHistoryWindow,
-  listPortrait,
   listRecentMessages,
 } from "../store.ts";
 import { InnerCutBuffer } from "./inner-cut.ts";
 import { applyProfilePatch } from "../../profile-patch.ts";
-import { buildVoiceMessages, renderDossierBlock, renderVoiceLongterm } from "./pack-build.ts";
+import { buildVoiceMessages } from "./pack-build.ts";
 
 export type ReplaySide = {
   speech: string;
@@ -52,38 +52,33 @@ export async function replayMessages(opts: {
   const user = await getMessage(opts.userMsgId);
   if (!user || user.role !== "user") throw new Error("找不到这句");
   const nowMs = opts.nowMs ?? now();
-  const zone = opts.profile ? "America/New_York" : "America/New_York";
   const inject = voiceInjectFromProfile(opts.profile);
-  const [history, dossierRow, voicePrompt, ackPrompt, meta] = await Promise.all([
+  const brainOn = opts.profile.brainOn;
+  const meta = await getMeta();
+  const tz = resolveTz(meta.timeZone);
+  const [history, dossier, voicePrompt, ackPrompt, mind, today, clockText] = await Promise.all([
     listHistoryWindow(user.id, inject.history, user.createdAt),
-    getDossier(),
+    inject.dossier && brainOn ? dossierTextForModel() : Promise.resolve(""),
     loadPrompt("voice"),
     loadPrompt("persona_ack"),
-    getMeta(),
+    inject.moment && brainOn ? mindForReply(nowMs, tz) : Promise.resolve(""),
+    inject.moment && brainOn ? todayText(nowMs, tz) : Promise.resolve(""),
+    timeFacts(nowMs, tz, user.createdAt),
   ]);
-  const legacy = dossierRow.active ? null : { portrait: await listPortrait(), meta };
-  const tz = meta.timeZone || zone;
-  const mindText = inject.moment && opts.profile.brainOn ? await mindForReply(nowMs, tz) : "";
-  const clockText = await timeFacts(nowMs, tz, user.createdAt);
-  const longterm = dossierRow.active
-    ? renderDossierBlock(dossierRow.body)
-    : renderVoiceLongterm(legacy!.meta.selfSummary, legacy!.meta.bondSummary, legacy!.portrait);
   const messages = buildVoiceMessages({
     charter: opts.charter,
-    longtermOverride: dossierRow.active ? longterm : null,
-    selfSummary: dossierRow.active ? undefined : legacy!.meta.selfSummary,
-    bondSummary: dossierRow.active ? undefined : legacy!.meta.bondSummary,
-    portrait: dossierRow.active ? undefined : legacy!.portrait,
-    history: collapseReplyVariants(history),
-    userText: user.text,
-    moment: { feel: "", desire: "", now: mindText, longing: "", glow: "" },
-    clock: clockText,
     identity: identityBlock(opts.profile.identity),
+    dossier,
+    mind,
+    today,
+    intimate: opts.profile.modes.find((m) => m.id === opts.profile.mode)?.intimate ? opts.profile.intimateNotes : "",
+    clock: clockText,
+    history: collapseReplyVariants(history),
+    historyWindow: inject.history,
+    userText: user.text,
     voiceTemplate: voicePrompt.body,
     personaPlacement: opts.placement,
     personaAck: personaAckText(ackPrompt.body),
-    intimateNotes: opts.profile.modes.find((m) => m.id === opts.profile.mode)?.intimate ? opts.profile.intimateNotes : "",
-    inject,
   });
   return { messages, userText: user.text };
 }

@@ -1,20 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
-import { failAttempt, isLimited, clientIp } from "../../../auth-lite/attempts.ts";
-import { passwordsMatch } from "../../../auth-lite/session.ts";
 import { getSql } from "../../../db.ts";
 import { now } from "../clock.ts";
-import { getMeta, patchMeta } from "../store.ts";
+import { getMeta } from "../store.ts";
 import { localDay, shiftDay } from "../time.ts";
 import { resolveTz } from "../tz.ts";
-import { insertOverride, listOverrides, loadTotals, resolvedLimits } from "./ledger.ts";
-import {
-  defaultSpendLimits,
-  spendDecision,
-  validateSpendLimits,
-  type SpendLimits,
-  type SpendScope,
-} from "./policy.ts";
+import { loadTotals } from "./ledger.ts";
 
 function asNum(v: unknown): number {
   const n = Number(v);
@@ -56,17 +46,6 @@ export type SpendEventRow = {
   turn_seq: number | null;
   job_id: string | null;
   log_id: number | null;
-};
-
-export type SpendAlertRow = {
-  id: number;
-  at: number;
-  day: string;
-  month: string;
-  scope: string;
-  level: string;
-  total_usd: number | null;
-  detail: string | null;
 };
 
 export type SpendTopRow = {
@@ -121,10 +100,7 @@ function mapEvent(r: Record<string, unknown>): SpendEventRow {
 }
 
 export const brainGetSpendOverview = createServerFn({ method: "GET" }).handler(async () => {
-  const [meta, limits, totals] = await Promise.all([getMeta(), resolvedLimits(), loadTotals(true)]);
-  const tz = resolveTz(meta.timeZone);
-  const overrides = await listOverrides(totals.day, totals.month);
-  const decision = spendDecision("voice", totals.dayUsd, totals.monthUsd, limits, overrides, now(), tz);
+  const totals = await loadTotals(true);
   const dayOfMonth = Number(totals.day.slice(8, 10)) || 1;
   const [y, m] = totals.month.split("-").map(Number);
   const daysInMonth = new Date(Date.UTC(y ?? 2026, m ?? 1, 0)).getUTCDate();
@@ -174,19 +150,6 @@ export const brainGetSpendOverview = createServerFn({ method: "GET" }).handler(a
     log_id: asNumOrNull(r.log_id),
     job_id: asStrOrNull(r.job_id),
   }));
-  const alertRaw = await db.query<Record<string, unknown>>(
-    `select id, at, day, month, scope, level, total_usd, detail from spend_alerts order by at desc limit 50`,
-  );
-  const alerts: SpendAlertRow[] = alertRaw.map((r) => ({
-    id: asNum(r.id),
-    at: asNum(r.at),
-    day: asStr(r.day),
-    month: asStr(r.month),
-    scope: asStr(r.scope),
-    level: asStr(r.level),
-    total_usd: asNumOrNull(r.total_usd),
-    detail: asStrOrNull(r.detail),
-  }));
   const recRaw = await db.query<Record<string, unknown>>(
     `select month, actual_usd, estimated_usd, entered_at from spend_reconcile order by month desc limit 12`,
   );
@@ -221,14 +184,10 @@ export const brainGetSpendOverview = createServerFn({ method: "GET" }).handler(a
     dayUsd: totals.dayUsd,
     monthUsd: totals.monthUsd,
     forecast,
-    limits,
-    decision,
-    overrides,
     daily,
     monthEvents,
     avgTurn,
     top,
-    alerts,
     reconcile,
     xaiShare,
     xaiUsd,
@@ -251,34 +210,6 @@ export const brainListSpendEvents = createServerFn({ method: "POST" })
       [day, route, Math.min(data.limit ?? 80, 200)],
     );
     return rows.map(mapEvent);
-  });
-
-export const brainSaveSpendLimits = createServerFn({ method: "POST" })
-  .validator((input: SpendLimits) => input)
-  .handler(async ({ data }) => {
-    const err = validateSpendLimits(data);
-    if (err) return { ok: false as const, error: err };
-    await patchMeta({ spendLimits: data });
-    return { ok: true as const, limits: data };
-  });
-
-export const brainSpendOverride = createServerFn({ method: "POST" })
-  .validator((input: { scope: SpendScope; password: string }) => input)
-  .handler(async ({ data }) => {
-    const expected = process.env.APP_PASSWORD ?? "";
-    const ip = clientIp(getRequest()?.headers.get("x-forwarded-for"));
-    const ts = now();
-    if (await isLimited(ip, ts)) return { ok: false as const, error: "试得太勤了，过一会儿再来。" };
-    if (!expected || !passwordsMatch(data.password, expected)) {
-      await failAttempt(ip, ts);
-      return { ok: false as const, error: "密码不对。" };
-    }
-    const meta = await getMeta();
-    const tz = resolveTz(meta.timeZone);
-    const day = localDay(ts, tz);
-    const period = data.scope === "month" ? day.slice(0, 7) : day;
-    await insertOverride(data.scope, period, "password");
-    return { ok: true as const };
   });
 
 export const brainSpendReconcile = createServerFn({ method: "POST" })
@@ -336,4 +267,3 @@ export const brainArchiveOldSpend = createServerFn({ method: "POST" }).handler(a
   return { ok: true as const, deleted: asNum(rows[0]?.n) };
 });
 
-export { defaultSpendLimits, validateSpendLimits };

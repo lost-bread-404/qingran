@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { now } from "./clock.ts";
 import { getMeta, getProfileData, patchMeta, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
-import { localDay } from "./time.ts";
+import { clockOf, localDay } from "./time.ts";
 import { lockedProfile, type Profile } from "../types.ts";
 import { applyProfilePatch } from "../profile-patch.ts";
 import { getDossier, publishMemory } from "./dossier.ts";
@@ -39,12 +39,11 @@ export const brainExportState = createServerFn({ method: "POST" })
 
     const at = now();
     const profile = lockedProfile(await getProfileData());
-    const [dossier, heart, plans, days, notes, prompts, mode] = await Promise.all([
+    const [dossier, heart, plans, days, prompts, mode] = await Promise.all([
       getDossier(),
       getHeart(),
       listPlans(),
       db.query<{ day: string; timeline: string }>(`select day, timeline from qr_days order by day asc`),
-      db.query<{ at: number; text: string }>(`select at::float8 as at, text from qr_day_notes order by at asc, id asc`),
       db.query<{ key: string; body: string }>(`select key, body from qr_prompts order by key`),
       effectiveMode(at, tz, profile.modes.map((m) => m.id)),
     ]);
@@ -59,7 +58,6 @@ export const brainExportState = createServerFn({ method: "POST" })
       mode,
       plans: plans.map((p) => ({ text: p.text, at: p.at == null ? null : formatLocal(p.at, tz), setBy: p.setBy })),
       days: days.map((d) => ({ day: String(d.day), timeline: String(d.timeline ?? "") })),
-      dayNotes: notes.map((n) => ({ at: formatLocal(Number(n.at), tz), text: String(n.text) })),
       prompts: Object.fromEntries(prompts.map((p) => [String(p.key), String(p.body)])),
     };
     // Sent as text: the profile holds free-form settings.
@@ -122,15 +120,24 @@ export const brainImportState = createServerFn({ method: "POST" })
       }
       done.push("每天的时间线");
     }
-    if (Array.isArray(state.dayNotes)) {
-      await db.query(`delete from qr_day_notes`);
+    if (Array.isArray(state.dayNotes) && state.dayNotes.length) {
+      // Older files kept a list of notes; they become lines in that day's text.
+      const byDay = new Map<string, string[]>();
       for (const n of state.dayNotes) {
         const when = parseLocalTime(n?.at, tz);
         const text = String(n?.text ?? "").trim();
         if (when == null || !text) continue;
-        await db.query(`insert into qr_day_notes (at, text) values ($1, $2)`, [when, text.slice(0, 300)]);
+        const day = localDay(when, tz);
+        byDay.set(day, [...(byDay.get(day) ?? []), `${clockOf(when, tz)} ${text}`]);
       }
-      done.push("今天的记录");
+      for (const [day, lines] of byDay) {
+        await db.query(
+          `insert into qr_days (day, timeline, updated_at) values ($1, $2, $3)
+           on conflict (day) do update set timeline = case when qr_days.timeline = '' then excluded.timeline else qr_days.timeline end`,
+          [day, lines.join("\n").slice(0, 3000), at],
+        );
+      }
+      done.push("旧的每天记录");
     }
     if (state.prompts && typeof state.prompts === "object") {
       for (const [key, body] of Object.entries(state.prompts)) {

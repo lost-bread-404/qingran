@@ -7,7 +7,7 @@
 
 ## 规则
 
-- 顶层 `kind` 必须是 `"qingran-state"`，`version` 是 `3`。
+- 顶层 `kind` 必须是 `"qingran-state"`，`version` 是 `4`（旧的 `3` 也能导入）。
 - **文件里有的部分，整块换掉；没有写的部分，不动。** 例如只想换记忆，就只写 `kind`、`version`、`memory`。
 - 消息（`messages`）**只会加上或按 id 更新，永远不删**。没有 `id` 的消息，按「角色 + 时间 + 正文」算出固定 id，同一个文件导入两次不会重复。
 - 所有时间都写成 `"YYYY-MM-DD HH:MM"`（消息可以带秒 `"YYYY-MM-DD HH:MM:SS"`），是 `timeZone` 里的当地时间。也可以直接写毫秒时间戳。
@@ -18,7 +18,7 @@
 | 字段 | 类型 | 导入时 | 说明 |
 |---|---|---|---|
 | `kind` | `"qingran-state"` | 必须 | |
-| `version` | `3` | 必须 | |
+| `version` | `4` | 必须 | |
 | `exportedAt` | 毫秒 | 忽略 | 导出时写 |
 | `timeZone` | IANA 时区，如 `"America/New_York"` | 覆盖 | 文件里所有时间按它解释 |
 | `profile` | 对象 | 只覆盖写了的键 | 设置。常用的键见下表 |
@@ -26,9 +26,9 @@
 | `heart` | 字符串 | 换掉 | 他此刻心里的样子 |
 | `mode` | 字符串 | 设为当前模式 | 必须是 `profile.modes` 里的某个 id |
 | `plans` | 数组 `{text, at?, setBy?}` | 全部待办换掉 | `at` 为空 = 接下来就做；有时间 = 到点才做。`setBy` 写 `"rosie"` 表示她加的，心思不会删 |
-| `days` | 数组 `{day, timeline}` | 全部换掉 | 每天一小段时间线，`day` 形如 `"2026-09-25"`。心思会读最近 7 天看规律，月报也从这里算 |
-| `dayNotes` | 数组 `{at, text}` | 全部换掉 | 他随手记下的她的事，一句一条 |
-| `prompts` | 对象 `{key: 正文}` | 只覆盖写了的键 | 自定义指令。key 如 `voice`、`reflect`、`editor`、`reach`。一般不用写，用代码里的默认 |
+| `days` | 数组 `{day, timeline}` | 全部换掉 | 每天一段文字，`day` 形如 `"2026-09-25"`。今天那一条是心思写的「今天到现在」（她的事、他说过编过的关于自己的事、还欠着的事）；过去的每一天是夜里整理定稿的时间线。心思读最近 7 天看规律，月报也从这里算 |
+| `dayNotes` | 数组 `{at, text}` | 并进那天的 `days` | 只有旧文件（version 3）才有：一句一条的随手记，导入时按天并成那天的文字（那天已经有文字就不动） |
+| `prompts` | 对象 `{key: 正文}` | 只覆盖写了的键 | 自定义指令。key 是 `voice`、`reflect`、`editor`、`report`、`persona_ack`。一般不用写，用代码里的默认 |
 | `messages` | 数组 | 加上 / 按 id 更新 | `{id?, role: "user"｜"assistant", text, at, kind?, forgotten?}`。`kind` 默认 `"say"`，主动消息是 `"proactive"` |
 
 ### `profile` 里常用的键
@@ -66,7 +66,7 @@
 ```json
 {
   "kind": "qingran-state",
-  "version": 3,
+  "version": 4,
   "timeZone": "America/New_York",
   "profile": {
     "storyline": "……",
@@ -81,7 +81,6 @@
   "heart": "",
   "plans": [{ "text": "早上她来找我时，先哄她喝蛋白质饮料，再哄她去学", "at": null }],
   "days": [{ "day": "2026-09-24", "timeline": "9:00 起；10–13 学习；……" }],
-  "dayNotes": [],
   "messages": [
     { "role": "user", "text": "姐姐早～", "at": "2026-09-25 08:01:12" },
     { "role": "assistant", "text": "小猫早。（亲了亲你的额头）", "at": "2026-09-25 08:01:20" }

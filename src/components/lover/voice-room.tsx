@@ -32,7 +32,6 @@ import {
   clearRoomMessages,
   deleteRoomMessages,
   loadRoom,
-  restoreRoomBackup,
   saveProfilePatch,
   updateRoomMessage,
 } from "@/lib/lover/room";

@@ -24,10 +24,6 @@ import {
   type ReplyFlagRow,
 } from "@/lib/lover/hearing/store";
 import {
-  listStoryMemory,
-  previewStorySeed,
-} from "@/lib/lover/brain/story";
-import {
   exportTurnFeedbackFn,
   listTurnFeedbackFn,
 } from "@/lib/lover/brain/turn-trace-fn";
@@ -123,24 +119,7 @@ function HearingLabPage() {
   const [confusions, setConfusions] = useState<ConfusionRule[]>([]);
   const [prosodyStatus, setProsodyStatus] = useState<string | null>(null);
   const [tuneStatus, setTuneStatus] = useState<string | null>(null);
-  const [labTab, setLabTab] = useState<"hearing" | "memory" | "feedback">("hearing");
-  const [storyNotes, setStoryNotes] = useState<
-    Array<{
-      id: string;
-      text: string;
-      tags: string[];
-      subject: string;
-      lens: string[];
-      fromRosie: boolean;
-      weight: number;
-      happenedAt: number;
-      localDay: string;
-      links: string[];
-    }>
-  >([]);
-  const [storyPortrait, setStoryPortrait] = useState<
-    Array<{ id: string; topic: string; body: string; status: string }>
-  >([]);
+  const [labTab, setLabTab] = useState<"hearing" | "feedback">("hearing");
   const [feedbackRows, setFeedbackRows] = useState<TurnFeedbackRow[]>([]);
   const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null);
   const [feedbackTag, setFeedbackTag] = useState<ReplyDownTag | null>(null);
@@ -190,20 +169,6 @@ function HearingLabPage() {
     }
   }
 
-  async function loadMemory(secret = password) {
-    try {
-      const next = await listStoryMemory({ data: { password: secret } });
-      if (!next.ok) {
-        setStatus(next.error);
-        return;
-      }
-      setStoryNotes(next.notes);
-      setStoryPortrait(next.portrait);
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   async function loadFeedback(secret = password) {
     try {
       const next = await listTurnFeedbackFn({ data: { password: secret } });
@@ -230,7 +195,6 @@ function HearingLabPage() {
       await loadLabeled(secret, page);
       await loadFlags(secret);
       await loadConfusions(secret);
-      await loadMemory(secret);
       await loadFeedback(secret);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -338,16 +302,14 @@ function HearingLabPage() {
         </Link>
         <div className="min-w-0 flex-1">
           <p className="font-display text-lg">
-            {labTab === "hearing" ? "成绩" : labTab === "memory" ? "记忆" : "反馈"}
+            {labTab === "hearing" ? "成绩" : "反馈"}
           </p>
           <p className="text-xs text-subtle">
             {labTab === "hearing"
               ? score
                 ? `${score.clipN} 段 · 有 gold ${score.goldN}`
                 : "读取数据库…"
-              : labTab === "memory"
-                ? `${storyNotes.length} 条笔记 · ${storyPortrait.length} 条画像`
-                : feedbackTag
+              : feedbackTag
                   ? `${shownFeedback.length} 条 · ${feedbackTag}`
                   : `${feedbackRows.length} 条反馈`}
             {score?.dbSource && labTab === "hearing" ? ` · ${score.dbSource}` : ""}
@@ -359,7 +321,6 @@ function HearingLabPage() {
         {(
           [
             ["hearing", "听力"],
-            ["memory", "记忆"],
             ["feedback", "反馈"],
           ] as const
         ).map(([id, label]) => (
@@ -745,66 +706,6 @@ function HearingLabPage() {
             {status ? <p className="mt-2 text-sm text-subtle">{status}</p> : null}
           </section>
           </>
-          ) : labTab === "memory" ? (
-            <>
-              <section className="rounded-md bg-surface-2 px-3 py-3">
-                <p className="mb-2 font-display text-lg">导入故事线</p>
-                <p className="text-sm text-muted">
-                  故事线不再写入笔记和画像。种子只在第一次整理「我记得的」时用。这里只显示种子里有多少条。
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="mt-3"
-                  onClick={async () => {
-                    const preview = await previewStorySeed({ data: { password } });
-                    if (!preview.ok) {
-                      setStatus(preview.error);
-                      return;
-                    }
-                    setStatus(`种子里有 ${preview.notes} 条事件、${preview.portrait} 条画像。不再写入笔记和画像。`);
-                  }}
-                >
-                  看种子有多少
-                </Button>
-              </section>
-              <section>
-                <p className="mb-2 font-display text-lg">画像</p>
-                {!storyPortrait.length ? (
-                  <p className="text-sm text-subtle">还没有画像。导入故事线后会出现。</p>
-                ) : (
-                  <ul className="flex flex-col gap-3">
-                    {storyPortrait.map((row) => (
-                      <li key={row.id} className="rounded-md bg-surface-2 px-3 py-3">
-                        <p className="text-xs text-subtle">{row.topic}</p>
-                        <p className="mt-1 whitespace-pre-wrap text-sm">{row.body}</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-              <section>
-                <p className="mb-2 font-display text-lg">事件</p>
-                {!storyNotes.length ? (
-                  <p className="text-sm text-subtle">还没有笔记。</p>
-                ) : (
-                  <ul className="flex flex-col gap-3">
-                    {storyNotes.map((row) => (
-                      <li key={row.id} className="rounded-md bg-surface-2 px-3 py-3">
-                        <p className="text-xs text-subtle">
-                          {row.localDay} · {row.subject} · {row.lens.join("/")} · {row.weight}
-                          {row.fromRosie ? " · Rosie" : ""}
-                        </p>
-                        <p className="mt-1 text-sm">{row.text}</p>
-                        {row.tags.length ? (
-                          <p className="mt-1 text-xs text-subtle">{row.tags.join(" · ")}</p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-            </>
           ) : (
             <>
               <section>

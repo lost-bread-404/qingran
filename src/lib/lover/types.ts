@@ -4,11 +4,11 @@ import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
 import { DEFAULT_HEARING_SENSE, lockHearingSense, type HearingSense } from "./hearing/sense.ts";
 import { SILENCE_MS } from "./vad.ts";
-import { clampHistoryWindow, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms, clampDossierMaxChars, clampGlowHalfLifeDays, HISTORY_WINDOW, PORTRAIT_ACTIVE_MAX, PORTRAIT_STALE_DAYS, RETRIEVE_MIN_TERMS } from "./brain/config.ts";
+import { clampHistoryWindow, clampDossierMaxChars, HISTORY_WINDOW } from "./brain/config.ts";
 import { lockPromptModels, type PromptModelPick } from "./brain/prompts/models.ts";
 import type { PromptKey } from "./brain/prompts/catalog.ts";
 
-export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio, clampPortraitActiveMax, clampPortraitStaleDays, clampRetrieveMinTerms, clampDossierMaxChars };
+export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio, clampDossierMaxChars };
 export type { HearingSense };
 
 export type VoiceId = "eve";
@@ -30,7 +30,6 @@ export type Profile = {
   systemPrompt: string;
   muted: boolean;
   voiceSpeed: number;
-  autoRemember: boolean;
   memoryCursor: string;
   hearingProvider: HearingProviderId;
   captureAudio: boolean;
@@ -41,8 +40,6 @@ export type Profile = {
   /** Pause that ends a turn, milliseconds. 800–3000, default 1500. */
   silenceMs: number;
   injectMind: boolean;
-  /** Retrieved notes in the voice prompt. Retrieval still runs when this is off. */
-  injectMemories: boolean;
   /** Self / bond / portrait block in the voice prompt. */
   injectLongterm: boolean;
   /** Recent messages in the voice prompt, and the archive slide-out window. 0–80. */
@@ -61,12 +58,6 @@ export type Profile = {
   hearingInstruction: string;
   /** Fixed words sent to xAI as keyterm. Recent dialogue terms are added on top. */
   sttKeyterms: string[];
-  /** Active portrait rows kept in the reply. 4–40, default 12. Relationship stage is extra. */
-  portraitActiveMax: number;
-  /** Days without corroboration before an active portrait row goes stale. 3–90, default 14. */
-  portraitStaleDays: number;
-  /** Content words a retrieved note must share with this turn. 1–6, default 1. Filler words do not count. */
-  retrieveMinTerms: number;
   /** iOS only. When on, a phone call uses CallKit so it survives background and the lock screen. */
   callKitBackground: boolean;
   /** Dossier character cap. 2000–8000, default 4000. */
@@ -75,8 +66,6 @@ export type Profile = {
   identity: string;
   /** One sentence of ordinary hours. Written when the busy table is generated. */
   rhythm: string;
-  /** Glow half-life in days. 0.5–7, default 2. */
-  glowHalfLifeDays: number;
   /** Monthly diary. Off until Rosie turns it on. Manual reports still run. */
   diaryEnabled: boolean;
   /** Shown to the reply only while the current mode is marked intimate. */
@@ -89,8 +78,6 @@ export type Profile = {
   mode: string;
   /** Her modes: each has a name, when it applies (free text for reflect), and a prompt added after the persona. One reply model for all. */
   modes: TalkModeDef[];
-  /** Rosie's rough routine in her own words. Only the reflect controller reads it. */
-  routine: string;
   /** Where the persona text sits: system prompt, or the first user message. */
   personaPlacement: "system" | "first_user";
 };
@@ -129,13 +116,6 @@ export type ChatMessage = {
     chars?: number;
     ttftMs?: number;
   };
-};
-
-export type Memory = {
-  id: string;
-  text: string;
-  createdAt: number;
-  updatedAt: number;
 };
 
 /** Used only when nothing is saved. Not a character. */
@@ -215,7 +195,6 @@ export const DEFAULT_PROFILE: Profile = {
   systemPrompt: "",
   muted: false,
   voiceSpeed: 1,
-  autoRemember: true,
   memoryCursor: "",
   hearingProvider: DEFAULT_HEARING_PROVIDER,
   captureAudio: true,
@@ -225,7 +204,6 @@ export const DEFAULT_PROFILE: Profile = {
   voiceEffort: DEFAULT_VOICE_EFFORT,
   silenceMs: SILENCE_MS,
   injectMind: true,
-  injectMemories: true,
   injectLongterm: true,
   historyWindow: HISTORY_WINDOW,
   nightMode: true,
@@ -235,21 +213,16 @@ export const DEFAULT_PROFILE: Profile = {
   promptModels: {},
   hearingInstruction: "",
   sttKeyterms: lockSttKeyterms(undefined),
-  portraitActiveMax: PORTRAIT_ACTIVE_MAX,
-  portraitStaleDays: PORTRAIT_STALE_DAYS,
-  retrieveMinTerms: RETRIEVE_MIN_TERMS,
   callKitBackground: false,
   dossierMaxChars: 4000,
   identity: "",
   rhythm: "",
-  glowHalfLifeDays: 2,
   diaryEnabled: false,
   intimateNotes: "",
   storyline: "",
   brainOn: true,
   mode: "play",
   modes: DEFAULT_MODES,
-  routine: "",
   personaPlacement: "system",
 };
 
@@ -264,7 +237,6 @@ type LooseProfile = Partial<Profile> & {
   muted?: boolean;
   voiceSpeed?: number;
   softVoice?: boolean;
-  autoRemember?: boolean;
   memoryCursor?: string;
   hearingProvider?: string;
   captureAudio?: boolean;
@@ -275,7 +247,6 @@ type LooseProfile = Partial<Profile> & {
   voiceEffort?: string | null;
   silenceMs?: number;
   injectMind?: boolean;
-  injectMemories?: boolean;
   injectLongterm?: boolean;
   historyWindow?: number;
   nightMode?: boolean;
@@ -285,21 +256,16 @@ type LooseProfile = Partial<Profile> & {
   promptModels?: unknown;
   hearingInstruction?: unknown;
   sttKeyterms?: unknown;
-  portraitActiveMax?: number;
-  portraitStaleDays?: number;
-  retrieveMinTerms?: number;
   callKitBackground?: boolean;
   dossierMaxChars?: number;
   identity?: string;
   rhythm?: string;
-  glowHalfLifeDays?: number;
   diaryEnabled?: boolean;
   intimateNotes?: string;
   storyline?: string;
   brainOn?: boolean;
   mode?: string;
   modes?: unknown;
-  routine?: string;
   personaPlacement?: string;
 };
 
@@ -314,7 +280,6 @@ export function lockedProfile(input?: unknown): Profile {
     systemPrompt: pickSystemPrompt(raw).slice(0, 16_000),
     muted: Boolean(raw.muted),
     voiceSpeed: pickVoiceSpeed(raw),
-    autoRemember: raw.autoRemember !== false,
     memoryCursor: typeof raw.memoryCursor === "string" ? raw.memoryCursor : "",
     hearingProvider: DEFAULT_HEARING_PROVIDER,
     debugHearing: raw.debugHearing !== false,
@@ -324,7 +289,6 @@ export function lockedProfile(input?: unknown): Profile {
     voiceEffort: pickVoiceEffort(raw),
     silenceMs: hearingSense.endWaitMs,
     injectMind: raw.injectMind !== false,
-    injectMemories: raw.injectMemories !== false,
     injectLongterm: raw.injectLongterm !== false,
     historyWindow: clampHistoryWindow(raw.historyWindow),
     nightMode: raw.nightMode !== false,
@@ -334,21 +298,16 @@ export function lockedProfile(input?: unknown): Profile {
     promptModels: lockPromptModels(raw.promptModels),
     hearingInstruction: lockHearingInstruction(raw.hearingInstruction),
     sttKeyterms: lockSttKeyterms(raw.sttKeyterms),
-    portraitActiveMax: clampPortraitActiveMax(raw.portraitActiveMax),
-    portraitStaleDays: clampPortraitStaleDays(raw.portraitStaleDays),
-    retrieveMinTerms: clampRetrieveMinTerms(raw.retrieveMinTerms),
     callKitBackground: raw.callKitBackground === true,
     dossierMaxChars: clampDossierMaxChars(raw.dossierMaxChars),
     identity: typeof raw.identity === "string" ? raw.identity.slice(0, 2000) : "",
     rhythm: typeof raw.rhythm === "string" ? raw.rhythm.slice(0, 500) : "",
-    glowHalfLifeDays: clampGlowHalfLifeDays(raw.glowHalfLifeDays),
     diaryEnabled: raw.diaryEnabled === true,
     intimateNotes: typeof raw.intimateNotes === "string" ? raw.intimateNotes.slice(0, 8000) : "",
     storyline: typeof raw.storyline === "string" ? raw.storyline.slice(0, 20000) : "",
     brainOn: raw.brainOn !== false,
     mode: typeof raw.mode === "string" && raw.mode.trim() ? raw.mode.trim().slice(0, 40) : "play",
     modes: lockModes(raw.modes),
-    routine: typeof raw.routine === "string" ? raw.routine.slice(0, 4000) : "",
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
   };
 }

@@ -66,47 +66,9 @@ async function runOne(job: BrainJob): Promise<void> {
     await finishReflectJob(job.id, turnSeq);
     return;
   }
-  if (job.type === "archive") {
-    const { runArchivist } = await import("./archivist");
-    const ids = Array.isArray(job.payload.ids) ? (job.payload.ids as string[]) : [];
-    await runArchivist(ids, job.id);
-    await finishJob(job.id, "done");
-    return;
-  }
-  if (job.type === "dusk") {
-    const { runDusk } = await import("./diary/dusk");
-    await runDusk(String(job.payload.day ?? ""), job.id, { manual: Boolean(job.payload.manual) });
-    await finishJob(job.id, "done");
-    return;
-  }
-  if (job.type === "synth") {
-    const { runSynth } = await import("./diary/synth");
-    await runSynth(String(job.payload.week ?? ""), job.id, { manual: Boolean(job.payload.manual) });
-    await finishJob(job.id, "done");
-    return;
-  }
   if (job.type === "report") {
     const { runReport } = await import("./diary/report");
     await runReport(String(job.payload.month ?? ""), job.id);
-    await finishJob(job.id, "done");
-    return;
-  }
-  if (job.type === "backfill") {
-    const { runBackfill } = await import("./diary/synth");
-    await runBackfill(String(job.payload.factorId ?? ""), job.id);
-    await finishJob(job.id, "done");
-    return;
-  }
-  if (job.type === "editor") {
-    // The memory is rewritten by the night pass now; an old "editor" job becomes 整理今天.
-    const reason = String(job.payload.reason ?? "turns");
-    if (reason === "activate") {
-      const { ensureDossierLive } = await import("./dossier");
-      await ensureDossierLive();
-    } else {
-      const { enqueueNightNow } = await import("./night");
-      await enqueueNightNow();
-    }
     await finishJob(job.id, "done");
     return;
   }

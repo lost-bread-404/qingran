@@ -20,9 +20,3 @@ npm run dev
 - 不要提交 `.env`、API 密钥或备份 json。
 - 听力：设置 → 听力，只走 xAI 和 Apple。标注模式开着时每一句都存 clip。标注页：`/lab`。
 - **xAI STT 官方不支持中文。** `/v1/stt` 的 `language` 格式化语言列表是 en / fr / de / ja 等，没有 zh。代码不再传未文档化的 `prompt` 字段，显式使用 `model=grok-voice-transcribe-2.0`，只传 `hearing/config.ts` 里的固定 `STT_KEYTERMS`（姐姐 / 清然 / 小猫 / Rosie + 单字语气词；不再喂「林泽」、叠语气词、system prompt 抽词或 ABO 词表），`filler_words=true`，`vad_threshold` 默认 0.3（可用 `XAI_VAD_THRESHOLD` 覆盖）。
-- 自部署 GPU：见 [deploy/README.md](deploy/README.md)。
-- 评测：
-
-```bash
-node --experimental-strip-types scripts/eval-hearing.mjs path/to/export.json --split test --out hearing-eval.csv
-```

@@ -1,14 +1,14 @@
 import { sql } from "./store.ts";
 import { formatClock, localDay, shiftDay, zonedParts } from "./time.ts";
 import { zonedWallMs } from "./spend/policy.ts";
-import { clockOf, dayNotes } from "./day-notes.ts";
+import { clockOf } from "./time.ts";
 
 /**
  * Brain v5 state, all free text:
  * - heart: what he feels and how he reads her right now (qr_inner.now_text)
  * - plans: what he means to do; a time is optional (qr_reach_plans, at may be null)
- * - today: his running notes on her day (qr_day_notes)
- * - days: one timeline per past day, written at night (qr_days)
+ * - days: one text per day (qr_days). Today's is rewritten by the mind each time she goes quiet
+ *   (her day, what he said or made up about himself, what is still owed); the night pass turns it into the day's timeline.
  * The memory document lives in qr_dossier.
  */
 
@@ -229,10 +229,11 @@ export function plansText(plans: Plan[], nowMs: number, timeZone: string, opts: 
     .join("\n");
 }
 
-export async function todayNotesText(nowMs: number, timeZone: string): Promise<string> {
-  const { from } = dayWindow(localDay(nowMs, timeZone), timeZone);
-  const notes = await dayNotes(from, nowMs + 1);
-  return notes.map((n) => `${clockOf(n.at, timeZone)} ${n.text}`).join("\n");
+/** Today's running text (the day runs 04:00–04:00). */
+export async function todayText(nowMs: number, timeZone: string): Promise<string> {
+  const db = await sql();
+  const rows = await db.query<{ timeline: string }>(`select timeline from qr_days where day = $1`, [localDay(nowMs, timeZone)]);
+  return String(rows[0]?.timeline ?? "").trim();
 }
 
 export function daysText(days: Array<{ day: string; timeline: string }>): string {

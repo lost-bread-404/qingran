@@ -2,7 +2,7 @@ import { callModel, type CallModelResult } from "./llm.ts";
 import { now } from "./clock.ts";
 import { appendInnerLog, getMeta, getProfileData, getProfilePrompt, patchBrainLog, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
-import { localDay, shiftDay, zonedParts } from "./time.ts";
+import { clockOf, localDay, shiftDay, zonedParts } from "./time.ts";
 import { lockedProfile, type TalkModeDef } from "../types.ts";
 import { isNightNoiseBody, modelFacingText } from "../message-markup.ts";
 import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
@@ -14,7 +14,6 @@ import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
 import { modesText, parsePlans } from "./voice/reflector.ts";
 import { recordMode } from "./mode.ts";
-import { clockOf, dayNotes } from "./day-notes.ts";
 import { dayWindow, getHeart, hasDay, listPlans, plansText, replaceMindPlans, saveDayTimeline, setFocus, setHeart } from "./heart.ts";
 
 /**
@@ -27,7 +26,7 @@ export const NIGHT_SCHEMA = {
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["memory", "timeline", "plans", "heart", "mode"] as string[],
+    required: ["memory", "timeline", "plans", "heart", "mode", "changes"] as string[],
     properties: {
       memory: { type: "string" },
       timeline: { type: "string" },
@@ -42,6 +41,7 @@ export const NIGHT_SCHEMA = {
       },
       heart: { type: "string" },
       mode: { type: "string" },
+      changes: { type: "string" },
     },
   },
 };
@@ -63,6 +63,13 @@ async function dayMessages(from: number, to: number): Promise<Row[]> {
     [from, to],
   );
   return rows.map((r) => ({ ...r, created_at: Number(r.created_at) }));
+}
+
+/** The text the mind kept for this day (before the night pass, the running 今天). */
+async function dayText(day: string): Promise<string> {
+  const db = await sql();
+  const rows = await db.query<{ timeline: string }>(`select timeline from qr_days where day = $1`, [day]);
+  return String(rows[0]?.timeline ?? "").trim();
 }
 
 /** Which mode was on at each moment, from the mode log. */
@@ -107,7 +114,7 @@ export function nightConversation(
   return text;
 }
 
-/** `manual` (整理今天 in the middle of the day) only rewrites the memory and today's timeline; plans and heart stay. */
+/** `manual` (整理今天 in the middle of the day) only rewrites the memory; today's text, plans, heart and mode stay. */
 export async function runNight(
   day: string,
   jobId?: string,
@@ -117,9 +124,9 @@ export async function runNight(
   const at = now();
   const tz = resolveTz((await getMeta()).timeZone);
   const window = dayWindow(day, tz);
-  const [rows, notes, profileData, charter, dossier, ident, heart, plans, modeLog] = await Promise.all([
+  const [rows, today, profileData, charter, dossier, ident, heart, plans, modeLog] = await Promise.all([
     dayMessages(window.from, window.to),
-    dayNotes(window.from, window.to),
+    dayText(day),
     getProfileData(),
     getProfilePrompt(),
     dossierTextForModel(),
@@ -128,7 +135,7 @@ export async function runNight(
     listPlans(),
     modeTimeline(window.to),
   ]);
-  if (!rows.length && !notes.length) {
+  if (!rows.length && !today) {
     await saveDayTimeline(day, "", at);
     return { ok: true, skipped: "empty" };
   }
@@ -141,7 +148,7 @@ export async function runNight(
     dossier: dossier.trim() || "（还没有）",
     heart: heart.text.trim() || "（空）",
     plans: plansText(plans, at, tz) || "（没有）",
-    notes: notes.map((n) => `${clockOf(n.at, tz)} ${n.text}`).join("\n") || "（没有）",
+    today: today || "（没有）",
     day,
     conversation: nightConversation(rows, profile.modes, modeLog, tz) || "（没有）",
     modes: modesText(profile.modes, "") || "（没有）",
@@ -166,9 +173,11 @@ export async function runNight(
   }
   const json = result.json as Record<string, unknown>;
   const memory = typeof json.memory === "string" ? json.memory.trim() : "";
-  if (memory) await publishMemory(memory, "night", Math.min(window.to, at), { day });
-  await saveDayTimeline(day, typeof json.timeline === "string" ? json.timeline.trim() : "", at);
+  const changes = typeof json.changes === "string" ? json.changes.trim().slice(0, 1000) : "";
+  if (memory) await publishMemory(memory, "night", Math.min(window.to, at), { day, changes });
   if (!opts.manual) {
+    // The day's timeline is final only at night; during the day 「今天」 keeps being the mind's running text.
+    await saveDayTimeline(day, typeof json.timeline === "string" ? json.timeline.trim() : "", at);
     await replaceMindPlans(parsePlans(json.plans, tz, at), at, "night");
     const wake = typeof json.heart === "string" ? json.heart.trim() : "";
     if (wake) await setHeart(wake, at);

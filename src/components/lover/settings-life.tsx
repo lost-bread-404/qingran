@@ -4,11 +4,11 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { brainGetLife, brainListManualEdits, brainSetReach, brainTestPush, brainWakeNow } from "@/lib/lover/brain/life-api";
 import {
-  brainDeleteDayNote,
   brainEditPlan,
   brainGetMind,
   brainSaveFocus,
   brainSaveHeartText,
+  brainSaveToday,
   brainSetModeNow,
 } from "@/lib/lover/brain/mind-api";
 import { hearingLabeledCount } from "@/lib/lover/hearing/store";
@@ -96,7 +96,7 @@ type Mind = {
   timeZone: string;
   heart: { text: string; focus: string; updatedAt: number };
   plans: Array<{ id: number; at: number | null; atText: string; due: boolean; text: string; setBy: string }>;
-  today: Array<{ id: number; clock: string; text: string }>;
+  today: string;
   days: Array<{ day: string; timeline: string }>;
   mode: string;
   modes: Array<{ id: string; name: string }>;
@@ -109,6 +109,7 @@ export function HeartEditor() {
   const [mind, setMind] = useState<Mind | null>(null);
   const [heart, setHeartDraft] = useState("");
   const [focus, setFocusDraft] = useState("");
+  const [today, setTodayDraft] = useState("");
   const [draftText, setDraftText] = useState("");
   const [draftAt, setDraftAt] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +121,7 @@ export function HeartEditor() {
         setMind(next);
         setHeartDraft(next.heart.text);
         setFocusDraft(next.heart.focus);
+        setTodayDraft(next.today);
       })
       .catch(() => setError("心没读出来。"));
   }
@@ -166,7 +168,7 @@ export function HeartEditor() {
       <section className="flex flex-col gap-2">
         <p className="text-sm">打算</p>
         <p className="text-xs text-subtle">
-          他心里的打算，回复看不到。每轮之后心思从这里挑一件放进「眼前这一件」。写了时间的到点时，你不在聊天他才决定要不要给你发一条。
+          他心里的打算，回复看不到。心思会把要做的那一件挪到「眼前这一件」。写了时间的到点时：你在聊天，要紧的会变成眼前这一件；你不在，他再想一遍，决定要不要给你发一条。
         </p>
         {mind.plans.length === 0 ? <p className="text-sm text-subtle">现在没有打算</p> : null}
         {mind.plans.map((plan) => (
@@ -233,30 +235,24 @@ export function HeartEditor() {
 
       <section className="flex flex-col gap-2">
         <p className="text-sm">今天</p>
-        <p className="text-xs text-subtle">他随手记下的你今天。记错了可以删。</p>
-        {mind.today.length === 0 ? <p className="text-sm text-subtle">还没有</p> : null}
-        {mind.today.map((note) => (
-          <div key={note.id} className="flex items-start justify-between gap-3 rounded-md bg-surface-2 px-3 py-2">
-            <p className="text-sm">
-              {note.clock} {note.text}
-            </p>
-            <button
-              type="button"
-              className="shrink-0 text-sm text-muted"
-              onClick={() => {
-                setMind({ ...mind, today: mind.today.filter((row) => row.id !== note.id) });
-                void brainDeleteDayNote({ data: { id: note.id } }).catch(() => setError("没删掉。"));
-              }}
-            >
-              删
-            </button>
-          </div>
-        ))}
+        <p className="text-xs text-subtle">你今天的事、他今天说过编过的关于自己的事、还欠着的事。你沉默时他整段重写，回复看得到。凌晨整理成那天的时间线。记错了可以直接改。</p>
+        <Textarea
+          value={today}
+          className="min-h-28"
+          placeholder="还没有"
+          onChange={(e) => setTodayDraft(e.target.value)}
+          onBlur={() => {
+            if (today === mind.today) return;
+            void brainSaveToday({ data: { text: today } })
+              .then(() => setMind({ ...mind, today }))
+              .catch(() => setError("没记下。"));
+          }}
+        />
       </section>
 
       <section className="flex flex-col gap-2">
         <p className="text-sm">最近几天</p>
-        <p className="text-xs text-subtle">每天凌晨整理时写的时间线。</p>
+        <p className="text-xs text-subtle">每天凌晨整理时定稿的时间线。</p>
         {mind.days.filter((d) => d.timeline.trim()).length === 0 ? <p className="text-sm text-subtle">还没有</p> : null}
         {mind.days
           .filter((d) => d.timeline.trim())

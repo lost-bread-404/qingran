@@ -14,7 +14,7 @@ export function DayRecords() {
   return (
     <div className="flex flex-col gap-2">
       <p className="text-sm">每天</p>
-      <p className="text-xs text-subtle">清然从聊天里随手记下的你的一天。月报从这里算学习、休息、情绪和睡眠。</p>
+      <p className="text-xs text-subtle">每一天你的时间线：白天他在你沉默时记，凌晨整理时定稿。月报从这里算学习、休息、情绪和睡眠。</p>
       {days == null ? (
         <p className="text-sm text-subtle">正在读…</p>
       ) : days.length === 0 ? (

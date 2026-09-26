@@ -4,7 +4,7 @@
  * Client-safe: no database imports here.
  */
 export const STATE_KIND = "qingran-state";
-export const STATE_VERSION = 3;
+export const STATE_VERSION = 4;
 
 export type StatePlan = { text: string; at?: string | null; setBy?: string };
 export type StateDay = { day: string; timeline: string };
@@ -33,9 +33,11 @@ export type StateFile = {
   /** Current mode id. */
   mode?: string;
   plans?: StatePlan[];
+  /** One text per day (04:00–04:00): today's running text, and each past day's timeline. */
   days?: StateDay[];
+  /** Older files (version ≤ 3): a list of notes; imported as lines in that day's text. */
   dayNotes?: StateNote[];
-  /** Custom prompt bodies by key (reflect, editor, reach, voice, …). Keys left out keep their current text. */
+  /** Custom prompt bodies by key (voice, reflect, editor, report, persona_ack). Keys left out keep their current text. */
   prompts?: Record<string, string>;
   messages?: StateMessage[];
 };

@@ -16,28 +16,30 @@ import { identityBlock } from "../life.ts";
 import { lockedProfile, type TalkModeDef } from "../../types.ts";
 import { readIdentity } from "../life-store.ts";
 import { effectiveMode, recordMode } from "../mode.ts";
-import { addDayNote } from "../day-notes.ts";
 import { spokenOnly, VERBATIM_REPLIES } from "./pack-build.ts";
 import {
   dayWindow,
   daysText,
   getHeart,
+  hasDay,
   listPlans,
   markSilenceSeen,
   parseLocalTime,
   plansText,
   recentDays,
   replaceMindPlans,
+  saveDayTimeline,
   setFocus,
   setHeart,
   timeFacts,
-  todayNotesText,
+  todayText,
 } from "../heart.ts";
 
 /**
- * The inner mind (brain v5). Runs after every reply, and once when she has gone quiet.
- * Output is free text: heart, focus, the full plan list when it changed, the next mode.
- * When she has gone quiet it also notes what she did in the stretch that just ended (today's record).
+ * The inner mind (brain v5). One mind, three moments:
+ * - turn: after every reply — heart, focus, plans, next mode;
+ * - silence: once when she has gone quiet — the same, plus today's text rewritten with the stretch that just ended;
+ * - due: a timed plan came due while she is away — the same, plus the message he sends her (or none).
  * Empty fields mean "no change", so most turns change nothing.
  */
 export const INNER_SCHEMA = {
@@ -45,7 +47,7 @@ export const INNER_SCHEMA = {
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["heart", "focus", "plans_changed", "plans", "mode", "note"] as string[],
+    required: ["heart", "focus", "plans_changed", "plans", "mode", "today", "message"] as string[],
     properties: {
       heart: { type: "string" },
       focus: { type: "string" },
@@ -63,12 +65,13 @@ export const INNER_SCHEMA = {
         },
       },
       mode: { type: "string" },
-      note: { type: "string" },
+      today: { type: "string" },
+      message: { type: "string" },
     },
   },
 };
 
-export type ReflectKind = "turn" | "silence";
+export type ReflectKind = "turn" | "silence" | "due";
 
 export function formatReflectConversation(history: StoredMessage[], timeZone: string): string {
   const rows = history.filter((m) => m.kind !== "system_notice" && !isNightNoiseBody(m.text));
@@ -151,8 +154,25 @@ function gapText(ms: number): string {
 /** A silence covers this many messages at most (the stretch since the last silence, from 04:00 today). */
 const SILENCE_WINDOW = 120;
 
+/** Why the mind is thinking now. `due` passes its own text (what came due, and how quiet she has been). */
+export type ReflectTrigger = { kind: ReflectKind; silentSince?: number; since?: number; dueText?: string };
+
+function triggerText(t: ReflectTrigger, at: number): string {
+  if (t.kind === "silence" && t.silentSince) {
+    return `她已经 ${gapText(at - t.silentSince)} 没说话了。这是她沉默后，你心里过的一遍。`;
+  }
+  if (t.kind === "due") return `到时间了。她现在不在和你聊天。\n${t.dueText?.trim() || ""}`.trim();
+  return "她刚说完话，你也刚回了她。";
+}
+
+/** The talk since `from`; never fewer than the usual window, so a short stretch still has its context. */
+function stretchSince(rows: StoredMessage[], from: number): StoredMessage[] {
+  const stretch = rows.filter((m) => m.createdAt > from);
+  return stretch.length >= REFLECT_WINDOW ? stretch : rows.slice(-REFLECT_WINDOW);
+}
+
 /** Everything the mind reads, from the database. Shared with the prompt preview. */
-export async function gatherReflectParts(at: number, kind: ReflectKind, silentSince?: number, since = 0): Promise<{
+export async function gatherReflectParts(at: number, trigger: ReflectTrigger): Promise<{
   parts: ReflectorParts;
   history: StoredMessage[];
   tz: string;
@@ -162,7 +182,7 @@ export async function gatherReflectParts(at: number, kind: ReflectKind, silentSi
 }> {
   const [meta, window, charter, dossier, ident, profileData, heart, plans] = await Promise.all([
     getMeta(),
-    listHistoryWindow(null, kind === "silence" ? SILENCE_WINDOW : REFLECT_WINDOW),
+    listHistoryWindow(null, trigger.kind === "silence" ? SILENCE_WINDOW : REFLECT_WINDOW),
     getProfilePrompt(),
     dossierTextForModel(),
     readIdentity(),
@@ -173,24 +193,21 @@ export async function gatherReflectParts(at: number, kind: ReflectKind, silentSi
   const profile = lockedProfile(profileData);
   const tz = resolveTz(meta.timeZone);
   const ids = profile.modes.map((m) => m.id);
-  const history = kind === "silence" ? stretchSince(window, Math.max(since, dayWindow(localDay(at, tz), tz).from)) : window;
+  const day = localDay(at, tz);
+  const history = trigger.kind === "silence" ? stretchSince(window, Math.max(trigger.since ?? 0, dayWindow(day, tz).from)) : window;
   const [facts, days, today, current] = await Promise.all([
     timeFacts(at, tz, at + 1),
-    recentDays(7),
-    todayNotesText(at, tz),
+    recentDays(7, day),
+    todayText(at, tz),
     effectiveMode(at, tz, ids),
   ]);
-  const trigger =
-    kind === "silence" && silentSince
-      ? `她已经 ${gapText(at - silentSince)} 没说话了。这是她沉默后，你心里过的一遍。`
-      : "她刚说完话，你也刚回了她。";
   return {
     parts: {
       charter,
       identity: identityBlock(ident.identity),
       story: profile.storyline,
       dossier,
-      trigger,
+      trigger: triggerText(trigger, at),
       facts,
       days: daysText(days),
       today,
@@ -208,12 +225,6 @@ export async function gatherReflectParts(at: number, kind: ReflectKind, silentSi
   };
 }
 
-/** The talk since `from`; never fewer than the usual window, so a short stretch still has its context. */
-function stretchSince(rows: StoredMessage[], from: number): StoredMessage[] {
-  const stretch = rows.filter((m) => m.createdAt > from);
-  return stretch.length >= REFLECT_WINDOW ? stretch : rows.slice(-REFLECT_WINDOW);
-}
-
 type ParsedPlan = { at: number | null; text: string };
 
 export function parsePlans(raw: unknown, tz: string, at: number): ParsedPlan[] {
@@ -228,18 +239,32 @@ export function parsePlans(raw: unknown, tz: string, at: number): ParsedPlan[] {
     });
 }
 
+export type ReflectResult = {
+  ok: boolean;
+  inner: InnerState | null;
+  /** Only for `due`: what he decided to send her ("" = nothing). */
+  message: string;
+  failKind: string | null;
+  model: string;
+  ms: number;
+};
+
+const kindLog = (kind: ReflectKind) => (kind === "turn" ? "reflect" : `reflect_${kind}`);
+
 export async function runReflector(
   turnSeq: number,
   jobId?: string,
   complete: typeof callModel = callModel,
-  opts: { kind?: ReflectKind; silentSince?: number; since?: number } = {},
-): Promise<InnerState | null> {
-  const kind = opts.kind ?? "turn";
+  trigger: ReflectTrigger = { kind: "turn" },
+): Promise<ReflectResult> {
+  const kind = trigger.kind;
   const heartBefore = await getHeart();
-  if (kind === "turn" && heartBefore.turnSeq >= turnSeq) return getInner();
+  if (kind === "turn" && heartBefore.turnSeq >= turnSeq) {
+    return { ok: true, inner: await getInner(), message: "", failKind: null, model: "", ms: 0 };
+  }
 
   const at = now();
-  const gathered = await gatherReflectParts(at, kind, opts.silentSince, opts.since ?? 0);
+  const gathered = await gatherReflectParts(at, trigger);
   const { parts, history, tz, modes, current, charter } = gathered;
   const loaded = await loadPrompt("reflect");
   const packed = buildReflectorInput(parts, loaded.body);
@@ -264,49 +289,51 @@ export async function runReflector(
     jobId,
     turnSeq,
     refs,
-    outputRef: `inner:${turnSeq}`,
+    outputRef: `inner:${kind}:${turnSeq || at}`,
     promptKey: loaded.key,
     promptHash: loaded.hash,
   });
   if (!result.ok || !result.json) {
-    await appendInnerLog({
-      turnSeq,
-      data: { kind: kind === "silence" ? "reflect_silence" : "reflect", error: classifyReflectFailure(result) },
-      model: result.model,
-      ms: result.ms,
-    });
+    const failKind = classifyReflectFailure(result);
+    await appendInnerLog({ turnSeq, data: { kind: kindLog(kind), error: failKind }, model: result.model, ms: result.ms });
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
     if (kind === "turn") {
-      await fillReflectTurn(turnSeq, false, result.ms, classifyReflectFailure(result));
+      await fillReflectTurn(turnSeq, false, result.ms, failKind);
       await patchTurnTraceReflector({ turnSeq, inner: null, model: result.model, ms: result.ms });
     }
-    return null;
+    return { ok: false, inner: null, message: "", failKind, model: result.model, ms: result.ms };
   }
 
   const json = result.json as Record<string, unknown>;
-  const heart = typeof json.heart === "string" ? json.heart.trim() : "";
-  await setHeart(heart || heartBefore.text, at, kind === "turn" ? turnSeq : undefined);
-  await setFocus(typeof json.focus === "string" ? json.focus.trim() : "");
+  const text = (key: string) => (typeof json[key] === "string" ? String(json[key]).trim() : "");
+  await setHeart(text("heart") || heartBefore.text, at, kind === "turn" ? turnSeq : undefined);
+  await setFocus(text("focus"));
   if (json.plans_changed === true) await replaceMindPlans(parsePlans(json.plans, tz, at), at);
-  const mode = typeof json.mode === "string" ? json.mode.trim() : "";
+  const mode = text("mode");
   if (mode && mode !== current && modes.some((m) => m.id === mode)) {
-    await recordMode({ at, mode, until: null, why: kind === "silence" ? "她沉默时想的" : "" });
+    await recordMode({ at, mode, until: null, why: kind === "turn" ? "" : kind === "silence" ? "她沉默时想的" : "到时间时想的" });
   }
-  // Today's record is written when a stretch of talking ends, so each stretch is noted once.
-  const note = kind === "silence" && typeof json.note === "string" ? json.note.trim() : "";
-  if (note) await addDayNote(opts.silentSince ?? at, note);
-  if (kind === "silence" && opts.silentSince) await markSilenceSeen(opts.silentSince);
+  // Today's text is rewritten when a stretch of talking ends, so each stretch goes in once.
+  const today = kind === "silence" ? text("today") : "";
+  if (today) {
+    const day = localDay(trigger.silentSince ?? at, tz);
+    // A day the night pass has already closed keeps its timeline.
+    if (!(await hasDay(day, dayWindow(day, tz).to))) await saveDayTimeline(day, today, at);
+  }
+  if (kind === "silence" && trigger.silentSince) await markSilenceSeen(trigger.silentSince);
 
-  await appendInnerLog({
-    turnSeq,
-    data: { kind: kind === "silence" ? "reflect_silence" : "reflect", output: result.json },
-    model: result.model,
-    ms: result.ms,
-  });
+  await appendInnerLog({ turnSeq, data: { kind: kindLog(kind), output: result.json }, model: result.model, ms: result.ms });
   const inner = await getInner();
   if (kind === "turn") {
     await fillReflectTurn(turnSeq, true, result.ms, null);
     await patchTurnTraceReflector({ turnSeq, inner, model: result.model, ms: result.ms });
   }
-  return inner;
+  return {
+    ok: true,
+    inner,
+    message: kind === "due" ? text("message").slice(0, 2000) : "",
+    failKind: null,
+    model: result.model,
+    ms: result.ms,
+  };
 }

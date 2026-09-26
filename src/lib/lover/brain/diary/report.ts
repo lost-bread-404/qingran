@@ -1,24 +1,17 @@
 import { asModelInput, callModel } from "../llm.ts";
 import { now } from "../clock.ts";
 import { getSql } from "../../../db.ts";
-import {
-  listDays,
-  listEpisodes,
-  listExperiments,
-  listFactors,
-  listFindings,
-  listIntentions,
-  listThemes,
-  listThemeWeeks,
-  patchMeta,
-  upsertReport,
-} from "../store.ts";
-import { daysInclusive, isoWeek, monthRange, shiftDay } from "../time.ts";
+import { getMeta, patchMeta, upsertReport } from "../store.ts";
+import { localDay, monthRange } from "../time.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
-import { narrativeNumbersOk } from "./report-check.ts";
-import { safetyFlag, sayDoByTag, stuckLoops } from "./stats.ts";
+import { lockedProfile } from "../../types.ts";
+import { enqueue } from "../jobs.ts";
 
+/**
+ * The monthly report: reads the month's daily timelines (qr_days, written by the mind and the night pass)
+ * and the month's conversation, and writes one reading for Rosie. Qingran never reads it.
+ */
 const CHUNK_CHARS = 12_000;
 
 export type MonthLine = { day: string; role: "user" | "assistant"; text: string };
@@ -40,7 +33,7 @@ export async function loadMonthDialogue(month: string): Promise<MonthLine[]> {
   return rows
     .map((row) => ({
       day: String(row.local_day ?? ""),
-      role: row.role === "assistant" ? "assistant" as const : "user" as const,
+      role: row.role === "assistant" ? ("assistant" as const) : ("user" as const),
       text: String(row.body ?? "").replace(/\s+/g, " ").trim(),
     }))
     .filter((row) => row.day && row.text);
@@ -58,10 +51,6 @@ export function chunkByDay(lines: MonthLine[], maxChars = CHUNK_CHARS): string[]
   const chunks: string[] = [];
   let buf = "";
   const push = (block: string) => {
-    if (block.length <= maxChars) {
-      chunks.push(block);
-      return;
-    }
     for (let i = 0; i < block.length; i += maxChars) chunks.push(block.slice(i, i + maxChars));
   };
   for (const day of days) {
@@ -71,8 +60,6 @@ export function chunkByDay(lines: MonthLine[], maxChars = CHUNK_CHARS): string[]
       buf = "";
     }
     if (block.length > maxChars) {
-      if (buf) push(buf);
-      buf = "";
       push(block);
       continue;
     }
@@ -93,64 +80,13 @@ async function completeVariant(variantId: string, vars: Record<string, string>, 
   return result.text.trim();
 }
 
-export async function buildReportData(month: string) {
-  const { start, end } = monthRange(month);
-  const days = await listDays(start, end);
-  const factors = await listFactors(true);
-  const episodes = await listEpisodes();
-  const findings = (await listFindings()).filter((f) => f.userFeedback !== "rejected");
-  const intentions = await listIntentions();
-  const themes = await listThemes(true);
-  const weeks = await listThemeWeeks();
-  const experiments = await listExperiments();
-  const byTheme: Record<string, Array<{ week: string; mentions: number; actionTaken: number | null }>> = {};
-  for (const w of weeks) {
-    byTheme[w.themeId] ??= [];
-    byTheme[w.themeId]!.push({ week: w.week, mentions: w.mentions, actionTaken: w.actionTaken });
-  }
-  const recentWeeks = [...new Set(days.map((d) => isoWeek(d.day)))].sort();
-  const low = factors.find((f) => f.name === "情绪低落");
-  const lowEps = episodes.filter((e) => e.factorId === (low?.id ?? "seed-情绪低落"));
-  const allDays = daysInclusive(start, end);
-  const ok = days.filter((d) => d.coverage === "ok").length;
-  return {
-    month,
-    periodStart: start,
-    periodEnd: end,
-    curve: days.map((d) => ({
-      day: d.day,
-      energy: d.energy,
-      mood: d.mood,
-      coverage: d.coverage,
-      lastActive: d.lastActive,
-    })),
-    episodes: episodes.filter((e) => e.startDay <= end && (e.endDay ?? e.startDay) >= start),
-    sayDo: sayDoByTag(intentions),
-    stuck: stuckLoops(byTheme, recentWeeks).map((s) => ({
-      ...s,
-      name: themes.find((t) => t.id === s.themeId)?.name ?? s.themeId,
-    })),
-    findings: findings.filter((f) => f.tier === "finding"),
-    clues: findings.filter((f) => f.tier === "clue"),
-    antecedents: findings.filter((f) => f.kind === "antecedent" && f.tier === "finding").slice(0, 5),
-    recovery: findings.filter((f) => f.kind === "recovery").slice(0, 3).map((f) => ({ ...f, clue: true })),
-    wins: days.flatMap((d) => d.wins.map((w) => ({ day: d.day, text: w.text }))),
-    themes: themes.map((t) => ({
-      id: t.id,
-      name: t.name,
-      mentions: (byTheme[t.id] ?? []).reduce((s, w) => s + w.mentions, 0),
-    })),
-    experiments: experiments.filter((e) => e.startDay <= end),
-    safety_flag: safetyFlag(lowEps, end),
-    coverage: allDays.length ? ok / allDays.length : 0,
-    okDays: ok,
-    monthDays: allDays.length,
-  };
-}
-
-export async function writeNarrative(summaries: string, jobId?: string): Promise<string> {
-  const text = await completeVariant("main", { summaries: summaries.slice(0, 20_000), data: summaries.slice(0, 20_000) }, jobId);
-  return text.replace(/\n{3,}/g, "\n\n").trim().slice(0, 800);
+async function monthTimelines(start: string, end: string): Promise<string> {
+  const db = await getSql();
+  const rows = await db.query<{ day: string; timeline: string }>(
+    `select day, timeline from qr_days where day >= $1 and day <= $2 and timeline <> '' order by day asc`,
+    [start, end],
+  );
+  return rows.map((r) => `${r.day}\n${String(r.timeline).trim()}`).join("\n\n");
 }
 
 export async function runReport(month: string, jobId?: string): Promise<void> {
@@ -171,30 +107,42 @@ export async function runReport(month: string, jobId?: string): Promise<void> {
   }
   const chunks = chunkByDay(lines);
   let summaries = chunks[0] ?? "";
-  if (chunks.length > 1 || summaries.length > CHUNK_CHARS) {
+  if (chunks.length > 1) {
     const parts: string[] = [];
     for (const chunk of chunks) {
-      const digest = await completeVariant("digest", { chunk, summaries: chunk, data: chunk }, jobId);
+      const digest = await completeVariant("digest", { chunk }, jobId);
       if (digest) parts.push(digest);
     }
     summaries = parts.join("\n\n");
   }
-  const { dayNotes, groupByDay } = await import("../day-notes.ts");
-  const { getMeta } = await import("../store.ts");
-  const { resolveTz } = await import("../tz.ts");
-  const tz = resolveTz((await getMeta()).timeZone);
-  const days = groupByDay(await dayNotes(Date.parse(`${start}T08:00:00Z`), Date.parse(`${end}T08:00:00Z`) + 24 * 3_600_000), tz);
-  const table = days.length ? `【每天的记录】（清然随手记下的，带时间）\n${days.map((d) => `${d.day}\n${d.lines.join("\n")}`).join("\n\n")}\n\n` : "";
-  const narrative = await writeNarrative(`${table}【对话摘要】\n${summaries}`, jobId);
+  const timelines = await monthTimelines(start, end);
+  const table = timelines ? `【每天的记录】（每天的时间线，带时间）\n${timelines}\n\n` : "";
+  const text = await completeVariant("main", { summaries: `${table}【对话摘要】\n${summaries}`.slice(0, 40_000) }, jobId);
   await upsertReport({
     id: month,
     periodStart: start,
     periodEnd: end,
     data: { month, source: "messages", chunks: chunks.length },
-    narrative: narrative || "没写成。",
+    narrative: text.replace(/\n{3,}/g, "\n\n").trim() || "没写成。",
     createdAt: now(),
   });
   await patchMeta({ lastReportMonth: month });
 }
 
-export { narrativeNumbersOk, shiftDay, CHUNK_CHARS };
+function previousMonth(nowMs: number, timeZone: string): string {
+  const [y, m] = localDay(nowMs, timeZone).split("-").map(Number) as [number, number];
+  const prev = m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 };
+  return `${prev.y}-${String(prev.m).padStart(2, "0")}`;
+}
+
+/** On the 1st of a month (diary switch on), queue last month's report once. */
+export async function enqueueReportIfDue(nowMs: number, timeZone: string): Promise<void> {
+  const { getProfileData } = await import("../store.ts");
+  const profile = lockedProfile(await getProfileData());
+  if (!profile.diaryEnabled) return;
+  const meta = await getMeta();
+  if (meta.timeZone !== timeZone) await patchMeta({ timeZone });
+  if (localDay(nowMs, timeZone).slice(8) !== "01") return;
+  const month = previousMonth(nowMs, timeZone);
+  if (meta.lastReportMonth < month) await enqueue("report", `report:${month}`, { month });
+}

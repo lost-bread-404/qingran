@@ -1,7 +1,7 @@
 import { getSql } from "../../db.ts";
 import { gitCommitSha } from "../hearing/eval-meta.ts";
 import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
-import { listNotesByIds, fromPgArray, pgTextArray } from "./store.ts";
+import { fromPgArray, pgTextArray } from "./store.ts";
 import type { InnerState } from "./types.ts";
 
 export const TRACE_FIELD_LIMIT = 100 * 1024;
@@ -47,14 +47,7 @@ export type TurnTraceInput = {
     personaPlacement?: "system" | "first_user";
     unexpected_state_block?: boolean;
     persona_missing?: boolean;
-    inner?: {
-      feel: string;
-      desire?: string;
-      want?: string;
-      now: string;
-      longing: string;
-      stale: { moment: boolean; longing: boolean };
-    };
+    inner?: { now: string; today: string };
     tool?: { name: string; arguments: string; ms: number } | null;
   };
   reply?: {
@@ -99,38 +92,10 @@ export function clipTraceValue<T>(value: T): { value: T | string; truncated: boo
   return { value: text, truncated: true };
 }
 
-async function enrichRetrieve(input: TurnTraceInput["retrieve"]): Promise<{
-  items: TraceRetrieveItem[];
-  jump: boolean;
-}> {
-  const selected = input?.selected ?? [];
-  const queryIds = input?.queryIds ?? input?.fallback ?? [];
-  const queryScores = input?.queryScores ?? [];
-  const scoreById = new Map(queryIds.map((id, i) => [id, queryScores[i] ?? null]));
-  const querySet = new Set(queryIds);
-  const notes = selected.length ? await listNotesByIds(selected) : [];
-  const byId = new Map(notes.map((n) => [n.id, n]));
-  const items: TraceRetrieveItem[] = selected.map((id, i) => {
-    const reason: RetrieveReason =
-      input?.reasons?.[i] ??
-      (querySet.has(id) ? "keyword" : "mind");
-    const note = byId.get(id);
-    return {
-      id,
-      title: (note?.text ?? id).slice(0, 120),
-      score: scoreById.get(id) ?? note?.weight ?? null,
-      reason,
-    };
-  });
-  return { items, jump: Boolean(input?.jump) };
-}
-
 export async function recordTurnTrace(input: TurnTraceInput): Promise<void> {
   try {
     const db = await getSql();
-    const retrieve = input.retrieve
-      ? { ...(await enrichRetrieve(input.retrieve)), raw: input.retrieve.selected ?? [] }
-      : null;
+    const retrieve = input.retrieve ?? null;
     const packed = {
       retrieve: clipTraceValue(retrieve),
       reflector: clipTraceValue(input.reflector ?? null),

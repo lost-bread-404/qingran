@@ -1,27 +1,11 @@
 import {
-  DIARY_ANALYST_TEXT,
   PROMPT_TEMPLATES,
   type PromptMessage,
   type PromptPlaceholder,
   type PromptVariantTemplate,
 } from "./templates.ts";
 
-export { DIARY_ANALYST_TEXT };
-
-export type PromptKey =
-  | "voice"
-  | "reflect"
-  | "archive"
-  | "editor"
-  | "persona_ack"
-  | "reach"
-  | "dusk"
-  | "assign"
-  | "synth"
-  | "ask"
-  | "report"
-  | "experiments"
-  | "backfill";
+export type PromptKey = "voice" | "reflect" | "editor" | "persona_ack" | "report";
 
 export type { PromptMessage, PromptPlaceholder };
 
@@ -48,11 +32,6 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
     blurb: "每轮回复之后跑一次，更新他心里、眼前这一件、打算和下一次用的模式。你沉默 45 分钟时再跑一次，这时顺便把刚才那一段你的事记进「今天」。没有变化就什么都不改。",
   },
   {
-    key: "archive",
-    name: "记笔记",
-    blurb: "对话滑出窗口时写观察笔记。用日常档。",
-  },
-  {
     key: "editor",
     name: "整理记忆",
     blurb: "每天凌晨 4 点后跑一次（main），整篇重写「他记得的」，写这一天的时间线、明天的打算、明早的心里和明早的模式。也可以在「他的心」里手动整理今天。",
@@ -63,44 +42,9 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
     blurb: "人设放在第一条消息时，紧跟着的那一句回应。人设在系统提示里时用不到。",
   },
   {
-    key: "reach",
-    name: "主动找她",
-    blurb: "你不在聊天时，他定好时间的打算到点了，决定要不要给你发一条、发什么。",
-  },
-  {
-    key: "dusk",
-    name: "日暮",
-    blurb: "一天结束时整理当天日记和因子。用分析档。",
-  },
-  {
-    key: "assign",
-    name: "日记打标",
-    blurb: "把笔记归进主题、给每天或每周打因子。用日常档。",
-  },
-  {
-    key: "synth",
-    name: "合成规律",
-    blurb: "每周维护主题、发现新因子。用深思考档。",
-  },
-  {
-    key: "ask",
-    name: "问日记",
-    blurb: "你在日记页提问时跑。用能调用工具的那档。",
-  },
-  {
     key: "report",
     name: "月报",
-    blurb: "读这个月的对话原文，写成一份月报。默认暂停，日记页打开开关后每月第一天才自动写上个月。",
-  },
-  {
-    key: "experiments",
-    name: "小实验",
-    blurb: "月报之后提出小实验。用深思考档。",
-  },
-  {
-    key: "backfill",
-    name: "回填",
-    blurb: "新因子出现后，按定义回填历史每一天。用日常档。",
+    blurb: "读这个月每天的时间线和对话，写成一份月报。日记页打开开关后，每月 1 日自动写上个月；也可以在日记页手动写。",
   },
 ];
 

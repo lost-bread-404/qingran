@@ -18,6 +18,13 @@ function fmtTime(ms: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** What the night pass said it changed (kept with the version). */
+function changesOf(ops: unknown): string {
+  if (!ops || typeof ops !== "object") return "";
+  const text = (ops as { changes?: unknown }).changes;
+  return typeof text === "string" ? text : "";
+}
+
 const AUTHOR: Record<string, string> = {
   editor: "整理",
   night: "夜里整理",
@@ -158,6 +165,7 @@ export function DossierPanel({ maxChars, onMaxChars, footer }: Props) {
                     onClick={() => setOpenId((cur) => (cur === version.id ? null : version.id))}
                   >
                     v{version.version} · {AUTHOR[version.author] ?? version.author} · {fmtTime(version.createdAt)}
+                    {changesOf(version.ops) ? <span className="block text-xs text-subtle">{changesOf(version.ops)}</span> : null}
                   </button>
                   <Button
                     type="button"

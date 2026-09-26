@@ -193,3 +193,9 @@ export function clipChars(text: string, max: number): string {
 export function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
+
+/** "HH:MM" in her zone. */
+export function clockOf(ms: number, timeZone: string): string {
+  const p = zonedParts(ms, timeZone);
+  return `${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
+}

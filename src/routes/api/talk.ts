@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { effectiveMode } from "@/lib/lover/brain/mode";
 import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } from "@/lib/lover/brain/config";
-import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
+import { enqueueReportIfDue } from "@/lib/lover/brain/diary/report";
 import { drainJobs, enqueueReflect } from "@/lib/lover/brain/jobs";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
 import { upsertMessage, appendBrainLog, getProfileData } from "@/lib/lover/brain/store";
@@ -247,7 +247,7 @@ export const Route = createFileRoute("/api/talk")({
               });
 
               if (profile.brainOn && !failed && display) await enqueueReflect(userCreatedAt);
-              await enqueuePeriodicIfDue(nowMs, timeZone);
+              await enqueueReportIfDue(nowMs, timeZone);
               await runInBackground(() => drainJobs(LONG_DRAIN_MS));
             } catch (err) {
               const outcome = talkFailFromResult({

@@ -1,6 +1,6 @@
 import { getSql } from "../../db.ts";
 import { now } from "./clock.ts";
-import { LOG_TEXT_DAYS, SESSION_GAP_MS, SNAPSHOT_DAYS } from "./config.ts";
+import { LOG_TEXT_DAYS, SNAPSHOT_DAYS } from "./config.ts";
 import { logRawHours } from "./log-refs.ts";
 
 const BATCH = 500;
@@ -64,44 +64,6 @@ async function trimSnapshots(nowMs: number): Promise<number> {
     [cutoff],
   );
   return Number(rows[0]?.n) || 0;
-}
-
-async function trimMindHistory(nowMs: number): Promise<number> {
-  const cutoff = nowMs - 30 * 86_400_000;
-  const db = await getSql();
-  const rows = await db.query<{ turn_seq: number; created_at: number; session_id: string | null }>(
-    `select h.turn_seq, h.created_at, t.session_id
-     from qr_mind_history h
-     left join brain_turns t on t.turn_seq = h.turn_seq
-     where h.created_at < $1
-     order by h.created_at asc, h.turn_seq asc`,
-    [cutoff],
-  );
-  const lastByKey = new Map<string, number>();
-  let gapSession = 0;
-  let lastGapAt = -Infinity;
-  for (const r of rows) {
-    let key = r.session_id;
-    if (!key) {
-      if (lastGapAt === -Infinity || r.created_at - lastGapAt > SESSION_GAP_MS) gapSession += 1;
-      lastGapAt = r.created_at;
-      key = `__gap:${gapSession}`;
-    }
-    lastByKey.set(key, r.turn_seq);
-  }
-  const keep = new Set(lastByKey.values());
-  const drop = rows.map((r) => r.turn_seq).filter((s) => !keep.has(s));
-  if (!drop.length) return 0;
-  let n = 0;
-  for (let i = 0; i < drop.length; i += BATCH) {
-    const chunk = drop.slice(i, i + BATCH);
-    const gone = await db.query<{ turn_seq: number }>(
-      `delete from qr_mind_history where turn_seq = any($1::bigint[]) returning turn_seq`,
-      [chunk],
-    );
-    n += gone.length;
-  }
-  return n;
 }
 
 async function rollupAndTrimSpend(nowMs: number): Promise<number> {
@@ -174,7 +136,6 @@ export type RetentionResult = {
   legacyHighFreq: number;
   tails: number;
   snapshots: number;
-  mindHistory: number;
   spendEvents: number;
   rawLogs: number;
   spendRate: number;
@@ -187,7 +148,6 @@ export async function runRetention(nowMs = now()): Promise<RetentionResult> {
     legacyHighFreq: 0,
     tails: 0,
     snapshots: 0,
-    mindHistory: 0,
     spendEvents: 0,
     rawLogs: 0,
     spendRate: 0,
@@ -205,7 +165,6 @@ export async function runRetention(nowMs = now()): Promise<RetentionResult> {
       if (n < BATCH) break;
     }
     result.snapshots = await trimSnapshots(nowMs);
-    result.mindHistory = await trimMindHistory(nowMs);
     result.spendEvents = await rollupAndTrimSpend(nowMs);
     result.rawLogs = await trimRawLogs(nowMs);
     result.spendRate = await trimSpendRate(nowMs);

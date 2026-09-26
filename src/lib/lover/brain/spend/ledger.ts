@@ -3,7 +3,6 @@ import { now } from "../clock.ts";
 import { getMeta } from "../store.ts";
 import { localDay } from "../time.ts";
 import { resolveTz } from "../tz.ts";
-import { defaultSpendLimits, type SpendLimits, type SpendLevel, type SpendScope } from "./policy.ts";
 import type { CostSource } from "../usage.ts";
 
 export type SpendEventInput = {
@@ -39,11 +38,6 @@ let snap: TotalsSnap | null = null;
 
 export function resetSpendSnap() {
   snap = null;
-}
-
-export async function resolvedLimits(): Promise<SpendLimits> {
-  const meta = await getMeta();
-  return { ...defaultSpendLimits(), ...(meta.spendLimits ?? {}) };
 }
 
 export async function loadTotals(force = false): Promise<TotalsSnap> {
@@ -148,21 +142,9 @@ export async function recordSpend(ev: SpendEventInput): Promise<void> {
   }
 }
 
-export async function listOverrides(day: string, month: string): Promise<{ day: boolean; month: boolean }> {
-  const db = await getSql();
-  const rows = await db.query<{ scope: string; period: string }>(
-    `select scope, period from spend_overrides where (scope = 'day' and period = $1) or (scope = 'month' and period = $2)`,
-    [day, month],
-  );
-  return {
-    day: rows.some((r) => r.scope === "day"),
-    month: rows.some((r) => r.scope === "month"),
-  };
-}
-
 export async function writeAlert(
-  scope: SpendScope | "rate",
-  level: SpendLevel | "rate",
+  scope: string,
+  level: string,
   totalUsd: number | null,
   detail: string,
 ): Promise<boolean> {
@@ -191,14 +173,6 @@ export async function writeAlert(
     console.error("[spend] alert failed", err);
     return false;
   }
-}
-
-export async function insertOverride(scope: SpendScope, period: string, note: string): Promise<void> {
-  const db = await getSql();
-  await db.query(
-    `insert into spend_overrides (scope, period, created_at, note) values ($1,$2,$3,$4)`,
-    [scope, period, now(), note],
-  );
 }
 
 export async function bumpRate(bucket: string): Promise<number> {

@@ -1,33 +1,11 @@
-import { clampDossierMaxChars, DOSSIER_MAX_CHARS, SESSION_GAP_MS } from "./config.ts";
 import { now } from "./clock.ts";
-import { callModel, type CallModelResult } from "./llm.ts";
-import { enqueue } from "./jobs.ts";
-import { isNightNoiseBody, modelFacingText } from "../message-markup.ts";
-import {
-  getInner,
-  getMeta,
-  getProfileData,
-  getProfilePrompt,
-  listPortrait,
-  sql,
-} from "./store.ts";
-import { formatClock, localDay, shiftDay } from "./time.ts";
-import { resolveTz } from "./tz.ts";
-import { lockedProfile } from "../types.ts";
-import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
-import { loadPrompt } from "./prompts/store.ts";
-import { dossierSections } from "./voice/pack-build.ts";
-import { identityBlock } from "./life.ts";
-import { readIdentity } from "./life-store.ts";
+import { sql } from "./store.ts";
 import type { JsonValue } from "./turn-trace.ts";
-import {
-  applyDossierOps,
-  batchConversation,
-  DEFAULT_DOSSIER,
-  editorDue,
-  type ConvoItem,
-} from "./dossier-text.ts";
 
+/**
+ * 他记得的: one document with a size cap (docs/brain.md). The night pass rewrites it whole;
+ * she can edit it or roll it back in 他的心. Every change keeps a version.
+ */
 export type DossierRow = {
   body: string;
   cursorAt: number;
@@ -44,43 +22,6 @@ export type DossierVersion = {
   author: string;
   ops: JsonValue | null;
   createdAt: number;
-};
-
-type Completer = typeof callModel;
-
-const OPS_SCHEMA = {
-  name: "dossier_ops",
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["ops"],
-    properties: {
-      ops: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["section", "action", "old", "new"],
-          properties: {
-            section: { type: "string" },
-            action: { type: "string", enum: ["add", "replace", "remove"] },
-            old: { type: "string" },
-            new: { type: "string" },
-          },
-        },
-      },
-    },
-  },
-};
-
-const BODY_SCHEMA = {
-  name: "dossier_body",
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["body"],
-    properties: { body: { type: "string" } },
-  },
 };
 
 function asJson(value: unknown): JsonValue | null {
@@ -113,12 +54,9 @@ export async function getDossier(): Promise<DossierRow> {
   return rowOf(rows[0]);
 }
 
-/** What the reply and reflect prompts should see. Old longterm only until this document is live. */
+/** What the reply, the mind and the night pass see. */
 export async function dossierTextForModel(): Promise<string> {
-  const row = await getDossier();
-  if (row.active) return row.body.trim();
-  const [meta, portrait] = await Promise.all([getMeta(), listPortrait()]);
-  return dossierSections(meta.selfSummary, meta.bondSummary, portrait);
+  return (await getDossier()).body.trim();
 }
 
 export async function listDossierVersions(limit = 40): Promise<DossierVersion[]> {
@@ -152,7 +90,7 @@ async function writeVersion(input: {
   );
 }
 
-export async function saveDossierBody(body: string, author: "rosie" | "seed" | "editor" | "compact"): Promise<DossierRow> {
+export async function saveDossierBody(body: string, author: "rosie"): Promise<DossierRow> {
   const db = await sql();
   const at = now();
   const current = await getDossier();
@@ -182,84 +120,6 @@ export async function publishMemory(body: string, author: "night" | "import", cu
   return getDossier();
 }
 
-export async function enableDossier(body: string): Promise<DossierRow> {
-  return publishLive(body, "rosie", { enable: true });
-}
-
-/** Copy a seed draft (or a freshly generated body) into the live document. */
-export async function activateDossierBody(body: string): Promise<DossierRow> {
-  return publishLive(body, "seed", { activate: true });
-}
-
-async function publishLive(body: string, author: "rosie" | "seed", ops: unknown): Promise<DossierRow> {
-  const db = await sql();
-  const at = now();
-  const current = await getDossier();
-  const version = current.version + 1;
-  const latest = await db.query<{ at: number | null }>(
-    "select max(created_at)::float8 as at from qingran_messages",
-  );
-  const cursor = Number(latest[0]?.at ?? 0) || 0;
-  const text = body.endsWith("\n") ? body : `${body}\n`;
-  await db.query(
-    `update qr_dossier
-     set body = $1, version = $2, updated_at = $3, active = true, cursor_at = $4, turns_since_edit = 0
-     where id = 1`,
-    [text, version, at, cursor],
-  );
-  await writeVersion({ version, body: text, author, ops, at });
-  return getDossier();
-}
-
-const ACTIVATE_KEY = "dossier:activate";
-
-/**
- * One-shot while `active` is still false. A body she already saved stays.
- * Otherwise a seed draft goes live as-is. No draft means generate one, then go live.
- */
-export async function ensureDossierLive(complete: Completer = callModel): Promise<"already" | "kept" | "draft" | "seeded"> {
-  const row = await getDossier();
-  if (row.active) return "already";
-  if (row.body.trim()) {
-    await flipActiveOnly();
-    return "kept";
-  }
-  const versions = await listDossierVersions(40);
-  const draft = versions.find((version) => version.author === "seed" && version.body.trim());
-  if (draft) {
-    if ((await getDossier()).active) return "already";
-    await activateDossierBody(draft.body);
-    return "draft";
-  }
-  const seeded = await seedDossierDraft(complete);
-  if ((await getDossier()).active) return "already";
-  await activateDossierBody(seeded.body);
-  return "seeded";
-}
-
-async function flipActiveOnly(): Promise<void> {
-  const db = await sql();
-  const at = now();
-  const latest = await db.query<{ at: number | null }>(
-    "select max(created_at)::float8 as at from qingran_messages",
-  );
-  const cursor = Number(latest[0]?.at ?? 0) || 0;
-  await db.query(
-    `update qr_dossier set active = true, cursor_at = $1, turns_since_edit = 0, updated_at = $2 where id = 1`,
-    [cursor, at],
-  );
-}
-
-export async function enqueueDossierActivate(): Promise<boolean> {
-  if ((await getDossier()).active) return false;
-  const db = await sql();
-  await db.query(
-    `delete from brain_jobs where dedupe_key = $1 and status in ('done', 'failed')`,
-    [ACTIVATE_KEY],
-  );
-  return enqueue("editor", ACTIVATE_KEY, { reason: "activate" });
-}
-
 export async function rollbackDossier(versionId: number): Promise<DossierRow> {
   const db = await sql();
   const rows = await db.query<Record<string, unknown>>(
@@ -269,242 +129,4 @@ export async function rollbackDossier(versionId: number): Promise<DossierRow> {
   const body = rows[0] ? String(rows[0].body ?? "") : null;
   if (body == null) throw new Error("找不到这个版本");
   return saveDossierBody(body, "rosie");
-}
-
-async function maxChars(): Promise<number> {
-  const profile = lockedProfile(await getProfileData());
-  return clampDossierMaxChars(profile.dossierMaxChars, DOSSIER_MAX_CHARS);
-}
-
-async function listAfterCursor(cursorAt: number): Promise<Array<Record<string, unknown>>> {
-  const db = await sql();
-  return db.query<Record<string, unknown>>(
-    `select id, role, body, created_at
-     from qingran_messages
-     where created_at > $1 and forgotten_at is null and kind is distinct from 'system_notice'
-     order by created_at asc, id asc`,
-    [cursorAt],
-  );
-}
-
-function convoItems(rows: Array<Record<string, unknown>>, timeZone: string): ConvoItem[] {
-  const items: ConvoItem[] = [];
-  for (const row of rows) {
-    const text = modelFacingText(String(row.body ?? ""));
-    if (!text.trim() || isNightNoiseBody(String(row.body ?? ""))) continue;
-    const who = row.role === "user" ? "Rosie" : "清然";
-    const createdAt = Number(row.created_at) || 0;
-    items.push({
-      createdAt,
-      line: `[${formatClock(createdAt, timeZone)}] ${who}：${text}`,
-    });
-  }
-  return items;
-}
-
-async function commitBody(input: {
-  body: string;
-  cursorAt: number;
-  author: string;
-  ops: unknown;
-  resetTurns: boolean;
-}): Promise<void> {
-  const db = await sql();
-  const at = now();
-  const current = await getDossier();
-  const version = current.version + 1;
-  await db.query(
-    `update qr_dossier
-     set body = $1, version = $2, updated_at = $3, cursor_at = $4,
-         turns_since_edit = case when $5::boolean then 0 else turns_since_edit end
-     where id = 1`,
-    [input.body, version, at, input.cursorAt, input.resetTurns],
-  );
-  await writeVersion({ version, body: input.body, author: input.author, ops: input.ops, at });
-}
-
-async function identityLine(): Promise<string> {
-  const block = identityBlock((await readIdentity()).identity);
-  return block ? `${block}\n` : "";
-}
-
-function packed(variant: "main" | "compact" | "seed", vars: Record<string, string>, template: string) {
-  const messages = renderVariant(parsePromptBody("editor", template), variant, vars);
-  const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
-  const user = messages.filter((message) => message.role !== "system").map((message) => message.content).join("\n\n");
-  return { system, user };
-}
-
-async function requireJson(result: CallModelResult, label: string): Promise<Record<string, unknown>> {
-  if (!result.ok || !result.json || typeof result.json !== "object") {
-    throw new Error(`${label}:${result.failKind || "bad json"}`);
-  }
-  return result.json as Record<string, unknown>;
-}
-
-/** Opinions the mind judged sincere, since the last edit. */
-async function sincereFeedbackSince(fromMs: number, tz: string): Promise<string> {
-  const db = await sql();
-  const rows = await db.query<{ created_at: number; feedback: string }>(
-    `select created_at::float8 as created_at, data->'output'->>'feedback' as feedback
-     from qr_inner_log
-     where created_at > $1 and data->>'kind' = 'reflect' and coalesce(data->'output'->>'feedback', '') <> ''
-     order by id asc limit 50`,
-    [fromMs],
-  );
-  if (!rows.length) return "（没有）";
-  return rows.map((r) => `[${formatClock(Number(r.created_at), tz)}] ${String(r.feedback).trim()}`).join("\n");
-}
-
-export async function runEditor(reason = "turns", complete: Completer = callModel): Promise<{ batches: number }> {
-  const row = await getDossier();
-  const meta = await getMeta();
-  const tz = resolveTz(meta.timeZone);
-  const unread = await listAfterCursor(row.cursorAt);
-  const items = convoItems(unread, tz);
-  if (!items.length) {
-    const db = await sql();
-    await db.query("update qr_dossier set turns_since_edit = 0 where id = 1");
-    return { batches: 0 };
-  }
-  const loaded = await loadPrompt("editor");
-  const [systemPrompt, profileData] = await Promise.all([getProfilePrompt(), getProfileData()]);
-  const story = lockedProfile(profileData).storyline.trim() || "（没有）";
-  const feedback = await sincereFeedbackSince(row.cursorAt, tz);
-  const limit = await maxChars();
-  const identity_block = await identityLine();
-  let body = row.body.trim() ? row.body : "（还没有）";
-  const batches = batchConversation(items);
-  for (let i = 0; i < batches.length; i += 1) {
-    const batch = batches[i]!;
-    const conversation = batch.map((item) => item.line).join("\n");
-    const prompt = packed("main", {
-      identity_block,
-      system_prompt: systemPrompt,
-      story,
-      dossier: body,
-      feedback,
-      conversation,
-      max_chars: String(limit),
-    }, loaded.body);
-    const result = await complete("editor", {
-      system: prompt.system,
-      input: prompt.user,
-      schema: BODY_SCHEMA,
-      promptKey: loaded.key,
-      promptHash: loaded.hash,
-      outputRef: `dossier:${reason}`,
-    });
-    const json = await requireJson(result, "editor");
-    const next = typeof json.body === "string" ? json.body.trim() : "";
-    const cursor = batch[batch.length - 1]!.createdAt;
-    if (next) body = `${next.length > limit ? next.slice(0, limit) : next}\n`;
-    await commitBody({
-      body,
-      cursorAt: cursor,
-      author: "editor",
-      ops: { reason, empty: !next },
-      resetTurns: i === batches.length - 1,
-    });
-  }
-  return { batches: batches.length };
-}
-
-export async function seedDossierDraft(complete: Completer = callModel): Promise<DossierVersion> {
-  const loaded = await loadPrompt("editor");
-  const [systemPrompt, meta, portrait, inner] = await Promise.all([
-    getProfilePrompt(),
-    getMeta(),
-    listPortrait(),
-    getInner(),
-  ]);
-  const tz = resolveTz(meta.timeZone);
-  const today = localDay(now(), tz);
-  const fromDay = shiftDay(today, -60);
-  const db = await sql();
-  const notes = await db.query<Record<string, unknown>>(
-    `select local_day, subject, weight, text from mem_notes
-     where status = 'active' and weight >= 3 and local_day >= $1
-     order by local_day desc, weight desc
-     limit 150`,
-    [fromDay],
-  );
-  const story = (await import("./story.ts")).loadStorySeed();
-  const storyText = [
-    ...story.portrait.map((row) => `画像 ${row.topic}：${row.body}`),
-    ...story.notes.map((row) => `${row.local_day} ${row.subject}：${row.text}`),
-  ].join("\n");
-  const legacy = [
-    meta.selfSummary.trim() ? `我自己：${meta.selfSummary.trim()}` : "",
-    meta.bondSummary.trim() ? `我们：${meta.bondSummary.trim()}` : "",
-    ...portrait
-      .filter((row) => row.status === "active")
-      .map((row) => `${row.topic}：${row.body}`),
-    inner.longing.trim() ? `惦记：${inner.longing.trim()}` : "",
-  ].filter(Boolean).join("\n");
-  const noteText = notes.map((row) => `${row.local_day} ${row.subject} w${row.weight}：${row.text}`).join("\n");
-  const limit = await maxChars();
-  const identity_block = await identityLine();
-  const prompt = packed("seed", {
-    identity_block,
-    system_prompt: systemPrompt,
-    max_chars: String(limit),
-    story: storyText || "（没有）",
-    legacy: legacy || "（没有）",
-    notes: noteText || "（没有）",
-  }, loaded.body);
-  const result = await complete("editor", {
-    system: prompt.system,
-    input: prompt.user,
-    schema: BODY_SCHEMA,
-    promptKey: loaded.key,
-    promptHash: loaded.hash,
-    outputRef: "dossier:seed",
-  });
-  const json = await requireJson(result, "seed");
-  const body = typeof json.body === "string" ? json.body.trim() : "";
-  if (!body) throw new Error("seed:empty");
-  const text = body.length > limit ? body.slice(0, limit) : body;
-  const stored = text.endsWith("\n") ? text : `${text}\n`;
-  const at = now();
-  const current = await getDossier();
-  await writeVersion({ version: current.version, body: stored, author: "seed", ops: null, at });
-  const versions = await listDossierVersions(1);
-  const draft = versions[0];
-  if (!draft) throw new Error("seed:not stored");
-  return draft;
-}
-
-export async function noteRosieTurn(createdAt: number): Promise<void> {
-  if (!(await getDossier()).active) await enqueueDossierActivate();
-  const db = await sql();
-  const prev = await db.query<{ at: number | null }>(
-    `select max(created_at)::float8 as at from qingran_messages
-     where role = 'user' and created_at < $1 and forgotten_at is null`,
-    [createdAt],
-  );
-  const previousAt = Number(prev[0]?.at ?? 0) || 0;
-  const bumped = await db.query<Record<string, unknown>>(
-    `update qr_dossier set turns_since_edit = turns_since_edit + 1 where id = 1
-     returning turns_since_edit, cursor_at, active`,
-  );
-  const row = rowOf(bumped[0]);
-  const unreadRows = await db.query<{ n: number }>(
-    `select count(*)::int as n from qingran_messages where created_at > $1 and forgotten_at is null`,
-    [row.cursorAt],
-  );
-  const gap = previousAt > 0 && createdAt - previousAt > SESSION_GAP_MS;
-  const due = editorDue({
-    active: row.active,
-    turns: row.turnsSinceEdit,
-    gap,
-    unread: Number(unreadRows[0]?.n ?? 0) > 0,
-  });
-  if (!due) return;
-  await enqueue("editor", due === "manual" ? `editor:manual:${createdAt}` : "editor:due", { reason: due });
-}
-
-export async function enqueueEditorNow(): Promise<void> {
-  const at = now();
-  await enqueue("editor", `editor:manual:${at}`, { reason: "manual" }, at, true);
 }

@@ -64,20 +64,7 @@ export const MODEL_CAPS: Record<
   },
 };
 
-export type Route =
-  | "voice"
-  | "reflect"
-  | "archive"
-  | "dusk"
-  | "portrait"
-  | "assign"
-  | "backfill"
-  | "synth"
-  | "report"
-  | "ask"
-  | "editor"
-  | "reach"
-  | "replay";
+export type Route = "voice" | "reflect" | "report" | "editor" | "replay";
 
 export const ROUTES: Record<
   Route,
@@ -85,16 +72,8 @@ export const ROUTES: Record<
 > = {
   voice: { cls: "FAST_THINKER", effort: "low", timeoutMs: 60_000, maxOutput: 2_000 },
   reflect: { cls: "FAST_THINKER", effort: "medium", timeoutMs: 240_000, maxOutput: 4_000 },
-  archive: { cls: "WORKHORSE", timeoutMs: 30_000, maxOutput: 6_000 },
-  dusk: { cls: "ANALYST", timeoutMs: 60_000, maxOutput: 8_000 },
-  portrait: { cls: "ANALYST", timeoutMs: 60_000, maxOutput: 6_000 },
-  assign: { cls: "WORKHORSE", timeoutMs: 60_000, maxOutput: 6_000 },
-  backfill: { cls: "WORKHORSE", timeoutMs: 60_000, maxOutput: 6_000 },
-  synth: { cls: "DEEP_THINKER", timeoutMs: 180_000, maxOutput: 20_000 },
   report: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 4_000 },
-  ask: { cls: "AGENT", timeoutMs: 90_000, maxOutput: 8_000 },
   editor: { cls: "ANALYST", timeoutMs: 240_000, maxOutput: 12_000 },
-  reach: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 2_000 },
   replay: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 4_000 },
 };
 
@@ -120,6 +99,7 @@ export function clampHistoryWindow(value: unknown, fallback = HISTORY_WINDOW): n
   return Math.max(HISTORY_WINDOW_MIN, Math.min(HISTORY_WINDOW_MAX, Math.round(n)));
 }
 export const REFLECT_WINDOW = 20;
+export const REFLECT_PROMPT_CACHE_KEY = "qingran-reflect";
 export const DOSSIER_MAX_CHARS = 4000;
 export const DOSSIER_MAX_CHARS_MIN = 2000;
 export const DOSSIER_MAX_CHARS_MAX = 8000;
@@ -130,74 +110,11 @@ export function clampDossierMaxChars(value: unknown, fallback = DOSSIER_MAX_CHAR
   return Math.max(DOSSIER_MAX_CHARS_MIN, Math.min(DOSSIER_MAX_CHARS_MAX, Math.round(n)));
 }
 
-export const GLOW_HALF_LIFE_DAYS = 2;
 
-export function clampGlowHalfLifeDays(value: unknown, fallback = GLOW_HALF_LIFE_DAYS): number {
-  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
-  if (!Number.isFinite(n)) return fallback;
-  const stepped = Math.round(n * 10) / 10;
-  return Math.max(0.5, Math.min(7, stepped));
-}
-export const ARCHIVE_BATCH_MAX = 40;
-export const ARCHIVE_MIN_OVERFLOW = 8;
 export const SESSION_GAP_MS = 30 * 60_000;
-/** longing stays in the reply for a week after the text last changed. */
-export const LONGING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-export const PLAN_OPEN_MAX = 5;
 /** Voice clips kept when label mode is off. Older files are deleted; messages stay. */
 export const RECENT_CLIP_KEEP = 20;
-export const PLAN_MAX_HOURS = 72;
-export const INDEX_MAX_ITEMS = 150;
-export const INDEX_CORE_MAX = 60; // 放在 Reflector B 段（可缓存）
-export const INDEX_RELATED_MAX = 30; // 放在 Reflector C 段（每轮变化）
-export const REFLECT_PROMPT_CACHE_KEY = "qingran-reflect";
-export const PICK_MAX = 6;
-export const PICK_MIND_SLOTS = 4;
-export const PICK_QUERY_SLOTS = 2;
-export const HOT_FALLBACK_K = 2;
-export const MIND_MAX_CHARS = 500;
-export const PORTRAIT_MAX_CHARS = 600;
-export const PORTRAIT_ACTIVE_MAX = 12;
-export const PORTRAIT_ACTIVE_MIN = 4;
-export const PORTRAIT_ACTIVE_HARD_MAX = 40;
-export const PORTRAIT_STALE_DAYS = 14;
-export const PORTRAIT_STALE_DAYS_MIN = 3;
-export const PORTRAIT_STALE_DAYS_MAX = 90;
-export const RETRIEVE_MIN_TERMS = 1;
-export const RETRIEVE_MIN_TERMS_MIN = 1;
-export const RETRIEVE_MIN_TERMS_MAX = 6;
-export const SELF_MAX_CHARS = 300;
-export const BOND_MAX_CHARS = 200;
 
-export function clampPortraitActiveMax(value: unknown, fallback = PORTRAIT_ACTIVE_MAX): number {
-  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(PORTRAIT_ACTIVE_MIN, Math.min(PORTRAIT_ACTIVE_HARD_MAX, Math.round(n)));
-}
-
-export function clampPortraitStaleDays(value: unknown, fallback = PORTRAIT_STALE_DAYS): number {
-  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(PORTRAIT_STALE_DAYS_MIN, Math.min(PORTRAIT_STALE_DAYS_MAX, Math.round(n)));
-}
-
-/** How many non-filler words a keyword hit must share before it is injected. */
-export function clampRetrieveMinTerms(value: unknown, fallback = RETRIEVE_MIN_TERMS): number {
-  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(RETRIEVE_MIN_TERMS_MIN, Math.min(RETRIEVE_MIN_TERMS_MAX, Math.round(n)));
-}
-
-export const LAG_MAX = 3;
-export const FINDING_MIN_N11 = 4;
-export const FINDING_MIN_EXPOSED = 5;
-export const FINDING_MIN_LIFT = 1.5;
-export const FINDING_MIN_UNEXPOSED = 5; // 对照组（没有前因的天）至少这么多天
-export const FINDING_MAX_P = 0.01; // 单侧 Fisher exact test
-export const RECOVERY_MAX_P = 0.05; // 恢复路径样本少，阈值放宽；报告中标注为“线索”
-export const CLUE_MAX_P = 0.05; // p 在 (FINDING_MAX_P, CLUE_MAX_P] 的条目标成 clue
-export const STUCK_MIN_WEEKS = 3;
-export const STALL_DAYS = 14;
 
 export const JOB_MAX_ATTEMPTS = 3;
 export const DRAIN_BUDGET_MS = 15_000;

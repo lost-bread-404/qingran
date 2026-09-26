@@ -6,20 +6,7 @@ export type PromptModelPick = {
   effort: Effort;
 };
 
-const ROUTE_KEYS = new Set<string>([
-  "voice",
-  "reflect",
-  "archive",
-  "dusk",
-  "portrait",
-  "assign",
-  "backfill",
-  "synth",
-  "report",
-  "ask",
-  "editor",
-  "reach",
-]);
+const ROUTE_KEYS = new Set<string>(["voice", "reflect", "report", "editor"]);
 
 function asRoute(key: string): Route | null {
   return ROUTE_KEYS.has(key) ? (key as Route) : null;
@@ -27,7 +14,7 @@ function asRoute(key: string): Route | null {
 
 /** Code defaults. A saved profile pick replaces these on the next run. */
 export function defaultPromptModel(key: string): PromptModelPick {
-  const route = key === "experiments" ? "report" : (asRoute(key) ?? "voice");
+  const route = asRoute(key) ?? "voice";
   const resolved = resolveRoute(route);
   return { model: resolved.model, effort: resolved.effort };
 }

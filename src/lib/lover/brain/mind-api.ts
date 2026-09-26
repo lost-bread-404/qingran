@@ -1,32 +1,26 @@
 import { createServerFn } from "@tanstack/react-start";
 import { now } from "./clock.ts";
-import { getMeta, getProfileData, sql } from "./store.ts";
+import { getMeta, getProfileData } from "./store.ts";
 import { resolveTz } from "./tz.ts";
 import { lockedProfile } from "../types.ts";
-import { clockOf } from "./day-notes.ts";
 import { localDay } from "./time.ts";
 import { effectiveMode, recordMode } from "./mode.ts";
 import { insertManualEdit } from "./life-store.ts";
 import { runInBackground } from "./wait-until.ts";
 import { LONG_DRAIN_MS } from "./config.ts";
-import { addPlan, dayWindow, formatLocal, getHeart, listPlans, parseLocalTime, recentDays, removePlan, setFocus, setHeart } from "./heart.ts";
+import { addPlan, formatLocal, getHeart, listPlans, parseLocalTime, recentDays, removePlan, saveDayTimeline, setFocus, setHeart, todayText } from "./heart.ts";
 
 /** Settings → 他的心: everything the brain holds, readable and editable. */
 export const brainGetMind = createServerFn({ method: "GET" }).handler(async () => {
   const at = now();
   const tz = resolveTz((await getMeta()).timeZone);
   const profile = lockedProfile(await getProfileData());
-  const { from } = dayWindow(localDay(at, tz), tz);
-  const db = await sql();
-  const [heart, plans, days, current, notes] = await Promise.all([
+  const [heart, plans, days, current, today] = await Promise.all([
     getHeart(),
     listPlans(),
-    recentDays(14),
+    recentDays(14, localDay(at, tz)),
     effectiveMode(at, tz, profile.modes.map((m) => m.id)),
-    db.query<{ id: number; at: number; text: string }>(
-      `select id, at::float8 as at, text from qr_day_notes where at >= $1 order by at asc, id asc`,
-      [from],
-    ),
+    todayText(at, tz),
   ]);
   return {
     timeZone: tz,
@@ -39,7 +33,7 @@ export const brainGetMind = createServerFn({ method: "GET" }).handler(async () =
       text: p.text,
       setBy: p.setBy,
     })),
-    today: notes.map((n) => ({ id: Number(n.id), clock: clockOf(Number(n.at), tz), text: String(n.text) })),
+    today,
     days: days.reverse(),
     mode: current,
     modes: profile.modes.map((m) => ({ id: m.id, name: m.name })),
@@ -75,12 +69,15 @@ export const brainEditPlan = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-export const brainDeleteDayNote = createServerFn({ method: "POST" })
-  .validator((input: { id: number }) => ({ id: Number(input?.id) }))
+/** 他的心 → 今天: she can correct today's text by hand. */
+export const brainSaveToday = createServerFn({ method: "POST" })
+  .validator((input: { text: string }) => ({ text: String(input?.text ?? "") }))
   .handler(async ({ data }) => {
-    if (!Number.isFinite(data.id)) return { ok: false as const };
-    const db = await sql();
-    await db.query(`delete from qr_day_notes where id = $1`, [data.id]);
+    const at = now();
+    const tz = resolveTz((await getMeta()).timeZone);
+    const before = await todayText(at, tz);
+    await saveDayTimeline(localDay(at, tz), data.text.trim(), at);
+    await insertManualEdit("today", { text: before }, { text: data.text.trim() });
     return { ok: true as const };
   });
 

@@ -7,14 +7,12 @@ import {
   listProfileVersions,
   readProfileSnapshot,
   restoreProfileVersion,
-  writeProfileDocument,
   type FieldRevs,
 } from "./profile-patch.ts";
 import {
   applyMemoryCursor,
   lockedProfile,
   type ChatMessage,
-  type Memory,
   type Profile,
 } from "./types";
 import { sortConversation } from "./pair-messages";
@@ -23,14 +21,12 @@ type Room = {
   profile: Profile;
   revs: FieldRevs;
   messages: ChatMessage[];
-  memories: Memory[];
 };
 
 const EMPTY_ROOM: Room = {
   profile: lockedProfile(),
   revs: emptyFieldRevs(),
   messages: [],
-  memories: [],
 };
 
 async function clientSource(): Promise<string> {
@@ -47,7 +43,7 @@ async function clientSource(): Promise<string> {
 export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
   try {
     const sql = await getSql();
-    const [saved, messages, memories] = await Promise.all([
+    const [saved, messages] = await Promise.all([
       readProfileSnapshot(),
       sql<{
         id: string;
@@ -65,16 +61,6 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
           id desc
         limit 240
       `,
-      sql<{
-        id: string;
-        body: string;
-        created_at: number;
-        updated_at: number;
-      }>`
-        select id, body, created_at, updated_at
-        from qingran_memories
-        order by updated_at asc
-      `,
     ]);
     const profile = saved.profile;
     return {
@@ -86,12 +72,6 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
           profile.memoryCursor,
         ),
       ),
-      memories: memories.map((m) => ({
-        id: m.id,
-        text: m.body,
-        createdAt: Number(m.created_at),
-        updatedAt: Number(m.updated_at),
-      })),
     } satisfies Room;
   } catch {
     return { ...EMPTY_ROOM, loadFailed: true as const };
@@ -142,50 +122,6 @@ export const appendRoomMessage = createServerFn({ method: "POST" })
     `;
     return { ok: true as const };
   });
-
-export const saveRoomMemories = createServerFn({ method: "POST" })
-  .validator((input: Memory[]) => input)
-  .handler(async ({ data }) => {
-    const sql = await getSql();
-    const list = data.slice(-80);
-    for (const m of list) {
-      await sql`
-        insert into qingran_memories (id, body, created_at, updated_at)
-        values (${m.id}, ${m.text.slice(0, 240)}, ${m.createdAt}, ${m.updatedAt})
-        on conflict (id) do update set
-          body = excluded.body, updated_at = excluded.updated_at
-      `;
-    }
-    return { ok: true as const };
-  });
-
-export const restoreRoomBackup = createServerFn({ method: "POST" })
-  .validator((input: { profile: Profile; memories: Memory[]; messages: ChatMessage[] }) => input)
-  .handler(async ({ data }) => {
-    const sql = await getSql();
-    await writeProfileDocument(lockedProfile(data.profile), "backup");
-    const memories = data.memories.slice(-80);
-    for (const m of memories) {
-      await sql`
-        insert into qingran_memories (id, body, created_at, updated_at)
-        values (${m.id}, ${m.text.slice(0, 240)}, ${m.createdAt}, ${m.updatedAt})
-        on conflict (id) do update set
-          body = excluded.body, updated_at = excluded.updated_at
-      `;
-    }
-    const messages = data.messages.slice(-240);
-    for (const msg of messages) {
-      const kind = msg.kind === "steer" || msg.kind === "setting" ? msg.kind : "say";
-      await sql`
-        insert into qingran_messages (id, role, body, created_at, kind)
-        values (${msg.id}, ${msg.role}, ${encodeStoredMessage(msg)}, ${msg.createdAt}, ${kind})
-        on conflict (id) do update
-          set body = excluded.body, kind = excluded.kind
-      `;
-    }
-    return { ok: true as const };
-  });
-
 
 export const clearRoomMessages = createServerFn({ method: "POST" }).handler(
   async () => {

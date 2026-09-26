@@ -63,22 +63,7 @@ export async function brainDbSize(): Promise<DbSize> {
     } catch {
       tables = [];
     }
-    let growth30dBytes: number | null = null;
-    try {
-      const hist = await db.query<{ bytes: number; at: number }>(
-        `select (data->'system'->>'dbBytes')::bigint as bytes, updated_at as at
-         from brain_daily_digest
-         where data->'system'->>'dbBytes' is not null
-         order by day desc limit 31`,
-      );
-      const latest = hist[0];
-      const old = hist.find((h) => latest && Number(latest.at) - Number(h.at) >= 25 * 86_400_000);
-      if (latest && old) {
-        growth30dBytes = Number(latest.bytes) - Number(old.bytes);
-      }
-    } catch {
-      growth30dBytes = null;
-    }
+    const growth30dBytes: number | null = null;
     const usedRatio =
       totalBytes != null && limitMb > 0 ? totalBytes / (limitMb * 1024 * 1024) : null;
     let fillDate: string | null = null;
