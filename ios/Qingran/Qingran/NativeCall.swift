@@ -20,6 +20,7 @@ final class NativePipeline {
   private var inSpeech = false
   private var speechMs = 0
   private var silenceMs = 0
+  private var speechPeak: Float = 0
   private var spikeMs = 0
   private var noiseFloor: Float = 0.008
   private var speech: [Int16] = []
@@ -96,6 +97,7 @@ final class NativePipeline {
     running = false
     busy = false
     inSpeech = false
+    speechPeak = 0
     speech.removeAll()
     playing = false
     engine.inputNode.removeTap(onBus: 0)
@@ -157,6 +159,7 @@ final class NativePipeline {
         inSpeech = true
         speechMs = 0
         silenceMs = 0
+        speechPeak = 0
         speech.removeAll(keepingCapacity: true)
         emit?(["type": "phase", "phase": "speaking-you"])
       } else {
@@ -165,16 +168,36 @@ final class NativePipeline {
     }
     speech.append(contentsOf: samples)
     speechMs += chunkMs
-    if rms < start { silenceMs += chunkMs } else { silenceMs = 0 }
+    let bar = max(start, speechPeak * NativeVad.endLiveRatio)
+    if rms >= bar {
+      speechPeak = followPeak(speechPeak, rms, chunkMs)
+      silenceMs = 0
+    } else {
+      silenceMs += chunkMs
+    }
     if speechMs >= NativeVad.maxUtteranceMs || (speechMs >= NativeVad.minSpeechMs && silenceMs >= NativeVad.silenceMs) {
       let said = speech
       inSpeech = false
       speech.removeAll(keepingCapacity: true)
       speechMs = 0
       silenceMs = 0
+      speechPeak = 0
       busy = true
       Task { await self.utter(said) }
     }
+  }
+
+  private func followPeak(_ prev: Float, _ rms: Float, _ chunkMs: Int) -> Float {
+    let dt = Float(max(0, chunkMs))
+    if prev <= 0 {
+      let k = 1 - pow(0.5, dt / NativeVad.peakAttackMs)
+      return rms * k
+    }
+    if rms >= prev {
+      let k = 1 - pow(0.5, dt / NativeVad.peakAttackMs)
+      return prev + (rms - prev) * k
+    }
+    return max(rms, prev * pow(0.5, dt / NativeVad.peakReleaseMs))
   }
 
   private func interruptPlayback() {

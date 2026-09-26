@@ -152,6 +152,65 @@ export function isStableHumanPitch(hz: number, clarity: number, clarityCut: numb
   return hz >= HUMAN_F0_MIN_HZ && hz <= HUMAN_F0_MAX_HZ && clarity >= clarityCut;
 }
 
+/** Forget a shout this fast while she is still above the bar, so the bar follows the phrase, not one plosive. */
+export const PEAK_ATTACK_MS = 70;
+export const PEAK_RELEASE_MS = 700;
+/**
+ * A frame still counts as her voice when it stays within this fraction of the
+ * phrase's own level. The noise floor stays frozen while she is considered to
+ * be talking, and a pitched room tone above that floor used to refresh the
+ * silence timer forever (the "在听你" counter ran on for a minute). 0.45 is
+ * under a normal syllable and above leftover room noise.
+ */
+export const END_LIVE_RATIO = 0.45;
+
+export type UtteranceEndState = { peak: number };
+
+/** Rises quickly toward a syllable, falls toward the phrase. A one-frame click cannot pin the bar. */
+export function followSpeechPeak(
+  prev: number,
+  rms: number,
+  dtMs: number,
+  attackMs = PEAK_ATTACK_MS,
+  releaseMs = PEAK_RELEASE_MS,
+): number {
+  const level = Math.max(0, rms);
+  const dt = Math.max(0, dtMs);
+  const base = prev > 0 ? prev : 0;
+  if (level >= base) {
+    const k = 1 - Math.pow(0.5, dt / attackMs);
+    return base + (level - base) * k;
+  }
+  return Math.max(level, base * Math.pow(0.5, dt / releaseMs));
+}
+
+/** Energy that still belongs to this phrase, not to the room underneath it. */
+export function liveSpeechBar(floor: number, peak: number, debug = false, cuts?: VadCuts | null): number {
+  return Math.max(holdThreshold(floor, debug, cuts), Math.max(0, peak) * END_LIVE_RATIO);
+}
+
+export function stepUtteranceEnd(input: {
+  state: UtteranceEndState;
+  rms: number;
+  floor: number;
+  dtMs: number;
+  debug?: boolean;
+  cuts?: VadCuts | null;
+}): { state: UtteranceEndState; talking: boolean } {
+  const peakPrev = Math.max(0, input.state.peak);
+  const bar = liveSpeechBar(input.floor, peakPrev, input.debug ?? false, input.cuts);
+  const dt = Math.max(0, input.dtMs);
+  if (input.rms >= bar) {
+    return {
+      state: { peak: followSpeechPeak(peakPrev, input.rms, dt) },
+      talking: true,
+    };
+  }
+  // Freeze the peak. Letting it fall here would walk the bar down onto the
+  // room and the silence timer would never elapse.
+  return { state: { peak: peakPrev }, talking: false };
+}
+
 export function holdCountsAsSpeech(input: {
   rms: number;
   floor: number;

@@ -35,4 +35,8 @@ enum NativeVad {
   static let maxUtteranceMs = 30_000
   static let minSpeechMs = 220
   static let spikeMs = 80
+  /// Same idea as END_LIVE_RATIO / followSpeechPeak in src/lib/lover/vad.ts.
+  static let endLiveRatio: Float = 0.45
+  static let peakAttackMs: Float = 70
+  static let peakReleaseMs: Float = 700
 }

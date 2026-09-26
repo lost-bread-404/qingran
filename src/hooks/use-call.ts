@@ -40,14 +40,15 @@ import {
   MIN_SPEECH_MS,
   POST_QINGRAN_MS,
   canBeginUtterance,
-  holdCountsAsSpeech,
   holdThreshold,
   isSpeechStart,
   nextFloor,
   floorUpdateAllowed,
   shouldEndUtterance,
   startThreshold,
+  stepUtteranceEnd,
   VOICE_SPIKE_MS,
+  type UtteranceEndState,
 } from "@/lib/lover/vad";
 
 export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing";
@@ -85,6 +86,8 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const speechStartRef = useRef(0);
   const lastVoiceRef = useRef(0);
   const voiceBurstAtRef = useRef(0);
+  const utteranceEndRef = useRef<UtteranceEndState>({ peak: 0 });
+  const utteranceEndAtRef = useRef(0);
   const lastTextAtRef = useRef(0);
   const listenReadyAtRef = useRef(0);
   const speechRiseAtRef = useRef(0);
@@ -255,6 +258,8 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
     prerollPeakRef.current = peakTimedRms(prerollLevelsRef.current);
     lastVoiceRef.current = now;
     voiceBurstAtRef.current = now;
+    utteranceEndRef.current = { peak: 0 };
+    utteranceEndAtRef.current = now;
     if (!lastTextAtRef.current || now - lastTextAtRef.current > 400) {
       finalTextRef.current = "";
       interimRef.current = "";
@@ -470,14 +475,19 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
         speechRiseAtRef.current = 0;
       }
       if (speaking) {
-        const voiced = holdCountsAsSpeech({
+        const dtMs = utteranceEndAtRef.current
+          ? Math.min(100, Math.max(0, now - utteranceEndAtRef.current))
+          : 16;
+        utteranceEndAtRef.current = now;
+        const stepped = stepUtteranceEnd({
+          state: utteranceEndRef.current,
           rms,
           floor,
-          hz: frame.hz,
-          clarity: frame.clarity,
-          clarityCut: session.sense.voicedClarity,
+          dtMs,
           cuts,
         });
+        utteranceEndRef.current = stepped.state;
+        const voiced = stepped.talking;
         if (voiced) {
           if (!voiceBurstAtRef.current) voiceBurstAtRef.current = now;
           if (now - voiceBurstAtRef.current >= VOICE_SPIKE_MS) lastVoiceRef.current = now;
