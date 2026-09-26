@@ -180,7 +180,7 @@ export async function runNight(
     await saveDayTimeline(day, typeof json.timeline === "string" ? json.timeline.trim() : "", at);
     await replaceMindPlans(parsePlans(json.plans, tz, at), at, "night");
     const wake = typeof json.heart === "string" ? json.heart.trim() : "";
-    if (wake) await setHeart(wake, at);
+    await setHeart(wake, at);
     await setFocus("");
     const mode = typeof json.mode === "string" ? json.mode.trim() : "";
     if (profile.modes.some((m) => m.id === mode)) await recordMode({ at, mode, until: null, why: "夜里整理定的明早" });

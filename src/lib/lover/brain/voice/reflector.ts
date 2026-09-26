@@ -43,7 +43,8 @@ import {
  * - turn: after every reply — plans, focus, his own feeling (heart), next mode;
  * - silence: once when she has gone quiet — the same, plus today's text rewritten with the stretch that just ended;
  * - due: a timed plan came due while she is away — the same, plus the message he sends her (or none).
- * plans_changed=false and empty heart/mode mean "no change"; focus is written every time.
+ * plans_changed=false and an empty mode mean "no change"; focus and heart are written every time, and empty means empty
+ * (most of the time there is nothing beyond what the current mode already does, and the reply sees no 心里 block).
  */
 export const INNER_SCHEMA = {
   name: "inner",
@@ -131,7 +132,7 @@ export function reflectVars(parts: ReflectorParts): Record<string, string> {
     days: parts.days.trim() || "（还没有）",
     today: parts.today.trim() || "（还没有）",
     heart: parts.heart.trim() || "（空）",
-    focus: parts.focus?.trim() || "（还没有）",
+    focus: parts.focus?.trim() || "（空）",
     plans: parts.plans.trim() || "（没有）",
     modes: parts.modes.trim() || "（没有）",
     conversation: parts.conversation.trim() || "（还没有）",
@@ -310,7 +311,7 @@ export async function runReflector(
 
   const json = result.json as Record<string, unknown>;
   const text = (key: string) => (typeof json[key] === "string" ? String(json[key]).trim() : "");
-  await setHeart(text("heart") || heartBefore.text, at, kind === "turn" ? turnSeq : undefined);
+  await setHeart(text("heart"), at, kind === "turn" ? turnSeq : undefined);
   await setFocus(text("focus"));
   if (json.plans_changed === true) await replaceMindPlans(parsePlans(json.plans, tz, at), at);
   const mode = text("mode");

@@ -5,9 +5,9 @@ import { clockOf } from "./time.ts";
 
 /**
  * Brain v5 state, all free text:
- * - heart: how he himself feels and what he wants right now (qr_inner.now_text)
+ * - heart: the undercurrent in him that differs from the scene (qr_inner.now_text); empty when he wants what is happening
  * - plans: the day's list in order, what he means to get done; a time is optional (qr_reach_plans, at may be null)
- * - focus: the one item from the list the reply moves toward now
+ * - focus: the one item from the list the reply moves toward now; empty when the current mode's own work is all there is
  * - days: one text per day (qr_days). Today's is rewritten by the mind each time she goes quiet
  *   (her day, what he said or made up about himself, what is still owed); the night pass turns it into the day's timeline.
  * The memory document lives in qr_dossier.
@@ -243,6 +243,6 @@ export async function mindForReply(_nowMs: number, _timeZone: string): Promise<s
   const heart = await getHeart();
   const parts: string[] = [];
   if (heart.text.trim()) parts.push(heart.text.trim());
-  if (heart.focus.trim()) parts.push(`眼前想做的一件事：${heart.focus.trim()}`);
+  if (heart.focus.trim()) parts.push(`这段时间要做成的一件事：${heart.focus.trim()}`);
   return parts.join("\n");
 }
