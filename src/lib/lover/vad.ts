@@ -68,6 +68,22 @@ export const DEBUG_START_CUE_MULT = 1.05;
 export const DEBUG_HOLD_FLOOR_MIN = 0.005;
 export const DEBUG_HOLD_FLOOR_MULT = 1.4;
 
+/** Call open-bar. Well above the tracked floor so room hiss does not flash「在听你」. */
+export const CALL_START_FLOOR_MIN = 0.012;
+export const CALL_START_FLOOR_MULT = 2.2;
+/** Must stay over the bar this long. One noisy frame is not a sentence. */
+export const CALL_START_HOLD_MS = 160;
+
+export function callStartThreshold(floor: number): number {
+  const base = Number.isFinite(floor) && floor > 0 ? floor : 0.008;
+  return Math.max(CALL_START_FLOOR_MIN, base * CALL_START_FLOOR_MULT);
+}
+
+/** Energy only. The old cue path treated a bright hiss just over the floor as speech. */
+export function isCallSpeechStart(rms: number, floor: number): boolean {
+  return rms >= callStartThreshold(floor);
+}
+
 export function isSilenceMs(value: unknown): value is SilenceMs {
   return value === 1000 || value === 1500 || value === 2000;
 }

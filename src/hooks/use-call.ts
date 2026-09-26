@@ -37,16 +37,16 @@ import { isQuotaHint, QUOTA_HINT } from "@/lib/lover/xai-error";
 import {
   LISTEN_WARMUP_MS,
   CALL_START_WARMUP_MS,
-  MIN_SPEECH_MS,
   POST_QINGRAN_MS,
   canBeginUtterance,
   holdThreshold,
-  isSpeechStart,
+  isCallSpeechStart,
+  callStartThreshold,
   nextFloor,
   floorUpdateAllowed,
   shouldEndUtterance,
-  startThreshold,
   stepUtteranceEnd,
+  CALL_START_HOLD_MS,
   VOICE_SPIKE_MS,
   type UtteranceEndState,
 } from "@/lib/lover/vad";
@@ -444,8 +444,8 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
         noiseFloorRef.current = nextFloor(noiseFloorRef.current, rms, speaking, session.sense.floorCap);
       }
       const floor = noiseFloorRef.current;
-      const rising = isSpeechStart(rms, floor, frame.clarity, frame.bright, false, cuts);
-      const cut = speaking ? holdThreshold(floor, false, cuts) : startThreshold(floor, false, cuts);
+      const rising = isCallSpeechStart(rms, floor);
+      const cut = speaking ? holdThreshold(floor, false, cuts) : callStartThreshold(floor);
       setLevel(Math.min(1, rms * 8));
       setThreshold(Math.min(1, cut * 8));
       setNoiseFloor(floor);
@@ -464,8 +464,8 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
           canBeginUtterance({
             rising: true,
             heldMs: now - speechRiseAtRef.current,
-            requireHold: session.sense.minVoicedMs > 0,
-            minMs: session.sense.minVoicedMs || MIN_SPEECH_MS,
+            requireHold: true,
+            minMs: CALL_START_HOLD_MS,
           })
         ) {
           speechRiseAtRef.current = 0;

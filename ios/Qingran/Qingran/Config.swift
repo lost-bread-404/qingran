@@ -28,8 +28,9 @@ enum QingranConfig {
 /// Matches the web call defaults in src/lib/lover/vad.ts.
 enum NativeVad {
   static let sampleRate = 16_000
-  static let startFloorMin: Float = 0.004
-  static let startFloorMult: Float = 1.35
+  static let startFloorMin: Float = 0.012
+  static let startFloorMult: Float = 2.2
+  static let startHoldMs = 160
   static let noiseFloorCap: Float = 0.02
   static let silenceMs = 1_500
   static let maxUtteranceMs = 30_000
