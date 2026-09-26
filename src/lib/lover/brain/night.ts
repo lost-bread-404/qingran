@@ -14,7 +14,7 @@ import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
 import { parsePlans } from "./voice/reflector.ts";
 import { clockOf, dayNotes } from "./day-notes.ts";
-import { dayWindow, getHeart, hasDay, listPlans, plansText, replaceMindPlans, saveDayTimeline, setHeart } from "./heart.ts";
+import { dayWindow, getHeart, hasDay, listPlans, plansText, replaceMindPlans, saveDayTimeline, setFocus, setHeart } from "./heart.ts";
 
 /**
  * The night pass: once a day after 04:00 local, fold the day that just ended into his memory.
@@ -168,6 +168,7 @@ export async function runNight(
     await replaceMindPlans(parsePlans(json.plans, tz, at), at, "night");
     const wake = typeof json.heart === "string" ? json.heart.trim() : "";
     if (wake) await setHeart(wake, at);
+    await setFocus("");
   }
   await appendInnerLog({ turnSeq: 0, data: { kind: "night", day, output: result.json }, model: result.model, ms: result.ms });
   return { ok: true };

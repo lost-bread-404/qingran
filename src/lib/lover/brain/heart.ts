@@ -14,7 +14,7 @@ import { clockOf, dayNotes } from "./day-notes.ts";
 
 export type Plan = { id: number; at: number | null; text: string; setBy: string; setAt: number };
 
-export type Heart = { text: string; updatedAt: number; turnSeq: number; silenceSeen: number };
+export type Heart = { text: string; focus: string; updatedAt: number; turnSeq: number; silenceSeen: number };
 
 /** Silence this long (after her last message) gets one thought. */
 export const SILENCE_THINK_MS = 45 * 60_000;
@@ -25,11 +25,12 @@ const MAX_PLANS = 12;
 export async function getHeart(): Promise<Heart> {
   const db = await sql();
   const rows = await db.query<Record<string, unknown>>(
-    `select now_text, updated_at, turn_seq, silence_seen from qr_inner where id = 1`,
+    `select now_text, focus, updated_at, turn_seq, silence_seen from qr_inner where id = 1`,
   );
   const row = rows[0] ?? {};
   return {
     text: String(row.now_text ?? ""),
+    focus: String(row.focus ?? ""),
     updatedAt: Number(row.updated_at ?? 0) || 0,
     turnSeq: Number(row.turn_seq ?? 0) || 0,
     silenceSeen: Number(row.silence_seen ?? 0) || 0,
@@ -42,6 +43,12 @@ export async function setHeart(text: string, at: number, turnSeq?: number): Prom
     `update qr_inner set now_text = $1, updated_at = $2, turn_seq = greatest(turn_seq, $3) where id = 1`,
     [text.slice(0, 3000), at, turnSeq ?? 0],
   );
+}
+
+/** The one thing he means to do right now ("" = just follow her). */
+export async function setFocus(text: string): Promise<void> {
+  const db = await sql();
+  await db.query(`update qr_inner set focus = $1 where id = 1`, [text.slice(0, 300)]);
 }
 
 export async function markSilenceSeen(lastUserAt: number): Promise<void> {
@@ -232,13 +239,14 @@ export function daysText(days: Array<{ day: string; timeline: string }>): string
   return days.filter((d) => d.timeline.trim()).map((d) => `${d.day}：${d.timeline.trim()}`).join("\n");
 }
 
-/** What only he knows, for the reply: his heart, what he means to do now, what he noted about her today. */
-export async function mindForReply(nowMs: number, timeZone: string): Promise<string> {
-  const [heart, plans, today] = await Promise.all([getHeart(), listPlans(), todayNotesText(nowMs, timeZone)]);
+/**
+ * What only he knows, for the reply: how he feels and reads her, and the ONE thing he means to do now.
+ * The plan list and today's notes stay with the mind — a reply that sees a list says the whole list.
+ */
+export async function mindForReply(_nowMs: number, _timeZone: string): Promise<string> {
+  const heart = await getHeart();
   const parts: string[] = [];
-  if (heart.text.trim()) parts.push(`你心里：\n${heart.text.trim()}`);
-  const visible = plansText(plans, nowMs, timeZone, { onlyVisible: true });
-  if (visible) parts.push(`你打算做的：\n${visible}`);
-  if (today.trim()) parts.push(`你记下的她今天：\n${today.trim()}`);
-  return parts.join("\n\n");
+  if (heart.text.trim()) parts.push(heart.text.trim());
+  if (heart.focus.trim()) parts.push(`眼前想做的一件事：${heart.focus.trim()}`);
+  return parts.join("\n");
 }

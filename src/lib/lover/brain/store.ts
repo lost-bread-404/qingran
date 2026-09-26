@@ -443,8 +443,9 @@ export async function clearRecentConversation(): Promise<void> {
   await setRoomClearedAt(ts);
   await forgetUnarchivedMessages(ts);
   await resetInnerTurn();
-  const { dropUntimedPlans } = await import("./heart.ts");
+  const { dropUntimedPlans, setFocus } = await import("./heart.ts");
   await dropUntimedPlans();
+  await setFocus("");
   await appendInnerLog({
     turnSeq: inner.turn_seq,
     data: { kind: "cleared_by_rosie" },

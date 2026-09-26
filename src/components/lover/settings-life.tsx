@@ -7,6 +7,7 @@ import {
   brainDeleteDayNote,
   brainEditPlan,
   brainGetMind,
+  brainSaveFocus,
   brainSaveHeartText,
   brainSetModeNow,
 } from "@/lib/lover/brain/mind-api";
@@ -93,7 +94,7 @@ export function IdentityField({
 
 type Mind = {
   timeZone: string;
-  heart: { text: string; updatedAt: number };
+  heart: { text: string; focus: string; updatedAt: number };
   plans: Array<{ id: number; at: number | null; atText: string; due: boolean; text: string; setBy: string }>;
   today: Array<{ id: number; clock: string; text: string }>;
   days: Array<{ day: string; timeline: string }>;
@@ -107,6 +108,7 @@ const PLAN_BY: Record<string, string> = { rosie: "你加的", reflect: "心思",
 export function HeartEditor() {
   const [mind, setMind] = useState<Mind | null>(null);
   const [heart, setHeartDraft] = useState("");
+  const [focus, setFocusDraft] = useState("");
   const [draftText, setDraftText] = useState("");
   const [draftAt, setDraftAt] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +119,7 @@ export function HeartEditor() {
         const next = res as Mind;
         setMind(next);
         setHeartDraft(next.heart.text);
+        setFocusDraft(next.heart.focus);
       })
       .catch(() => setError("心没读出来。"));
   }
@@ -145,12 +148,25 @@ export function HeartEditor() {
           }}
         />
         <p className="text-xs text-subtle">更新于 {clock(mind.heart.updatedAt)}</p>
+        <p className="text-sm">眼前这一件</p>
+        <p className="text-xs text-subtle">回复只看得到心里和这一件事，看不到下面的打算。空着 = 专心跟着你说的。</p>
+        <Textarea
+          value={focus}
+          className="min-h-14"
+          onChange={(e) => setFocusDraft(e.target.value)}
+          onBlur={() => {
+            if (focus === mind.heart.focus) return;
+            void brainSaveFocus({ data: { text: focus } })
+              .then(() => setMind({ ...mind, heart: { ...mind.heart, focus } }))
+              .catch(() => setError("没记下。"));
+          }}
+        />
       </section>
 
       <section className="flex flex-col gap-2">
         <p className="text-sm">打算</p>
         <p className="text-xs text-subtle">
-          没写时间的是他接下来要做的，回复看得到。写了时间的到点才出现：你在聊，回复会看到；你不在，他会给你发一条。
+          他心里的打算，回复看不到。每轮之后心思从这里挑一件放进「眼前这一件」。写了时间的到点时，你不在聊天他才决定要不要给你发一条。
         </p>
         {mind.plans.length === 0 ? <p className="text-sm text-subtle">现在没有打算</p> : null}
         {mind.plans.map((plan) => (

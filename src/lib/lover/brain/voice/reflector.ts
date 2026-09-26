@@ -27,6 +27,7 @@ import {
   plansText,
   recentDays,
   replaceMindPlans,
+  setFocus,
   setHeart,
   timeFacts,
   todayNotesText,
@@ -42,9 +43,10 @@ export const INNER_SCHEMA = {
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["heart", "plans_changed", "plans", "mode", "note"] as string[],
+    required: ["heart", "focus", "plans_changed", "plans", "mode", "note"] as string[],
     properties: {
       heart: { type: "string" },
+      focus: { type: "string" },
       plans_changed: { type: "boolean" },
       plans: {
         type: "array",
@@ -101,6 +103,7 @@ export type ReflectorParts = {
   days: string;
   today: string;
   heart: string;
+  focus?: string;
   plans: string;
   modes: string;
   conversation: string;
@@ -119,6 +122,7 @@ export function reflectVars(parts: ReflectorParts): Record<string, string> {
     days: parts.days.trim() || "（还没有）",
     today: parts.today.trim() || "（还没有）",
     heart: parts.heart.trim() || "（空）",
+    focus: parts.focus?.trim() || "（没有，跟着她）",
     plans: parts.plans.trim() || "（没有）",
     modes: parts.modes.trim() || "（没有）",
     conversation: parts.conversation.trim() || "（还没有）",
@@ -185,6 +189,7 @@ export async function gatherReflectParts(at: number, kind: ReflectKind, silentSi
       days: daysText(days),
       today,
       heart: heart.text,
+      focus: heart.focus,
       plans: plansText(plans, at, tz),
       modes: modesText(profile.modes, current),
       conversation: formatReflectConversation(history, tz),
@@ -269,6 +274,7 @@ export async function runReflector(
   const json = result.json as Record<string, unknown>;
   const heart = typeof json.heart === "string" ? json.heart.trim() : "";
   await setHeart(heart || heartBefore.text, at, kind === "turn" ? turnSeq : undefined);
+  await setFocus(typeof json.focus === "string" ? json.focus.trim() : "");
   if (json.plans_changed === true) await replaceMindPlans(parsePlans(json.plans, tz, at), at);
   const mode = typeof json.mode === "string" ? json.mode.trim() : "";
   if (mode && mode !== current && modes.some((m) => m.id === mode)) {

@@ -9,7 +9,7 @@ import { effectiveMode, recordMode } from "./mode.ts";
 import { insertManualEdit } from "./life-store.ts";
 import { runInBackground } from "./wait-until.ts";
 import { LONG_DRAIN_MS } from "./config.ts";
-import { addPlan, dayWindow, formatLocal, getHeart, listPlans, parseLocalTime, recentDays, removePlan, setHeart } from "./heart.ts";
+import { addPlan, dayWindow, formatLocal, getHeart, listPlans, parseLocalTime, recentDays, removePlan, setFocus, setHeart } from "./heart.ts";
 
 /** Settings → 他的心: everything the brain holds, readable and editable. */
 export const brainGetMind = createServerFn({ method: "GET" }).handler(async () => {
@@ -30,7 +30,7 @@ export const brainGetMind = createServerFn({ method: "GET" }).handler(async () =
   ]);
   return {
     timeZone: tz,
-    heart: { text: heart.text, updatedAt: heart.updatedAt },
+    heart: { text: heart.text, focus: heart.focus, updatedAt: heart.updatedAt },
     plans: plans.map((p) => ({
       id: p.id,
       at: p.at,
@@ -52,6 +52,13 @@ export const brainSaveHeartText = createServerFn({ method: "POST" })
     const before = await getHeart();
     await setHeart(data.text.trim(), now());
     await insertManualEdit("heart", { text: before.text }, { text: data.text.trim() });
+    return { ok: true as const };
+  });
+
+export const brainSaveFocus = createServerFn({ method: "POST" })
+  .validator((input: { text: string }) => ({ text: String(input?.text ?? "") }))
+  .handler(async ({ data }) => {
+    await setFocus(data.text.trim());
     return { ok: true as const };
   });
 
