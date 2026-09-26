@@ -21,6 +21,7 @@ export type VoiceFallbackInput = {
   voiceSpeed?: number;
   primary: VoiceModelPick;
   safety: VoiceModelPick;
+  temperature?: number;
   tools?: TalkStreamInput["tools"];
   resolveTool?: (call: { id: string; name: string; arguments: string }) => Promise<string>;
 };
@@ -144,6 +145,7 @@ function streamArgs(
     model: pick.model,
     effort: pick.effort,
     timeoutMs: pick.timeoutMs,
+    temperature: data.temperature,
     tools,
   };
 }

@@ -165,6 +165,23 @@ export async function saveDossierBody(body: string, author: "rosie" | "seed" | "
   return getDossier();
 }
 
+/** The night pass (or an import) rewrites the whole document; it goes live at once and the cursor moves to `cursorAt`. */
+export async function publishMemory(body: string, author: "night" | "import", cursorAt: number, ops: unknown = null): Promise<DossierRow> {
+  const db = await sql();
+  const at = now();
+  const current = await getDossier();
+  const version = current.version + 1;
+  const text = body.trim() ? `${body.trim()}\n` : "";
+  await db.query(
+    `update qr_dossier
+     set body = $1, version = $2, updated_at = $3, active = true, cursor_at = greatest(cursor_at, $4), turns_since_edit = 0
+     where id = 1`,
+    [text, version, at, Math.round(cursorAt)],
+  );
+  await writeVersion({ version, body: text, author, ops, at });
+  return getDossier();
+}
+
 export async function enableDossier(body: string): Promise<DossierRow> {
   return publishLive(body, "rosie", { enable: true });
 }

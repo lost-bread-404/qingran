@@ -7,11 +7,10 @@ import { now } from "../clock.ts";
 import type { Effort } from "../config.ts";
 import { getDossier } from "../dossier.ts";
 import { identityBlock } from "../life.ts";
-import { intimateNotesForVoice, momentForVoice } from "../mind-parse.ts";
+import { mindForReply, timeFacts } from "../heart.ts";
 import { personaAckText } from "../prompts/doc.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import {
-  getInner,
   getMessage,
   getMeta,
   getProfileData,
@@ -20,7 +19,6 @@ import {
   listPortrait,
   listRecentMessages,
 } from "../store.ts";
-import { formatClock } from "../time.ts";
 import { InnerCutBuffer } from "./inner-cut.ts";
 import { applyProfilePatch } from "../../profile-patch.ts";
 import { buildVoiceMessages, renderDossierBlock, renderVoiceLongterm } from "./pack-build.ts";
@@ -56,18 +54,17 @@ export async function replayMessages(opts: {
   const nowMs = opts.nowMs ?? now();
   const zone = opts.profile ? "America/New_York" : "America/New_York";
   const inject = voiceInjectFromProfile(opts.profile);
-  const [history, inner, dossierRow, voicePrompt, ackPrompt, meta] = await Promise.all([
+  const [history, dossierRow, voicePrompt, ackPrompt, meta] = await Promise.all([
     listHistoryWindow(user.id, inject.history, user.createdAt),
-    getInner(),
     getDossier(),
     loadPrompt("voice"),
     loadPrompt("persona_ack"),
     getMeta(),
   ]);
   const legacy = dossierRow.active ? null : { portrait: await listPortrait(), meta };
-  const half = Math.round(opts.profile.glowHalfLifeDays * 24 * 60 * 60 * 1000);
-  const injected = momentForVoice(inner, nowMs, inject.moment, half);
-  const clockText = formatClock(nowMs, meta.timeZone || zone);
+  const tz = meta.timeZone || zone;
+  const mindText = inject.moment && opts.profile.brainOn ? await mindForReply(nowMs, tz) : "";
+  const clockText = await timeFacts(nowMs, tz, user.createdAt);
   const longterm = dossierRow.active
     ? renderDossierBlock(dossierRow.body)
     : renderVoiceLongterm(legacy!.meta.selfSummary, legacy!.meta.bondSummary, legacy!.portrait);
@@ -79,19 +76,13 @@ export async function replayMessages(opts: {
     portrait: dossierRow.active ? undefined : legacy!.portrait,
     history: collapseReplyVariants(history),
     userText: user.text,
-    moment: {
-      feel: injected.feel,
-      desire: injected.desire,
-      now: injected.now,
-      longing: injected.longing,
-      glow: injected.glow,
-    },
+    moment: { feel: "", desire: "", now: mindText, longing: "", glow: "" },
     clock: clockText,
     identity: identityBlock(opts.profile.identity),
     voiceTemplate: voicePrompt.body,
     personaPlacement: opts.placement,
     personaAck: personaAckText(ackPrompt.body),
-    intimateNotes: intimateNotesForVoice(inner, nowMs, opts.profile.intimateNotes),
+    intimateNotes: opts.profile.modes.find((m) => m.id === opts.profile.mode)?.intimate ? opts.profile.intimateNotes : "",
     inject,
   });
   return { messages, userText: user.text };

@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { noteRosieTurn } from "@/lib/lover/brain/dossier";
 import { effectiveMode } from "@/lib/lover/brain/mode";
 import { enqueueArchiveIfNeeded } from "@/lib/lover/brain/archivist";
 import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } from "@/lib/lover/brain/config";
@@ -18,9 +17,6 @@ import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
 import { formatVoiceInjectLine, lockedProfile, type Profile } from "@/lib/lover/types";
 import { resolveTalkProfile } from "@/lib/lover/talk-profile";
-import { lookupBusyRange } from "@/lib/lover/brain/busy";
-import { loadPrompt } from "@/lib/lover/brain/prompts/store";
-import { parsePromptBody, renderVariant } from "@/lib/lover/brain/prompts/doc";
 import { type TalkStreamEvent } from "@/lib/lover/stream-talk";
 import { logTalkTurn, talkFailFromResult } from "@/lib/lover/talk-fail";
 import { recordTurnTrace } from "@/lib/lover/brain/turn-trace";
@@ -145,12 +141,8 @@ export const Route = createFileRoute("/api/talk")({
               tVoice = Date.now();
               const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
               const safety = voiceSafetyPick();
-              const busyTool = await loadPrompt("busy_tool").catch(() => null);
-              const busyDescription = busyTool
-                ? renderVariant(parsePromptBody("busy_tool", busyTool.body), "main", {})
-                    .find((message) => message.role === "system")
-                    ?.content ?? ""
-                : "";
+              // Each mode may set its own temperature (e.g. a high one for intimate scenes).
+              const modeTemperature = profile.modes.find((m) => m.id === profile.mode)?.temperature ?? undefined;
               const toolStarted = { ms: 0, name: "", args: "" };
               let sentDone = false;
               const fallback = await runVoiceWithFallback(
@@ -161,40 +153,7 @@ export const Route = createFileRoute("/api/talk")({
                   voiceSpeed: profile.voiceSpeed,
                   primary,
                   safety,
-                  tools: busyDescription
-                    ? [
-                        {
-                          type: "function" as const,
-                          function: {
-                            name: "busy_lookup",
-                            description: busyDescription,
-                            parameters: {
-                              type: "object",
-                              additionalProperties: false,
-                              required: ["from_day", "to_day"],
-                              properties: {
-                                from_day: { type: "string" },
-                                to_day: { type: "string" },
-                              },
-                            },
-                          },
-                        },
-                      ]
-                    : undefined,
-                  resolveTool: async (call) => {
-                    const started = Date.now();
-                    let args: { from_day?: string; to_day?: string } = {};
-                    try {
-                      args = JSON.parse(call.arguments) as { from_day?: string; to_day?: string };
-                    } catch {
-                      args = {};
-                    }
-                    const result = await lookupBusyRange(String(args.from_day ?? ""), String(args.to_day ?? ""));
-                    toolStarted.ms = Date.now() - started;
-                    toolStarted.name = call.name;
-                    toolStarted.args = call.arguments.slice(0, 180);
-                    return JSON.stringify(result);
-                  },
+                  temperature: modeTemperature,
                 },
                 (event) => {
                   if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;
@@ -302,10 +261,7 @@ export const Route = createFileRoute("/api/talk")({
                 },
               });
 
-              if (profile.brainOn) {
-                if (!failed && display) await enqueueReflect(userCreatedAt);
-                await noteRosieTurn(userCreatedAt);
-              }
+              if (profile.brainOn && !failed && display) await enqueueReflect(userCreatedAt);
               await enqueueArchiveIfNeeded(userCreatedAt, ctx.inject.history);
               await enqueuePeriodicIfDue(nowMs, timeZone);
               await runInBackground(() => drainJobs(LONG_DRAIN_MS));

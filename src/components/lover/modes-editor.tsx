@@ -88,7 +88,7 @@ export function ModesEditor({
       <div className="flex flex-col gap-2">
         <p className="text-sm">模式</p>
         <p className="text-xs text-subtle">
-          开着「运行心思和记忆整理」时，他的心思会看每个模式写的「什么时候用」，决定你下一次来时用哪个；关掉时，在聊天页右上角手动切。模式的 prompt 会接在人设后面发给他。
+          开着「运行心思和记忆整理」时，他的心思每轮之后看每个模式写的「什么时候用」，决定下一句用哪个；关掉时，在聊天页右上角手动切。模式的 prompt 接在人设后面发给他。
         </p>
         {draft.map((m, i) => (
           <div key={m.id} className="flex flex-col gap-2 rounded-md bg-surface-2 px-3 py-3">
@@ -117,6 +117,37 @@ export function ModesEditor({
                 className="min-h-32 resize-none font-mono leading-relaxed"
               />
             </label>
+            <label className="flex items-center justify-between gap-3">
+              <span className="text-xs text-subtle">temperature（空着 = 1.0；越高越放得开、越不重复，0–2）</span>
+              <input
+                className="h-11 w-20 rounded-md bg-surface px-3 text-sm"
+                inputMode="decimal"
+                value={m.temperature == null ? "" : String(m.temperature)}
+                placeholder="1.0"
+                onChange={(e) => {
+                  const raw = e.target.value.trim();
+                  const n = Number(raw);
+                  patch(i, { temperature: raw === "" || !Number.isFinite(n) ? null : Math.max(0, Math.min(2, n)) });
+                }}
+                onBlur={() => commit(draft)}
+              />
+            </label>
+            <label className="flex min-h-11 items-center gap-3">
+              <input
+                type="checkbox"
+                checked={m.intimate}
+                onChange={(e) => commit(draft.map((row, j) => (j === i ? { ...row, intimate: e.target.checked } : row)))}
+              />
+              <span className="text-xs text-subtle">这个模式里给他看亲密设定</span>
+            </label>
+            <label className="flex min-h-11 items-center gap-3">
+              <input
+                type="checkbox"
+                checked={!m.keepActions}
+                onChange={(e) => commit(draft.map((row, j) => (j === i ? { ...row, keepActions: !e.target.checked } : row)))}
+              />
+              <span className="text-xs text-subtle">夜里整理记忆时，这个模式里只记说的话，不记他的动作</span>
+            </label>
             {draft.length > 1 ? (
               <button type="button" className="h-11 self-start text-sm text-muted" onClick={() => commit(draft.filter((_, j) => j !== i))}>
                 删掉这个模式
@@ -128,7 +159,12 @@ export function ModesEditor({
           <button
             type="button"
             className="h-11 self-start text-sm text-muted"
-            onClick={() => commit([...draft, { id: newId(draft), name: "新模式", when: "", prompt: "" }])}
+            onClick={() =>
+              commit([
+                ...draft,
+                { id: newId(draft), name: "新模式", when: "", prompt: "", temperature: null, keepActions: true, intimate: false },
+              ])
+            }
           >
             加一个模式
           </button>

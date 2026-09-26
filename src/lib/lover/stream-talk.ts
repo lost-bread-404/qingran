@@ -54,6 +54,8 @@ export type TalkStreamInput = {
   model?: string;
   effort?: Effort;
   timeoutMs?: number;
+  /** The current mode's temperature. Missing → 1.0. */
+  temperature?: number;
   tools?: Array<{
     type: "function";
     function: { name: string; description: string; parameters: Record<string, unknown> };
@@ -174,7 +176,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   try {
     const body: Record<string, unknown> = {
       model: route.model,
-      temperature: 1.0,
+      temperature: typeof data.temperature === "number" ? data.temperature : 1.0,
       max_tokens: route.maxOutput,
       stream: true,
       stream_options: { include_usage: true },

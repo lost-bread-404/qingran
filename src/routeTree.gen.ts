@@ -12,10 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DiaryRouteImport } from './routes/diary'
 import { Route as LabRouteImport } from './routes/lab'
+import { Route as ApiNativeLogRouteImport } from './routes/api/native-log'
+import { Route as ApiSttRouteImport } from './routes/api/stt'
 import { Route as ApiTalkRouteImport } from './routes/api/talk'
 import { Route as ApiWarmRouteImport } from './routes/api/warm'
-import { Route as ApiSttRouteImport } from './routes/api/stt'
-import { Route as ApiNativeLogRouteImport } from './routes/api/native-log'
 import { Route as ApiCronBrainRouteImport } from './routes/api/cron/brain'
 import { Route as ApiCronWakeRouteImport } from './routes/api/cron/wake'
 import { Route as ApiPushRegisterRouteImport } from './routes/api/push/register'
@@ -35,6 +35,16 @@ const LabRoute = LabRouteImport.update({
   path: '/lab',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiNativeLogRoute = ApiNativeLogRouteImport.update({
+  id: '/api/native-log',
+  path: '/api/native-log',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSttRoute = ApiSttRouteImport.update({
+  id: '/api/stt',
+  path: '/api/stt',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTalkRoute = ApiTalkRouteImport.update({
   id: '/api/talk',
   path: '/api/talk',
@@ -43,16 +53,6 @@ const ApiTalkRoute = ApiTalkRouteImport.update({
 const ApiWarmRoute = ApiWarmRouteImport.update({
   id: '/api/warm',
   path: '/api/warm',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiSttRoute = ApiSttRouteImport.update({
-  id: '/api/stt',
-  path: '/api/stt',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiNativeLogRoute = ApiNativeLogRouteImport.update({
-  id: '/api/native-log',
-  path: '/api/native-log',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiCronBrainRoute = ApiCronBrainRouteImport.update({
@@ -75,10 +75,10 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/diary': typeof DiaryRoute
   '/lab': typeof LabRoute
+  '/api/native-log': typeof ApiNativeLogRoute
+  '/api/stt': typeof ApiSttRoute
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
-  '/api/stt': typeof ApiSttRoute
-  '/api/native-log': typeof ApiNativeLogRoute
   '/api/cron/brain': typeof ApiCronBrainRoute
   '/api/cron/wake': typeof ApiCronWakeRoute
   '/api/push/register': typeof ApiPushRegisterRoute
@@ -87,10 +87,10 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/diary': typeof DiaryRoute
   '/lab': typeof LabRoute
+  '/api/native-log': typeof ApiNativeLogRoute
+  '/api/stt': typeof ApiSttRoute
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
-  '/api/stt': typeof ApiSttRoute
-  '/api/native-log': typeof ApiNativeLogRoute
   '/api/cron/brain': typeof ApiCronBrainRoute
   '/api/cron/wake': typeof ApiCronWakeRoute
   '/api/push/register': typeof ApiPushRegisterRoute
@@ -100,10 +100,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/diary': typeof DiaryRoute
   '/lab': typeof LabRoute
+  '/api/native-log': typeof ApiNativeLogRoute
+  '/api/stt': typeof ApiSttRoute
   '/api/talk': typeof ApiTalkRoute
   '/api/warm': typeof ApiWarmRoute
-  '/api/stt': typeof ApiSttRoute
-  '/api/native-log': typeof ApiNativeLogRoute
   '/api/cron/brain': typeof ApiCronBrainRoute
   '/api/cron/wake': typeof ApiCronWakeRoute
   '/api/push/register': typeof ApiPushRegisterRoute
@@ -114,10 +114,10 @@ export interface FileRouteTypes {
     | '/'
     | '/diary'
     | '/lab'
+    | '/api/native-log'
+    | '/api/stt'
     | '/api/talk'
     | '/api/warm'
-    | '/api/stt'
-    | '/api/native-log'
     | '/api/cron/brain'
     | '/api/cron/wake'
     | '/api/push/register'
@@ -126,10 +126,10 @@ export interface FileRouteTypes {
     | '/'
     | '/diary'
     | '/lab'
+    | '/api/native-log'
+    | '/api/stt'
     | '/api/talk'
     | '/api/warm'
-    | '/api/stt'
-    | '/api/native-log'
     | '/api/cron/brain'
     | '/api/cron/wake'
     | '/api/push/register'
@@ -138,10 +138,10 @@ export interface FileRouteTypes {
     | '/'
     | '/diary'
     | '/lab'
+    | '/api/native-log'
+    | '/api/stt'
     | '/api/talk'
     | '/api/warm'
-    | '/api/stt'
-    | '/api/native-log'
     | '/api/cron/brain'
     | '/api/cron/wake'
     | '/api/push/register'
@@ -151,10 +151,10 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DiaryRoute: typeof DiaryRoute
   LabRoute: typeof LabRoute
+  ApiNativeLogRoute: typeof ApiNativeLogRoute
+  ApiSttRoute: typeof ApiSttRoute
   ApiTalkRoute: typeof ApiTalkRoute
   ApiWarmRoute: typeof ApiWarmRoute
-  ApiSttRoute: typeof ApiSttRoute
-  ApiNativeLogRoute: typeof ApiNativeLogRoute
   ApiCronBrainRoute: typeof ApiCronBrainRoute
   ApiCronWakeRoute: typeof ApiCronWakeRoute
   ApiPushRegisterRoute: typeof ApiPushRegisterRoute
@@ -183,6 +183,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LabRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/native-log': {
+      id: '/api/native-log'
+      path: '/api/native-log'
+      fullPath: '/api/native-log'
+      preLoaderRoute: typeof ApiNativeLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/stt': {
+      id: '/api/stt'
+      path: '/api/stt'
+      fullPath: '/api/stt'
+      preLoaderRoute: typeof ApiSttRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/talk': {
       id: '/api/talk'
       path: '/api/talk'
@@ -195,20 +209,6 @@ declare module '@tanstack/react-router' {
       path: '/api/warm'
       fullPath: '/api/warm'
       preLoaderRoute: typeof ApiWarmRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/stt': {
-      id: '/api/stt'
-      path: '/api/stt'
-      fullPath: '/api/stt'
-      preLoaderRoute: typeof ApiSttRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/native-log': {
-      id: '/api/native-log'
-      path: '/api/native-log'
-      fullPath: '/api/native-log'
-      preLoaderRoute: typeof ApiNativeLogRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/cron/brain': {
@@ -239,10 +239,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DiaryRoute: DiaryRoute,
   LabRoute: LabRoute,
+  ApiNativeLogRoute: ApiNativeLogRoute,
+  ApiSttRoute: ApiSttRoute,
   ApiTalkRoute: ApiTalkRoute,
   ApiWarmRoute: ApiWarmRoute,
-  ApiSttRoute: ApiSttRoute,
-  ApiNativeLogRoute: ApiNativeLogRoute,
   ApiCronBrainRoute: ApiCronBrainRoute,
   ApiCronWakeRoute: ApiCronWakeRoute,
   ApiPushRegisterRoute: ApiPushRegisterRoute,

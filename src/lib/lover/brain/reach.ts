@@ -1,111 +1,49 @@
 import { callModel } from "./llm.ts";
-import { appendBrainLog, getInner, getProfileData, getProfilePrompt, listHistoryWindow, upsertMessage } from "./store.ts";
+import { appendBrainLog, getProfileData, getProfilePrompt, listHistoryWindow, upsertMessage } from "./store.ts";
 import { now } from "./clock.ts";
 import { formatClock, localDay, shiftDay } from "./time.ts";
 import { zonedWallMs } from "./spend/policy.ts";
 import { parsePromptBody, personaAckText, renderVariant } from "./prompts/doc.ts";
 import { loadPrompt } from "./prompts/store.ts";
 import { dossierTextForModel } from "./dossier.ts";
-import {
-  applyGlowDelta,
-  busyContextLine,
-  clampNextReachAt,
-  decideWake,
-  glowNow,
-  glowWord,
-  identityBlock,
-  randomWakeProbability,
-  REACH_LLM_DAY_MAX,
-  REACH_RETRY_MS,
-  REACH_SENT_DAY_MAX,
-  CHAT_QUIET_MS,
-  GLOW_HALF_LIFE_MS,
-  type WakeDecision,
-} from "./life.ts";
-import { applyReflectOutput } from "./mind-parse.ts";
-import { currentBusy } from "./busy.ts";
+import { identityBlock, REACH_LLM_DAY_MAX, REACH_RETRY_MS, REACH_SENT_DAY_MAX } from "./life.ts";
 import { sendApns } from "../push/apns.ts";
 import { newId } from "../storage.ts";
 import { getSql } from "../../db.ts";
 import { lockedProfile } from "../types.ts";
 import { placePersona } from "./voice/pack-build.ts";
+import { modelFacingText } from "../message-markup.ts";
 import {
-  addReachPlan,
   delayReachPlans,
   finishReachPlans,
   getReach,
-  insertGlowEvent,
-  listReachPlans,
   insertReachLog,
-  lastVisibleMessageAt,
   profileClockZone,
   reachCountsToday,
   readIdentity,
   saveReach,
   silenceSnapshot,
 } from "./life-store.ts";
+import { ACTIVE_MS, formatLocal, getHeart, lastUserAt, listPlans, markSilenceSeen, SILENCE_THINK_MS } from "./heart.ts";
 
 const REACH_SCHEMA = {
   name: "reach",
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["send", "text", "desire", "read_her", "feel", "choice", "now", "longings", "plans", "scene", "glow", "next_reach"],
+    required: ["send", "text"],
     properties: {
       send: { type: "boolean" },
       text: { type: "string" },
-      desire: { type: "string" },
-      read_her: { type: "string" },
-      feel: { type: "string" },
-      choice: { type: "string" },
-      now: { type: "string" },
-      longings: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["id", "text", "since"],
-          properties: {
-            id: { type: "string" },
-            text: { type: "string" },
-            since: { type: "string" },
-          },
-        },
-      },
-      plans: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["id", "what", "why", "status"],
-          properties: {
-            id: { type: "string" },
-            what: { type: "string" },
-            why: { type: "string" },
-            status: { type: "string", enum: ["open", "done", "dropped"] },
-          },
-        },
-      },
-      scene: { type: "string", enum: ["daily", "intimate"] },
-      glow: {
-        type: "object",
-        additionalProperties: false,
-        required: ["delta", "why"],
-        properties: { delta: { type: "number" }, why: { type: "string" } },
-      },
-      next_reach: {
-        anyOf: [
-          { type: "null" },
-          {
-            type: "object",
-            additionalProperties: false,
-            required: ["in_hours", "intent"],
-            properties: { in_hours: { type: "number" }, intent: { type: "string" } },
-          },
-        ],
-      },
     },
   },
+};
+
+export type WakeResult = {
+  ok: boolean;
+  sent: boolean;
+  brain: string[];
+  decision: { action: "call"; trigger: "planned" | "manual" } | { action: "return"; reason: string };
 };
 
 const WAKE_LOCK = "wake:lock";
@@ -154,122 +92,109 @@ function ago(ms: number): string {
   return `${Math.round(h / 24)} 天`;
 }
 
+/**
+ * Every 10 minutes (GitHub Actions → /api/cron/wake):
+ * 1. brain on: after 04:00 the day that ended gets its night pass; a silence of 45 minutes gets one thought.
+ * 2. plans whose time has come: she is in the chat → they wait for the reply (it sees them as 到时间了);
+ *    she is away → he decides whether to send one message, and the plans are done.
+ */
 export async function runWake(opts: {
   manual?: boolean;
   at?: number;
-  roll?: number;
   complete?: typeof callModel;
   llmMax?: number;
   sentMax?: number;
-} = {}): Promise<{ ok: boolean; decision: WakeDecision | { action: "return"; reason: string; log: boolean }; sent: boolean }> {
+} = {}): Promise<WakeResult> {
   const at = opts.at ?? now();
   const zone = await profileClockZone();
-  const [reach, plans, inner, ident, busy, lastAt, silence, counts] = await Promise.all([
+  const profile = lockedProfile(await getProfileData());
+  const complete = opts.complete ?? callModel;
+  const brain: string[] = [];
+
+  if (profile.brainOn && !opts.manual) {
+    const { enqueueNightIfDue } = await import("./night.ts");
+    const night = await enqueueNightIfDue(at);
+    if (night) brain.push(`night:${night}`);
+    const [last, heart] = await Promise.all([lastUserAt(at + 1), getHeart()]);
+    if (last && at - last >= SILENCE_THINK_MS && heart.silenceSeen < last) {
+      // One thought per silence, even if the call fails.
+      await markSilenceSeen(last);
+      const { runReflector } = await import("./voice/reflector.ts");
+      await runReflector(0, undefined, complete, { kind: "silence", silentSince: last });
+      brain.push("silence");
+    }
+  }
+
+  const [reach, plans, lastUser, silence, counts] = await Promise.all([
     getReach(),
-    listReachPlans(),
-    getInner(),
-    readIdentity(),
-    currentBusy(at),
-    lastVisibleMessageAt(),
+    listPlans(),
+    lastUserAt(at + 1),
     silenceSnapshot(at),
     reachCountsToday(zone, at),
   ]);
-  const profile = lockedProfile(await getProfileData());
-  const half = Math.round(profile.glowHalfLifeDays * 24 * 60 * 60 * 1000) || GLOW_HALF_LIFE_MS;
-  const glow = glowNow(inner.glow, inner.glow_at, at, half);
-  // Several plans can hang at once; the soonest one decides when he wakes, and every plan due by then goes together.
-  const due = plans.filter((plan) => plan.at <= at);
-  const later = plans.filter((plan) => plan.at > at);
+  const due = plans.filter((plan) => plan.at != null && plan.at <= at);
+  const later = plans.filter((plan) => plan.at != null && plan.at > at);
   const dueIds = due.map((plan) => plan.id);
-  const dueIntent = due.map((plan) => plan.intent).filter(Boolean).join("；");
-  const decision = decideWake({
-    enabled: reach.enabled,
-    chatting: !opts.manual && lastAt != null && at - lastAt < CHAT_QUIET_MS,
-    nextAt: plans[0]?.at ?? null,
-    now: at,
-    roll: opts.roll ?? Math.random(),
-    probability: randomWakeProbability({ glow, busy: busy.busy, longings: inner.longings.length }),
-    llmToday: counts.llm,
-    sentToday: counts.sent,
-    tomorrowMorning: zonedWallMs(shiftDay(localDay(at, zone), 1), 8, 0, zone),
-    manual: opts.manual,
-    llmMax: opts.llmMax,
-    sentMax: opts.sentMax,
-  });
-  if (decision.action === "return") {
-    if (decision.log) {
-      await insertReachLog({
-        at,
-        trigger: `skip:${decision.reason}`,
-        intent: dueIntent,
-        calledLlm: false,
-        sent: false,
-        nextAt: decision.nextAt ?? plans[0]?.at ?? null,
-      });
-      if (decision.reason === "breaker" && decision.nextAt) {
-        await delayReachPlans(dueIds, decision.nextAt);
-        await appendBrainLog({
-          step: "reach-breaker",
-          ok: false,
-          route: "reach",
-          note: `当天 reach 调用 ${counts.llm}/${opts.llmMax ?? REACH_LLM_DAY_MAX}，发出 ${counts.sent}/${opts.sentMax ?? REACH_SENT_DAY_MAX}`,
-        });
-      }
-    }
-    return { ok: true, decision, sent: false };
+  const dueIntent = due.map((plan) => plan.text).filter(Boolean).join("；");
+  const skip = async (reason: string, log: boolean): Promise<WakeResult> => {
+    if (log) await insertReachLog({ at, trigger: `skip:${reason}`, intent: dueIntent, calledLlm: false, sent: false, nextAt: later[0]?.at ?? null });
+    return { ok: true, sent: false, brain, decision: { action: "return", reason } };
+  };
+  if (!reach.enabled) return skip("disabled", dueIds.length > 0);
+  const trigger: "planned" | "manual" = opts.manual ? "manual" : "planned";
+  if (!opts.manual) {
+    if (!due.length) return skip("not_due", false);
+    if (lastUser != null && at - lastUser < ACTIVE_MS) return skip("chatting", false);
+  }
+  const llmMax = opts.llmMax ?? REACH_LLM_DAY_MAX;
+  const sentMax = opts.sentMax ?? REACH_SENT_DAY_MAX;
+  if (counts.llm >= llmMax || counts.sent >= sentMax) {
+    const tomorrow = zonedWallMs(shiftDay(localDay(at, zone), 1), 8, 0, zone);
+    await delayReachPlans(dueIds, tomorrow);
+    await appendBrainLog({
+      step: "reach-breaker",
+      ok: false,
+      route: "reach",
+      note: `当天 reach 调用 ${counts.llm}/${llmMax}，发出 ${counts.sent}/${sentMax}`,
+    });
+    return skip("breaker", true);
   }
 
   const loaded = await loadPrompt("reach");
-  const dossier = await dossierTextForModel();
-  const clock = formatClock(at, zone);
-  const busyLine = busyContextLine(busy);
+  const [dossier, heart, ident, charter, ackPrompt, history] = await Promise.all([
+    dossierTextForModel(),
+    getHeart(),
+    readIdentity(),
+    getProfilePrompt(),
+    loadPrompt("persona_ack"),
+    recentLines(zone),
+  ]);
   const laterText = later.length
-    ? `\n之后还打算：\n${later.map((plan) => `- ${formatClock(plan.at, zone)} ${plan.intent || "（没写）"}`).join("\n")}`
+    ? `\n之后还打算：\n${later.map((plan) => `- ${formatLocal(plan.at!, zone)} ${plan.text || "（没写）"}`).join("\n")}`
     : "";
-  const why = (decision.trigger === "planned"
-    ? `之前想好的：\n${due.map((plan) => `- ${plan.intent || "（没写）"}（${plan.setAt ? `${ago(at - plan.setAt)}前定的` : "刚刚"}）`).join("\n")}`
-    : decision.trigger === "manual"
+  const why =
+    (trigger === "manual"
       ? "她要你现在想起她。"
-      : "没有特别的事，就是想起你了。") + laterText;
+      : due.map((plan) => `- ${plan.text || "（没写）"}${plan.setAt ? `（${ago(at - plan.setAt)}前定的）` : ""}`).join("\n")) + laterText;
   const silenceText = silence.lastUserAt
-    ? `你最后一次说话是 ${ago(at - silence.lastUserAt)} 前。之后我已经发了 ${silence.unanswered} 条，你都还没回：\n${silence.lines.join("\n") || "（没有）"}`
-    : "你还没有说过话。";
-  const history = await recentLines(zone);
-  const word = glowWord(glow);
-  const innerText = [
-    inner.desire.trim() ? `想要：${inner.desire.trim()}` : "",
-    inner.readHer.trim() ? `对她：${inner.readHer.trim()}` : "",
-    inner.feel.trim() ? `心里：${inner.feel.trim()}` : "",
-    word ? `心情：${word}（比平常）` : "",
-    inner.longings.length
-      ? `心事：\n${inner.longings.map((item) => `- ${item.text}${item.since ? `（从 ${item.since} 起）` : ""}`).join("\n")}`
-      : "",
-    inner.choice.trim() ? `取舍：${inner.choice.trim()}` : "",
-    `场景：${inner.scene === "intimate" ? "intimate" : "daily"}`,
-    inner.plans.filter((plan) => plan.status === "open").length
-      ? `计划：\n${inner.plans.filter((plan) => plan.status === "open").map((plan) => `- ${plan.what}${plan.why ? `（${plan.why}）` : ""}`).join("\n")}`
-      : "",
-  ].filter(Boolean).join("\n");
+    ? `她最后一次说话是 ${ago(at - silence.lastUserAt)} 前。之后我已经发了 ${silence.unanswered} 条，她还没回：\n${silence.lines.join("\n") || "（没有）"}`
+    : "她还没有说过话。";
   const block = identityBlock(ident.identity);
-  const charter = await getProfilePrompt();
-  const ack = personaAckText((await loadPrompt("persona_ack")).body);
   const placed = placePersona(
     renderVariant(parsePromptBody("reach", loaded.body), "main", {
       system_prompt: profile.personaPlacement === "first_user" ? "" : charter,
       identity_block: block ? `${block}\n` : "",
       dossier: dossier.trim() || "（还没有）",
-      clock,
-      busy_line: busyLine,
-      inner: innerText || "（空）",
+      clock: formatClock(at, zone),
+      inner: heart.text.trim() || "（空）",
       why,
       silence: silenceText,
       conversation: history || "（还没有）",
     }),
-    { placement: profile.personaPlacement, charter, ack },
+    { placement: profile.personaPlacement, charter, ack: personaAckText(ackPrompt.body) },
   );
   const system = placed.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
   const users = placed.filter((message) => message.role !== "system").map((message) => message.content);
-  const complete = opts.complete ?? callModel;
   const result = await complete("reach", {
     system,
     input: users[0] ?? "",
@@ -281,76 +206,36 @@ export async function runWake(opts: {
     outputRef: "reach",
   });
   if (!result.ok || !result.json || typeof result.json !== "object") {
-    return failLlm(at, reach.retry, dueIds, failReasonZh(result.failKind), result.model, result.ms, decision.trigger);
+    const failed = await failLlm(at, reach.retry, dueIds, failReasonZh(result.failKind), result.model, result.ms, trigger);
+    return { ok: failed.ok, sent: false, brain, decision: { action: "call", trigger } };
   }
   const json = result.json as Record<string, unknown>;
-  const applied = applyReflectOutput(inner, {
-    desire: json.desire ?? json.want,
-    read_her: json.read_her,
-    feel: json.feel,
-    want: json.want,
-    choice: "choice" in json ? json.choice : inner.choice,
-    now: json.now,
-    scene: json.scene,
-    longings: json.longings,
-    plans: "plans" in json ? json.plans : inner.plans,
-    glow: json.glow,
-    next_reach: json.next_reach,
-  }, at, inner.turn_seq);
-  if (applied.glow && applied.glow.delta) {
-    const nextGlow = applyGlowDelta(applied.next.glow, applied.next.glow_at, at, applied.glow.delta, half);
-    applied.next.glow = nextGlow.glow;
-    applied.next.glow_at = nextGlow.glowAt;
-    if (nextGlow.event) {
-      await insertGlowEvent({
-        at,
-        delta: applied.glow.delta,
-        why: applied.glow.why,
-        source: "reach",
-        turnSeq: inner.turn_seq,
-        glowAfter: nextGlow.glow,
-      });
-    }
-  }
-  await saveInnerForced(applied.next);
-  const hours = applied.nextReach && typeof applied.nextReach === "object" ? applied.nextReach.inHours : applied.nextReach === null ? null : null;
-  const intent = applied.nextReach && typeof applied.nextReach === "object" ? applied.nextReach.intent : "";
-  const send = json.send === true && String(json.text ?? "").trim();
-  const nextAt = hours == null ? null : clampNextReachAt(at, hours, silence.unanswered + (send ? 1 : 0));
-  // The plans that fired are done; the rest keep waiting. A new one from this wake joins them.
-  if (decision.trigger === "planned") await finishReachPlans(dueIds, at);
-  if (nextAt != null) await addReachPlan({ at: nextAt, intent, setBy: "reach", setAt: at });
+  const text = json.send === true ? String(json.text ?? "").trim().slice(0, 2000) : "";
+  // What came due is handled either way: sent, or he chose to let it go.
+  await finishReachPlans(dueIds, at);
   if (reach.retry) await saveReach({ retry: 0 });
   let messageId: string | null = null;
   let pushResult: string | null = null;
-  if (send) {
+  if (text) {
     messageId = newId();
-    const text = String(json.text).trim().slice(0, 2000);
-    await upsertMessage({
-      id: messageId,
-      role: "assistant",
-      text,
-      createdAt: at,
-      kind: "proactive",
-      timeZone: zone,
-    });
+    await upsertMessage({ id: messageId, role: "assistant", text, createdAt: at, kind: "proactive", timeZone: zone });
     pushResult = await sendApns({ body: text, messageId });
   }
   await insertReachLog({
     at,
-    trigger: decision.trigger,
+    trigger,
     intent: dueIntent,
     calledLlm: true,
-    sent: Boolean(send),
+    sent: Boolean(text),
     messageId,
-    text: send ? String(json.text).trim().slice(0, 2000) : "",
+    text,
     pushResult,
-    nextAt,
-    nextIntent: intent,
+    nextAt: later[0]?.at ?? null,
+    nextIntent: later[0]?.text ?? "",
     model: result.model,
     ms: result.ms,
   });
-  return { ok: true, decision, sent: Boolean(send) };
+  return { ok: true, sent: Boolean(text), brain, decision: { action: "call", trigger } };
 }
 
 async function failLlm(
@@ -360,8 +245,8 @@ async function failLlm(
   reason: string,
   model: string,
   ms: number,
-  trigger: string,
-): Promise<{ ok: boolean; decision: WakeDecision; sent: boolean }> {
+  _trigger: string,
+): Promise<{ ok: boolean }> {
   if (retry >= 1) {
     const zone = await profileClockZone();
     const id = newId();
@@ -385,7 +270,7 @@ async function failLlm(
       ms,
       nextAt: null,
     });
-    return { ok: false, decision: { action: "call", trigger: trigger as "planned" }, sent: false };
+    return { ok: false };
   }
   const nextAt = at + REACH_RETRY_MS;
   await delayReachPlans(dueIds, nextAt);
@@ -399,43 +284,19 @@ async function failLlm(
     ms,
     nextAt,
   });
-  return { ok: false, decision: { action: "call", trigger: trigger as "planned" }, sent: false };
+  return { ok: false };
 }
 
 async function recentLines(zone: string): Promise<string> {
   const rows = await listHistoryWindow(null, 8);
   return rows
     .filter((row) => row.kind !== "system_notice")
-    .map((row) => `[${formatClock(row.createdAt, zone)}] ${row.role === "user" ? "Rosie" : "清然"}：${row.text}`)
+    .map((row) => `[${formatClock(row.createdAt, zone)}] ${row.role === "user" ? "Rosie" : "清然"}：${modelFacingText(row.text)}`)
     .join("\n");
 }
 
-async function saveInnerForced(inner: import("./types.ts").InnerState): Promise<void> {
-  const db = await getSql();
-  await db.query(
-    `update qr_inner
-     set feel = $1, desire = $2, read_her = $3, choice = $4, now_text = $5, scene = $6, longings = $7::jsonb, plans = $8::jsonb,
-         updated_at = $9, longing_updated_at = $10, glow = $11, glow_at = $12
-     where id = 1`,
-    [
-      inner.feel,
-      inner.desire,
-      inner.readHer,
-      inner.choice,
-      inner.now,
-      inner.scene === "intimate" ? "intimate" : "daily",
-      JSON.stringify(inner.longings ?? []),
-      JSON.stringify(inner.plans),
-      inner.updated_at,
-      inner.longing_updated_at,
-      inner.glow ?? 0,
-      inner.glow_at ?? 0,
-    ],
-  );
-}
-
 export async function wakeOnce(opts: Parameters<typeof runWake>[0] = {}): Promise<Awaited<ReturnType<typeof runWake>> | { ok: true; skipped: "locked" }> {
-  const got = await claimWakeLock(opts.at ?? now());
+  const got = await claimWakeLock(opts.at ?? now(), 300_000);
   if (!got) return { ok: true, skipped: "locked" };
   try {
     return await runWake(opts);

@@ -1,11 +1,8 @@
-import { modeFacts } from "../mode.ts";
-import { ADJUST_HEADING, dossierSection } from "../dossier-text.ts";
+import { mindForReply, timeFacts } from "../heart.ts";
 import { mergeEditedUserBody } from "../../message-markup.ts";
 import { NEUTRAL_PERSONA, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getInner, getMessage, getMeta, listHistoryWindow, listPortrait, upsertMessage } from "../store.ts";
-import { intimateNotesForVoice, momentForVoice } from "../mind-parse.ts";
-import { formatClock } from "../time.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { personaAckText } from "../prompts/doc.ts";
@@ -98,45 +95,47 @@ export async function loadHotContext(input: {
   });
   await ensureMemoryHygiene();
 
+  // Brain off → persona + context only. Brain on → full memory and his private mind.
+  const brainOn = input.profile.brainOn;
   const inject = voiceInjectFromProfile(input.profile);
-  const [history, inner, dossierRow] = await Promise.all([
+  inject.moment = inject.moment && brainOn;
+  inject.dossier = inject.dossier && brainOn;
+  const [history, inner, dossierRow, mindText, clockText] = await Promise.all([
     listHistoryWindow(input.userMsgId, inject.history),
     getInner(),
     getDossier(),
+    inject.moment ? mindForReply(input.nowMs, input.timeZone) : Promise.resolve(""),
+    timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
   ]);
   const legacy = dossierRow.active
     ? null
     : await Promise.all([getMeta(), listPortrait()]).then(([meta, portrait]) => ({ meta, portrait }));
 
-  const injected = momentForVoice(
-    inner,
-    input.nowMs,
-    inject.moment && input.profile.brainOn,
-    Math.round(input.profile.glowHalfLifeDays * 24 * 60 * 60 * 1000),
-  );
-  const mindAgeMs = inner.updated_at ? input.nowMs - inner.updated_at : 0;
-  const mindStale = injected.stale.moment;
-  const careHint = false;
-  // Code-computed time facts (how long she has studied today, current mode and why) so the reply can judge a rest itself.
-  const clockText = `${formatClock(input.nowMs, input.timeZone)}\n${await modeFacts(input.nowMs, input.timeZone, input.profile.modes.map((m) => m.id))}`;
-  const moment = {
-    feel: injected.feel,
-    desire: injected.desire,
-    now: injected.now,
-    longing: injected.longing,
-    glow: injected.glow,
+  const injected: InjectedInner = {
+    feel: "",
+    desire: "",
+    now: mindText,
+    longing: "",
+    glow: "",
+    stale: { moment: false, longing: false },
   };
+  const mindAgeMs = inner.updated_at ? input.nowMs - inner.updated_at : 0;
+  const mindStale = false;
+  const careHint = false;
+  const moment = { feel: "", desire: "", now: mindText, longing: "", glow: "" };
   const tail = buildTail({ clock: clockText, moment, inject });
-  const adjust = dossierRow.active ? dossierSection(dossierRow.body, ADJUST_HEADING) : "";
-  // The reply only sees how the two of them have adjusted to each other; everything else stays with the mind.
-  const longterm = dossierRow.active
-    ? adjust
-      ? renderDossierBlock(adjust)
-      : ""
-    : renderVoiceLongterm(legacy!.meta.selfSummary, legacy!.meta.bondSummary, legacy!.portrait);
+  const longterm = !inject.dossier
+    ? ""
+    : dossierRow.active
+      ? dossierRow.body.trim()
+        ? renderDossierBlock(dossierRow.body)
+        : ""
+      : renderVoiceLongterm(legacy!.meta.selfSummary, legacy!.meta.bondSummary, legacy!.portrait);
   const charter = input.profile.systemPrompt;
   const [loaded, ackPrompt] = await Promise.all([loadPrompt("voice"), loadPrompt("persona_ack")]);
-  const intimate = intimateNotesForVoice(inner, input.nowMs, input.profile.intimateNotes);
+  // Intimate notes follow the mode: shown while the current mode is marked intimate.
+  const modeDef = input.profile.modes.find((m) => m.id === input.profile.mode);
+  const intimate = modeDef?.intimate ? input.profile.intimateNotes.trim() : "";
   const parts: VoicePackParts = {
     charter,
     longterm,

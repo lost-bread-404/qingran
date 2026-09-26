@@ -1,3 +1,5 @@
+> 已过时：当前架构见 [brain.md](brain.md)（v5）。下面是 v3 / v4 的历史说明。
+
 # 清然 brain v4（2026-09-25）
 
 需求总表见 [requirements.md](requirements.md)。

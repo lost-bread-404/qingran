@@ -1,12 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { now } from "./clock.ts";
-import { applyGlowDelta } from "./life.ts";
-import { saveIdentityAndRefreshBusy } from "./busy.ts";
 import { wakeOnce } from "./reach.ts";
 import { sendApns } from "../push/apns.ts";
 import { getInner, saveInner } from "./store.ts";
-import { lockedProfile } from "../types.ts";
-import { getProfileData } from "./store.ts";
 import type { InnerPlan, LongingItem } from "./types.ts";
 import type { Effort } from "./config.ts";
 import { adoptPersona, listPersonaVersions, listReplayTargets, runReplay } from "./voice/replay.ts";
@@ -14,36 +10,28 @@ import {
   addReachPlan,
   clearReachPlans,
   getReach,
-  insertGlowEvent,
   listReachPlans,
   removeReachPlan,
   insertManualEdit,
   innerSnapshot,
-  listGlowEvents,
   listReachLog,
   profileClockZone,
   reachCountsToday,
   saveReach,
   listManualEdits,
+  writeIdentity,
 } from "./life-store.ts";
 
 export const brainGetLife = createServerFn({ method: "GET" }).handler(async () => {
   const at = now();
   const zone = await profileClockZone();
-  const [reach, plans, log, glow, inner, counts] = await Promise.all([
-    getReach(),
-    listReachPlans(),
-    listReachLog(30),
-    listGlowEvents(40),
-    getInner(),
-    reachCountsToday(zone, at),
-  ]);
+  const { listPlans } = await import("./heart.ts");
+  const [reach, plans, log, counts] = await Promise.all([getReach(), listPlans(), listReachLog(30), reachCountsToday(zone, at)]);
   return {
     reach,
-    plans,
+    // Only timed plans can make him message her.
+    plans: plans.filter((p) => p.at != null).map((p) => ({ id: p.id, at: p.at as number, intent: p.text, setBy: p.setBy, setAt: p.setAt })),
     log: log.map((row) => JSON.parse(JSON.stringify(row))),
-    glow,
-    inner,
     counts,
   };
 });
@@ -51,8 +39,9 @@ export const brainGetLife = createServerFn({ method: "GET" }).handler(async () =
 export const brainSaveIdentity = createServerFn({ method: "POST" })
   .validator((input: { identity: string }) => input)
   .handler(async ({ data }) => {
-    const queued = await saveIdentityAndRefreshBusy(String(data.identity ?? ""));
-    return { ok: true as const, queued };
+    // The busy table is no longer generated; what he did is improvised when she asks.
+    await writeIdentity(String(data.identity ?? ""));
+    return { ok: true as const, queued: false };
   });
 
 export const brainSetReach = createServerFn({ method: "POST" })
@@ -82,32 +71,6 @@ export const brainTestPush = createServerFn({ method: "POST" }).handler(async ()
   const push = await sendApns({ body: "这是一条测试通知。", messageId: "test" });
   return { ok: true as const, push };
 });
-
-export const brainAdjustGlow = createServerFn({ method: "POST" })
-  .validator((input: { delta: number; why: string }) => input)
-  .handler(async ({ data }) => {
-    const inner = await getInner();
-    const profile = lockedProfile(await getProfileData());
-    const half = Math.round(profile.glowHalfLifeDays * 24 * 60 * 60 * 1000);
-    const at = now();
-    const before = inner.glow;
-    const next = applyGlowDelta(inner.glow, inner.glow_at, at, Number(data.delta) || 0, half);
-    inner.glow = next.glow;
-    inner.glow_at = next.glowAt;
-    await saveInner({ ...inner, turn_seq: inner.turn_seq + 1, updated_at: inner.updated_at || at }, inner.turn_seq + 1);
-    if (next.event) {
-      await insertGlowEvent({
-        at,
-        delta: Number(data.delta) || 0,
-        why: String(data.why ?? "").slice(0, 200),
-        source: "rosie",
-        turnSeq: inner.turn_seq,
-        glowAfter: next.glow,
-      });
-    }
-    await insertManualEdit("glow", { glow: before }, { glow: next.glow, why: data.why });
-    return { ok: true as const, glow: next.glow };
-  });
 
 export const brainSaveHeart = createServerFn({ method: "POST" })
   .validator((input: {

@@ -434,40 +434,23 @@ export async function setRoomClearedAt(at: number): Promise<void> {
   );
 }
 
-/** Hide recent unarchived turns from the screen and from Qingran; keep rows for analysis.
- * Open plans are dropped and the next reach is cleared. Longings, glow, and the dossier stay. */
+/** Hide recent turns not yet folded into memory, from the screen and from Qingran; rows stay for analysis.
+ * His heart is emptied (it may hold the stuck topic) and what he meant to do next is dropped.
+ * Plans with a time (dinner, bedtime), plans she added, and the memory stay. */
 export async function clearRecentConversation(): Promise<void> {
   const ts = now();
   const inner = await getInner();
   await setRoomClearedAt(ts);
   await forgetUnarchivedMessages(ts);
   await resetInnerTurn();
-  const plans = inner.plans.map((plan) =>
-    plan.status === "open" ? { ...plan, status: "dropped" as const } : plan,
-  );
-  const dropped = inner.plans.filter((plan) => plan.status === "open").map((plan) => plan.id);
-  if (dropped.length) await saveInnerPlans(plans);
+  const { dropUntimedPlans } = await import("./heart.ts");
+  await dropUntimedPlans();
   await appendInnerLog({
     turnSeq: inner.turn_seq,
-    data: { kind: "cleared_by_rosie", dropped },
+    data: { kind: "cleared_by_rosie" },
   });
-  await clearReachOnRosieClear(ts);
 }
 
-async function clearReachOnRosieClear(at: number): Promise<void> {
-  const db = await getSql();
-  await db.query(
-    `insert into qr_reach (id, next_at, intent, set_by, set_at)
-     values (1, null, '', 'rosie', $1)
-     on conflict (id) do update set
-       next_at = null,
-       intent = '',
-       set_by = 'rosie',
-       set_at = excluded.set_at`,
-    [at],
-  );
-  await db.query(`delete from qr_reach_plans where done_at is null`);
-}
 
 function rowMessage(r: Record<string, unknown>): StoredMessage {
   return {

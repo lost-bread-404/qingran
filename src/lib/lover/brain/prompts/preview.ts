@@ -1,12 +1,11 @@
 import { getSql } from "../../../db.ts";
 import { lockedProfile, voiceInjectFromProfile } from "../../types.ts";
 import { now } from "../clock.ts";
-import { HISTORY_WINDOW, REFLECT_WINDOW } from "../config.ts";
+import { HISTORY_WINDOW } from "../config.ts";
 import { currentArchiveVars } from "../archivist.ts";
 import { buildReportData } from "../diary/report.ts";
 import {
   getMeta,
-  getInner,
   getProfileData,
   getProfilePrompt,
   listDays,
@@ -24,8 +23,8 @@ import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
 import { buildVoiceMessages, renderDossierBlock, voiceHistoryMessages } from "../voice/pack-build.ts";
-import { formatReflectConversation, recentThoughts, reflectVars } from "../voice/reflector.ts";
-import { momentForVoice } from "../mind-parse.ts";
+import { gatherReflectParts, reflectVars } from "../voice/reflector.ts";
+import { mindForReply, listPlans, plansText, getHeart, todayNotesText } from "../heart.ts";
 import { dossierTextForModel, getDossier } from "../dossier.ts";
 
 export type PromptPreview = {
@@ -57,10 +56,9 @@ async function profileData(): Promise<Record<string, unknown>> {
 }
 
 async function voicePreview(body: string | undefined): Promise<Omit<PromptPreview, "variantId">> {
-  const [meta, portrait, inner, charter, profile] = await Promise.all([
+  const [meta, portrait, charter, profile] = await Promise.all([
     getMeta(),
     listPortrait(),
-    getInner(),
     getProfilePrompt(),
     profileData(),
   ]);
@@ -72,7 +70,7 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
   });
   const history = await listHistoryWindow(null, inject.history);
   const clock = formatClock(now(), tz);
-  const moment = momentForVoice(inner, now(), inject.moment);
+  const moment = { feel: "", desire: "", longing: "", glow: "", now: profile.brainOn === false ? "" : await mindForReply(now(), tz) };
   const dossierRow = await getDossier();
   const dossier = await dossierTextForModel();
   const historyText =
@@ -111,36 +109,31 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
 }
 
 async function reflectSlots(): Promise<Record<string, string>> {
-  const [history, charter, dossier, profileData] = await Promise.all([
-    listHistoryWindow(null, REFLECT_WINDOW),
-    getProfilePrompt(),
-    dossierTextForModel(),
-    getProfileData(),
-  ]);
-  const meta = await getMeta();
-  const tz = resolveTz(meta.timeZone);
-  const at = now();
-  return reflectVars({
-    charter,
-    story: lockedProfile(profileData).storyline,
-    dossier,
-    clock: formatClock(at, tz),
-    thoughts: await recentThoughts(tz),
-    conversation: formatReflectConversation(history, tz),
-  });
+  return reflectVars((await gatherReflectParts(now(), "turn")).parts);
 }
 
 async function editorSlots(): Promise<Record<string, string>> {
-  const [dossier, inner, charter] = await Promise.all([dossierTextForModel(), getInner(), getProfilePrompt()]);
+  const tz = resolveTz((await getMeta()).timeZone);
+  const at = now();
+  const [dossier, charter, heart, plans, notes, profile] = await Promise.all([
+    dossierTextForModel(),
+    getProfilePrompt(),
+    getHeart(),
+    listPlans(),
+    todayNotesText(at, tz),
+    getProfileData(),
+  ]);
   return {
     system_prompt: charter,
     dossier: dossier || "（还没有）",
-    longing: inner.longing.trim() || "（没有）",
-    conversation: "（要等这次整理才有）",
-    max_chars: "4000",
-    story: lockedProfile(await getProfileData()).storyline || "（没有）",
+    heart: heart.text || "（空）",
+    plans: plansText(plans, at, tz) || "（没有）",
+    notes: notes || "（没有）",
+    day: localDay(at, tz),
+    conversation: "（要等这次整理才有：这一天没被清空的对话）",
+    max_chars: String(lockedProfile(profile).dossierMaxChars),
+    story: lockedProfile(profile).storyline || "（没有）",
     legacy: "（要等这次生成才有）",
-    notes: "（要等这次生成才有）",
   };
 }
 

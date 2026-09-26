@@ -20,6 +20,8 @@ function fmtTime(ms: number): string {
 
 const AUTHOR: Record<string, string> = {
   editor: "整理",
+  night: "夜里整理",
+  import: "导入",
   rosie: "你改的",
   seed: "初版",
   compact: "压缩",
@@ -109,7 +111,8 @@ export function DossierPanel({ maxChars, onMaxChars, footer }: Props) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
       <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-        <p className="text-xs text-subtle">说话时他眼前就是这一份。不对的地方直接改，失焦就记下。</p>
+        <p className="text-sm">我记得的</p>
+        <p className="text-xs text-subtle">说话时他眼前就是这一份，每天凌晨整篇重写一次。不对的地方直接改，失焦就记下。</p>
         <p className="text-xs text-subtle">
           版本 {row?.version ?? 0}
           {" · "}
@@ -124,7 +127,7 @@ export function DossierPanel({ maxChars, onMaxChars, footer }: Props) {
           aria-label="我记得的"
         />
         <Button type="button" variant="outline" disabled={busy != null} onClick={() => void editNow()}>
-          {busy === "edit" ? "正在整理…" : "现在整理"}
+          {busy === "edit" ? "正在整理…（要一两分钟）" : "现在把今天整理进去"}
         </Button>
         <label className="flex flex-col gap-2">
           <span className="text-xs text-subtle">字数上限（2000–8000）</span>

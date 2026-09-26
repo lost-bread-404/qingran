@@ -253,13 +253,19 @@ export async function rebuildReflectorInput(turnSeq: number): Promise<RebuildRes
       charter: charter ?? "",
       story: "",
       dossier: "",
-      clock: refs.clockText,
-      thoughts: oldInnerText,
+      trigger: "",
+      facts: refs.clockText,
+      days: "",
+      today: "",
+      heart: oldInnerText,
+      plans: "",
+      modes: "",
       conversation: formatReflectConversation(recent, tz),
     },
     await promptBody(log.promptHash, "reflect"),
   );
   if (block?.text != null) packed.stable = block.text;
+  warnings.push("时间、今天、打算和模式这几块只存了时钟，重建时是空的；实际发出的原文在调用记录里");
   return {
     messages: [
       { role: "system", content: packed.system },

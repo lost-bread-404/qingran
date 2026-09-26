@@ -2,19 +2,15 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { brainGetLife, brainListManualEdits, brainSetReach, brainTestPush, brainWakeNow } from "@/lib/lover/brain/life-api";
 import {
-  brainAdjustGlow,
-  brainGetLife,
-  brainListManualEdits,
-  brainSaveHeart,
-  brainSetReach,
-  brainTestPush,
-  brainWakeNow,
-} from "@/lib/lover/brain/life-api";
-import { glowWord } from "@/lib/lover/brain/life";
-import type { InnerPlan, InnerState, LongingItem } from "@/lib/lover/brain/types";
+  brainDeleteDayNote,
+  brainEditPlan,
+  brainGetMind,
+  brainSaveHeartText,
+  brainSetModeNow,
+} from "@/lib/lover/brain/mind-api";
 import { hearingLabeledCount } from "@/lib/lover/hearing/store";
-import { clampGlowHalfLifeDays } from "@/lib/lover/brain/config";
 import { cn } from "@/lib/utils";
 
 type ReachRow = {
@@ -28,16 +24,10 @@ type ReachRow = {
 
 type ReachPlan = { id: number; at: number; intent: string; setBy: string; setAt: number };
 
-const PLAN_AUTHOR: Record<string, string> = { mode: "休息结束叫你", rosie: "你定的", reflect: "心思", reach: "上次找你时定的" };
-
-type GlowRow = { id: number; at: number; delta: number; why: string; source: string; glowAfter: number };
-
 type Life = {
   reach: ReachRow;
   plans: ReachPlan[];
   log: Array<Record<string, unknown>>;
-  glow: GlowRow[];
-  inner: InnerState;
   counts: { llm: number; sent: number };
 };
 
@@ -46,19 +36,6 @@ function clock(ms: number): string {
   const d = new Date(ms);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function localInput(ms: number | null): string {
-  if (!ms) return "";
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function todayStamp(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 export function SettingsLink({
@@ -114,29 +91,32 @@ export function IdentityField({
   );
 }
 
-export function HeartEditor({
-  halfLifeDays,
-  onHalfLife,
-}: {
-  halfLifeDays: number;
-  onHalfLife: (days: number) => void;
-}) {
-  const [inner, setInner] = useState<InnerState | null>(null);
-  const [glow, setGlow] = useState<GlowRow[]>([]);
-  const [plans, setPlans] = useState<ReachPlan[] | null>(null);
-  const [draftAt, setDraftAt] = useState<number | null>(null);
-  const [draftIntent, setDraftIntent] = useState("");
+type Mind = {
+  timeZone: string;
+  heart: { text: string; updatedAt: number };
+  plans: Array<{ id: number; at: number | null; atText: string; due: boolean; text: string; setBy: string }>;
+  today: Array<{ id: number; clock: string; text: string }>;
+  days: Array<{ day: string; timeline: string }>;
+  mode: string;
+  modes: Array<{ id: string; name: string }>;
+};
+
+const PLAN_BY: Record<string, string> = { rosie: "你加的", reflect: "心思", night: "夜里整理" };
+
+/** 他的心：心里、打算、模式、今天、最近几天。都是他自己写的，你可以改。 */
+export function HeartEditor() {
+  const [mind, setMind] = useState<Mind | null>(null);
+  const [heart, setHeartDraft] = useState("");
+  const [draftText, setDraftText] = useState("");
+  const [draftAt, setDraftAt] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [delta, setDelta] = useState("");
-  const [why, setWhy] = useState("");
 
   function load() {
-    void brainGetLife()
+    void brainGetMind()
       .then((res) => {
-        const life = res as Life;
-        setInner(life.inner);
-        setGlow(life.glow);
-        setPlans(life.plans ?? []);
+        const next = res as Mind;
+        setMind(next);
+        setHeartDraft(next.heart.text);
       })
       .catch(() => setError("心没读出来。"));
   }
@@ -145,196 +125,68 @@ export function HeartEditor({
     load();
   }, []);
 
-  function save(patch: Partial<{ desire: string; readHer: string; feel: string; now: string; choice: string; plans: InnerPlan[]; longings: LongingItem[] }>) {
-    if (!inner) return;
-    const next = { ...inner, ...patch, now: patch.now ?? inner.now };
-    setInner(next);
-    void brainSaveHeart({
-      data: {
-        desire: next.desire,
-        readHer: next.readHer,
-        feel: next.feel,
-        now: next.now,
-        choice: next.choice,
-        plans: next.plans,
-        longings: next.longings,
-      },
-    }).catch(() => setError("没记下。"));
-  }
-
-  if (!inner) return <p className="text-sm text-subtle">{error || "正在读…"}</p>;
-  const word = glowWord(inner.glow);
-  const maxGlow = Math.max(60, ...glow.map((row) => Math.abs(row.glowAfter)));
+  if (!mind) return <p className="text-sm text-subtle">{error || "正在读…"}</p>;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       {error ? <p className="text-sm text-live">{error}</p> : null}
       <section className="flex flex-col gap-2">
-        <p className="text-sm">此刻</p>
-        <p className="text-xs text-subtle">
-          他没说出口的。下一轮回复看得到欲望、心里和正在做，取舍和对她的理解他留着自己看。
-        </p>
-        <p className="text-sm">场景：{inner.scene === "intimate" ? "亲密" : "日常"}</p>
-        <p className="text-xs text-subtle">失焦就记下。</p>
-        {(
-          [
-            ["欲望", "desire"],
-            ["对她", "readHer"],
-            ["心里", "feel"],
-            ["取舍", "choice"],
-            ["正在做", "now"],
-          ] as const
-        ).map(([label, key]) => (
-          <label key={key} className="flex flex-col gap-1">
-            <span className="text-sm">{label}</span>
-            <Textarea
-              value={inner[key]}
-              className="min-h-16"
-              onChange={(e) => setInner({ ...inner, [key]: e.target.value })}
-              onBlur={() => save({ [key]: inner[key] })}
-            />
-          </label>
-        ))}
-      </section>
-      <section className="flex flex-col gap-2">
-        <p className="text-sm">计划</p>
-        <p className="text-xs text-subtle">
-          他接下来想做成的事。达成了标做成了，想法变了就改或标放下了。不会自己过期。
-        </p>
-        {inner.plans.map((plan, index) => (
-          <div key={plan.id || index} className="rounded-md bg-surface-2 p-2">
-            <Textarea
-              value={plan.what}
-              className="min-h-14"
-              onChange={(e) => {
-                const plans = inner.plans.map((item, i) => (i === index ? { ...item, what: e.target.value } : item));
-                setInner({ ...inner, plans });
-              }}
-              onBlur={() => save({ plans: inner.plans })}
-            />
-            <div className="mt-2 flex gap-2">
-              <select
-                className="h-11 flex-1 rounded-md bg-bg px-2 text-sm"
-                value={plan.status}
-                onChange={(e) => {
-                  const plans = inner.plans.map((item, i) =>
-                    i === index ? { ...item, status: e.target.value as InnerPlan["status"] } : item,
-                  );
-                  setInner({ ...inner, plans });
-                  save({ plans });
-                }}
-              >
-                <option value="open">进行中</option>
-                <option value="done">做成了</option>
-                <option value="dropped">放下了</option>
-              </select>
-              <button
-                type="button"
-                className="text-sm text-muted"
-                onClick={() => save({ plans: inner.plans.filter((_, i) => i !== index) })}
-              >
-                删除
-              </button>
-            </div>
-          </div>
-        ))}
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() =>
-            save({
-              plans: [...inner.plans, { id: `rosie-${Date.now()}`, what: "", why: "", status: "open" }],
-            })
-          }
-        >
-          加一条计划
-        </Button>
-      </section>
-      <section className="flex flex-col gap-2">
-        <p className="text-sm">心事</p>
-        <p className="text-xs text-subtle">一直惦记的，几天不说话也还在。</p>
-        {inner.longings.map((item, index) => (
-          <div key={item.id || index} className="rounded-md bg-surface-2 p-2">
-            <Textarea
-              value={item.text}
-              className="min-h-14"
-              onChange={(e) => {
-                const longings = inner.longings.map((row, i) => (i === index ? { ...row, text: e.target.value } : row));
-                setInner({ ...inner, longings });
-              }}
-              onBlur={() => save({ longings: inner.longings })}
-            />
-            <div className="mt-1 flex items-center justify-between">
-              <span className="text-xs text-subtle">{item.since || "今天"}</span>
-              <button
-                type="button"
-                className="text-sm text-muted"
-                onClick={() => save({ longings: inner.longings.filter((_, i) => i !== index) })}
-              >
-                删除
-              </button>
-            </div>
-          </div>
-        ))}
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() =>
-            save({
-              longings: [...inner.longings, { id: `rosie-${Date.now()}`, text: "", since: todayStamp() }],
-            })
-          }
-        >
-          加一条心事
-        </Button>
-      </section>
-      <section className="flex flex-col gap-2">
-        <p className="text-sm">打算找你</p>
-        <p className="text-xs text-subtle">他同时挂着的几件事，到点哪件就发哪件。可以删，也可以自己加。</p>
-        {plans == null ? null : plans.length === 0 ? (
-          <p className="text-sm text-subtle">现在没有计划</p>
-        ) : (
-          plans.map((plan) => (
-            <div key={plan.id} className="flex items-start justify-between gap-3 rounded-md bg-surface-2 px-3 py-2">
-              <p className="text-sm">
-                {clock(plan.at)} · {plan.intent || "（没写）"}
-                <span className="text-xs text-subtle"> · {PLAN_AUTHOR[plan.setBy] ?? plan.setBy}</span>
-              </p>
-              <button
-                type="button"
-                className="shrink-0 text-sm text-muted"
-                onClick={() => {
-                  setPlans(plans.filter((row) => row.id !== plan.id));
-                  void brainSetReach({ data: { remove: plan.id } }).catch(() => setError("没删掉。"));
-                }}
-              >
-                删
-              </button>
-            </div>
-          ))
-        )}
-        <Input
-          type="datetime-local"
-          value={localInput(draftAt)}
-          onChange={(e) => setDraftAt(e.target.value ? new Date(e.target.value).getTime() : null)}
-        />
+        <p className="text-sm">心里</p>
+        <p className="text-xs text-subtle">他此刻的感觉、想要你什么、怎么看你。回复看得到。心思没有新想法时就留着这一份。</p>
         <Textarea
-          value={draftIntent}
-          className="min-h-14"
-          placeholder="想让他那时做什么"
-          onChange={(e) => setDraftIntent(e.target.value)}
+          value={heart}
+          className="min-h-28"
+          onChange={(e) => setHeartDraft(e.target.value)}
+          onBlur={() => {
+            if (heart === mind.heart.text) return;
+            void brainSaveHeartText({ data: { text: heart } })
+              .then(() => setMind({ ...mind, heart: { ...mind.heart, text: heart } }))
+              .catch(() => setError("没记下。"));
+          }}
+        />
+        <p className="text-xs text-subtle">更新于 {clock(mind.heart.updatedAt)}</p>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <p className="text-sm">打算</p>
+        <p className="text-xs text-subtle">
+          没写时间的是他接下来要做的，回复看得到。写了时间的到点才出现：你在聊，回复会看到；你不在，他会给你发一条。
+        </p>
+        {mind.plans.length === 0 ? <p className="text-sm text-subtle">现在没有打算</p> : null}
+        {mind.plans.map((plan) => (
+          <div key={plan.id} className="flex items-start justify-between gap-3 rounded-md bg-surface-2 px-3 py-2">
+            <p className="text-sm">
+              {plan.at == null ? "接下来" : plan.due ? "到时间了" : plan.atText} · {plan.text}
+              <span className="text-xs text-subtle"> · {PLAN_BY[plan.setBy] ?? plan.setBy}</span>
+            </p>
+            <button
+              type="button"
+              className="shrink-0 text-sm text-muted"
+              onClick={() => {
+                setMind({ ...mind, plans: mind.plans.filter((row) => row.id !== plan.id) });
+                void brainEditPlan({ data: { remove: plan.id } }).catch(() => setError("没删掉。"));
+              }}
+            >
+              删
+            </button>
+          </div>
+        ))}
+        <Textarea value={draftText} className="min-h-14" placeholder="加一件他要做的事" onChange={(e) => setDraftText(e.target.value)} />
+        <Input
+          value={draftAt}
+          placeholder="时间（可空），例如 2026-09-26 23:00"
+          onChange={(e) => setDraftAt(e.target.value)}
         />
         <Button
           type="button"
           variant="outline"
-          disabled={draftAt == null}
+          disabled={!draftText.trim()}
           onClick={() => {
-            if (draftAt == null) return;
-            void brainSetReach({ data: { add: { at: draftAt, intent: draftIntent.trim() } } })
-              .then((res) => {
-                if (res?.plans) setPlans(res.plans as ReachPlan[]);
-                setDraftAt(null);
-                setDraftIntent("");
+            void brainEditPlan({ data: { add: { text: draftText.trim(), at: draftAt.trim() } } })
+              .then(() => {
+                setDraftText("");
+                setDraftAt("");
+                load();
               })
               .catch(() => setError("没加上。"));
           }}
@@ -342,66 +194,62 @@ export function HeartEditor({
           加一件
         </Button>
       </section>
+
       <section className="flex flex-col gap-2">
-        <p className="text-sm">心情</p>
-        <p className="text-xs text-subtle">
-          {word ? `${word}（比平常）` : "平常"} · {inner.glow.toFixed(1)}
-        </p>
-        {glow.length === 0 ? (
-          <p className="text-sm text-subtle">还没有起伏</p>
-        ) : (
-          <div className="flex h-16 items-end gap-1">
-            {[...glow].reverse().map((row) => (
-              <div
-                key={row.id}
-                title={`${clock(row.at)} ${row.why}`}
-                className={cn("w-2 rounded-sm", row.glowAfter >= 0 ? "bg-accent" : "bg-live")}
-                style={{ height: `${Math.max(8, (Math.abs(row.glowAfter) / maxGlow) * 100)}%` }}
-              />
-            ))}
+        <p className="text-sm">模式</p>
+        <p className="text-xs text-subtle">心思在每轮之后选；这里可以手动换。模式本身在「清然是谁」里改。</p>
+        <div className="flex flex-wrap gap-2">
+          {mind.modes.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className={cn("min-h-11 rounded-md px-3 text-sm", m.id === mind.mode ? "bg-accent text-accent-fg" : "bg-surface-2")}
+              onClick={() => {
+                setMind({ ...mind, mode: m.id });
+                void brainSetModeNow({ data: { mode: m.id } }).catch(() => setError("没换成。"));
+              }}
+            >
+              {m.name}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <p className="text-sm">今天</p>
+        <p className="text-xs text-subtle">他随手记下的你今天。记错了可以删。</p>
+        {mind.today.length === 0 ? <p className="text-sm text-subtle">还没有</p> : null}
+        {mind.today.map((note) => (
+          <div key={note.id} className="flex items-start justify-between gap-3 rounded-md bg-surface-2 px-3 py-2">
+            <p className="text-sm">
+              {note.clock} {note.text}
+            </p>
+            <button
+              type="button"
+              className="shrink-0 text-sm text-muted"
+              onClick={() => {
+                setMind({ ...mind, today: mind.today.filter((row) => row.id !== note.id) });
+                void brainDeleteDayNote({ data: { id: note.id } }).catch(() => setError("没删掉。"));
+              }}
+            >
+              删
+            </button>
           </div>
-        )}
-        <label className="flex flex-col gap-1 text-xs text-subtle">
-          给他的心情 +/−
-          <Input
-            aria-label="给他的心情 +/−"
-            value={delta}
-            placeholder="例如 +10"
-            onChange={(e) => setDelta(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-subtle">
-          原因
-          <Input aria-label="原因" value={why} onChange={(e) => setWhy(e.target.value)} placeholder="原因" />
-        </label>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            void brainAdjustGlow({ data: { delta: Number(delta) || 0, why } })
-              .then(() => {
-                setDelta("");
-                setWhy("");
-                load();
-              })
-              .catch(() => setError("心情没记下。"));
-          }}
-        >
-          记下
-        </Button>
-        <label className="text-xs text-subtle">
-          开心或难过多久回到平常：{halfLifeDays} 天
-          <input
-            type="range"
-            min={0.5}
-            max={7}
-            step={0.5}
-            value={halfLifeDays}
-            aria-label="开心或难过多久回到平常"
-            className="mt-1 h-11 w-full accent-accent"
-            onChange={(e) => onHalfLife(clampGlowHalfLifeDays(Number(e.target.value)))}
-          />
-        </label>
+        ))}
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <p className="text-sm">最近几天</p>
+        <p className="text-xs text-subtle">每天凌晨整理时写的时间线。</p>
+        {mind.days.filter((d) => d.timeline.trim()).length === 0 ? <p className="text-sm text-subtle">还没有</p> : null}
+        {mind.days
+          .filter((d) => d.timeline.trim())
+          .map((d) => (
+            <div key={d.day} className="rounded-md bg-surface-2 px-3 py-2 text-sm">
+              <p className="text-xs text-subtle">{d.day}</p>
+              <p className="whitespace-pre-wrap">{d.timeline}</p>
+            </div>
+          ))}
       </section>
     </div>
   );

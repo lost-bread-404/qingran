@@ -109,14 +109,6 @@ export const saveProfilePatch = createServerFn({ method: "POST" })
       baseRevs: data.baseRevs,
       source: await clientSource(),
     });
-    if (result.ok && Object.prototype.hasOwnProperty.call(data.patch, "identity")) {
-      try {
-        const { enqueueBusyRefresh } = await import("./brain/busy.ts");
-        await enqueueBusyRefresh();
-      } catch {
-        /* identity is already saved */
-      }
-    }
     return result;
   });
 

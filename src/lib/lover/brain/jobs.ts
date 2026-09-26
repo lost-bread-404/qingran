@@ -99,14 +99,21 @@ async function runOne(job: BrainJob): Promise<void> {
     return;
   }
   if (job.type === "editor") {
+    // The memory is rewritten by the night pass now; an old "editor" job becomes 整理今天.
     const reason = String(job.payload.reason ?? "turns");
     if (reason === "activate") {
       const { ensureDossierLive } = await import("./dossier");
       await ensureDossierLive();
     } else {
-      const { runEditor } = await import("./dossier");
-      await runEditor(reason);
+      const { enqueueNightNow } = await import("./night");
+      await enqueueNightNow();
     }
+    await finishJob(job.id, "done");
+    return;
+  }
+  if (job.type === "night") {
+    const { runNight } = await import("./night");
+    await runNight(String(job.payload.day ?? ""), job.id, undefined, { manual: job.payload.manual === true });
     await finishJob(job.id, "done");
     return;
   }

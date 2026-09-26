@@ -118,8 +118,8 @@ export function BrainBackupPanel() {
 
   return (
     <div className="rounded-md bg-surface-2 px-3 py-3">
-      <p className="text-sm">完整备份</p>
-      <p className="mt-1 text-xs text-subtle">包含对话、笔记和日记。分块传输，可以重复导入。</p>
+      <p className="text-sm">系统完整备份</p>
+      <p className="mt-1 text-xs text-subtle">给程序用的逐表备份（旧格式），包含对话、笔记和日记。平时用「数据」页的导出导入就够了。</p>
       <div className="mt-3 flex gap-2">
         <Button type="button" size="sm" variant="outline" onClick={() => void exportAll()}>
           导出完整备份

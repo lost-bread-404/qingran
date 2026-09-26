@@ -148,12 +148,48 @@ export const NEUTRAL_PERSONA = "你是清然。";
 /** Kept for callers that still import the old name. Empty profiles stay empty. */
 export const DEFAULT_SYSTEM_PROMPT = NEUTRAL_PERSONA;
 
-export type TalkModeDef = { id: string; name: string; when: string; prompt: string };
+/**
+ * A mode she defines. `when` is free text for the inner mind. `prompt` goes after the persona.
+ * `temperature` overrides the reply's default (1.0) while this mode is on; null keeps the default.
+ * `keepActions`: false → the night pass keeps only what was said in this mode, not his actions.
+ * `intimate`: the intimate notes are shown to the reply while this mode is on.
+ */
+export type TalkModeDef = {
+  id: string;
+  name: string;
+  when: string;
+  prompt: string;
+  temperature: number | null;
+  keepActions: boolean;
+  intimate: boolean;
+};
 
 export const DEFAULT_MODES: TalkModeDef[] = [
-  { id: "play", name: "戏", when: "休息、哄睡、午休、亲密、剧情；晚上收工后和周末", prompt: "" },
-  { id: "real", name: "现实", when: "工作日白天她该起床开工、学习、准备面试的时候", prompt: "" },
+  {
+    id: "play",
+    name: "戏",
+    when: "休息、哄睡、午休、亲密、剧情；晚上收工后和周末",
+    prompt: "",
+    temperature: null,
+    keepActions: true,
+    intimate: true,
+  },
+  {
+    id: "real",
+    name: "现实",
+    when: "工作日白天她该起床开工、学习、准备面试的时候",
+    prompt: "",
+    temperature: null,
+    keepActions: true,
+    intimate: false,
+  },
 ];
+
+function lockTemperature(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(2, Math.round(n * 100) / 100));
+}
 
 export function lockModes(raw: unknown): TalkModeDef[] {
   if (!Array.isArray(raw)) return DEFAULT_MODES.map((m) => ({ ...m }));
@@ -170,6 +206,9 @@ export function lockModes(raw: unknown): TalkModeDef[] {
       name: typeof row.name === "string" && row.name.trim() ? row.name.trim().slice(0, 20) : id,
       when: typeof row.when === "string" ? row.when.slice(0, 1000) : "",
       prompt: typeof row.prompt === "string" ? row.prompt.slice(0, 8000) : "",
+      temperature: lockTemperature(row.temperature),
+      keepActions: row.keepActions !== false,
+      intimate: row.intimate === true,
     });
     if (out.length >= 8) break;
   }
