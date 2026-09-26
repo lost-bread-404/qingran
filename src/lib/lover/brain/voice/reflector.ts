@@ -36,21 +36,22 @@ import {
 } from "../heart.ts";
 
 /**
- * The inner mind (brain v5). One mind, three moments:
- * - turn: after every reply — heart, focus, plans, next mode;
+ * The inner mind (brain v5) is the control unit: it keeps the day's plan list in order and hands the reply
+ * one thing to move toward (focus). It does not read her mood — the reply does that from the talk and the memory;
+ * deeper understanding is written into the memory at night. Three moments:
+ * - turn: after every reply — plans, focus, his own feeling (heart), next mode;
  * - silence: once when she has gone quiet — the same, plus today's text rewritten with the stretch that just ended;
  * - due: a timed plan came due while she is away — the same, plus the message he sends her (or none).
- * Empty fields mean "no change", so most turns change nothing.
+ * plans_changed=false and empty heart/mode mean "no change"; focus is written every time.
  */
 export const INNER_SCHEMA = {
   name: "inner",
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["heart", "focus", "plans_changed", "plans", "mode", "today", "message"] as string[],
+    // Generated in this order: the list first, then the one thing, then how he feels.
+    required: ["plans_changed", "plans", "focus", "heart", "mode", "today", "message"] as string[],
     properties: {
-      heart: { type: "string" },
-      focus: { type: "string" },
       plans_changed: { type: "boolean" },
       plans: {
         type: "array",
@@ -64,6 +65,8 @@ export const INNER_SCHEMA = {
           },
         },
       },
+      focus: { type: "string" },
+      heart: { type: "string" },
       mode: { type: "string" },
       today: { type: "string" },
       message: { type: "string" },
@@ -127,7 +130,7 @@ export function reflectVars(parts: ReflectorParts): Record<string, string> {
     days: parts.days.trim() || "（还没有）",
     today: parts.today.trim() || "（还没有）",
     heart: parts.heart.trim() || "（空）",
-    focus: parts.focus?.trim() || "（没有，跟着她）",
+    focus: parts.focus?.trim() || "（还没有）",
     plans: parts.plans.trim() || "（没有）",
     modes: parts.modes.trim() || "（没有）",
     conversation: parts.conversation.trim() || "（还没有）",

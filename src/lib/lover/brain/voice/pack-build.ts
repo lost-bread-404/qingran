@@ -25,6 +25,8 @@ export type VoicePackParts = {
   history: StoredMessage[];
   historyWindow: number;
   userText: string;
+  /** Set when he writes first (nothing from her to answer): the「主动找她」variant. */
+  first?: { quiet: string; intent: string };
   voiceTemplate?: string;
   personaPlacement: "system" | "first_user";
   personaAck: string;
@@ -98,8 +100,11 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
     today: strip === "none" ? parts.today.trim() : "",
     clock: parts.clock,
     user_text: parts.userText,
+    quiet: parts.first?.quiet ?? "",
+    intent: parts.first?.intent ?? "",
   };
-  const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), "main").filter((message) => {
+  const variant = parts.first ? "first" : "main";
+  const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant).filter((message) => {
     const tokens = optionalTokens(message.content);
     return !tokens.length || tokens.some((token) => vars[token]);
   });

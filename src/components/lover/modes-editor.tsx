@@ -88,7 +88,7 @@ export function ModesEditor({
       <div className="flex flex-col gap-2">
         <p className="text-sm">模式</p>
         <p className="text-xs text-subtle">
-          开着「运行心思和记忆整理」时，他的心思每轮之后看每个模式写的「什么时候用」，决定下一句用哪个；关掉时，在聊天页右上角手动切。模式的 prompt 接在人设后面发给他。
+          开着「运行心思和记忆整理」时，他的心思每轮之后看每个模式写的「什么时候用」，决定下一句用哪个；关掉时，在聊天页右上角手动切。模式的 prompt 接在人设后面，作为「现在大致是什么时候」的基调发给他：眼前真的发生的事和他心里的感觉比它优先。所以写这个时候你们大概是什么样就够了，不用把每种情况都列出来。
         </p>
         {draft.map((m, i) => (
           <div key={m.id} className="flex flex-col gap-2 rounded-md bg-surface-2 px-3 py-3">

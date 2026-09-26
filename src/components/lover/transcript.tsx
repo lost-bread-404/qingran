@@ -138,6 +138,8 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
   }
 
   const pairs = pairMessages(messages);
+  // His messages that came on their own after her last word stay marked until she says something.
+  const lastUserAt = messages.reduce((max: number, m: ChatMessage) => (m.role === "user" ? Math.max(max, m.createdAt) : max), 0);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -214,8 +216,10 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
               <div className="flex max-w-[min(22rem,92%)] flex-col gap-6 self-start">
                 {shown.text.trim() ? (
                 <div className="flex items-start gap-2">
+                  {!shown.replyTo && shown.createdAt > lastUserAt ? (
+                    <span aria-label="还没回" className="mt-3 size-2 shrink-0 rounded-full bg-live" />
+                  ) : null}
                   <div className="min-w-0">
-                    {shown.kind === "proactive" ? <p className="mb-1 text-[10px] text-subtle">他先找你</p> : null}
                     <p className="whitespace-pre-wrap break-words font-display text-lg font-medium leading-relaxed tracking-tight text-fg">
                       {shown.text}
                     </p>

@@ -20,7 +20,8 @@ export type PromptPreview = {
 };
 
 /** What the reply would be given right now, with 「在吗」 standing in for her line. */
-async function voicePreview(body: string | undefined): Promise<Omit<PromptPreview, "variantId">> {
+async function voicePreview(body: string | undefined, variantId: string): Promise<Omit<PromptPreview, "variantId">> {
+  const first = variantId === "first" ? { quiet: "25 分钟", intent: "（到时间时心思写的那件事）" } : undefined;
   const at = now();
   const [meta, charter, profileData, ackPrompt] = await Promise.all([getMeta(), getProfilePrompt(), getProfileData(), loadPrompt("persona_ack")]);
   const profile = lockedProfile(profileData);
@@ -45,6 +46,7 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
     history,
     historyWindow: inject.history,
     userText: "在吗",
+    first,
     voiceTemplate: body,
     personaPlacement: profile.personaPlacement,
     personaAck: personaAckText(ackPrompt.body),
@@ -54,9 +56,21 @@ async function voicePreview(body: string | undefined): Promise<Omit<PromptPrevie
       .map((message) => `${message.role}：${message.content}`)
       .join("\n") || "（没有对话）";
   return {
-    slots: { dossier, now: mind, today, system_prompt: charter, clock, user_text: "在吗", history_messages: historyText },
+    slots: {
+      dossier,
+      now: mind,
+      today,
+      system_prompt: charter,
+      clock,
+      user_text: "在吗",
+      quiet: first?.quiet ?? "",
+      intent: first?.intent ?? "",
+      history_messages: historyText,
+    },
     messages,
-    note: "没有正在说的这一句，用「在吗」占位。人设这里不带当前模式的 prompt，亲密设定也不放。",
+    note: first
+      ? "主动找她：多久没说话、想做成什么用占位。人设这里不带当前模式的 prompt，亲密设定也不放。"
+      : "没有正在说的这一句，用「在吗」占位。人设这里不带当前模式的 prompt，亲密设定也不放。",
   };
 }
 
@@ -114,7 +128,7 @@ export async function previewPrompt(input: { key: string; variantId?: string; bo
   const key = input.key;
   const spec = promptSpec(key);
   const variantId = spec.variants.some((variant) => variant.id === input.variantId) ? input.variantId! : spec.variants[0]?.id ?? "main";
-  if (key === "voice") return { variantId, ...(await voicePreview(input.body)) };
+  if (key === "voice") return { variantId, ...(await voicePreview(input.body, variantId)) };
   const loaded = await slotsFor(key);
   return { variantId, slots: loaded.slots, messages: render(key, variantId, input.body, loaded.slots), note: loaded.note };
 }

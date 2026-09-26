@@ -39,7 +39,7 @@
 | `identity` | 清然的身份（学校、年龄、在做什么），和人设分开 |
 | `storyline` | 故事线：在用这个 app 之前两人之间发生过的事。回复不直接读，心思和夜里整理读 |
 | `intimateNotes` | 亲密设定，只在勾了 `intimate` 的模式里给回复看 |
-| `modes` | 数组 `{id, name, when, prompt, temperature, intimate, keepActions}`：`when` 自然语言写什么时候用；`prompt` 接在人设后面；`temperature` 空为 1.0；`intimate: true` 时带上亲密设定；`keepActions: false` 时夜里整理只记说的话 |
+| `modes` | 数组 `{id, name, when, prompt, temperature, intimate, keepActions}`：`when` 自然语言写什么时候用；`prompt` 接在人设后面，作为基调；`temperature` 空为 1.0；`intimate: true` 时带上亲密设定；`keepActions: false` 时夜里整理只记说的话 |
 | `brainOn` | 是否运行心思和夜里整理 |
 | `voiceModel` | 回复模型 id |
 | `historyWindow` | 回复看最近几条（0–80，默认 20） |

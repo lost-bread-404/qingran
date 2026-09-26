@@ -5,8 +5,9 @@ import { clockOf } from "./time.ts";
 
 /**
  * Brain v5 state, all free text:
- * - heart: what he feels and how he reads her right now (qr_inner.now_text)
- * - plans: what he means to do; a time is optional (qr_reach_plans, at may be null)
+ * - heart: how he himself feels and what he wants right now (qr_inner.now_text)
+ * - plans: the day's list in order, what he means to get done; a time is optional (qr_reach_plans, at may be null)
+ * - focus: the one item from the list the reply moves toward now
  * - days: one text per day (qr_days). Today's is rewritten by the mind each time she goes quiet
  *   (her day, what he said or made up about himself, what is still owed); the night pass turns it into the day's timeline.
  * The memory document lives in qr_dossier.
@@ -45,7 +46,7 @@ export async function setHeart(text: string, at: number, turnSeq?: number): Prom
   );
 }
 
-/** The one thing he means to do right now ("" = just follow her). */
+/** The one thing from the list the reply moves toward now. */
 export async function setFocus(text: string): Promise<void> {
   const db = await sql();
   await db.query(`update qr_inner set focus = $1 where id = 1`, [text.slice(0, 300)]);
@@ -66,13 +67,13 @@ function planOf(row: Record<string, unknown>): Plan {
   };
 }
 
-/** Pending plans: untimed first (they are "next"), then by time. */
+/** Pending plans in the order the mind wrote them. */
 export async function listPlans(): Promise<Plan[]> {
   const db = await sql();
   const rows = await db.query<Record<string, unknown>>(
     `select id, at::float8 as at, intent, set_by, set_at::float8 as set_at
      from qr_reach_plans where done_at is null
-     order by at asc nulls first, id asc`,
+     order by id asc`,
   );
   return rows.map(planOf);
 }
@@ -241,7 +242,7 @@ export function daysText(days: Array<{ day: string; timeline: string }>): string
 }
 
 /**
- * What only he knows, for the reply: how he feels and reads her, and the ONE thing he means to do now.
+ * What only he knows, for the reply: how he himself feels, and the ONE thing from the list he means to do now.
  * The plan list and today's notes stay with the mind — a reply that sees a list says the whole list.
  */
 export async function mindForReply(_nowMs: number, _timeZone: string): Promise<string> {

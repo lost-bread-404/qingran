@@ -123,7 +123,7 @@ export async function runWake(opts: {
     reachCountsToday(zone, at),
   ]);
   const due = plans.filter((plan) => plan.at != null && plan.at <= at);
-  const later = plans.filter((plan) => plan.at != null && plan.at > at);
+  const later = plans.filter((plan) => plan.at != null && plan.at > at).sort((x, y) => x.at! - y.at!);
   const dueIds = due.map((plan) => plan.id);
   const dueIntent = due.map((plan) => plan.text).filter(Boolean).join("；");
   const trigger: "planned" | "manual" = opts.manual ? "manual" : "planned";
@@ -190,19 +190,36 @@ export async function runWake(opts: {
   await finishReachPlans(dueIds, at);
   await finishDuePlans(at);
   if (reach.retry) await saveReach({ retry: 0 });
-  const text = result.message;
+  // The mind decided whether to reach her and what for; the words come from the voice that answers her.
+  const intent = result.message;
+  let text = "";
   let messageId: string | null = null;
   let pushResult: string | null = null;
+  if (intent) {
+    const { speakFirst } = await import("./voice/first-word.ts");
+    const spoken = await speakFirst({ intent, nowMs: at, timeZone: zone, lastUserAt: silence.lastUserAt ?? null });
+    text = spoken.text;
+    if (!text) {
+      await upsertMessage({
+        id: newId(),
+        role: "assistant",
+        text: `清然尝试给你发信息，但是因为${spoken.reason ?? "出错"}没发成功。`,
+        createdAt: at,
+        kind: "system_notice",
+        timeZone: zone,
+      });
+    }
+  }
   if (text) {
     messageId = newId();
     await upsertMessage({ id: messageId, role: "assistant", text, createdAt: at, kind: "proactive", timeZone: zone });
     pushResult = await sendApns({ body: text, messageId });
   }
-  const next = (await listPlans()).find((plan) => plan.at != null && plan.at > at);
+  const next = (await listPlans()).filter((plan) => plan.at != null && plan.at > at).sort((x, y) => x.at! - y.at!)[0];
   await insertReachLog({
     at,
     trigger,
-    intent: dueIntent,
+    intent: intent ? `${dueIntent} → ${intent}` : dueIntent,
     calledLlm: true,
     sent: Boolean(text),
     messageId,

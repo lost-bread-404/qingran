@@ -137,7 +137,7 @@ export function HeartEditor() {
       {error ? <p className="text-sm text-live">{error}</p> : null}
       <section className="flex flex-col gap-2">
         <p className="text-sm">心里</p>
-        <p className="text-xs text-subtle">他此刻的感觉、想要你什么、怎么看你。回复看得到。心思没有新想法时就留着这一份。</p>
+        <p className="text-xs text-subtle">他自己此刻的情绪和欲望。回复看得到。你此刻怎样，回复看着对话和记得的自己读；心思不写对你的分析。</p>
         <Textarea
           value={heart}
           className="min-h-28"
@@ -151,7 +151,7 @@ export function HeartEditor() {
         />
         <p className="text-xs text-subtle">更新于 {clock(mind.heart.updatedAt)}</p>
         <p className="text-sm">眼前这一件</p>
-        <p className="text-xs text-subtle">回复只看得到心里和这一件事，看不到下面的打算。空着 = 专心跟着你说的。</p>
+        <p className="text-xs text-subtle">打算单上现在该推进的那一件，写要做成什么。回复只看得到心里和这一件，看不到下面的打算；什么时候提、怎么带，回复看着你此刻的样子自己决定。</p>
         <Textarea
           value={focus}
           className="min-h-14"
@@ -168,7 +168,7 @@ export function HeartEditor() {
       <section className="flex flex-col gap-2">
         <p className="text-sm">打算</p>
         <p className="text-xs text-subtle">
-          他心里的打算，回复看不到。心思会把要做的那一件挪到「眼前这一件」。写了时间的到点时：你在聊天，要紧的会变成眼前这一件；你不在，他再想一遍，决定要不要给你发一条。
+          他管这一天的打算单，按先后排，回复看不到。心思每次过一遍：做完的拿掉、该加的加上，现在该做的那一件交给「眼前这一件」。写了时间的到点时：你在聊天，轮到它就是眼前这一件；你不在，他再想一遍，决定要不要给你发一条。
         </p>
         {mind.plans.length === 0 ? <p className="text-sm text-subtle">现在没有打算</p> : null}
         {mind.plans.map((plan) => (
