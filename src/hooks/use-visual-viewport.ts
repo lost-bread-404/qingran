@@ -1,28 +1,72 @@
 import { useEffect, useState } from "react";
 
+function editingField(): boolean {
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return true;
+  return active instanceof HTMLElement && active.isContentEditable;
+}
+
+function readViewportBox() {
+  const viewport = window.visualViewport;
+  const innerH = window.innerHeight || document.documentElement.clientHeight || 800;
+  let height = Math.round(viewport?.height ?? innerH);
+  let offsetTop = Math.round(viewport?.offsetTop ?? 0);
+  // After a field blurs, iOS can leave visualViewport at the keyboard size or
+  // with a leftover offsetTop. The room and settings then paint into that
+  // hole, so the page looks empty until the next gesture.
+  const keyboardLike = innerH - height > 160;
+  if (height < 120 || (!editingField() && keyboardLike)) {
+    return { height: innerH, offsetTop: 0 };
+  }
+  if (!editingField() && offsetTop > 0) offsetTop = 0;
+  return { height, offsetTop: Math.max(0, offsetTop) };
+}
+
+/** Undo scroll iOS applies to the fixed shells while a field is focused. */
+export function releaseStuckScroll() {
+  window.scrollTo(0, 0);
+  const nodes: Array<HTMLElement | null> = [
+    document.documentElement,
+    document.body,
+    document.getElementById("app"),
+    document.querySelector(".room-bg"),
+  ];
+  for (const node of nodes) {
+    if (!node) continue;
+    if (node.scrollTop) node.scrollTop = 0;
+    if (node.scrollLeft) node.scrollLeft = 0;
+  }
+}
+
 export function useVisualViewportHeight(active = true) {
   const [box, setBox] = useState({ height: 800, offsetTop: 0 });
 
   useEffect(() => {
     if (!active) return;
-    const sync = () => {
-      const viewport = window.visualViewport;
-      setBox({
-        height: Math.round(viewport?.height ?? window.innerHeight),
-        offsetTop: Math.round(viewport?.offsetTop ?? 0),
-      });
-    };
+    const sync = () => setBox(readViewportBox());
     sync();
     const viewport = window.visualViewport;
     viewport?.addEventListener("resize", sync);
     viewport?.addEventListener("scroll", sync);
     window.addEventListener("resize", sync);
     window.addEventListener("orientationchange", sync);
+    const timers: number[] = [];
+    const settle = () => {
+      releaseStuckScroll();
+      for (const id of timers) window.clearTimeout(id);
+      timers.length = 0;
+      for (const ms of [0, 80, 360]) timers.push(window.setTimeout(sync, ms));
+    };
+    window.addEventListener("focusout", settle);
+    window.addEventListener("focusin", sync);
     return () => {
       viewport?.removeEventListener("resize", sync);
       viewport?.removeEventListener("scroll", sync);
       window.removeEventListener("resize", sync);
       window.removeEventListener("orientationchange", sync);
+      window.removeEventListener("focusout", settle);
+      window.removeEventListener("focusin", sync);
+      for (const id of timers) window.clearTimeout(id);
     };
   }, [active]);
 
