@@ -2,7 +2,7 @@
 
 清然把「她看到了什么、想了什么、说了什么、花了多少」写进几张表。Diary 的「系统档案」页用来看，不进通话。
 
-高频 route（`voice` / `reflect` / `archive`）**同时存引用和原文**。发给模型的 prompt 仍用数据库里的原料拼出来；日志里再存一份当时的完整输入/输出，设置 → 记录页直接点开看。
+高频 route（`voice` / `reflect`）**同时存引用和原文**。发给模型的 prompt 仍用数据库里的原料拼出来；日志里再存一份当时的完整输入/输出，设置 → 记录页直接点开看。
 
 ## 表
 
@@ -27,8 +27,7 @@
 |---|---|---|
 | `voice` | charterHash、longtermHash、historyIds、mindTurnSeq、mindStale、pickedIds、fallbackIds、careHint、clockText、userMsgId、timeZone、mindAgeMs | `output_ref = message:<replyId>` |
 | `reflect` | charterHash、blockBHash、relatedIds、oldMindTurnSeq、recentMessageIds、clockText、timeZone | `output_ref = mind:<turn_seq>`；解析失败或乐观锁拒绝时才存 `output_text` |
-| `archive` | batchMessageIds、candidateNoteIds | 存 `output_text`（ops 原文），按文本保留期裁 |
-| 低频（dusk / portrait / assign / backfill / synth / report / ask / judge） | — | 存完整 `input_system` / `input_user` / `output_text` |
+| 低频（editor / reach / report） | — | 存完整 `input_system` / `input_user` / `output_text` |
 
 所有 route 的完整 messages 另写入 `brain_log_raw`。设置 → 记录页点开某一条，分区显示输入（按 messages 段折叠）、输出、参数与耗时，并可复制全部。
 

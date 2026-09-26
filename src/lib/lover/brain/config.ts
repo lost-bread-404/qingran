@@ -75,9 +75,7 @@ export type Route =
   | "synth"
   | "report"
   | "ask"
-  | "judge"
   | "editor"
-  | "busy"
   | "reach"
   | "replay";
 
@@ -95,9 +93,7 @@ export const ROUTES: Record<
   synth: { cls: "DEEP_THINKER", timeoutMs: 180_000, maxOutput: 20_000 },
   report: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 4_000 },
   ask: { cls: "AGENT", timeoutMs: 90_000, maxOutput: 8_000 },
-  judge: { cls: "DEEP_THINKER", timeoutMs: 120_000, maxOutput: 8_000 },
   editor: { cls: "ANALYST", timeoutMs: 240_000, maxOutput: 12_000 },
-  busy: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 8_000 },
   reach: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 2_000 },
   replay: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 4_000 },
 };

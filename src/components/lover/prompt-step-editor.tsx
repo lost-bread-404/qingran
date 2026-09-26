@@ -166,7 +166,6 @@ export function PromptStepEditor({
     }
   }
 
-  const toolOnly = item.key === "busy_tool";
   const known = new Map(item.placeholders.map((row) => [row.token, row.meaning]));
   const extra = variant
     ? [...new Set(variant.messages.flatMap((message) => tokensIn(message.content)))].filter((token) => !known.has(token))
@@ -189,14 +188,13 @@ export function PromptStepEditor({
             {dirty ? <span className="shrink-0 text-xs text-subtle">未记</span> : null}
           </p>
           <p className="mt-0.5 truncate text-xs text-subtle">
-            {toolOnly ? "回复时的工具说明（不单独调用模型）" : `${model}${effort ? ` · ${effort}` : ""} · ${item.blurb}`}
+            {`${model}${effort ? ` · ${effort}` : ""} · ${item.blurb}`}
           </p>
         </div>
         <ChevronDown className="size-4 shrink-0 text-subtle transition-transform group-open:rotate-180" />
       </summary>
 
       <div className="flex flex-col gap-3 px-3 pb-3">
-        {toolOnly ? null : (
         <div className="flex flex-col gap-2">
           <label className="text-xs text-subtle" htmlFor={`prompt-model-${item.key}`}>
             回复模型
@@ -245,7 +243,6 @@ export function PromptStepEditor({
             <p className="text-xs text-subtle">每轮回复报错或空回复会自动用 grok-4.20-0309-non-reasoning 再试一次。</p>
           ) : null}
         </div>
-        )}
 
         {doc && doc.variants.length > 1 ? (
           <div className="flex flex-wrap gap-1">

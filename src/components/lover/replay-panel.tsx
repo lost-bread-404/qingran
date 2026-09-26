@@ -81,7 +81,7 @@ export function ReplayPanel({ profile }: { profile: Profile }) {
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4">
       <p className="text-xs text-subtle">
-        用当时的对话、我记得的、我此刻，各生成一次。不写入聊天，也不改他的心。同一句可以多跑几次看稳不稳。
+        用当时的对话、他记得的、他心里，各生成一次。不写入聊天，也不改他的心。同一句可以多跑几次看稳不稳。
       </p>
       {error ? <p className="text-sm text-live">{error}</p> : null}
       <label className="flex flex-col gap-1">

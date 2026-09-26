@@ -17,9 +17,7 @@ const ROUTE_KEYS = new Set<string>([
   "synth",
   "report",
   "ask",
-  "judge",
   "editor",
-  "busy",
   "reach",
 ]);
 

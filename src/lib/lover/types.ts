@@ -79,22 +79,18 @@ export type Profile = {
   glowHalfLifeDays: number;
   /** Monthly diary. Off until Rosie turns it on. Manual reports still run. */
   diaryEnabled: boolean;
-  /** Shown to him only while the previous turn was an intimate scene and still fresh. */
+  /** Shown to the reply only while the current mode is marked intimate. */
   intimateNotes: string;
   /** Rosie's story line. Only the inner mind and the memory editor read it; the reply never does. */
   storyline: string;
   /** Run the inner mind (reflect) and memory editor. Off → reply uses persona + context only. */
   brainOn: boolean;
-  /** 戏 = voiceModel + systemPrompt. 现实 = realModel + realPrompt (empty → systemPrompt). Rosie flips it by hand. */
   /** Current mode id (set by reflect, or by her toggle when the brain is off). */
   mode: string;
   /** Her modes: each has a name, when it applies (free text for reflect), and a prompt added after the persona. One reply model for all. */
   modes: TalkModeDef[];
   /** Rosie's rough routine in her own words. Only the reflect controller reads it. */
   routine: string;
-  realModel: string;
-  realEffort: VoiceEffort;
-  realPrompt: string;
   /** Where the persona text sits: system prompt, or the first user message. */
   personaPlacement: "system" | "first_user";
 };
@@ -254,9 +250,6 @@ export const DEFAULT_PROFILE: Profile = {
   mode: "play",
   modes: DEFAULT_MODES,
   routine: "",
-  realModel: "grok-4.7",
-  realEffort: "low",
-  realPrompt: "",
   personaPlacement: "system",
 };
 
@@ -307,9 +300,6 @@ type LooseProfile = Partial<Profile> & {
   mode?: string;
   modes?: unknown;
   routine?: string;
-  realModel?: string;
-  realEffort?: unknown;
-  realPrompt?: string;
   personaPlacement?: string;
 };
 
@@ -359,9 +349,6 @@ export function lockedProfile(input?: unknown): Profile {
     mode: typeof raw.mode === "string" && raw.mode.trim() ? raw.mode.trim().slice(0, 40) : "play",
     modes: lockModes(raw.modes),
     routine: typeof raw.routine === "string" ? raw.routine.slice(0, 4000) : "",
-    realModel: typeof raw.realModel === "string" && raw.realModel.trim() ? raw.realModel.trim().slice(0, 80) : "grok-4.7",
-    realEffort: raw.realEffort === null ? null : isVoiceEffort(raw.realEffort) ? raw.realEffort : "low",
-    realPrompt: typeof raw.realPrompt === "string" ? raw.realPrompt.slice(0, 16_000) : "",
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
   };
 }

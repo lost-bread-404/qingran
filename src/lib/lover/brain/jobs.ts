@@ -21,7 +21,6 @@ import {
 } from "./store.ts";
 import { newId } from "../storage.ts";
 import type { BrainJob, JobType } from "./types.ts";
-import { checkSpend } from "./spend/check.ts";
 import { SPEND_RATE_ERR } from "./spend/rate.ts";
 
 export { canStartJob } from "./jobs-policy.ts";
@@ -123,12 +122,6 @@ async function runOne(job: BrainJob): Promise<void> {
     await finishJob(job.id, "done");
     return;
   }
-  if (job.type === "busy") {
-    const { generateBusySchedule, busyRefreshNeeded } = await import("./busy");
-    if (await busyRefreshNeeded()) await generateBusySchedule();
-    await finishJob(job.id, "done");
-    return;
-  }
   await finishJob(job.id, "failed", { error: `unknown type ${job.type}` });
 }
 
@@ -140,11 +133,6 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
     const remaining = budgetMs - (Date.now() - wall0);
     const peek = await peekNextJob(now());
     if (!peek) break;
-    const hold = await checkSpend(peek.type);
-    if (!hold.allow) {
-      await deferJob(peek.id, hold.resumeAt ?? now() + 3_600_000, `spend:${hold.level}`);
-      continue;
-    }
     if (!canStartJob(peek.type, remaining)) {
       await deferJob(peek.id, now() + Math.max(remaining, 1_000), "wait-budget");
       continue;

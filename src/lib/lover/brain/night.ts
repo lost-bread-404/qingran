@@ -12,20 +12,22 @@ import { identityBlock } from "./life.ts";
 import { readIdentity } from "./life-store.ts";
 import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
-import { parsePlans } from "./voice/reflector.ts";
+import { modesText, parsePlans } from "./voice/reflector.ts";
+import { recordMode } from "./mode.ts";
 import { clockOf, dayNotes } from "./day-notes.ts";
 import { dayWindow, getHeart, hasDay, listPlans, plansText, replaceMindPlans, saveDayTimeline, setFocus, setHeart } from "./heart.ts";
 
 /**
  * The night pass: once a day after 04:00 local, fold the day that just ended into his memory.
- * One call rewrites the whole memory, writes the day's timeline, keeps tomorrow's plans and sets how he wakes up.
+ * One call rewrites the whole memory, writes the day's timeline, keeps tomorrow's plans and sets how he wakes up
+ * (his heart, and the mode she meets first).
  */
 export const NIGHT_SCHEMA = {
   name: "night",
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["memory", "timeline", "plans", "heart"] as string[],
+    required: ["memory", "timeline", "plans", "heart", "mode"] as string[],
     properties: {
       memory: { type: "string" },
       timeline: { type: "string" },
@@ -39,6 +41,7 @@ export const NIGHT_SCHEMA = {
         },
       },
       heart: { type: "string" },
+      mode: { type: "string" },
     },
   },
 };
@@ -141,6 +144,7 @@ export async function runNight(
     notes: notes.map((n) => `${clockOf(n.at, tz)} ${n.text}`).join("\n") || "（没有）",
     day,
     conversation: nightConversation(rows, profile.modes, modeLog, tz) || "（没有）",
+    modes: modesText(profile.modes, "") || "（没有）",
     max_chars: String(profile.dossierMaxChars),
   });
   const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
@@ -169,12 +173,14 @@ export async function runNight(
     const wake = typeof json.heart === "string" ? json.heart.trim() : "";
     if (wake) await setHeart(wake, at);
     await setFocus("");
+    const mode = typeof json.mode === "string" ? json.mode.trim() : "";
+    if (profile.modes.some((m) => m.id === mode)) await recordMode({ at, mode, until: null, why: "夜里整理定的明早" });
   }
   await appendInnerLog({ turnSeq: 0, data: { kind: "night", day, output: result.json }, model: result.model, ms: result.ms });
   return { ok: true };
 }
 
-/** Called from the 10-minute wake: after 04:00, the day that just ended gets its night pass once. */
+/** Called from the wake: after 04:00, the day that just ended gets its night pass once. */
 export async function enqueueNightIfDue(at = now()): Promise<string | null> {
   const tz = resolveTz((await getMeta()).timeZone);
   const hour = zonedParts(at, tz).hour;

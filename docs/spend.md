@@ -1,6 +1,6 @@
-# 费用限额
+# 费用记账
 
-清然自己记账、自己停。xAI 开了自动续费之后，不能靠账户余额用完才停。
+清然只记账，不在 app 里设花费上限：Rosie 每月在 xAI 预付约 $100，预付额度就是硬上限（见 requirements 第 0 节）。主动消息另有每天的软上限（`REACH_LLM_DAY_MAX` / `REACH_SENT_DAY_MAX`）。
 
 ## 价格表与实际金额
 
@@ -36,29 +36,9 @@ TTS / STT **不返回** ticks，按价格表入账（`cost_source = price_table`
 
 `spend_monthly(month, route, model, usd, calls, tokens_in, tokens_cached, tokens_out)` 在每次 `recordSpend` 时累加；90 天删除 `spend_events` 明细前会补写缺失的月度行。`spend_daily` 仍按日保留。`spend_rate` 只留 24 小时。
 
-## 限额档位
-
-默认（可用环境变量 `QR_SPEND_DAY_SOFT/HARD/BREAKER`、`QR_SPEND_MONTH_*` 覆盖，设置页可改）：
-
-| | 软 | 硬 | 熔断 |
-|---|---|---|---|
-| 日 | $15 | $30 | $50 |
-| 月 | $100 | $150 | $200 |
-
-- 软：暂停 P3（synth / backfill / report / judge）
-- 硬：再暂停 P2（archive / dusk / portrait / assign / ask）
-- 熔断：连 Voice / TTS / STT / Reflector 也停
-
-被暂停的后台任务保持 `pending`，不增加 `attempts`，`run_after` 到次日 04:30（或下月 1 日 04:30）。时区回退 `America/New_York`。
-
-## 熔断后怎么恢复
-
-设置页或 Diary「费用」：熔断时出现「今天继续使用 / 本月继续使用」，再输入一次 `APP_PASSWORD`。只解除熔断，软 / 硬上限仍在。周期过了 override 自动失效。
-
 ## 对账与导出
 
 - 导出：费用页「导出本月 CSV」
 - 对账：输入 xAI 控制台该月实际金额
 - 一年前的明细可以手动归档（按日汇总仍在 `spend_daily`）
 
-建议在 xAI 控制台再设一层月度消费上限（例如 $250），作为应用限额外面的兜底。

@@ -4,7 +4,6 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -18,20 +17,11 @@ import {
   brainExportSpendCsv,
   brainGetSpendOverview,
   brainListSpendEvents,
-  brainSaveSpendLimits,
-  brainSpendOverride,
   brainSpendReconcile,
   type SpendEventRow,
 } from "@/lib/lover/brain/spend/api";
-import { routePriority, type SpendLimits } from "@/lib/lover/brain/spend/policy";
+import { routePriority } from "@/lib/lover/brain/spend/policy";
 import { cn } from "@/lib/utils";
-
-const LEVEL_LABEL: Record<string, string> = {
-  ok: "正常",
-  soft: "软上限",
-  hard: "硬上限",
-  breaker: "熔断",
-};
 
 function asNum(v: unknown): number {
   const n = Number(v);
@@ -48,8 +38,6 @@ export function BrainSpendPage() {
   const [events, setEvents] = useState<SpendEventRow[]>([]);
   const [dayFilter, setDayFilter] = useState("");
   const [routeFilter, setRouteFilter] = useState("");
-  const [limits, setLimits] = useState<SpendLimits | null>(null);
-  const [password, setPassword] = useState("");
   const [actual, setActual] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [range, setRange] = useState<30 | 90>(30);
@@ -60,7 +48,6 @@ export function BrainSpendPage() {
   async function refresh() {
     const o = await brainGetSpendOverview();
     setData(o);
-    setLimits(o.limits);
     setDayFilter(o.day);
   }
 
@@ -99,64 +86,14 @@ export function BrainSpendPage() {
   }, [data, byDay]);
 
   if (err) return <p className="text-sm text-live">{err}</p>;
-  if (!data || !limits) return <p className="text-sm text-subtle">在算今天花了多少…</p>;
-
-  const remain = (cap: number, used: number) => Math.max(0, cap - used);
+  if (!data) return <p className="text-sm text-subtle">在算今天花了多少…</p>;
 
   return (
     <section className="flex flex-col gap-6">
       <div className="rounded-xl bg-surface p-4 text-sm leading-relaxed">
         <p>
           今天 ${data.dayUsd.toFixed(3)} · 本月 ${data.monthUsd.toFixed(3)} · 预测 ${data.forecast.toFixed(2)}
-          <span className="ml-2 text-subtle">（{LEVEL_LABEL[data.decision.level] ?? data.decision.level}）</span>
         </p>
-        <p className="mt-2 text-xs text-subtle">
-          今日剩余 软 ${remain(limits.daySoft, data.dayUsd).toFixed(2)} / 硬 $
-          {remain(limits.dayHard, data.dayUsd).toFixed(2)} / 熔断 ${remain(limits.dayBreaker, data.dayUsd).toFixed(2)}
-        </p>
-        <p className="text-xs text-subtle">
-          本月剩余 软 ${remain(limits.monthSoft, data.monthUsd).toFixed(2)} / 硬 $
-          {remain(limits.monthHard, data.monthUsd).toFixed(2)} / 熔断 ${remain(limits.monthBreaker, data.monthUsd).toFixed(2)}
-        </p>
-        {data.decision.level === "breaker" ? (
-          <div className="mt-3 flex flex-col gap-2">
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="再输入一次密码确认"
-            />
-            <div className="flex gap-2">
-              {!data.overrides.day ? (
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    void brainSpendOverride({ data: { scope: "day", password } }).then((r) => {
-                      setNote(r.ok ? "今天可以继续用了。" : r.error);
-                      if (r.ok) void refresh();
-                    })
-                  }
-                >
-                  今天继续使用
-                </Button>
-              ) : null}
-              {!data.overrides.month ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    void brainSpendOverride({ data: { scope: "month", password } }).then((r) => {
-                      setNote(r.ok ? "本月可以继续用了。" : r.error);
-                      if (r.ok) void refresh();
-                    })
-                  }
-                >
-                  本月继续使用
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
       </div>
 
       <div>
@@ -182,7 +119,7 @@ export function BrainSpendPage() {
             </ComposedChart>
           </ResponsiveContainer>
         </div>
-        <p className="mb-2 mt-4 text-xs text-subtle">本月累计与档位线</p>
+        <p className="mb-2 mt-4 text-xs text-subtle">本月累计</p>
         <div className="h-40">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={monthCurve}>
@@ -191,9 +128,6 @@ export function BrainSpendPage() {
               <YAxis fontSize={10} />
               <Tooltip />
               <Line type="monotone" dataKey="cum" stroke="#2c241c" dot={false} />
-              <ReferenceLine y={limits.monthSoft} stroke="#c9b49a" strokeDasharray="4 4" />
-              <ReferenceLine y={limits.monthHard} stroke="#a67c52" strokeDasharray="4 4" />
-              <ReferenceLine y={limits.monthBreaker} stroke="#6b4f3a" strokeDasharray="4 4" />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -309,51 +243,6 @@ export function BrainSpendPage() {
         </pre>
       ) : null}
 
-      <div>
-        <p className="mb-2 text-xs text-subtle">警报</p>
-        <ul className="flex flex-col gap-1 text-xs">
-          {data.alerts.map((a) => (
-            <li key={a.id}>
-              {a.day} {a.scope}/{a.level} {a.detail ?? ""}
-            </li>
-          ))}
-          {!data.alerts.length ? <li className="text-subtle">还没有警报。</li> : null}
-        </ul>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <p className="text-xs text-subtle">限额（美元）</p>
-        {(
-          [
-            ["daySoft", "日软"],
-            ["dayHard", "日硬"],
-            ["dayBreaker", "日熔断"],
-            ["monthSoft", "月软"],
-            ["monthHard", "月硬"],
-            ["monthBreaker", "月熔断"],
-          ] as Array<[keyof SpendLimits, string]>
-        ).map(([k, label]) => (
-          <label key={k} className="flex items-center gap-2 text-sm">
-            <span className="w-16 text-subtle">{label}</span>
-            <Input
-              type="number"
-              value={limits[k]}
-              onChange={(e) => setLimits({ ...limits, [k]: Number(e.target.value) })}
-            />
-          </label>
-        ))}
-        <Button
-          size="sm"
-          onClick={() =>
-            void brainSaveSpendLimits({ data: limits }).then((r) => {
-              setNote(r.ok ? "限额已保存。" : r.error);
-              if (r.ok) void refresh();
-            })
-          }
-        >
-          保存限额
-        </Button>
-      </div>
 
       <div className="flex flex-wrap gap-2">
         <Button

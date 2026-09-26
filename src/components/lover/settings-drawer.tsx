@@ -839,7 +839,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                     persistProfile({ injectMind: next });
                   }}
                 />
-                <span className="text-sm">注入我此刻</span>
+                <span className="text-sm">他心里和眼前这一件</span>
               </label>
               <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
                 <input
@@ -851,7 +851,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                     persistProfile({ injectLongterm: next });
                   }}
                 />
-                <span className="text-sm">我记得的</span>
+                <span className="text-sm">他记得的</span>
               </label>
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
@@ -903,9 +903,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
               [
-                ["清然", ["voice", "reach", "editor", "busy", "busy_tool", "persona_ack"]],
+                ["清然", ["voice", "reflect", "editor", "reach", "persona_ack"]],
                 ["日记", ["report"]],
-                ["评审", ["judge"]],
               ].map(([title, keys]) => (
                 <div key={String(title)} className="flex flex-col gap-2">
                   <p className="text-xs text-subtle">{title}</p>
@@ -1417,7 +1416,7 @@ function logClock(at: number): string {
 function logInputChars(row: BrainLogRow): string {
   const split = parseVoiceInputCharsLine(row.note);
   const parts = split
-    ? `system ${split.system} · 我此刻 ${split.moment} · 我记得的 ${split.dossier} · 对话历史 ${split.history} · 用户消息 ${split.user}`
+    ? `system ${split.system} · 心里 ${split.moment} · 记得的 ${split.dossier} · 对话历史 ${split.history} · 用户消息 ${split.user}`
     : "";
   if (parts && row.inputChars != null) return `${row.inputChars}（${parts}）`;
   if (parts) return parts;

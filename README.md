@@ -1,6 +1,6 @@
 # 清然
 
-Rosie 的语音聊天工具：按住说话 / 电话免提，Eve 朗读，可编辑 system prompt。她记得的事是一份有字数上限的文档（Dossier），原文在消息表里只追加、不删除。结构见 [docs/brain-v3.md](docs/brain-v3.md)。
+Rosie 的语音聊天工具：按住说话 / 电话免提，Eve 朗读，可编辑 system prompt。她记得的事是一份有字数上限的文档，原文在消息表里只追加、不删除。需求见 [docs/requirements.md](docs/requirements.md)，结构见 [docs/brain.md](docs/brain.md)。
 
 **你要做的全部步骤（域名、数据库、自动发布、iPhone）：[操作说明.md](操作说明.md)**
 
@@ -15,7 +15,7 @@ npm run dev
 
 ## 说明
 
-- 线上记忆在你自己的 Neon 数据库里，不在 GitHub。换域名用设置里的「备份」导出/导入。清然用的是「我记得的」和「我此刻」；日记仍写笔记，清然不读那些笔记。
+- 线上记忆在你自己的 Neon 数据库里，不在 GitHub。换域名用设置 → 数据里的导出/导入（格式见 [docs/state-format.md](docs/state-format.md)）。
 - 线上全站密码是 `APP_PASSWORD`（HMAC cookie `qr_session`）。本地 `npm run dev` 不走这层。
 - 不要提交 `.env`、API 密钥或备份 json。
 - 听力：设置 → 听力，只走 xAI 和 Apple。标注模式开着时每一句都存 clip。标注页：`/lab`。

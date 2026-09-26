@@ -13,8 +13,6 @@ export type PromptKey =
   | "reflect"
   | "archive"
   | "editor"
-  | "busy"
-  | "busy_tool"
   | "persona_ack"
   | "reach"
   | "dusk"
@@ -23,8 +21,7 @@ export type PromptKey =
   | "ask"
   | "report"
   | "experiments"
-  | "backfill"
-  | "judge";
+  | "backfill";
 
 export type { PromptMessage, PromptPlaceholder };
 
@@ -43,12 +40,12 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
   {
     key: "voice",
     name: "每轮回复",
-    blurb: "每次你说完话立刻跑，只生成清然开口的那一句。它看得到人设、当前模式、我记得的、他心里和打算、他记下的你今天。",
+    blurb: "每次你说完话立刻跑，只生成清然开口的那一句。它看得到人设、当前模式、他记得的、他心里和眼前这一件、现在几点和最近的对话。看不到打算和今天的记录。",
   },
   {
     key: "reflect",
     name: "内心",
-    blurb: "每轮回复之后，和你沉默 45 分钟时各跑一次：更新他心里、打算、模式，随手记一句你今天的事。没有变化就什么都不改。",
+    blurb: "每轮回复之后跑一次，更新他心里、眼前这一件、打算和下一次用的模式。你沉默 45 分钟时再跑一次，这时顺便把刚才那一段你的事记进「今天」。没有变化就什么都不改。",
   },
   {
     key: "archive",
@@ -58,17 +55,7 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
   {
     key: "editor",
     name: "整理记忆",
-    blurb: "每天凌晨 4 点后跑一次（main），整篇重写「我记得的」，写这一天的时间线、明天的打算和明早的心里。也可以在「他的心」里手动整理今天。",
-  },
-  {
-    key: "busy",
-    name: "忙碌表",
-    blurb: "身份保存后在后台生成未来大约三年的忙闲。身份没变就不会再跑。",
-  },
-  {
-    key: "busy_tool",
-    name: "查忙碌",
-    blurb: "回复时的工具说明。只有她问起某段时间在忙什么时才会用。",
+    blurb: "每天凌晨 4 点后跑一次（main），整篇重写「他记得的」，写这一天的时间线、明天的打算、明早的心里和明早的模式。也可以在「他的心」里手动整理今天。",
   },
   {
     key: "persona_ack",
@@ -114,11 +101,6 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
     key: "backfill",
     name: "回填",
     blurb: "新因子出现后，按定义回填历史每一天。用日常档。",
-  },
-  {
-    key: "judge",
-    name: "评审",
-    blurb: "离线评审回复，不跟每一句一起跑。用深思考档。",
   },
 ];
 

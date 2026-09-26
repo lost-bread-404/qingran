@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { effectiveMode } from "@/lib/lover/brain/mode";
-import { enqueueArchiveIfNeeded } from "@/lib/lover/brain/archivist";
 import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } from "@/lib/lover/brain/config";
 import { enqueuePeriodicIfDue } from "@/lib/lover/brain/diary/dusk";
 import { drainJobs, enqueueReflect } from "@/lib/lover/brain/jobs";
@@ -11,7 +10,6 @@ import { loadHotContext } from "@/lib/lover/brain/voice/pack";
 import { runVoiceWithFallback, formatVoiceLogNote } from "@/lib/lover/brain/voice/voice-fallback";
 import { recordVoiceTurn } from "@/lib/lover/brain/voice-log";
 import { syncTalkTimeZone } from "@/lib/lover/brain/log-refs";
-import { checkSpend } from "@/lib/lover/brain/spend/check";
 import { talkRateHit } from "@/lib/lover/brain/spend/rate";
 import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
@@ -53,19 +51,6 @@ export const Route = createFileRoute("/api/talk")({
         }
 
         const timeZone = await syncTalkTimeZone(body.timeZone);
-        const hold = await checkSpend("voice");
-        if (!hold.allow) {
-          const msg =
-            hold.scope === "month"
-              ? "本月费用异常，已暂停。可在设置中确认后继续。"
-              : "今日费用异常，已暂停。可在设置中确认后继续。";
-          return new Response(`data: ${JSON.stringify({ t: "err", m: msg, code: "spend_breaker" })}\n\n`, {
-            headers: {
-              "Content-Type": "text/event-stream; charset=utf-8",
-              "Cache-Control": "no-cache, no-transform",
-            },
-          });
-        }
 
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
@@ -262,7 +247,6 @@ export const Route = createFileRoute("/api/talk")({
               });
 
               if (profile.brainOn && !failed && display) await enqueueReflect(userCreatedAt);
-              await enqueueArchiveIfNeeded(userCreatedAt, ctx.inject.history);
               await enqueuePeriodicIfDue(nowMs, timeZone);
               await runInBackground(() => drainJobs(LONG_DRAIN_MS));
             } catch (err) {

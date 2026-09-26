@@ -13,9 +13,7 @@ export type SpendRoute =
   | "synth"
   | "backfill"
   | "report"
-  | "judge"
   | "editor"
-  | "busy"
   | "reach"
   | "replay";
 
@@ -44,7 +42,7 @@ const RANK: Record<SpendLevel, number> = { ok: 0, soft: 1, hard: 2, breaker: 3 }
 
 const P0 = new Set<SpendRoute>(["voice", "tts", "stt", "replay"]);
 const P1 = new Set<SpendRoute>(["reflect", "reach"]);
-const P2 = new Set<SpendRoute>(["archive", "dusk", "portrait", "assign", "ask", "editor", "busy"]);
+const P2 = new Set<SpendRoute>(["archive", "dusk", "portrait", "assign", "ask", "editor"]);
 
 export function routePriority(route: string): 0 | 1 | 2 | 3 {
   const r = route as SpendRoute;

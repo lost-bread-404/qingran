@@ -93,9 +93,9 @@ function ago(ms: number): string {
 }
 
 /**
- * Every 10 minutes (GitHub Actions → /api/cron/wake):
+ * Every 5 minutes (cron-job.org → /api/cron/wake):
  * 1. brain on: after 04:00 the day that ended gets its night pass; a silence of 45 minutes gets one thought.
- * 2. plans whose time has come: she is in the chat → they wait for the reply (it sees them as 到时间了);
+ * 2. plans whose time has come: she is in the chat → they stay for the mind, which may make one the reply's focus;
  *    she is away → he decides whether to send one message, and the plans are done.
  */
 export async function runWake(opts: {
@@ -120,7 +120,7 @@ export async function runWake(opts: {
       // One thought per silence, even if the call fails.
       await markSilenceSeen(last);
       const { runReflector } = await import("./voice/reflector.ts");
-      await runReflector(0, undefined, complete, { kind: "silence", silentSince: last });
+      await runReflector(0, undefined, complete, { kind: "silence", silentSince: last, since: heart.silenceSeen });
       brain.push("silence");
     }
   }

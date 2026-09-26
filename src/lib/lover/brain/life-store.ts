@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
 import { getSql } from "../../db.ts";
-import { newId } from "../storage.ts";
 import { now } from "./clock.ts";
 import type { InnerPlan, InnerState, LongingItem } from "./types.ts";
-import { calendarDay, localDay } from "./time.ts";
+import { localDay } from "./time.ts";
 import { getMeta } from "./store.ts";
 import { resolveTz } from "./tz.ts";
 import { applyProfilePatch } from "../profile-patch.ts";
@@ -17,21 +15,6 @@ function asInt(value: unknown, fallback = 0): number {
 function asBool(value: unknown): boolean {
   return value === true || value === "t" || value === "true" || value === 1;
 }
-
-export function identityHash(text: string): string {
-  return createHash("sha256").update(text.trim()).digest("hex").slice(0, 16);
-}
-
-export type BusyRow = {
-  id: string;
-  fromDay: string;
-  toDay: string;
-  busy: number;
-  label: string;
-  reason: string;
-  identityHash: string;
-  createdAt: number;
-};
 
 export type ReachRow = {
   nextAt: number | null;
@@ -67,63 +50,6 @@ export async function writeIdentity(identity: string, at = now()): Promise<void>
     source: "server",
     at,
   });
-}
-
-export async function writeRhythm(rhythm: string): Promise<void> {
-  const text = rhythm.trim().slice(0, 500);
-  const db = await getSql();
-  await db.query(
-    `insert into qingran_profile (id, data, rhythm, updated_at)
-     values (1, jsonb_build_object('rhythm', $1::text), $1, now())
-     on conflict (id) do update set
-       data = coalesce(qingran_profile.data, '{}'::jsonb) || jsonb_build_object('rhythm', $1::text),
-       rhythm = excluded.rhythm,
-       updated_at = now()`,
-    [text],
-  );
-}
-
-export async function listBusyPeriods(): Promise<BusyRow[]> {
-  const db = await getSql();
-  const rows = await db.query<Record<string, unknown>>(
-    `select id, from_day, to_day, busy, label, reason, identity_hash, created_at
-     from qr_busy_periods order by from_day asc, id asc`,
-  );
-  return rows.map((row) => ({
-    id: String(row.id),
-    fromDay: String(row.from_day),
-    toDay: String(row.to_day),
-    busy: Number(row.busy) || 0,
-    label: String(row.label ?? ""),
-    reason: String(row.reason ?? ""),
-    identityHash: String(row.identity_hash ?? ""),
-    createdAt: asInt(row.created_at),
-  }));
-}
-
-export async function replaceBusyPeriods(
-  periods: Array<Omit<BusyRow, "createdAt" | "identityHash"> & { identityHash?: string }>,
-  hash: string,
-  at = now(),
-): Promise<void> {
-  const db = await getSql();
-  await db.query(`delete from qr_busy_periods`);
-  for (const row of periods) {
-    await db.query(
-      `insert into qr_busy_periods (id, from_day, to_day, busy, label, reason, identity_hash, created_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [
-        row.id || newId(),
-        row.fromDay,
-        row.toDay,
-        Math.max(0, Math.min(1, Number(row.busy) || 0)),
-        row.label.slice(0, 80),
-        row.reason.slice(0, 400),
-        hash,
-        at,
-      ],
-    );
-  }
 }
 
 export async function getReach(): Promise<ReachRow> {
@@ -229,44 +155,6 @@ export async function clearReachPlans(): Promise<void> {
   await db.query(`delete from qr_reach_plans where done_at is null`);
 }
 
-export async function insertGlowEvent(entry: {
-  at: number;
-  delta: number;
-  why: string;
-  source: string;
-  turnSeq?: number | null;
-  glowAfter: number;
-}): Promise<void> {
-  const db = await getSql();
-  await db.query(
-    `insert into qr_glow_events (at, delta, why, source, turn_seq, glow_after) values ($1,$2,$3,$4,$5,$6)`,
-    [entry.at, entry.delta, entry.why.slice(0, 400), entry.source, entry.turnSeq ?? null, entry.glowAfter],
-  );
-}
-
-export async function listGlowEvents(limit = 60): Promise<Array<{
-  id: number;
-  at: number;
-  delta: number;
-  why: string;
-  source: string;
-  glowAfter: number;
-}>> {
-  const db = await getSql();
-  const rows = await db.query<Record<string, unknown>>(
-    `select id, at, delta, why, source, glow_after from qr_glow_events order by id desc limit $1`,
-    [limit],
-  );
-  return rows.map((row) => ({
-    id: asInt(row.id),
-    at: asInt(row.at),
-    delta: Number(row.delta) || 0,
-    why: String(row.why ?? ""),
-    source: String(row.source ?? ""),
-    glowAfter: Number(row.glow_after) || 0,
-  }));
-}
-
 export async function insertReachLog(entry: {
   at: number;
   trigger: string;
@@ -326,19 +214,6 @@ export async function reachCountsToday(timeZone: string, at = now()): Promise<{ 
   return { llm: asInt(rows[0]?.llm), sent: asInt(rows[0]?.sent), day };
 }
 
-export async function lastVisibleMessageAt(): Promise<number | null> {
-  const db = await getSql();
-  const rows = await db.query<{ created_at: number }>(
-    `select created_at from qingran_messages
-     where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
-       and forgotten_at is null
-       and kind is distinct from 'system_notice'
-       and kind is distinct from 'proactive'
-     order by created_at desc limit 1`,
-  );
-  return rows[0] ? asInt(rows[0].created_at) : null;
-}
-
 export async function silenceSnapshot(_at = now()): Promise<{
   lastUserAt: number | null;
   unanswered: number;
@@ -364,16 +239,6 @@ export async function silenceSnapshot(_at = now()): Promise<{
     unanswered: sent.length,
     lines: sent.map((row) => String(row.body ?? "")),
   };
-}
-
-export async function countProactiveBetween(fromMs: number, toMs: number): Promise<number> {
-  const db = await getSql();
-  const rows = await db.query<{ n: number }>(
-    `select count(*)::int as n from qingran_messages
-     where kind = 'proactive' and created_at >= $1 and created_at <= $2`,
-    [fromMs, toMs],
-  );
-  return asInt(rows[0]?.n);
 }
 
 export async function insertManualEdit(target: string, before: unknown, after: unknown, at = now()): Promise<void> {
@@ -428,10 +293,6 @@ export async function markPushDevice(token: string, error: string | null): Promi
 
 export async function profileClockZone(): Promise<string> {
   return resolveTz((await getMeta()).timeZone);
-}
-
-export async function todayCalendar(at = now()): Promise<string> {
-  return calendarDay(at, await profileClockZone());
 }
 
 export type ManualInnerPatch = {

@@ -23,7 +23,7 @@ import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
 import { buildVoiceMessages, renderDossierBlock, voiceHistoryMessages } from "../voice/pack-build.ts";
-import { gatherReflectParts, reflectVars } from "../voice/reflector.ts";
+import { gatherReflectParts, modesText, reflectVars } from "../voice/reflector.ts";
 import { mindForReply, listPlans, plansText, getHeart, todayNotesText } from "../heart.ts";
 import { dossierTextForModel, getDossier } from "../dossier.ts";
 
@@ -132,6 +132,7 @@ async function editorSlots(): Promise<Record<string, string>> {
     day: localDay(at, tz),
     conversation: "（要等这次整理才有：这一天没被清空的对话）",
     max_chars: String(lockedProfile(profile).dossierMaxChars),
+    modes: modesText(lockedProfile(profile).modes, "") || "（没有）",
     story: lockedProfile(profile).storyline || "（没有）",
     legacy: "（要等这次生成才有）",
   };
@@ -156,7 +157,7 @@ async function slotsFor(key: PromptKey, variantId: string): Promise<{ slots: Rec
   }
   if (key === "reflect") return { slots: await reflectSlots(), note: "这是这一刻会写进内心的材料。" };
   if (key === "archive") return { slots: await currentArchiveVars(), note: "用当前滑出窗口的那一批。没有待归档时是空的。" };
-  if (key === "editor") return { slots: await editorSlots(), note: "整理时会带上还没读过的对话。这里先给出文档和惦记。" };
+  if (key === "editor") return { slots: await editorSlots(), note: "整理时会带上这一天没被清空的对话。这里先给出记得的、心里、打算和今天的记录。" };
   if (key === "dusk") {
     const { day, messages, notes, intentions } = await todayContext();
     const rosie = messages.filter((message) => message.role === "user").map((message) => message.text).join("\n").slice(0, 3000);

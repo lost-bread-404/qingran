@@ -1,7 +1,7 @@
 import { REFLECT_WINDOW } from "../config.ts";
 import { callModel, classifyReflectFailure, type CallModelResult } from "../llm.ts";
 import { appendInnerLog, getInner, getMeta, getProfilePrompt, listHistoryWindow, patchBrainLog, getProfileData } from "../store.ts";
-import { formatClock } from "../time.ts";
+import { formatClock, localDay } from "../time.ts";
 import { now } from "../clock.ts";
 import { fillReflectTurn } from "../observability.ts";
 import { patchTurnTraceReflector } from "../turn-trace.ts";
@@ -19,6 +19,7 @@ import { effectiveMode, recordMode } from "../mode.ts";
 import { addDayNote } from "../day-notes.ts";
 import { spokenOnly, VERBATIM_REPLIES } from "./pack-build.ts";
 import {
+  dayWindow,
   daysText,
   getHeart,
   listPlans,
@@ -35,7 +36,8 @@ import {
 
 /**
  * The inner mind (brain v5). Runs after every reply, and once when she has gone quiet.
- * Output is free text: heart, the full plan list when it changed, the next mode, one note on her day.
+ * Output is free text: heart, focus, the full plan list when it changed, the next mode.
+ * When she has gone quiet it also notes what she did in the stretch that just ended (today's record).
  * Empty fields mean "no change", so most turns change nothing.
  */
 export const INNER_SCHEMA = {
@@ -146,8 +148,11 @@ function gapText(ms: number): string {
   return m >= 60 ? `${Math.floor(m / 60)} 小时 ${m % 60} 分钟` : `${m} 分钟`;
 }
 
+/** A silence covers this many messages at most (the stretch since the last silence, from 04:00 today). */
+const SILENCE_WINDOW = 120;
+
 /** Everything the mind reads, from the database. Shared with the prompt preview. */
-export async function gatherReflectParts(at: number, kind: ReflectKind, silentSince?: number): Promise<{
+export async function gatherReflectParts(at: number, kind: ReflectKind, silentSince?: number, since = 0): Promise<{
   parts: ReflectorParts;
   history: StoredMessage[];
   tz: string;
@@ -155,9 +160,9 @@ export async function gatherReflectParts(at: number, kind: ReflectKind, silentSi
   current: string;
   charter: string;
 }> {
-  const [meta, history, charter, dossier, ident, profileData, heart, plans] = await Promise.all([
+  const [meta, window, charter, dossier, ident, profileData, heart, plans] = await Promise.all([
     getMeta(),
-    listHistoryWindow(null, REFLECT_WINDOW),
+    listHistoryWindow(null, kind === "silence" ? SILENCE_WINDOW : REFLECT_WINDOW),
     getProfilePrompt(),
     dossierTextForModel(),
     readIdentity(),
@@ -168,6 +173,7 @@ export async function gatherReflectParts(at: number, kind: ReflectKind, silentSi
   const profile = lockedProfile(profileData);
   const tz = resolveTz(meta.timeZone);
   const ids = profile.modes.map((m) => m.id);
+  const history = kind === "silence" ? stretchSince(window, Math.max(since, dayWindow(localDay(at, tz), tz).from)) : window;
   const [facts, days, today, current] = await Promise.all([
     timeFacts(at, tz, at + 1),
     recentDays(7),
@@ -202,6 +208,12 @@ export async function gatherReflectParts(at: number, kind: ReflectKind, silentSi
   };
 }
 
+/** The talk since `from`; never fewer than the usual window, so a short stretch still has its context. */
+function stretchSince(rows: StoredMessage[], from: number): StoredMessage[] {
+  const stretch = rows.filter((m) => m.createdAt > from);
+  return stretch.length >= REFLECT_WINDOW ? stretch : rows.slice(-REFLECT_WINDOW);
+}
+
 type ParsedPlan = { at: number | null; text: string };
 
 export function parsePlans(raw: unknown, tz: string, at: number): ParsedPlan[] {
@@ -220,14 +232,14 @@ export async function runReflector(
   turnSeq: number,
   jobId?: string,
   complete: typeof callModel = callModel,
-  opts: { kind?: ReflectKind; silentSince?: number } = {},
+  opts: { kind?: ReflectKind; silentSince?: number; since?: number } = {},
 ): Promise<InnerState | null> {
   const kind = opts.kind ?? "turn";
   const heartBefore = await getHeart();
   if (kind === "turn" && heartBefore.turnSeq >= turnSeq) return getInner();
 
   const at = now();
-  const gathered = await gatherReflectParts(at, kind, opts.silentSince);
+  const gathered = await gatherReflectParts(at, kind, opts.silentSince, opts.since ?? 0);
   const { parts, history, tz, modes, current, charter } = gathered;
   const loaded = await loadPrompt("reflect");
   const packed = buildReflectorInput(parts, loaded.body);
@@ -280,11 +292,9 @@ export async function runReflector(
   if (mode && mode !== current && modes.some((m) => m.id === mode)) {
     await recordMode({ at, mode, until: null, why: kind === "silence" ? "她沉默时想的" : "" });
   }
-  const note = typeof json.note === "string" ? json.note.trim() : "";
-  if (note) {
-    const lastUser = [...history].reverse().find((m) => m.role === "user");
-    await addDayNote(kind === "silence" ? at : (lastUser?.createdAt ?? at), note);
-  }
+  // Today's record is written when a stretch of talking ends, so each stretch is noted once.
+  const note = kind === "silence" && typeof json.note === "string" ? json.note.trim() : "";
+  if (note) await addDayNote(opts.silentSince ?? at, note);
   if (kind === "silence" && opts.silentSince) await markSilenceSeen(opts.silentSince);
 
   await appendInnerLog({

@@ -9,7 +9,7 @@ import {
 import { appendBrainLog } from "./store.ts";
 import { extractJson } from "./text.ts";
 import { parseUsage, settleLlmCost } from "./usage.ts";
-import { checkSpend, recordLlmSpend } from "./spend/check.ts";
+import { recordLlmSpend } from "./spend/check.ts";
 import { jobRateHit, SPEND_RATE_ERR } from "./spend/rate.ts";
 import { codeVersion, maybeWriteRawLog, xaiStoreEnabled } from "./log-refs.ts";
 import { applyPromptModel } from "./prompts/models.ts";
@@ -284,14 +284,6 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     inputSystem: input.system,
     inputUser: joinedUser(input),
   };
-
-  const hold = await checkSpend(route);
-  if (!hold.allow) {
-    const result = fail(SPEND_HOLD_ERR);
-    const logId = await appendBrainLog({ ...failLog, ms: result.ms, note: SPEND_HOLD_ERR, error: SPEND_HOLD_ERR });
-    await maybeWriteRawLog(logId, { messages: logMessagesOf(input) });
-    return result;
-  }
 
   if (input.jobId) {
     const rate = await jobRateHit();

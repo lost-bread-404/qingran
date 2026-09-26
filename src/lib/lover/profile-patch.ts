@@ -64,9 +64,6 @@ const PATCH_KEYS = [
   "mode",
   "modes",
   "routine",
-  "realModel",
-  "realEffort",
-  "realPrompt",
   "personaPlacement",
 ] as const satisfies readonly (keyof Profile)[];
 

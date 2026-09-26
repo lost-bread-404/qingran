@@ -439,7 +439,7 @@ export function insertIntimateNotes<T extends { role: string; content: string }>
   const text = notes.trim();
   if (!text) return messages;
   const block = { role: "system", content: `你在亲密时的样子：\n${text}` } as T;
-  const moment = messages.findIndex((message) => message.content.includes("【我此刻】") || message.content.startsWith("你心里此刻") || message.content.startsWith("只有你自己知道的"));
+  const moment = messages.findIndex((message) => message.content.includes("【我此刻】") || message.content.startsWith("你心里") || message.content.startsWith("只有你自己知道的"));
   if (moment >= 0) return [...messages.slice(0, moment + 1), block, ...messages.slice(moment + 1)];
   const at = messages.findIndex((message) => message.role !== "system");
   const index = at < 0 ? messages.length : at;
