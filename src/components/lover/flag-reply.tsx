@@ -34,11 +34,14 @@ export function FlagReply({ open, triggerText, replyText, busy, error, onClose, 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end bg-bg/80">
+    <div
+      className="fixed inset-x-0 z-50 flex flex-col justify-end bg-bg/80"
+      style={{ top: viewport.offsetTop, height: viewport.height }}
+    >
       <button type="button" className="min-h-0 flex-1" aria-label="关掉" onClick={onClose} />
       <div
-        className="rounded-t-2xl bg-bg px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-lamp"
-        style={{ marginBottom: viewport.offsetTop ? 0 : undefined }}
+        className="max-h-full overflow-y-auto rounded-t-2xl bg-bg px-4 pt-3 shadow-lamp"
+        style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
       >
         <div className="mb-3 flex items-center justify-between">
           <p className="font-display text-lg">差在哪</p>

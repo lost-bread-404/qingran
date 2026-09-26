@@ -91,7 +91,7 @@ export function ConfirmTurn({
       <div
         className={cn(
           "flex min-h-0 flex-col overflow-hidden rounded-t-2xl bg-bg px-4 pt-3 shadow-lamp",
-          viewport.keyboardUp ? "flex-1" : "max-h-full",
+          viewport.keyboardUp ? "h-0 flex-1" : "max-h-full",
         )}
         style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
       >
@@ -111,7 +111,7 @@ export function ConfirmTurn({
         ) : (
           <p className="mb-3 shrink-0 text-xs text-subtle">{clipNote || "没有这段录音，或者还在加载。"}</p>
         )}
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div ref={scrollRef} className="sheet-scroll">
           <Textarea
             ref={draftRef}
             value={draft}
@@ -124,10 +124,7 @@ export function ConfirmTurn({
               const box = e.currentTarget;
               const scroller = scrollRef.current;
               if (scroller) scroller.scrollTop = Math.max(0, box.offsetTop - 8);
-              window.setTimeout(() => {
-                window.scrollTo(0, 0);
-                caretOf(box);
-              }, 50);
+              window.setTimeout(() => caretOf(box), 50);
             }}
             className="min-h-28"
             aria-label="识别文字"
@@ -154,10 +151,7 @@ export function ConfirmTurn({
             onSelect={(e) => caretOf(e.currentTarget)}
             onFocus={(e) => {
               const box = e.currentTarget;
-              window.setTimeout(() => {
-                window.scrollTo(0, 0);
-                caretOf(box);
-              }, 50);
+              window.setTimeout(() => caretOf(box), 50);
             }}
             className="mt-2"
             placeholder="可选备注"

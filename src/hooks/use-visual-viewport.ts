@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 function editingField(): boolean {
+  if (typeof document === "undefined") return false;
   const active = document.activeElement;
   if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return true;
   return active instanceof HTMLElement && active.isContentEditable;
@@ -11,14 +12,13 @@ function readViewportBox() {
   const innerH = window.innerHeight || document.documentElement.clientHeight || 800;
   let height = Math.round(viewport?.height ?? innerH);
   let offsetTop = Math.round(viewport?.offsetTop ?? 0);
-  // After a field blurs, iOS can leave visualViewport at the keyboard size or
-  // with a leftover offsetTop. The room and settings then paint into that
-  // hole, so the page looks empty until the next gesture.
-  const keyboardLike = innerH - height > 160;
-  if (height < 120 || (!editingField() && keyboardLike)) {
-    return { height: innerH, offsetTop: 0 };
-  }
-  if (!editingField() && offsetTop > 0) offsetTop = 0;
+  if (height < 120) return { height: innerH, offsetTop: 0 };
+  const gap = innerH - height - Math.max(0, offsetTop);
+  const keyboard = editingField() && gap > 80;
+  // A stuck keyboard is a few hundred pixels. Browser chrome is smaller, and
+  // snapping over it hides the mic under Safari's toolbar.
+  if (!keyboard && gap > 240) return { height: innerH, offsetTop: 0 };
+  if (!keyboard && offsetTop > 0 && gap < 80) offsetTop = 0;
   return { height, offsetTop: Math.max(0, offsetTop) };
 }
 
@@ -52,10 +52,16 @@ export function useVisualViewportHeight(active = true) {
     window.addEventListener("orientationchange", sync);
     const timers: number[] = [];
     const settle = () => {
-      releaseStuckScroll();
       for (const id of timers) window.clearTimeout(id);
       timers.length = 0;
-      for (const ms of [0, 80, 360]) timers.push(window.setTimeout(sync, ms));
+      const run = () => {
+        // focusout fires before the next field's focusin. Wait, and skip when
+        // focus only moved from one input to another.
+        if (editingField()) return;
+        releaseStuckScroll();
+        sync();
+      };
+      for (const ms of [0, 80, 360]) timers.push(window.setTimeout(run, ms));
     };
     window.addEventListener("focusout", settle);
     window.addEventListener("focusin", sync);
@@ -70,8 +76,10 @@ export function useVisualViewportHeight(active = true) {
     };
   }, [active]);
 
-  const keyboardUp = typeof window !== "undefined" && window.innerHeight - box.height > 80;
-  return { ...box, keyboardUp };
+  const keyboardInset =
+    typeof window !== "undefined" ? Math.max(0, Math.round(window.innerHeight - box.height - box.offsetTop)) : 0;
+  const keyboardUp = keyboardInset > 80 && editingField();
+  return { ...box, keyboardUp, keyboardInset: keyboardUp ? keyboardInset : 0 };
 }
 
 export function useVisualViewport() {

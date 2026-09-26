@@ -1207,14 +1207,16 @@ export function VoiceRoom() {
   const composing = composerOpen && !recording && !call.active;
   const statusLine = call.active
     ? call.phase === "speaking-you"
-      ? `在听你 · ${call.listenSec} 秒`
+      ? "在听你"
       : call.phase === "transcribing"
         ? "听你说的话"
         : status === "thinking"
           ? "她在想"
           : status === "speaking"
             ? "清然在说"
-            : `你说，说完停两秒 · phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
+            : call.deaf
+              ? "麦关着"
+              : "你说，说完停两秒"
     : status === "thinking"
       ? "正在想"
       : "";
@@ -1225,11 +1227,8 @@ export function VoiceRoom() {
       style={{ top: viewport.offsetTop, height: viewport.height }}
     >
       <div className="mx-auto flex h-full min-h-0 w-full max-w-lg flex-col overflow-hidden">
-        <header
-          className="relative z-10 flex shrink-0 items-center justify-between bg-bg/80 px-5 pb-2 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm"
-          onClick={() => transcriptRef.current?.pageUp()}
-        >
-          <div className="flex min-w-0 flex-1 items-center gap-3">
+        <header className="relative z-10 flex shrink-0 items-center gap-2 bg-bg/80 px-3 pb-2 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-sm">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <button
               type="button"
               aria-label={status === "speaking" || status === "thinking" ? "打断清然" : "清然"}
@@ -1251,57 +1250,56 @@ export function VoiceRoom() {
               type="button"
               aria-label="往上看更早的对话"
               className="min-w-0 flex-1 text-left"
+              onClick={() => transcriptRef.current?.pageUp()}
             >
-              <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
-              <p className="text-xs text-subtle">{call.active ? "通话中" : "在"}</p>
+              <p className="truncate font-display text-lg font-medium leading-tight tracking-tight">清然</p>
+              <p className="truncate text-xs text-subtle">{call.active ? "通话中" : "在"}</p>
             </button>
           </div>
-          <div
-            className="flex items-center gap-1"
-            onClick={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <Button variant="ghost" size="icon" aria-label="日记" asChild>
-              <Link to="/diary">
-                <BookOpen className="size-5" />
-              </Link>
-            </Button>
+          <div className="flex shrink-0 items-center">
             {!profile.brainOn ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-label={`现在是「${profile.modes.find((m) => m.id === profile.mode)?.name ?? profile.mode}」，点一下换下一个模式`}
-                className="text-xs"
-                onClick={() => {
-                  const ids = profileRef.current.modes.map((m) => m.id);
-                  const at = ids.indexOf(profileRef.current.mode);
-                  const mode = ids[(at + 1) % ids.length] ?? ids[0]!;
-                  const next = lockedProfile({ ...profileRef.current, mode });
-                  profileRef.current = next;
-                  setProfile(next);
-                  void saveProfilePatch({ data: { patch: { mode } } })
-                    .then((result) => {
-                      if (!result?.ok) return;
-                      revsRef.current = result.revs;
-                      setRevs(result.revs);
-                    })
-                    .catch(() => undefined);
-                }}
-              >
-                {profile.modes.find((m) => m.id === profile.mode)?.name ?? profile.modes[0]?.name}
-              </Button>
+              <div className="flex max-w-12 items-center overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`现在是「${profile.modes.find((m) => m.id === profile.mode)?.name ?? profile.mode}」，点一下换下一个模式`}
+                  className="max-w-12 truncate text-xs"
+                  onClick={() => {
+                    const ids = profileRef.current.modes.map((m) => m.id);
+                    const at = ids.indexOf(profileRef.current.mode);
+                    const mode = ids[(at + 1) % ids.length] ?? ids[0]!;
+                    const next = lockedProfile({ ...profileRef.current, mode });
+                    profileRef.current = next;
+                    setProfile(next);
+                    void saveProfilePatch({ data: { patch: { mode } } })
+                      .then((result) => {
+                        if (!result?.ok) return;
+                        revsRef.current = result.revs;
+                        setRevs(result.revs);
+                      })
+                      .catch(() => undefined);
+                  }}
+                >
+                  {profile.modes.find((m) => m.id === profile.mode)?.name ?? profile.modes[0]?.name}
+                </Button>
+              </div>
             ) : null}
             <Button
               variant="ghost"
               size="sm"
               aria-label={`语速 ${snapVoiceRate(profile.voiceSpeed).label}，点一下换一档`}
               className={cn(
-                "text-xs",
+                "max-w-14 shrink-0 truncate text-xs",
                 snapVoiceRate(profile.voiceSpeed).id !== "normal" && "text-live",
               )}
               onClick={cycleVoiceSpeed}
             >
               {snapVoiceRate(profile.voiceSpeed).label}
+            </Button>
+            <Button variant="ghost" size="icon" aria-label="日记" asChild>
+              <Link to="/diary">
+                <BookOpen className="size-5" />
+              </Link>
             </Button>
             <Button
               variant="ghost"
@@ -1335,7 +1333,7 @@ export function VoiceRoom() {
         </header>
 
         {composing ? (
-          <div className="flex min-h-0 flex-1 flex-col px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+          <div className="flex h-0 min-h-0 flex-1 flex-col px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
             {(banner || voice.error) && (
               <p className="mb-2 text-center text-sm text-live">{banner || voice.error}</p>
             )}
@@ -1352,10 +1350,7 @@ export function VoiceRoom() {
               onFocus={(e) => {
                 stopPlayback();
                 const box = e.currentTarget;
-                window.setTimeout(() => {
-                  window.scrollTo(0, 0);
-                  keepCaretVisible(box);
-                }, 50);
+                window.setTimeout(() => keepCaretVisible(box), 50);
               }}
               placeholder="写给她"
               className="min-h-0 flex-1 resize-none"
@@ -1494,18 +1489,22 @@ export function VoiceRoom() {
                     />
                   </div>
                 )}
-                <p className="min-h-4 max-w-xs text-center text-xs text-subtle">
+                <p className="flex h-8 w-full max-w-xs items-center justify-center text-center text-xs leading-4 text-subtle">
+                  <span className="line-clamp-2">
                   {call.active
                     ? status === "speaking"
-                      ? `点按钮挂断 · phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
+                      ? "点按钮挂断"
                       : call.phase === "speaking-you"
-                        ? `在听 ${call.listenSec} 秒 · phase ${call.phase} · 音量 ${call.rms.toFixed(3)} / 保持 ${call.hold.toFixed(3)} · 底噪 ${call.noiseFloor.toFixed(3)}`
-                        : `phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
+                        ? "在听你"
+                        : call.deaf
+                          ? "麦关着"
+                          : "通话中"
                     : recording
                       ? voice.interim.trim() || "松开发送"
                       : transcribing
                         ? "听你说的话"
                         : "按住说话，或者打电话"}
+                  </span>
                 </p>
                 {call.active ? null : (
                   <button

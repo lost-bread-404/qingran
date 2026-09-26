@@ -8,7 +8,7 @@ import { formatTalkTrace } from "@/lib/lover/talk-fail";
 import type { ChatMessage } from "@/lib/lover/types";
 
 const PIN_PX = 96;
-const PAGE_UP_SCREENS = 3;
+const PAGE_UP_SCREENS = 1;
 
 export type TranscriptHandle = {
   pageUp: () => void;
@@ -126,7 +126,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
 
   if (messages.length === 0 && !thinking && !statusLine) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+      <div className="flex h-0 min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
         <p className="font-display text-4xl font-medium tracking-tight text-fg">
           {partnerName}
         </p>
@@ -140,10 +140,10 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
   const pairs = pairMessages(messages);
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div className="relative flex h-0 min-h-0 flex-1 flex-col">
     <div
       ref={scrollerRef}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [touch-action:pan-y]"
+      className="fill-scroll px-5 py-4"
       style={{ paddingBottom: Math.max(16, keyboardPad + (editingId ? 12 : 0)) }}
       onScroll={(e) => {
         const el = e.currentTarget;

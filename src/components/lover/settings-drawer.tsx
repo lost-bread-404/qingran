@@ -198,6 +198,11 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [phase, setPhase] = useState<"in" | "out">("in");
   const shellRef = useRef<HTMLDivElement>(null);
   const scrollMem = useRef<Partial<Record<Page, number>>>({});
+  const pageRef = useRef<Page>("home");
+  const onOpenChangeRef = useRef(onOpenChange);
+  const historyOn = useRef(false);
+  pageRef.current = page;
+  onOpenChangeRef.current = onOpenChange;
   const [openPrompt, setOpenPrompt] = useState<string | null>(null);
   const [log, setLog] = useState<BrainLogRow[]>([]);
   const [clearArmed, setClearArmed] = useState(false);
@@ -284,11 +289,41 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   useEffect(() => {
     if (!open) {
       setPhase("out");
-      const timer = window.setTimeout(() => setMounted(false), 190);
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const timer = window.setTimeout(() => setMounted(false), reduce ? 0 : 190);
       return () => window.clearTimeout(timer);
     }
     setMounted(true);
     setPhase("in");
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    window.history.pushState({ qingranSettings: 1 }, "");
+    historyOn.current = true;
+    const onPop = () => {
+      const cur = pageRef.current;
+      const scroller = shellRef.current?.querySelector<HTMLElement>(".settings-scroll");
+      if (scroller) scrollMem.current[cur] = scroller.scrollTop;
+      if (cur === "home") {
+        historyOn.current = false;
+        onOpenChangeRef.current(false);
+        return;
+      }
+      window.history.pushState({ qingranSettings: 1 }, "");
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active !== document.body) active.blur();
+      setNavDir("back");
+      setPage(ADVANCED_CHILD.has(cur) ? "advanced" : "home");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      if (historyOn.current && window.history.state?.qingranSettings) {
+        historyOn.current = false;
+        window.history.back();
+      }
+    };
   }, [open]);
 
   useLayoutEffect(() => {
@@ -309,7 +344,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       node.scrollTop = top;
     };
     const raf = requestAnimationFrame(kick);
-    const timer = window.setTimeout(kick, 320);
+    const timer = window.setTimeout(kick, 48);
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
@@ -656,31 +691,36 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
 
   function rememberScroll() {
     const scroller = shellRef.current?.querySelector<HTMLElement>(".settings-scroll");
-    if (scroller) scrollMem.current[page] = scroller.scrollTop;
+    if (scroller) scrollMem.current[pageRef.current] = scroller.scrollTop;
   }
 
   function blurField() {
     const active = document.activeElement;
     if (active instanceof HTMLElement && active !== document.body) active.blur();
-    releaseStuckScroll();
   }
 
   function openPage(next: Page) {
     rememberScroll();
     blurField();
+    releaseStuckScroll();
     setNavDir("forward");
     setPage(next);
   }
 
   function goBack() {
-    if (page === "home") {
+    rememberScroll();
+    blurField();
+    if (historyOn.current) {
+      window.history.back();
+      return;
+    }
+    releaseStuckScroll();
+    if (pageRef.current === "home") {
       onOpenChange(false);
       return;
     }
-    rememberScroll();
-    blurField();
     setNavDir("back");
-    setPage(ADVANCED_CHILD.has(page) ? "advanced" : "home");
+    setPage(ADVANCED_CHILD.has(pageRef.current) ? "advanced" : "home");
   }
 
   if (!mounted) return null;
@@ -706,7 +746,12 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const tier = hearingTierOf(sense);
 
   return (
-    <div ref={shellRef} className="settings-shell" data-phase={phase}>
+    <div
+      ref={shellRef}
+      className="settings-shell"
+      data-phase={phase}
+      style={{ top: viewport.offsetTop, height: viewport.height }}
+    >
       <header className="flex shrink-0 items-center gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <button
           type="button"
@@ -797,10 +842,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             onSelect={(e) => keepCaretVisible(e.currentTarget)}
             onFocus={(e) => {
               const box = e.currentTarget;
-              window.setTimeout(() => {
-                window.scrollTo(0, 0);
-                keepCaretVisible(box);
-              }, 50);
+              window.setTimeout(() => keepCaretVisible(box), 50);
             }}
             maxLength={8000}
             className="min-h-64 resize-none font-mono leading-relaxed"

@@ -109,7 +109,7 @@ export function DossierPanel({ maxChars, onMaxChars, footer }: Props) {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
+    <div className="flex flex-col gap-4">
       <div className="mx-auto flex w-full max-w-md flex-col gap-4">
         <p className="text-sm">我记得的</p>
         <p className="text-xs text-subtle">说话时他眼前就是这一份，每天凌晨整篇重写一次。不对的地方直接改，失焦就记下。</p>
