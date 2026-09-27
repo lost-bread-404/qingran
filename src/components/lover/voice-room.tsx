@@ -36,6 +36,7 @@ import {
   updateRoomMessage,
 } from "@/lib/lover/room";
 import { registerNativePush } from "@/lib/lover/push-client";
+import { nativeCallPlan, nativeInterruptCall } from "@/lib/lover/native-shell";
 import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { buildHearingContext, extractContextKeyterms, lastDialogueTurns, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
@@ -348,6 +349,8 @@ export function VoiceRoom() {
   }
 
   const playFull = useCallback(async (id: string, speech: string, turn: number) => {
+    // During the iPhone shell's call the shell owns the speaker and the mic; a clip played here would be heard as her.
+    if (callActiveRef.current && nativeCallPlan().callStart === "startNativeCall") return;
     if (profileRef.current.muted) {
       resumeCallListen(turn);
       return;
@@ -1171,6 +1174,10 @@ export function VoiceRoom() {
   }
 
   function interruptQingran() {
+    if (call.active && nativeCallPlan().callStart === "startNativeCall") {
+      if (call.phase === "thinking" || call.phase === "speaking") nativeInterruptCall();
+      return;
+    }
     const plan = planInterruptQingran({
       speakingOrThinking: status === "speaking" || status === "thinking",
       callActive: call.active,
@@ -1203,16 +1210,20 @@ export function VoiceRoom() {
   const transcribing = voice.status === "transcribing";
   const editable = lastUserSay(messages);
   const composing = composerOpen && !recording && !call.active;
+  // In the iPhone shell's call the shell does everything, so its phase alone says where the call is.
+  const shellCall = call.active && nativeCallPlan().callStart === "startNativeCall";
   const statusLine = call.active
     ? call.phase === "speaking-you"
       ? `在听你 · ${call.listenSec} 秒`
       : call.phase === "transcribing"
         ? "听你说的话"
-        : status === "thinking" || call.phase === "thinking"
+        : call.phase === "thinking" || (!shellCall && status === "thinking")
           ? "她在想"
-          : status === "speaking" || call.phase === "speaking"
+          : call.phase === "speaking" || (!shellCall && status === "speaking")
             ? "清然在说"
-            : `你说，说完停两秒 · phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
+            : shellCall
+              ? "你说，说完停两秒"
+              : `你说，说完停两秒 · phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
     : status === "thinking"
       ? "正在想"
       : "";

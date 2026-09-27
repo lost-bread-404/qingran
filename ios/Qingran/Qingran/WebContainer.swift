@@ -151,6 +151,8 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       CallEngine.shared.beginNativeCall()
     case "endNativeCall":
       CallEngine.shared.endCallFromWeb()
+    case "interruptNativeCall":
+      NativePipeline.shared.interrupt()
     case "keepAwake":
       var on = false
       if let body = message.body as? [String: Any], let flag = body["on"] as? Bool {
@@ -291,6 +293,7 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       prepareAudio: function () { post('prepareAudio'); },
       startNativeCall: function (params) { post('startNativeCall', { params: params || {} }); },
       endNativeCall: function () { post('endNativeCall'); },
+      interruptNativeCall: function () { post('interruptNativeCall'); },
       keepAwake: function (on) { post('keepAwake', { on: !!on }); }
     };
   })();

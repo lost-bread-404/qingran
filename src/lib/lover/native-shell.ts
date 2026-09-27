@@ -7,6 +7,8 @@ export type NativeBridge = {
   prepareAudio?: () => void;
   startNativeCall?: (params?: NativeCallParams) => void;
   endNativeCall?: () => void;
+  /** Stop his reply and listen again (she tapped him). Shells built before 2026-09-27 do not have it. */
+  interruptNativeCall?: () => void;
   keepAwake?: (on: boolean) => void;
 };
 
@@ -78,6 +80,10 @@ export function nativeStartCall(params: NativeCallParams) {
   const plan = nativeCallPlan();
   if (plan.callStart === "startNativeCall") post((bridge) => bridge.startNativeCall?.(params));
   else nativePrepareAudio();
+}
+
+export function nativeInterruptCall() {
+  post((bridge) => bridge.interruptNativeCall?.());
 }
 
 export function nativeEndCall() {

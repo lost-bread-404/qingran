@@ -37,12 +37,8 @@ enum NativeVad {
   static let floorStart: Float = 0.006
   static let minSpeechMs: Float = 220
   static let preRollMs = 1_500
-  /// Floor stays frozen while Qingran plays and this long after.
+  /// While Qingran plays and this long after, the floor stays frozen and no turn starts (his voice still in the room).
   static let postPlaybackMs: Float = 300
-  /// Talking over Qingran: clearly louder than a soft 嗯, so her own voice leaking back does not cut her off.
-  static let bargeMin: Float = 0.02
-  static let bargeMult: Float = 3
-  static let bargeHoldMs: Float = 250
 }
 
 struct NativeVadParams {

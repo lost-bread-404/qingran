@@ -45,12 +45,14 @@ final class NativePipeline {
   private var replyStarted = false
   private static let startSec = 0.42
   private static let holdSec = 0.32
-  private var voiceProcessing = false
+  /// When the audio handed to the player should have finished; past this (plus a margin) it is treated as done.
+  private var playEndsAt = Date.distantPast
   /// Bumped whenever scheduled audio is thrown away, so late completion callbacks are ignored.
   private var playGen = 0
   private var playing: Bool { pendingBuffers > 0 }
   private var playIdleAt = Date.distantPast
-  private var bargeMs: Float = 0
+  /// One converter for his voice across the pieces of a reply, so the resampler keeps its state and no piece loses its tail.
+  private var playConverter: AVAudioConverter?
   private var failures = 0
   private var emit: (([String: Any]) -> Void)?
   private var observers: [NSObjectProtocol] = []
@@ -85,20 +87,23 @@ final class NativePipeline {
     }
   }
 
+  /// She tapped him (the orb on the page), as in the web call: his reply stops and the call listens again.
+  func interrupt() {
+    queue.async { [weak self] in
+      guard let self, self.running else { return }
+      self.turnGen += 1
+      self.talkTask?.cancel()
+      self.talkTask = nil
+      self.busy = false
+      self.dropPlayback()
+      if self.engine.isRunning { self.player.play() }
+      self.emit?(["type": "phase", "phase": "listening"])
+    }
+  }
+
   private func startEngineOnQueue() {
     if running { return }
     watchAudio()
-    if !voiceProcessing {
-      // The same echo cancelling and level as the browser's call (getUserMedia with echoCancellation), so her voice
-      // comes in at the level the VAD, the hearing and the voice-or-noise gate were tuned on, and his voice from the
-      // speaker is not heard as her.
-      do {
-        try engine.inputNode.setVoiceProcessingEnabled(true)
-        voiceProcessing = true
-      } catch {
-        note(ok: false, error: "voice processing \(error.localizedDescription)")
-      }
-    }
     let input = engine.inputNode
     let inFormat = input.inputFormat(forBus: 0)
     guard inFormat.sampleRate > 0,
@@ -111,9 +116,11 @@ final class NativePipeline {
     converter = conv
     if !playerAttached {
       engine.attach(player)
-      engine.connect(player, to: engine.mainMixerNode, format: nil)
       playerAttached = true
     }
+    // Connected again on every start: after a route or configuration change the old connection can play into nothing.
+    engine.disconnectNodeOutput(player)
+    engine.connect(player, to: engine.mainMixerNode, format: nil)
     input.removeTap(onBus: 0)
     input.installTap(onBus: 0, bufferSize: 1024, format: inFormat) { [weak self] buffer, _ in
       self?.take(buffer)
@@ -130,7 +137,7 @@ final class NativePipeline {
       playIdleAt = Date()
       running = true
       mark("engine on")
-      emit?(["type": "phase", "phase": "listening"])
+      emit?(["type": "phase", "phase": busy ? "thinking" : "listening"])
     } catch {
       note(ok: false, error: "engine \(error.localizedDescription)")
       dropAfter(failures: 3)
@@ -148,8 +155,18 @@ final class NativePipeline {
       let timer = DispatchSource.makeTimerSource(queue: queue)
       timer.schedule(deadline: .now() + 2, repeating: 2)
       timer.setEventHandler { [weak self] in
-        guard let self, self.running, !self.engine.isRunning else { return }
-        self.revive("engine stopped")
+        guard let self, self.running else { return }
+        if !self.engine.isRunning {
+          self.revive("engine stopped")
+          return
+        }
+        // Audio that should long be over but never reported done would leave him "speaking" and her unheard.
+        if self.playing && Date().timeIntervalSince(self.playEndsAt) > 1.5 {
+          self.mark("playback never finished")
+          self.dropPlayback()
+          self.player.play()
+          if !self.busy { self.emit?(["type": "phase", "phase": "listening"]) }
+        }
       }
       timer.resume()
       watchdog = timer
@@ -195,6 +212,9 @@ final class NativePipeline {
       mark("\(why): session \(error.localizedDescription)")
     }
     running = false
+    // Whatever was scheduled went with the stopped engine; the rest of his reply still plays after the restart.
+    dropPlayback()
+    replyStarted = false
     engine.inputNode.removeTap(onBus: 0)
     startEngineOnQueue()
     mark("\(why): engine restarted \(running ? "ok" : "failed")")
@@ -213,7 +233,6 @@ final class NativePipeline {
     busy = false
     inSpeech = false
     riseMs = 0
-    bargeMs = 0
     dropPlayback()
     preroll.removeAll()
     speech.removeAll()
@@ -260,26 +279,23 @@ final class NativePipeline {
     let chunkMs = Float(samples.count) * 1000 / Float(NativeVad.sampleRate)
 
     level += (rms - level) * (1 - exp(-chunkMs / NativeVad.levelMs))
-    if !playing && Float(Date().timeIntervalSince(playIdleAt) * 1000) >= NativeVad.postPlaybackMs {
+    let afterPlayback = !playing && Float(Date().timeIntervalSince(playIdleAt) * 1000) >= NativeVad.postPlaybackMs
+    if afterPlayback {
       floor = nextFloor(floor, level, chunkMs, inTurn: inSpeech)
+    }
+
+    // Like the web call: while he is thinking or speaking (and a moment after) the mic is not listening, and nothing
+    // from then is kept for the next turn's pre-roll — without echo cancelling, his voice from the speaker would be
+    // sent as hers.
+    if busy || !afterPlayback {
+      riseMs = 0
+      preroll.removeAll(keepingCapacity: true)
+      return
     }
 
     let keep = NativeVad.sampleRate * NativeVad.preRollMs / 1000
     preroll.append(contentsOf: samples)
     if preroll.count > keep { preroll.removeFirst(preroll.count - keep) }
-
-    if playing {
-      if level >= max(NativeVad.bargeMin, floor * NativeVad.bargeMult) {
-        bargeMs += chunkMs
-        if bargeMs >= NativeVad.bargeHoldMs { interruptReply() }
-      } else {
-        bargeMs = 0
-      }
-    }
-    if busy || playing {
-      riseMs = 0
-      return
-    }
 
     if !inSpeech {
       if level >= max(params.startMin, floor * params.startMult) {
@@ -337,23 +353,13 @@ final class NativePipeline {
     return min(NativeVad.floorMax, max(NativeVad.floorMin, next))
   }
 
-  /// She talked over Qingran: stop his voice and the rest of that reply, and listen.
-  private func interruptReply() {
-    turnGen += 1
-    talkTask?.cancel()
-    talkTask = nil
-    busy = false
-    bargeMs = 0
-    dropPlayback()
-    player.play()
-    emit?(["type": "phase", "phase": "listening"])
-  }
-
   private func dropPlayback() {
     playGen += 1
     pendingBuffers = 0
+    playEndsAt = Date.distantPast
     waiting.removeAll()
     waitingFrames = 0
+    playConverter = nil
     playIdleAt = Date()
     player.stop()
   }
@@ -379,7 +385,10 @@ final class NativePipeline {
       return
     }
     if text.isEmpty || !current(gen) { return }
-    emit?(["type": "phase", "phase": "thinking"])
+    queue.async {
+      guard self.turnGen == gen else { return }
+      self.emit?(["type": "phase", "phase": "thinking"])
+    }
     let userId = UUID().uuidString.lowercased()
     let replyId = UUID().uuidString.lowercased()
     let now = Int(Date().timeIntervalSince1970 * 1000)
@@ -441,6 +450,7 @@ final class NativePipeline {
 
   private func talk(text: String, userId: String, replyId: String, now: Int, gen: Int) async {
     queue.async {
+      guard self.turnGen == gen else { return }
       self.replyEnded = false
       self.replyStarted = false
     }
@@ -448,6 +458,7 @@ final class NativePipeline {
       queue.async {
         guard self.turnGen == gen else { return }
         self.replyEnded = true
+        self.drainPlayConverter()
         self.flushPlayback()
       }
     }
@@ -510,6 +521,13 @@ final class NativePipeline {
             speech = full
             emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
           }
+          // The reply is complete at "done"; the stream stays open a moment longer while the server saves it.
+          queue.async {
+            guard self.turnGen == gen else { return }
+            self.replyEnded = true
+            self.drainPlayConverter()
+            self.flushPlayback()
+          }
         }
       }
     } catch {
@@ -520,6 +538,8 @@ final class NativePipeline {
 
   private func schedule(_ buffer: AVAudioPCMBuffer) {
     let gen = playGen
+    let seconds = buffer.format.sampleRate > 0 ? Double(buffer.frameLength) / buffer.format.sampleRate : 0
+    playEndsAt = max(playEndsAt, Date()).addingTimeInterval(seconds)
     pendingBuffers += 1
     player.scheduleBuffer(buffer, completionHandler: { [weak self] in
       self?.queue.async {
@@ -527,12 +547,11 @@ final class NativePipeline {
         self.pendingBuffers -= 1
         if self.pendingBuffers == 0 {
           self.playIdleAt = Date()
-          self.bargeMs = 0
           if self.running && !self.busy { self.emit?(["type": "phase", "phase": "listening"]) }
         }
       }
     })
-    if !player.isPlaying { player.play() }
+    if engine.isRunning && !player.isPlaying { player.play() }
   }
 
   private func playPCM(_ b64: String, mime: String, replace: Bool) {
@@ -553,14 +572,33 @@ final class NativePipeline {
       let hi = UInt16(bytes[i * 2 + 1])
       dst[0][i] = Int16(bitPattern: lo | (hi << 8))
     }
-    guard let converted = convert(src, to: fmt) else { return }
     if replace {
       dropPlayback()
-      player.play()
+      if engine.isRunning { player.play() }
     }
+    if playConverter == nil || playConverter?.inputFormat != srcFmt || playConverter?.outputFormat != fmt {
+      playConverter = AVAudioConverter(from: srcFmt, to: fmt)
+    }
+    guard let conv = playConverter, let converted = convert(src, with: conv) else { return }
     waiting.append(converted)
     waitingFrames += Double(converted.frameLength)
     flushPlayback()
+  }
+
+  /// The last few milliseconds the resampler still holds once the reply is complete.
+  private func drainPlayConverter() {
+    guard let conv = playConverter,
+          let out = AVAudioPCMBuffer(pcmFormat: conv.outputFormat, frameCapacity: 4096) else { return }
+    var error: NSError?
+    conv.convert(to: out, error: &error) { _, status in
+      status.pointee = .endOfStream
+      return nil
+    }
+    playConverter = nil
+    if error == nil && out.frameLength > 0 {
+      waiting.append(out)
+      waitingFrames += Double(out.frameLength)
+    }
   }
 
   /// Hands buffered pieces to the player: at once while he is already speaking, otherwise once enough is waiting
@@ -580,8 +618,8 @@ final class NativePipeline {
     waitingFrames = 0
   }
 
-  private func convert(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
-    guard let conv = AVAudioConverter(from: buffer.format, to: format) else { return nil }
+  private func convert(_ buffer: AVAudioPCMBuffer, with conv: AVAudioConverter) -> AVAudioPCMBuffer? {
+    let format = conv.outputFormat
     let ratio = format.sampleRate / buffer.format.sampleRate
     let cap = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
     guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: max(cap, 32)) else { return nil }
