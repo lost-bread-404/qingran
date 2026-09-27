@@ -62,6 +62,15 @@ export function SuperGrokPanel() {
             这个链接
           </a>
           ，用有 SuperGrok 的账号登录并同意；要填码就填 <span className="font-mono">{status.pending.userCode}</span>。同意后这里会自己变成「已连接」。
+          链接在 app 里打不开时，
+          <button
+            type="button"
+            className="underline underline-offset-4"
+            onClick={() => void navigator.clipboard?.writeText(status.pending?.url ?? "").then(() => setErr("链接已复制，去 Safari 打开。"), () => setErr(status.pending?.url ?? ""))}
+          >
+            复制链接
+          </button>
+          到 Safari 或电脑上打开，一样能连。
         </p>
       ) : (
         <p>{status.hasApiKey ? "没连接 · 现在全部走 API" : "没连接，也没有 API key"}</p>

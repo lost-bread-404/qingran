@@ -181,12 +181,17 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     decidePolicyFor navigationAction: WKNavigationAction,
     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
   ) {
-    if navigationAction.targetFrame == nil {
-      if let url = navigationAction.request.url {
-        webView.load(URLRequest(url: url))
+    // A link meant for a new window (target=_blank, e.g. signing in to SuperGrok) opens in Safari, so the app
+    // stays on Qingran and the other site's own redirects (x.com → the X app) work there. So do non-web schemes.
+    if let url = navigationAction.request.url {
+      let web = url.scheme == "http" || url.scheme == "https"
+      if navigationAction.targetFrame == nil || !web {
+        if !["about", "blob", "data"].contains(url.scheme ?? "") {
+          UIApplication.shared.open(url)
+        }
+        decisionHandler(.cancel)
+        return
       }
-      decisionHandler(.cancel)
-      return
     }
     decisionHandler(.allow)
   }
