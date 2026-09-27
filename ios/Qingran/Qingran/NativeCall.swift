@@ -53,6 +53,8 @@ final class NativePipeline {
   private var playIdleAt = Date.distantPast
   /// One converter for his voice across the pieces of a reply, so the resampler keeps its state and no piece loses its tail.
   private var playConverter: AVAudioConverter?
+  /// An odd byte left at the end of a piece of his voice, joined to the next piece.
+  private var pcmCarry = Data()
   private var failures = 0
   private var emit: (([String: Any]) -> Void)?
   private var observers: [NSObjectProtocol] = []
@@ -360,6 +362,7 @@ final class NativePipeline {
     waiting.removeAll()
     waitingFrames = 0
     playConverter = nil
+    pcmCarry = Data()
     playIdleAt = Date()
     player.stop()
   }
@@ -453,6 +456,7 @@ final class NativePipeline {
       guard self.turnGen == gen else { return }
       self.replyEnded = false
       self.replyStarted = false
+      self.pcmCarry = Data()
     }
     defer {
       queue.async {
@@ -488,47 +492,54 @@ final class NativePipeline {
         softFail("talk \(code)")
         return
       }
+      // One SSE frame ends at a blank line. Only the last byte is looked at: searching the whole growing frame on
+      // every byte made each piece of his voice (tens of KB) take seconds to read, so it arrived late and stuttered.
       var buf = Data()
+      buf.reserveCapacity(64 * 1024)
       var speech = ""
-      let sep = Data([10, 10])
+      var last: UInt8 = 0
       for try await byte in bytes {
         if Task.isCancelled { return }
-        buf.append(byte)
-        guard let range = buf.range(of: sep) else { continue }
-        let frame = buf.subdata(in: 0..<range.lowerBound)
-        buf.removeSubrange(0..<range.upperBound)
-        guard let event = sseJSON(frame) else { continue }
-        let kind = event["t"] as? String ?? ""
-        if kind == "text", let delta = event["d"] as? String {
-          speech += delta
-          emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
-        } else if kind == "text_end", let full = event["speech"] as? String, !full.isEmpty {
-          speech = full
-          emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
-        } else if kind == "audio", let b64 = event["b"] as? String {
-          let replace = event["replace"] as? Bool ?? false
-          let mime = event["m"] as? String ?? ""
-          queue.async {
-            guard self.turnGen == gen else { return }
-            self.playPCM(b64, mime: mime, replace: replace)
-          }
-        } else if kind == "err" {
-          softFail((event["m"] as? String) ?? "talk")
-          return
-        } else if kind == "done" {
-          failures = 0
-          if speech.isEmpty, let full = event["speech"] as? String {
+        if byte == 10 && last == 10 {
+          let frame = buf
+          buf.removeAll(keepingCapacity: true)
+          last = 0
+          guard let event = sseJSON(frame) else { continue }
+          let kind = event["t"] as? String ?? ""
+          if kind == "text", let delta = event["d"] as? String {
+            speech += delta
+            emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
+          } else if kind == "text_end", let full = event["speech"] as? String, !full.isEmpty {
             speech = full
             emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
+          } else if kind == "audio", let b64 = event["b"] as? String {
+            let replace = event["replace"] as? Bool ?? false
+            let mime = event["m"] as? String ?? ""
+            queue.async {
+              guard self.turnGen == gen else { return }
+              self.playPCM(b64, mime: mime, replace: replace)
+            }
+          } else if kind == "err" {
+            softFail((event["m"] as? String) ?? "talk")
+            return
+          } else if kind == "done" {
+            failures = 0
+            if speech.isEmpty, let full = event["speech"] as? String {
+              speech = full
+              emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
+            }
+            // The reply is complete at "done"; the stream stays open a moment longer while the server saves it.
+            queue.async {
+              guard self.turnGen == gen else { return }
+              self.replyEnded = true
+              self.drainPlayConverter()
+              self.flushPlayback()
+            }
           }
-          // The reply is complete at "done"; the stream stays open a moment longer while the server saves it.
-          queue.async {
-            guard self.turnGen == gen else { return }
-            self.replyEnded = true
-            self.drainPlayConverter()
-            self.flushPlayback()
-          }
+          continue
         }
+        buf.append(byte)
+        last = byte
       }
     } catch {
       if Task.isCancelled { return }
@@ -555,28 +566,39 @@ final class NativePipeline {
   }
 
   private func playPCM(_ b64: String, mime: String, replace: Bool) {
-    guard running, let raw = Data(base64Encoded: b64), raw.count >= 2, let fmt = playerFormat, fmt.sampleRate > 0 else { return }
+    guard running, let raw = Data(base64Encoded: b64), let fmt = playerFormat, fmt.sampleRate > 0 else { return }
+    if replace {
+      dropPlayback()
+      if engine.isRunning { player.play() }
+    }
+    // 16-bit samples can be split across two pieces; an odd byte waits for the next piece instead of shifting
+    // every sample after it.
+    var data = pcmCarry
+    data.append(raw)
+    pcmCarry = Data()
+    if data.count % 2 == 1 {
+      pcmCarry = Data(data.suffix(1))
+      data.removeLast()
+    }
+    let frames = data.count / 2
+    guard frames > 0 else { return }
     let rate = mime.range(of: "rate=").flatMap { rest -> Double? in
       let tail = mime[rest.upperBound...]
       let digits = tail.prefix { $0.isNumber }
       return Double(digits)
     } ?? 24000
-    let frames = raw.count / 2
     guard let srcFmt = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: rate, channels: 1, interleaved: false),
           let src = AVAudioPCMBuffer(pcmFormat: srcFmt, frameCapacity: AVAudioFrameCount(frames)),
           let dst = src.int16ChannelData else { return }
     src.frameLength = AVAudioFrameCount(frames)
-    let bytes = [UInt8](raw)
-    for i in 0..<frames {
-      let lo = UInt16(bytes[i * 2])
-      let hi = UInt16(bytes[i * 2 + 1])
-      dst[0][i] = Int16(bitPattern: lo | (hi << 8))
+    data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
+      for i in 0..<frames {
+        let lo = UInt16(buf[i * 2])
+        let hi = UInt16(buf[i * 2 + 1])
+        dst[0][i] = Int16(bitPattern: lo | (hi << 8))
+      }
     }
-    if replace {
-      dropPlayback()
-      if engine.isRunning { player.play() }
-    }
-    if playConverter == nil || playConverter?.inputFormat != srcFmt || playConverter?.outputFormat != fmt {
+    if playConverter == nil || playConverter?.inputFormat.sampleRate != rate || playConverter?.outputFormat != fmt {
       playConverter = AVAudioConverter(from: srcFmt, to: fmt)
     }
     guard let conv = playConverter, let converted = convert(src, with: conv) else { return }
@@ -608,6 +630,8 @@ final class NativePipeline {
     if !playing && !replyEnded {
       let need = (replyStarted ? Self.holdSec : Self.startSec) * fmt.sampleRate
       if waitingFrames < need { return }
+      // His voice ran dry mid-reply and had to wait: recorded, so a stutter can be traced.
+      if replyStarted { mark("underrun") }
     }
     if !replyStarted {
       replyStarted = true

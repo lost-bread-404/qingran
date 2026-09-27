@@ -3,6 +3,7 @@ import { AuthProvider } from "@/lib/auth/provider";
 import "@/lib/auth-lite/fetch-guard";
 import { AppErrorComponent } from "@/lib/error-component";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
+import { KeyboardGuard } from "@/hooks/use-visual-viewport";
 import appCss from "../styles.css?url";
 
 const APP_NAME = "清然";
@@ -43,6 +44,7 @@ export const Route = createRootRoute({
       </head>
       <body>
         <PreviewHostBridge />
+        <KeyboardGuard />
         <AuthProvider>
           <Outlet />
         </AuthProvider>

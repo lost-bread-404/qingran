@@ -73,6 +73,50 @@ export function useVisualViewport() {
 
 export type CaretField = HTMLTextAreaElement | HTMLInputElement;
 
+function focusedField(): CaretField | null {
+  const active = typeof document === "undefined" ? null : document.activeElement;
+  return active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement ? active : null;
+}
+
+/**
+ * For every editable field in the app: when it gets focus, and whenever the keyboard moves the visible area,
+ * the field (and the caret in it) is scrolled back above the keyboard. Panels that hold fields follow the visible
+ * area (top / height from useVisualViewportHeight), so there is always room to scroll into.
+ */
+export function useKeepFocusedFieldVisible() {
+  useEffect(() => {
+    const timers: number[] = [];
+    let frame = 0;
+    const reveal = () => {
+      const field = focusedField();
+      if (field) keepCaretVisible(field);
+    };
+    const soon = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(reveal);
+    };
+    const onFocus = (event: FocusEvent) => {
+      if (!(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement)) return;
+      // Once when it gets focus, again as the keyboard finishes coming up.
+      for (const delay of [60, 320, 650]) timers.push(window.setTimeout(reveal, delay));
+    };
+    const viewport = window.visualViewport;
+    document.addEventListener("focusin", onFocus);
+    viewport?.addEventListener("resize", soon);
+    return () => {
+      document.removeEventListener("focusin", onFocus);
+      viewport?.removeEventListener("resize", soon);
+      cancelAnimationFrame(frame);
+      for (const t of timers) window.clearTimeout(t);
+    };
+  }, []);
+}
+
+export function KeyboardGuard() {
+  useKeepFocusedFieldVisible();
+  return null;
+}
+
 const CARET_STYLE_KEYS = [
   "box-sizing",
   "width",

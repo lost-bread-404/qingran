@@ -64,14 +64,6 @@ export function ConfirmTurn({
     setToneNote(initialToneNote ?? "");
   }, [open, sttText, initialDraft, initialNoise, initialToneNote]);
 
-  useEffect(() => {
-    if (!open) return;
-    const active = document.activeElement;
-    if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) {
-      keepCaretVisible(active);
-    }
-  }, [open, viewport.height, viewport.offsetTop]);
-
   if (!open) return null;
 
   const goldText = goldTextForSave(draft);

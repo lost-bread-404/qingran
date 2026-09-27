@@ -252,14 +252,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
-    const active = document.activeElement;
-    if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) {
-      keepCaretVisible(active);
-    }
-  }, [open, viewport.height, viewport.offsetTop]);
-
-  useEffect(() => {
     if (!open || page !== "prompts") return;
     let cancelled = false;
     void brainListPrompts()
