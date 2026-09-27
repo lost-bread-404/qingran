@@ -12,7 +12,7 @@ import { finishHearing } from "@/lib/lover/hearing/finish";
 import { extractTfIdfTerms } from "@/lib/lover/hearing/keyterms";
 import { formatSenseLine, toneFromSense } from "@/lib/lover/hearing/sense";
 import { hearClip } from "@/lib/lover/hearing/store";
-import { prosodyFromWav, wavDurationMs } from "@/lib/lover/hearing/wav";
+import { liftQuietWav, prosodyFromWav, wavDurationMs } from "@/lib/lover/hearing/wav";
 import { downsampleProsody, framesFromStored, readTone } from "@/lib/lover/prosody";
 import { newId } from "@/lib/lover/storage";
 import { lockedProfile } from "@/lib/lover/types";
@@ -45,8 +45,9 @@ export const Route = createFileRoute("/api/stt")({
         } catch {
           return Response.json({ ok: false, error: "先给一段声音。" }, { status: 400 });
         }
-        const audioBase64 = String(body.audioBase64 ?? "");
-        if (audioBase64.length < 120) return Response.json({ ok: true, text: "", skip: true, ms: 0 });
+        const sent = String(body.audioBase64 ?? "");
+        if (sent.length < 120) return Response.json({ ok: true, text: "", skip: true, ms: 0 });
+        const audioBase64 = liftQuietWav(sent);
         const mimeType = typeof body.mimeType === "string" && body.mimeType ? body.mimeType : "audio/wav";
 
         const [savedProfile, recent] = await Promise.all([getProfileData(), listHistoryWindow(null, 24)]);

@@ -37,6 +37,15 @@ final class NativePipeline {
   private var turnGen = 0
   private var talkTask: Task<Void, Never>?
   private var pendingBuffers = 0
+  /// His voice arrives in pieces; like the web player, it starts once a little is buffered and waits again after
+  /// running dry, so one reply plays as one stretch instead of stopping between pieces.
+  private var waiting: [AVAudioPCMBuffer] = []
+  private var waitingFrames: Double = 0
+  private var replyEnded = false
+  private var replyStarted = false
+  private static let startSec = 0.42
+  private static let holdSec = 0.32
+  private var voiceProcessing = false
   /// Bumped whenever scheduled audio is thrown away, so late completion callbacks are ignored.
   private var playGen = 0
   private var playing: Bool { pendingBuffers > 0 }
@@ -79,6 +88,17 @@ final class NativePipeline {
   private func startEngineOnQueue() {
     if running { return }
     watchAudio()
+    if !voiceProcessing {
+      // The same echo cancelling and level as the browser's call (getUserMedia with echoCancellation), so her voice
+      // comes in at the level the VAD, the hearing and the voice-or-noise gate were tuned on, and his voice from the
+      // speaker is not heard as her.
+      do {
+        try engine.inputNode.setVoiceProcessingEnabled(true)
+        voiceProcessing = true
+      } catch {
+        note(ok: false, error: "voice processing \(error.localizedDescription)")
+      }
+    }
     let input = engine.inputNode
     let inFormat = input.inputFormat(forBus: 0)
     guard inFormat.sampleRate > 0,
@@ -332,6 +352,8 @@ final class NativePipeline {
   private func dropPlayback() {
     playGen += 1
     pendingBuffers = 0
+    waiting.removeAll()
+    waitingFrames = 0
     playIdleAt = Date()
     player.stop()
   }
@@ -357,6 +379,7 @@ final class NativePipeline {
       return
     }
     if text.isEmpty || !current(gen) { return }
+    emit?(["type": "phase", "phase": "thinking"])
     let userId = UUID().uuidString.lowercased()
     let replyId = UUID().uuidString.lowercased()
     let now = Int(Date().timeIntervalSince1970 * 1000)
@@ -417,6 +440,17 @@ final class NativePipeline {
   }
 
   private func talk(text: String, userId: String, replyId: String, now: Int, gen: Int) async {
+    queue.async {
+      self.replyEnded = false
+      self.replyStarted = false
+    }
+    defer {
+      queue.async {
+        guard self.turnGen == gen else { return }
+        self.replyEnded = true
+        self.flushPlayback()
+      }
+    }
     guard let url = endpoint("api/talk") else {
       softFail("talk-url")
       return
@@ -524,7 +558,26 @@ final class NativePipeline {
       dropPlayback()
       player.play()
     }
-    schedule(converted)
+    waiting.append(converted)
+    waitingFrames += Double(converted.frameLength)
+    flushPlayback()
+  }
+
+  /// Hands buffered pieces to the player: at once while he is already speaking, otherwise once enough is waiting
+  /// (or the reply is complete).
+  private func flushPlayback() {
+    guard !waiting.isEmpty, let fmt = playerFormat, fmt.sampleRate > 0 else { return }
+    if !playing && !replyEnded {
+      let need = (replyStarted ? Self.holdSec : Self.startSec) * fmt.sampleRate
+      if waitingFrames < need { return }
+    }
+    if !replyStarted {
+      replyStarted = true
+      emit?(["type": "phase", "phase": "speaking"])
+    }
+    for buffer in waiting { schedule(buffer) }
+    waiting.removeAll()
+    waitingFrames = 0
   }
 
   private func convert(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) -> AVAudioPCMBuffer? {

@@ -83,6 +83,42 @@ export function decodeWavPcm16(base64: string): { samples: Float32Array; sampleR
   }
 }
 
+/** The browser call's usual loudness (median 20 ms peak of her clips there). */
+const BROWSER_PEAK_RMS = 0.2;
+
+/**
+ * The iPhone shell can record her much quieter than the browser does. Pitch is only read on frames above a fixed
+ * level, so a quiet clip of real words was judged noise and she had to shout. A quiet clip is raised to the browser's
+ * usual level (at most 8×) before anything reads it; a clip already at that level is left as it is.
+ */
+export function liftQuietWav(base64: string, maxGain = 8): string {
+  const peak = wavPeakRms(base64);
+  if (!(peak > 0) || peak >= BROWSER_PEAK_RMS * 0.8) return base64;
+  const decoded = decodeWavPcm16(base64);
+  if (!decoded || !decoded.samples.length) return base64;
+  const gain = Math.min(maxGain, BROWSER_PEAK_RMS / peak);
+  const count = decoded.samples.length;
+  const out = Buffer.alloc(44 + count * 2);
+  out.write("RIFF", 0, "ascii");
+  out.writeUInt32LE(36 + count * 2, 4);
+  out.write("WAVE", 8, "ascii");
+  out.write("fmt ", 12, "ascii");
+  out.writeUInt32LE(16, 16);
+  out.writeUInt16LE(1, 20);
+  out.writeUInt16LE(1, 22);
+  out.writeUInt32LE(decoded.sampleRate, 24);
+  out.writeUInt32LE(decoded.sampleRate * 2, 28);
+  out.writeUInt16LE(2, 32);
+  out.writeUInt16LE(16, 34);
+  out.write("data", 36, "ascii");
+  out.writeUInt32LE(count * 2, 40);
+  for (let i = 0; i < count; i += 1) {
+    const v = Math.max(-1, Math.min(1, (decoded.samples[i] ?? 0) * gain));
+    out.writeInt16LE(Math.round(v < 0 ? v * 0x8000 : v * 0x7fff), 44 + i * 2);
+  }
+  return out.toString("base64");
+}
+
 export function prosodyFromWav(base64: string, minClarity = 0.58): StoredProsody | null {
   const decoded = decodeWavPcm16(base64);
   if (!decoded || decoded.samples.length < 80) return null;

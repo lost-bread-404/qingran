@@ -54,7 +54,8 @@ import {
   startHoldMs,
 } from "@/lib/lover/vad";
 
-export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing";
+/** "thinking" and "speaking" come only from the iPhone shell's call; the web call shows those from the reply itself. */
+export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing" | "thinking" | "speaking";
 
 const FFT_SIZE = 2048;
 
@@ -132,6 +133,7 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
   const framesRef = useRef<ProsodyFrame[]>([]);
   const nativeHangupRef = useRef(false);
   const nativeOwnedRef = useRef(false);
+  const nativeListenTimerRef = useRef<number | undefined>(undefined);
   const speechStartWallRef = useRef(0);
   const recognizingRef = useRef(false);
   /** performance.now() when playback last stopped. Infinity while audio is going out. */
@@ -831,12 +833,21 @@ export function useCall({ onUtterance, prompt, isGenerating, isLabeling, onStuck
       if (!liveRef.current) return;
       const detail = (event as CustomEvent<{ type?: string; phase?: CallPhase }>).detail;
       const phaseNow = detail?.phase;
-      if (detail?.type === "phase" && (phaseNow === "listening" || phaseNow === "speaking-you" || phaseNow === "transcribing")) {
-        setPhaseBoth(phaseNow);
+      if (detail?.type !== "phase" || !phaseNow || phaseNow === "idle") return;
+      setPhaseBoth(phaseNow);
+      // The shell does the listening, so the seconds she has been talking are counted here from its phases.
+      window.clearInterval(nativeListenTimerRef.current);
+      setListenSec(0);
+      if (phaseNow === "speaking-you") {
+        const since = Date.now();
+        nativeListenTimerRef.current = window.setInterval(() => setListenSec(Math.floor((Date.now() - since) / 1000)), 500);
       }
     };
     window.addEventListener("qingran-native-call", onNative);
-    return () => window.removeEventListener("qingran-native-call", onNative);
+    return () => {
+      window.removeEventListener("qingran-native-call", onNative);
+      window.clearInterval(nativeListenTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {

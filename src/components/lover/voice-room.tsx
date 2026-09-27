@@ -1208,9 +1208,9 @@ export function VoiceRoom() {
       ? `在听你 · ${call.listenSec} 秒`
       : call.phase === "transcribing"
         ? "听你说的话"
-        : status === "thinking"
+        : status === "thinking" || call.phase === "thinking"
           ? "她在想"
-          : status === "speaking"
+          : status === "speaking" || call.phase === "speaking"
             ? "清然在说"
             : `你说，说完停两秒 · phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
     : status === "thinking"
@@ -1378,7 +1378,7 @@ export function VoiceRoom() {
               messages={messages}
               partnerName="清然"
               statusLine={statusLine}
-              thinking={status === "thinking" || transcribing || call.phase === "transcribing"}
+              thinking={status === "thinking" || transcribing || call.phase === "transcribing" || call.phase === "thinking"}
               editableId={editable?.id ?? null}
               editingId={editingId}
               editDraft={editDraft}
