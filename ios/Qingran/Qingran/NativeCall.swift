@@ -44,6 +44,8 @@ final class NativePipeline {
   private var bargeMs: Float = 0
   private var failures = 0
   private var emit: (([String: Any]) -> Void)?
+  private var observers: [NSObjectProtocol] = []
+  private var watchdog: DispatchSourceTimer?
 
   private init() {}
 
@@ -76,6 +78,7 @@ final class NativePipeline {
 
   private func startEngineOnQueue() {
     if running { return }
+    watchAudio()
     let input = engine.inputNode
     let inFormat = input.inputFormat(forBus: 0)
     guard inFormat.sampleRate > 0,
@@ -106,6 +109,7 @@ final class NativePipeline {
       preroll.removeAll()
       playIdleAt = Date()
       running = true
+      mark("engine on")
       emit?(["type": "phase", "phase": "listening"])
     } catch {
       note(ok: false, error: "engine \(error.localizedDescription)")
@@ -113,11 +117,76 @@ final class NativePipeline {
     }
   }
 
+  /**
+   * The call must outlive the page. When the app goes to the background, WebKit pauses its own media and the
+   * audio session can be interrupted or reconfigured; an engine that stops then is never started again, iOS
+   * suspends the app, and the call goes silent. So while a call is on, any of these puts the engine back.
+   */
+  private func watchAudio() {
+    if watchdog == nil {
+      // Some of these changes come without any notification (WebKit letting go of the audio in the background).
+      let timer = DispatchSource.makeTimerSource(queue: queue)
+      timer.schedule(deadline: .now() + 2, repeating: 2)
+      timer.setEventHandler { [weak self] in
+        guard let self, self.running, !self.engine.isRunning else { return }
+        self.revive("engine stopped")
+      }
+      timer.resume()
+      watchdog = timer
+    }
+    guard observers.isEmpty else { return }
+    let center = NotificationCenter.default
+    let session = AVAudioSession.sharedInstance()
+    observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+      self?.queue.async { self?.revive("config change") }
+    })
+    observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: nil) { [weak self] note in
+      let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt ?? 0
+      let began = AVAudioSession.InterruptionType(rawValue: raw) == .began
+      self?.queue.async {
+        if began {
+          self?.mark("interrupted")
+        } else {
+          self?.revive("interruption ended")
+        }
+      }
+    })
+    observers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: nil) { [weak self] _ in
+      self?.queue.async { self?.revive("media services reset") }
+    })
+    observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
+      self?.queue.async { self?.revive("background") }
+    })
+    observers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil) { [weak self] _ in
+      self?.queue.async { self?.revive("foreground") }
+    })
+  }
+
+  /// During a call: make sure the session is active and the engine is running; restart it if it is not.
+  private func revive(_ why: String) {
+    guard running, !stopping else { return }
+    if engine.isRunning {
+      mark("\(why): engine on")
+      return
+    }
+    do {
+      try AVAudioSession.sharedInstance().setActive(true, options: [])
+    } catch {
+      mark("\(why): session \(error.localizedDescription)")
+    }
+    running = false
+    engine.inputNode.removeTap(onBus: 0)
+    startEngineOnQueue()
+    mark("\(why): engine restarted \(running ? "ok" : "failed")")
+  }
+
   private func haltLocked() {
     if stopping { return }
     stopping = true
     defer { stopping = false }
     running = false
+    watchdog?.cancel()
+    watchdog = nil
     turnGen += 1
     talkTask?.cancel()
     talkTask = nil
@@ -311,7 +380,7 @@ final class NativePipeline {
     ]
     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
     do {
-      let (data, res) = try await URLSession.shared.data(for: req)
+      let (data, res) = try await Self.send(req)
       let code = (res as? HTTPURLResponse)?.statusCode ?? 0
       guard code == 200,
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -325,6 +394,25 @@ final class NativePipeline {
       if Task.isCancelled { return nil }
       note(ok: false, error: "stt \(error.localizedDescription)")
       return nil
+    }
+  }
+
+  /// A connection iOS dropped while the app changed state fails once with "connection lost"; the same request again goes through.
+  private static func send(_ req: URLRequest) async throws -> (Data, URLResponse) {
+    do {
+      return try await URLSession.shared.data(for: req)
+    } catch let error as URLError where error.code == .networkConnectionLost || error.code == .notConnectedToInternet {
+      try await Task.sleep(nanoseconds: 400_000_000)
+      return try await URLSession.shared.data(for: req)
+    }
+  }
+
+  private static func stream(_ req: URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse) {
+    do {
+      return try await URLSession.shared.bytes(for: req)
+    } catch let error as URLError where error.code == .networkConnectionLost || error.code == .notConnectedToInternet {
+      try await Task.sleep(nanoseconds: 400_000_000)
+      return try await URLSession.shared.bytes(for: req)
     }
   }
 
@@ -349,7 +437,7 @@ final class NativePipeline {
     ]
     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
     do {
-      let (bytes, res) = try await URLSession.shared.bytes(for: req)
+      let (bytes, res) = try await Self.stream(req)
       let code = (res as? HTTPURLResponse)?.statusCode ?? 0
       guard code == 200 else {
         softFail("talk \(code)")
@@ -503,14 +591,20 @@ final class NativePipeline {
     }
   }
 
-  private func note(ok: Bool, error: String) {
+  /// What happened to the call (engine on, background, restarted), so a silent call can be traced afterwards.
+  private func mark(_ event: String) {
+    note(ok: true, error: "", detail: event)
+  }
+
+  private func note(ok: Bool, error: String, detail: String = "") {
     Task {
       guard let url = self.endpoint("api/native-log") else { return }
       var req = URLRequest(url: url)
       req.httpMethod = "POST"
       req.setValue("application/json", forHTTPHeaderField: "Content-Type")
       req.setValue(await self.cookieHeader(), forHTTPHeaderField: "Cookie")
-      let body: [String: Any] = ["ok": ok, "error": String(error.prefix(500)), "note": "native-call"]
+      let state = await MainActor.run { UIApplication.shared.applicationState == .background ? "bg" : "fg" }
+      let body: [String: Any] = ["ok": ok, "error": String(error.prefix(500)), "note": "native-call \(state) \(detail)".trimmingCharacters(in: .whitespaces)]
       req.httpBody = try? JSONSerialization.data(withJSONObject: body)
       _ = try? await URLSession.shared.data(for: req)
     }
