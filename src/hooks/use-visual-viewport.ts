@@ -13,16 +13,35 @@ export function useVisualViewportHeight(active = true) {
       });
     };
     sync();
+    // When the keyboard goes away, iOS can leave the page panned and not report the last resize; then the frame
+    // stays small or pushed down and the screen looks empty. Once no field has focus, put the page back at the top
+    // and measure again after the keyboard has finished closing.
+    const timers: number[] = [];
+    const settle = () => {
+      for (const delay of [60, 350, 700]) {
+        timers.push(
+          window.setTimeout(() => {
+            const active = document.activeElement;
+            if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+            if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+            sync();
+          }, delay),
+        );
+      }
+    };
     const viewport = window.visualViewport;
     viewport?.addEventListener("resize", sync);
     viewport?.addEventListener("scroll", sync);
     window.addEventListener("resize", sync);
     window.addEventListener("orientationchange", sync);
+    document.addEventListener("focusout", settle);
     return () => {
       viewport?.removeEventListener("resize", sync);
       viewport?.removeEventListener("scroll", sync);
       window.removeEventListener("resize", sync);
       window.removeEventListener("orientationchange", sync);
+      document.removeEventListener("focusout", settle);
+      for (const t of timers) window.clearTimeout(t);
     };
   }, [active]);
 

@@ -610,15 +610,13 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <button
           type="button"
           aria-label={page === "home" ? "关闭" : "返回"}
-          onClick={() =>
-            page === "home"
-              ? onOpenChange(false)
-              : setPage(
-                  page === "prompts" || page === "hearing" || page === "log" || page === "spend"
-                    ? "advanced"
-                    : "home",
-                )
-          }
+          onClick={() => {
+            // Close the keyboard first: the field saves on blur, and the next page is laid out without it.
+            const active = document.activeElement;
+            if (active instanceof HTMLElement) active.blur();
+            if (page === "home") onOpenChange(false);
+            else setPage(page === "prompts" || page === "hearing" || page === "log" || page === "spend" ? "advanced" : "home");
+          }}
           className="grid size-11 place-items-center rounded-md text-muted"
         >
           <X className={cn("size-5", page !== "home" && "hidden")} />
@@ -634,6 +632,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         {saveError ? <span className="text-xs text-live">{saveError}</span> : null}
       </header>
 
+      {/* Each page is its own element: it opens at the top, and nothing (scroll, focus) carries over from the last one. */}
+      <div key={page} className="flex min-h-0 flex-1 flex-col">
       {page === "home" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
@@ -1333,6 +1333,7 @@ maxAlternatives: 3`}
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
