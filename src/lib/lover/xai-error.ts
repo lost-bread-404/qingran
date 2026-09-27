@@ -17,7 +17,7 @@ export function isXaiQuotaFail(status: number, body = ""): boolean {
 
 export function xaiFailHint(status: number, body = ""): string {
   if (isXaiQuotaFail(status, body)) return QUOTA_HINT;
-  if (status === 429) return "说得太密了，等几秒再开口。";
+  if (status === 429 || status === 503) return "xAI 这会儿太忙，没接上，再说一次。";
   if (!status) return "这会儿连不上。";
   return `想你的时候卡住了（${status}）。`;
 }

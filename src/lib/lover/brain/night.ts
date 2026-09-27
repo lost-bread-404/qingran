@@ -14,19 +14,19 @@ import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
 import { modesText, parsePlans } from "./voice/reflector.ts";
 import { recordMode } from "./mode.ts";
-import { dayWindow, getHeart, hasDay, listPlans, plansText, replaceMindPlans, saveDayTimeline, setFocus, setHeart } from "./heart.ts";
+import { dayWindow, hasDay, listPlans, plansText, replaceMindPlans, saveDayTimeline, setThought } from "./heart.ts";
 
 /**
  * The night pass: once a day after 04:00 local, fold the day that just ended into his memory.
- * One call rewrites the whole memory, writes the day's timeline, keeps tomorrow's plans and sets how he wakes up
- * (his heart, and the mode she meets first).
+ * One call rewrites the whole memory, writes the day's timeline, writes tomorrow's plans (what he wants of her included)
+ * and the mode she meets first.
  */
 export const NIGHT_SCHEMA = {
   name: "night",
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["memory", "timeline", "plans", "heart", "mode", "changes"] as string[],
+    required: ["memory", "timeline", "plans", "mode", "changes"] as string[],
     properties: {
       memory: { type: "string" },
       timeline: { type: "string" },
@@ -39,7 +39,6 @@ export const NIGHT_SCHEMA = {
           properties: { text: { type: "string" }, at: { type: "string" } },
         },
       },
-      heart: { type: "string" },
       mode: { type: "string" },
       changes: { type: "string" },
     },
@@ -114,7 +113,7 @@ export function nightConversation(
   return text;
 }
 
-/** `manual` (整理今天 in the middle of the day) only rewrites the memory; today's text, plans, heart and mode stay. */
+/** `manual` (整理今天 in the middle of the day) only rewrites the memory; today's text, plans and mode stay. */
 export async function runNight(
   day: string,
   jobId?: string,
@@ -124,14 +123,13 @@ export async function runNight(
   const at = now();
   const tz = resolveTz((await getMeta()).timeZone);
   const window = dayWindow(day, tz);
-  const [rows, today, profileData, charter, dossier, ident, heart, plans, modeLog] = await Promise.all([
+  const [rows, today, profileData, charter, dossier, ident, plans, modeLog] = await Promise.all([
     dayMessages(window.from, window.to),
     dayText(day),
     getProfileData(),
     getProfilePrompt(),
     dossierTextForModel(),
     readIdentity(),
-    getHeart(),
     listPlans(),
     modeTimeline(window.to),
   ]);
@@ -146,7 +144,6 @@ export async function runNight(
     identity_block: identityBlock(ident.identity) ? `${identityBlock(ident.identity)}\n` : "",
     story: profile.storyline.trim() || "（没有）",
     dossier: dossier.trim() || "（还没有）",
-    heart: heart.text.trim() || "（空）",
     plans: plansText(plans, at, tz) || "（没有）",
     today: today || "（没有）",
     day,
@@ -179,9 +176,7 @@ export async function runNight(
     // The day's timeline is final only at night; during the day 「今天」 keeps being the mind's running text.
     await saveDayTimeline(day, typeof json.timeline === "string" ? json.timeline.trim() : "", at);
     await replaceMindPlans(parsePlans(json.plans, tz, at), at, "night");
-    const wake = typeof json.heart === "string" ? json.heart.trim() : "";
-    await setHeart(wake, at);
-    await setFocus("");
+    await setThought("", at);
     const mode = typeof json.mode === "string" ? json.mode.trim() : "";
     if (profile.modes.some((m) => m.id === mode)) await recordMode({ at, mode, until: null, why: "夜里整理定的明早" });
   }

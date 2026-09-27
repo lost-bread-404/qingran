@@ -1,4 +1,4 @@
-import { getHeart, mindForReply, timeFacts, todayText } from "../heart.ts";
+import { getInner, mindForReply, timeFacts, todayText } from "../heart.ts";
 import { mergeEditedUserBody } from "../../message-markup.ts";
 import { NEUTRAL_PERSONA, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
@@ -60,11 +60,11 @@ export async function loadHotContext(input: {
   const inject = voiceInjectFromProfile(input.profile);
   inject.moment = inject.moment && brainOn;
   inject.dossier = inject.dossier && brainOn;
-  const [history, heart, dossier, mind, today, clockText, voicePrompt] = await Promise.all([
+  const [history, inner, dossier, mind, today, clockText, voicePrompt] = await Promise.all([
     listHistoryWindow(input.userMsgId, inject.history),
-    getHeart(),
+    getInner(),
     inject.dossier ? dossierTextForModel() : Promise.resolve(""),
-    inject.moment ? mindForReply(input.nowMs, input.timeZone) : Promise.resolve(""),
+    inject.moment ? mindForReply(input.nowMs) : Promise.resolve(""),
     inject.moment ? todayText(input.nowMs, input.timeZone) : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
     loadPrompt("voice"),
@@ -93,12 +93,12 @@ export async function loadHotContext(input: {
     rememberBlock("voice_longterm", dossier),
   ]);
   const historyIds = history.map((m) => m.id);
-  const mindAgeMs = heart.updatedAt ? input.nowMs - heart.updatedAt : 0;
+  const mindAgeMs = inner.updatedAt ? input.nowMs - inner.updatedAt : 0;
   const refs: VoiceRefs = {
     charterHash,
     longtermHash,
     historyIds,
-    mindTurnSeq: heart.turnSeq,
+    mindTurnSeq: inner.turnSeq,
     mindStale: false,
     pickedIds: [],
     fallbackIds: [],
@@ -123,7 +123,7 @@ export async function loadHotContext(input: {
     dbFirstMs,
     sessionId: user.sessionId,
     user,
-    mindTurnSeq: heart.turnSeq,
+    mindTurnSeq: inner.turnSeq,
     mindAgeMs,
     charterHash,
     longtermHash,

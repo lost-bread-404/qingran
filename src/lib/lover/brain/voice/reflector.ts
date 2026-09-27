@@ -20,8 +20,8 @@ import { spokenOnly, VERBATIM_REPLIES } from "./pack-build.ts";
 import {
   dayWindow,
   daysText,
-  getHeart,
-  type Heart,
+  getInner,
+  type Inner,
   hasDay,
   listPlans,
   markSilenceSeen,
@@ -30,30 +30,30 @@ import {
   recentDays,
   replaceMindPlans,
   saveDayTimeline,
-  setFocus,
-  setHeart,
+  setThought,
+  stripPlanMarks,
   timeFacts,
   todayText,
 } from "../heart.ts";
 
 /**
- * The inner mind (brain v5) is the control unit: it keeps the day's plan list in order and hands the reply
- * one thing to move toward (focus). It does not read her mood — the reply does that from the talk and the memory;
- * deeper understanding is written into the memory at night. Three moments:
- * - turn: after every reply — plans, focus, his own feeling (heart), next mode;
- * - silence: once when she has gone quiet — the same, plus today's text rewritten with the stretch that just ended;
- * - due: a timed plan came due while she is away — the same, plus the message he sends her (or none).
- * plans_changed=false and an empty mode mean "no change"; focus and heart are written every time, and empty means empty
- * (most of the time there is nothing beyond what the current mode already does, and the reply sees no 心里 block).
+ * The inner mind (brain v5, docs/day-example.md): from the persona, the memory and what just happened it thinks
+ * his own thought, and turns it into items on his plan list — or keeps nothing. The reply works on the first item
+ * that is due; the mind takes an item off once it is done. Three moments:
+ * - turn: after every reply;
+ * - silence: once when she has gone quiet — plus today's text rewritten with the stretch that just ended;
+ * - due: a timed plan came due while she is away — plus the message he sends her (or none).
+ * plans_changed=false and an empty mode mean "no change".
  */
 export const INNER_SCHEMA = {
   name: "inner",
   schema: {
     type: "object",
     additionalProperties: false,
-    // Generated in this order: the list first, then the one thing, then how he feels.
-    required: ["plans_changed", "plans", "focus", "heart", "mode", "today", "message"] as string[],
+    // Generated in this order: the thought first, then what it does to the list.
+    required: ["thought", "plans_changed", "plans", "mode", "today", "message"] as string[],
     properties: {
+      thought: { type: "string" },
       plans_changed: { type: "boolean" },
       plans: {
         type: "array",
@@ -67,8 +67,6 @@ export const INNER_SCHEMA = {
           },
         },
       },
-      focus: { type: "string" },
-      heart: { type: "string" },
       mode: { type: "string" },
       today: { type: "string" },
       message: { type: "string" },
@@ -112,8 +110,6 @@ export type ReflectorParts = {
   facts: string;
   days: string;
   today: string;
-  heart: string;
-  focus?: string;
   plans: string;
   modes: string;
   conversation: string;
@@ -131,8 +127,6 @@ export function reflectVars(parts: ReflectorParts): Record<string, string> {
     facts: parts.facts.trim() || "（没有）",
     days: parts.days.trim() || "（还没有）",
     today: parts.today.trim() || "（还没有）",
-    heart: parts.heart.trim() || "（空）",
-    focus: parts.focus?.trim() || "（空）",
     plans: parts.plans.trim() || "（没有）",
     modes: parts.modes.trim() || "（没有）",
     conversation: parts.conversation.trim() || "（还没有）",
@@ -185,14 +179,13 @@ export async function gatherReflectParts(at: number, trigger: ReflectTrigger): P
   current: string;
   charter: string;
 }> {
-  const [meta, window, charter, dossier, ident, profileData, heart, plans] = await Promise.all([
+  const [meta, window, charter, dossier, ident, profileData, plans] = await Promise.all([
     getMeta(),
     listHistoryWindow(null, trigger.kind === "silence" ? SILENCE_WINDOW : REFLECT_WINDOW),
     getProfilePrompt(),
     dossierTextForModel(),
     readIdentity(),
     getProfileData(),
-    getHeart(),
     listPlans(),
   ]);
   const profile = lockedProfile(profileData);
@@ -216,8 +209,6 @@ export async function gatherReflectParts(at: number, trigger: ReflectTrigger): P
       facts,
       days: daysText(days),
       today,
-      heart: heart.text,
-      focus: heart.focus,
       plans: plansText(plans, at, tz),
       modes: modesText(profile.modes, current),
       conversation: formatReflectConversation(history, tz),
@@ -236,17 +227,17 @@ export function parsePlans(raw: unknown, tz: string, at: number): ParsedPlan[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((item) => (item && typeof item === "object" ? (item as Record<string, unknown>) : null))
-    .filter((item): item is Record<string, unknown> => item != null && typeof item.text === "string" && item.text.trim() !== "")
+    .filter((item): item is Record<string, unknown> => item != null && typeof item.text === "string" && stripPlanMarks(item.text) !== "")
     .map((item) => {
       const when = parseLocalTime(item.at, tz);
       // A time already past means "now": keep it due rather than dropping it.
-      return { text: String(item.text).trim().slice(0, 500), at: when == null ? null : Math.max(when, at - 60_000) };
+      return { text: stripPlanMarks(String(item.text)).slice(0, 500), at: when == null ? null : Math.max(when, at - 60_000) };
     });
 }
 
 export type ReflectResult = {
   ok: boolean;
-  inner: Heart | null;
+  inner: Inner | null;
   /** Only for `due`: what he decided to send her ("" = nothing). */
   message: string;
   failKind: string | null;
@@ -263,9 +254,9 @@ export async function runReflector(
   trigger: ReflectTrigger = { kind: "turn" },
 ): Promise<ReflectResult> {
   const kind = trigger.kind;
-  const heartBefore = await getHeart();
-  if (kind === "turn" && heartBefore.turnSeq >= turnSeq) {
-    return { ok: true, inner: heartBefore, message: "", failKind: null, model: "", ms: 0 };
+  const before = await getInner();
+  if (kind === "turn" && before.turnSeq >= turnSeq) {
+    return { ok: true, inner: before, message: "", failKind: null, model: "", ms: 0 };
   }
 
   const at = now();
@@ -279,8 +270,8 @@ export async function runReflector(
     charterHash,
     blockBHash,
     relatedIds: [],
-    oldMindTurnSeq: heartBefore.turnSeq,
-    oldInnerText: heartBefore.text,
+    oldMindTurnSeq: before.turnSeq,
+    oldInnerText: before.thought,
     recentMessageIds: history.map((m) => m.id),
     clockText: formatClock(at, tz),
     timeZone: tz,
@@ -311,8 +302,7 @@ export async function runReflector(
 
   const json = result.json as Record<string, unknown>;
   const text = (key: string) => (typeof json[key] === "string" ? String(json[key]).trim() : "");
-  await setHeart(text("heart"), at, kind === "turn" ? turnSeq : undefined);
-  await setFocus(text("focus"));
+  await setThought(text("thought"), at, kind === "turn" ? turnSeq : undefined);
   if (json.plans_changed === true) await replaceMindPlans(parsePlans(json.plans, tz, at), at);
   const mode = text("mode");
   if (mode && mode !== current && modes.some((m) => m.id === mode)) {
@@ -328,7 +318,7 @@ export async function runReflector(
   if (kind === "silence" && trigger.silentSince) await markSilenceSeen(trigger.silentSince);
 
   await appendInnerLog({ turnSeq, data: { kind: kindLog(kind), output: result.json }, model: result.model, ms: result.ms });
-  const inner = await getHeart();
+  const inner = await getInner();
   if (kind === "turn") {
     await fillReflectTurn(turnSeq, true, result.ms, null);
     await patchTurnTraceReflector({ turnSeq, inner, model: result.model, ms: result.ms });

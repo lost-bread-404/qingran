@@ -7,7 +7,7 @@ import { NEUTRAL_PERSONA } from "../../types.ts";
 
 /**
  * What the reply is given (docs/brain.md「回复看到的」):
- * persona (+ identity + current mode) → 你记得的 → 你心里 → 今天到现在 → intimate notes → 现在是… → recent talk → her line.
+ * persona (+ identity + current mode) → 你记得的 → 你现在要做成的事 → 今天到现在 → intimate notes → recent talk → 现在是… → her line.
  * A block whose value is empty is left out.
  */
 export type VoicePackParts = {
@@ -15,7 +15,7 @@ export type VoicePackParts = {
   identity: string;
   /** 他记得的, whole text ("" = not injected). */
   dossier: string;
-  /** heart + focus ("" = not injected). */
+  /** The one item from his plan list the reply works on now ("" = nothing / not injected). */
   mind: string;
   /** Today's running text ("" = not injected). */
   today: string;
@@ -32,14 +32,14 @@ export type VoicePackParts = {
   personaAck: string;
 };
 
-/** Retries when the model returns nothing (usually a refusal): drop his mind, then the memory, then almost everything. */
+/** Retries when the model returns nothing (usually a refusal): drop what he is doing now and today, then the memory, then almost everything. */
 export type VoiceStrip = "none" | "moment" | "dossier" | "thin";
 export const VOICE_STRIPS: VoiceStrip[] = ["none", "moment", "dossier", "thin"];
 export const VOICE_THIN_HISTORY = 8;
 
 export function stripLabel(strip: VoiceStrip): string {
-  if (strip === "moment") return "去掉了心里和今天";
-  if (strip === "dossier") return "去掉了心里、今天和记得的";
+  if (strip === "moment") return "去掉了现在要做成的事和今天";
+  if (strip === "dossier") return "去掉了现在要做成的事、今天和记得的";
   if (strip === "thin") return "只保留人设、最近 8 条对话和这一句";
   return "未裁剪";
 }
@@ -58,10 +58,19 @@ export function spokenOnly(text: string): string {
   return flat.length > 40 ? `${flat.slice(0, 40)}…` : flat;
 }
 
+/** A pause this long between two messages is marked in the talk, so a new morning does not read as the same night. */
+export const GAP_MARK_MS = 30 * 60_000;
+
+function gapText(ms: number): string {
+  const m = Math.round(ms / 60_000);
+  if (m < 60) return `${m} 分钟`;
+  return m % 60 ? `${Math.floor(m / 60)} 小时 ${m % 60} 分钟` : `${Math.floor(m / 60)} 小时`;
+}
+
 export function voiceHistoryMessages(
   history: StoredMessage[],
   limit = HISTORY_WINDOW,
-): Array<{ role: "user" | "assistant"; content: string }> {
+): Array<{ role: "system" | "user" | "assistant"; content: string }> {
   if (limit <= 0) return [];
   const rows = history.filter((message) => !isNightNoiseBody(message.text)).slice(-limit);
   let replies = 0;
@@ -72,14 +81,15 @@ export function voiceHistoryMessages(
       replies += 1;
     }
   }
-  return rows.map((message, i) => {
+  const out: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
+  rows.forEach((message, i) => {
+    const gap = i > 0 ? message.createdAt - rows[i - 1]!.createdAt : 0;
+    if (gap >= GAP_MARK_MS) out.push({ role: "system", content: `（过了 ${gapText(gap)}）` });
     const text = modelFacingText(message.text);
     const assistant = message.role === "assistant";
-    return {
-      role: assistant ? "assistant" : "user",
-      content: assistant && !keep.has(i) ? spokenOnly(text) : text,
-    };
+    out.push({ role: assistant ? "assistant" : "user", content: assistant && !keep.has(i) ? spokenOnly(text) : text });
   });
+  return out;
 }
 
 /** Tokens whose block disappears when their value is empty. */
@@ -124,14 +134,14 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
   });
 }
 
-/** Intimate notes sit right after his heart (or, without it, just before the talk). */
+/** Intimate notes sit right after what he is doing now (or, without it, just before the talk). */
 export function insertIntimateNotes<T extends { role: string; content: string }>(messages: T[], notes: string): T[] {
   const text = notes.trim();
   if (!text) return messages;
   const block = { role: "system", content: `你在亲密时的样子：\n${text}` } as T;
-  const heart = messages.findIndex((message) => message.role === "system" && message.content.startsWith("你心里"));
+  const now = messages.findIndex((message) => message.role === "system" && message.content.startsWith("你现在要做成的事"));
   const talk = messages.findIndex((message) => message.role !== "system");
-  const at = heart >= 0 ? heart + 1 : talk >= 0 ? talk : messages.length;
+  const at = now >= 0 ? now + 1 : talk >= 0 ? talk : messages.length;
   return [...messages.slice(0, at), block, ...messages.slice(at)];
 }
 

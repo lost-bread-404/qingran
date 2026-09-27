@@ -136,9 +136,12 @@ export async function noteSubscriptionRefused(status: number, detail: string): P
   ).catch(() => undefined);
 }
 
+/** When xAI says it is at capacity (429 / 503), the same request goes again after these waits. */
+const BUSY_WAITS_MS = [800, 2000];
+
 /**
  * fetch with the subscription first and the API key after it. The body must be a string or form data
- * (sent again unchanged on the second try). Returns null when there is no credential at all.
+ * (sent again unchanged on a second try). Returns null when there is no credential at all.
  */
 export async function xaiFetch(
   url: string,
@@ -147,10 +150,17 @@ export async function xaiFetch(
   const creds = await xaiCreds();
   for (let i = 0; i < creds.length; i += 1) {
     const cred = creds[i]!;
-    const res = await fetch(url, { ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${cred.token}` } });
+    const send = () => fetch(url, { ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${cred.token}` } });
+    let res = await send();
     if (cred.kind === "sub" && i < creds.length - 1 && subscriptionRefusedStatus(res.status)) {
       await noteSubscriptionRefused(res.status, await res.text().catch(() => ""));
       continue;
+    }
+    for (const wait of BUSY_WAITS_MS) {
+      if (res.status !== 429 && res.status !== 503) break;
+      await res.body?.cancel().catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      res = await send();
     }
     return { res, cred };
   }

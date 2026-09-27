@@ -6,8 +6,6 @@ import { brainGetLife, brainListManualEdits, brainSetReach, brainTestPush, brain
 import {
   brainEditPlan,
   brainGetMind,
-  brainSaveFocus,
-  brainSaveHeartText,
   brainSaveToday,
   brainSetModeNow,
 } from "@/lib/lover/brain/mind-api";
@@ -94,8 +92,8 @@ export function IdentityField({
 
 type Mind = {
   timeZone: string;
-  heart: { text: string; focus: string; updatedAt: number };
-  plans: Array<{ id: number; at: number | null; atText: string; due: boolean; text: string; setBy: string }>;
+  thought: { text: string; updatedAt: number };
+  plans: Array<{ id: number; at: number | null; atText: string; due: boolean; current: boolean; text: string; setBy: string }>;
   today: string;
   days: Array<{ day: string; timeline: string }>;
   mode: string;
@@ -104,11 +102,9 @@ type Mind = {
 
 const PLAN_BY: Record<string, string> = { rosie: "你加的", reflect: "心思", night: "夜里整理" };
 
-/** 他的心：心里、打算、模式、今天、最近几天。都是他自己写的，你可以改。 */
+/** 他的心：刚才想的、打算、模式、今天、最近几天。打算和今天你可以改。 */
 export function HeartEditor() {
   const [mind, setMind] = useState<Mind | null>(null);
-  const [heart, setHeartDraft] = useState("");
-  const [focus, setFocusDraft] = useState("");
   const [today, setTodayDraft] = useState("");
   const [draftText, setDraftText] = useState("");
   const [draftAt, setDraftAt] = useState("");
@@ -119,8 +115,6 @@ export function HeartEditor() {
       .then((res) => {
         const next = res as Mind;
         setMind(next);
-        setHeartDraft(next.heart.text);
-        setFocusDraft(next.heart.focus);
         setTodayDraft(next.today);
       })
       .catch(() => setError("心没读出来。"));
@@ -136,45 +130,22 @@ export function HeartEditor() {
     <div className="flex flex-col gap-5">
       {error ? <p className="text-sm text-live">{error}</p> : null}
       <section className="flex flex-col gap-2">
-        <p className="text-sm">心里</p>
-        <p className="text-xs text-subtle">他自己此刻的情绪和欲望。回复看得到。你此刻怎样，回复看着对话和记得的自己读；心思不写对你的分析。</p>
-        <Textarea
-          value={heart}
-          className="min-h-28"
-          onChange={(e) => setHeartDraft(e.target.value)}
-          onBlur={() => {
-            if (heart === mind.heart.text) return;
-            void brainSaveHeartText({ data: { text: heart } })
-              .then(() => setMind({ ...mind, heart: { ...mind.heart, text: heart } }))
-              .catch(() => setError("没记下。"));
-          }}
-        />
-        <p className="text-xs text-subtle">更新于 {clock(mind.heart.updatedAt)}</p>
-        <p className="text-sm">眼前这一件</p>
-        <p className="text-xs text-subtle">打算单上现在该推进的那一件，写要做成什么。回复只看得到心里和这一件，看不到下面的打算；什么时候提、怎么带，回复看着你此刻的样子自己决定。</p>
-        <Textarea
-          value={focus}
-          className="min-h-14"
-          onChange={(e) => setFocusDraft(e.target.value)}
-          onBlur={() => {
-            if (focus === mind.heart.focus) return;
-            void brainSaveFocus({ data: { text: focus } })
-              .then(() => setMind({ ...mind, heart: { ...mind.heart, focus } }))
-              .catch(() => setError("没记下。"));
-          }}
-        />
+        <p className="text-sm">他刚才想的</p>
+        <p className="text-xs text-subtle">心思最近一次想到的（只存着给你看，没有模型读它）。想法要么变成下面的打算，要么就不留。</p>
+        <p className="whitespace-pre-wrap rounded-md bg-surface-2 px-3 py-2 text-sm">{mind.thought.text || "（空）"}</p>
+        <p className="text-xs text-subtle">更新于 {clock(mind.thought.updatedAt)}</p>
       </section>
 
       <section className="flex flex-col gap-2">
         <p className="text-sm">打算</p>
         <p className="text-xs text-subtle">
-          他管这一天的打算单，按先后排，回复看不到。心思每次过一遍：做完的拿掉、该加的加上，现在该做的那一件交给「眼前这一件」。写了时间的到点时：你在聊天，轮到它就是眼前这一件；你不在，他再想一遍，决定要不要给你发一条。
+          他的打算单，按先后排：你的事，和他自己想要你的事。回复只看得到「现在在做」的那一件（第一件到了时间的，没写时间就是现在），做成了心思就拿掉，下一件接上。写了时间的到点时你不在聊天，他再想一遍，决定要不要给你发一条。
         </p>
         {mind.plans.length === 0 ? <p className="text-sm text-subtle">现在没有打算</p> : null}
         {mind.plans.map((plan) => (
           <div key={plan.id} className="flex items-start justify-between gap-3 rounded-md bg-surface-2 px-3 py-2">
             <p className="text-sm">
-              {plan.at == null ? "接下来" : plan.due ? "到时间了" : plan.atText} · {plan.text}
+              {plan.current ? "现在在做" : plan.at == null ? "接下来" : plan.due ? "到时间了" : plan.atText} · {plan.text}
               <span className="text-xs text-subtle"> · {PLAN_BY[plan.setBy] ?? plan.setBy}</span>
             </p>
             <button

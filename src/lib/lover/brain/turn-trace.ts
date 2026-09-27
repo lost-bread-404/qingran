@@ -2,7 +2,7 @@ import { getSql } from "../../db.ts";
 import { gitCommitSha } from "../hearing/eval-meta.ts";
 import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
 import { fromPgArray, pgTextArray } from "./store.ts";
-import type { Heart } from "./heart.ts";
+import type { Inner } from "./heart.ts";
 
 export const TRACE_FIELD_LIMIT = 100 * 1024;
 
@@ -150,7 +150,7 @@ export async function recordTurnTrace(input: TurnTraceInput): Promise<void> {
 
 export async function patchTurnTraceReflector(opts: {
   turnSeq: number;
-  inner: Heart | null;
+  inner: Inner | null;
   model?: string | null;
   ms?: number | null;
 }): Promise<void> {

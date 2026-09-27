@@ -59,7 +59,7 @@ export async function replayMessages(opts: {
     listHistoryWindow(user.id, inject.history, user.createdAt),
     inject.dossier && brainOn ? dossierTextForModel() : Promise.resolve(""),
     loadPrompt("voice"),
-    inject.moment && brainOn ? mindForReply(nowMs, tz) : Promise.resolve(""),
+    inject.moment && brainOn ? mindForReply(nowMs) : Promise.resolve(""),
     inject.moment && brainOn ? todayText(nowMs, tz) : Promise.resolve(""),
     timeFacts(nowMs, tz, user.createdAt),
   ]);

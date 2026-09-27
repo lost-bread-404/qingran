@@ -4,10 +4,11 @@ import { zonedWallMs } from "./spend/policy.ts";
 import { clockOf } from "./time.ts";
 
 /**
- * Brain v5 state, all free text:
- * - heart: the undercurrent in him that differs from the scene (qr_inner.now_text); empty when he wants what is happening
- * - plans: the day's list in order, what he means to get done; a time is optional (qr_reach_plans, at may be null)
- * - focus: the one item from the list the reply moves toward now; empty when the current mode's own work is all there is
+ * Brain v5 state, all free text (docs/day-example.md):
+ * - plans: the list, in order, of what he means to get done — her day, and what he himself wants of her.
+ *   A thought of his becomes an item here or is not kept. A time is optional (qr_reach_plans, at may be null).
+ *   The first item that is due (no time, or its time has come) is what the reply works on now; once done, the mind takes it off.
+ * - thought: what he last thought (qr_inner.now_text), for the record and the settings page only; no model reads it.
  * - days: one text per day (qr_days). Today's is rewritten by the mind each time she goes quiet
  *   (her day, what he said or made up about himself, what is still owed); the night pass turns it into the day's timeline.
  * The memory document lives in qr_dossier.
@@ -15,7 +16,7 @@ import { clockOf } from "./time.ts";
 
 export type Plan = { id: number; at: number | null; text: string; setBy: string; setAt: number };
 
-export type Heart = { text: string; focus: string; updatedAt: number; turnSeq: number; silenceSeen: number };
+export type Inner = { thought: string; updatedAt: number; turnSeq: number; silenceSeen: number };
 
 /** Silence this long (after her last message) gets one thought. */
 export const SILENCE_THINK_MS = 45 * 60_000;
@@ -23,22 +24,21 @@ export const SILENCE_THINK_MS = 45 * 60_000;
 export const ACTIVE_MS = 10 * 60_000;
 const MAX_PLANS = 12;
 
-export async function getHeart(): Promise<Heart> {
+export async function getInner(): Promise<Inner> {
   const db = await sql();
   const rows = await db.query<Record<string, unknown>>(
-    `select now_text, focus, updated_at, turn_seq, silence_seen from qr_inner where id = 1`,
+    `select now_text, updated_at, turn_seq, silence_seen from qr_inner where id = 1`,
   );
   const row = rows[0] ?? {};
   return {
-    text: String(row.now_text ?? ""),
-    focus: String(row.focus ?? ""),
+    thought: String(row.now_text ?? ""),
     updatedAt: Number(row.updated_at ?? 0) || 0,
     turnSeq: Number(row.turn_seq ?? 0) || 0,
     silenceSeen: Number(row.silence_seen ?? 0) || 0,
   };
 }
 
-export async function setHeart(text: string, at: number, turnSeq?: number): Promise<void> {
+export async function setThought(text: string, at: number, turnSeq?: number): Promise<void> {
   const db = await sql();
   await db.query(
     `update qr_inner set now_text = $1, updated_at = $2, turn_seq = greatest(turn_seq, $3) where id = 1`,
@@ -46,10 +46,9 @@ export async function setHeart(text: string, at: number, turnSeq?: number): Prom
   );
 }
 
-/** The one thing from the list the reply moves toward now. */
-export async function setFocus(text: string): Promise<void> {
-  const db = await sql();
-  await db.query(`update qr_inner set focus = $1 where id = 1`, [text.slice(0, 300)]);
+/** What the reply works on now: the first item in the list whose time has come (no time = now). */
+export function currentPlan(plans: Plan[], nowMs: number): Plan | null {
+  return plans.find((p) => p.at == null || p.at <= nowMs) ?? null;
 }
 
 export async function markSilenceSeen(lastUserAt: number): Promise<void> {
@@ -212,12 +211,22 @@ export async function hasDay(day: string, closedAt = 0): Promise<boolean> {
 
 // ---------- text for the models ----------
 
-export function plansText(plans: Plan[], nowMs: number, timeZone: string, opts: { onlyVisible?: boolean } = {}): string {
-  const rows = opts.onlyVisible ? plans.filter((p) => p.at == null || p.at <= nowMs) : plans;
-  if (!rows.length) return "";
-  return rows
+/** Takes off the marks plansText puts around an item, when a model copies them back into the text. */
+export function stripPlanMarks(text: string): string {
+  return text
+    .trim()
+    .replace(/^-\s*/, "")
+    .replace(/^(（(现在在做|到时间了|\d{4}-\d{2}-\d{2} \d{1,2}:\d{2})）\s*)+/, "")
+    .replace(/（我定的）$/, "")
+    .trim();
+}
+
+export function plansText(plans: Plan[], nowMs: number, timeZone: string): string {
+  if (!plans.length) return "";
+  const current = currentPlan(plans, nowMs);
+  return plans
     .map((p) => {
-      const when = p.at == null ? "" : p.at <= nowMs ? "（到时间了）" : `（${formatLocal(p.at, timeZone)}）`;
+      const when = p === current ? "（现在在做）" : p.at == null ? "" : p.at <= nowMs ? "（到时间了）" : `（${formatLocal(p.at, timeZone)}）`;
       const who = p.setBy === "rosie" ? "（我定的）" : "";
       return `- ${when}${p.text}${who}`;
     })
@@ -235,14 +244,7 @@ export function daysText(days: Array<{ day: string; timeline: string }>): string
   return days.filter((d) => d.timeline.trim()).map((d) => `${d.day}：${d.timeline.trim()}`).join("\n");
 }
 
-/**
- * What only he knows, for the reply: how he himself feels, and the ONE thing from the list he means to do now.
- * The plan list and today's notes stay with the mind — a reply that sees a list says the whole list.
- */
-export async function mindForReply(_nowMs: number, _timeZone: string): Promise<string> {
-  const heart = await getHeart();
-  const parts: string[] = [];
-  if (heart.text.trim()) parts.push(heart.text.trim());
-  if (heart.focus.trim()) parts.push(`这段时间要做成的一件事：${heart.focus.trim()}`);
-  return parts.join("\n");
+/** What the reply is given of his mind: only the one thing from his list it works on now ("" = nothing). */
+export async function mindForReply(nowMs: number): Promise<string> {
+  return currentPlan(await listPlans(), nowMs)?.text.trim() ?? "";
 }

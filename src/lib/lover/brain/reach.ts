@@ -17,7 +17,7 @@ import {
   saveReach,
   silenceSnapshot,
 } from "./life-store.ts";
-import { ACTIVE_MS, formatLocal, getHeart, lastUserAt, listPlans, markSilenceSeen, SILENCE_THINK_MS } from "./heart.ts";
+import { ACTIVE_MS, formatLocal, getInner, lastUserAt, listPlans, markSilenceSeen, SILENCE_THINK_MS } from "./heart.ts";
 
 export type WakeResult = {
   ok: boolean;
@@ -108,12 +108,12 @@ export async function runWake(opts: {
     const { enqueueNightIfDue } = await import("./night.ts");
     const night = await enqueueNightIfDue(at);
     if (night) brain.push(`night:${night}`);
-    const [last, heart] = await Promise.all([lastUserAt(at + 1), getHeart()]);
-    if (last && at - last >= SILENCE_THINK_MS && heart.silenceSeen < last) {
+    const [last, inner] = await Promise.all([lastUserAt(at + 1), getInner()]);
+    if (last && at - last >= SILENCE_THINK_MS && inner.silenceSeen < last) {
       // One thought per silence, even if the call fails.
       await markSilenceSeen(last);
       const { runReflector } = await import("./voice/reflector.ts");
-      await runReflector(0, undefined, complete, { kind: "silence", silentSince: last, since: heart.silenceSeen });
+      await runReflector(0, undefined, complete, { kind: "silence", silentSince: last, since: inner.silenceSeen });
       brain.push("silence");
     }
   }

@@ -28,8 +28,6 @@ export type StateFile = {
   profile?: Record<string, unknown>;
   /** 我记得的: the whole memory document. */
   memory?: string;
-  /** 他心里此刻. */
-  heart?: string;
   /** Current mode id. */
   mode?: string;
   plans?: StatePlan[];

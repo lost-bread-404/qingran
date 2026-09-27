@@ -7,7 +7,7 @@ import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
 import { buildVoiceMessages, voiceHistoryMessages } from "../voice/pack-build.ts";
 import { gatherReflectParts, modesText, reflectVars } from "../voice/reflector.ts";
-import { getHeart, listPlans, mindForReply, plansText, timeFacts, todayText } from "../heart.ts";
+import { listPlans, mindForReply, plansText, timeFacts, todayText } from "../heart.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { identityBlock } from "../life.ts";
 
@@ -30,7 +30,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
   const [history, dossier, mind, today, clock] = await Promise.all([
     listHistoryWindow(null, inject.history),
     inject.dossier && brainOn ? dossierTextForModel() : Promise.resolve(""),
-    inject.moment && brainOn ? mindForReply(at, tz) : Promise.resolve(""),
+    inject.moment && brainOn ? mindForReply(at) : Promise.resolve(""),
     inject.moment && brainOn ? todayText(at, tz) : Promise.resolve(""),
     timeFacts(at, tz, at),
   ]);
@@ -76,10 +76,9 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
 async function editorSlots(): Promise<Record<string, string>> {
   const tz = resolveTz((await getMeta()).timeZone);
   const at = now();
-  const [dossier, charter, heart, plans, today, profileData] = await Promise.all([
+  const [dossier, charter, plans, today, profileData] = await Promise.all([
     dossierTextForModel(),
     getProfilePrompt(),
-    getHeart(),
     listPlans(),
     todayText(at, tz),
     getProfileData(),
@@ -90,7 +89,6 @@ async function editorSlots(): Promise<Record<string, string>> {
     identity_block: identityBlock(profile.identity) ? `${identityBlock(profile.identity)}\n` : "",
     story: profile.storyline || "（没有）",
     dossier: dossier || "（还没有）",
-    heart: heart.text || "（空）",
     plans: plansText(plans, at, tz) || "（没有）",
     today: today || "（没有）",
     day: localDay(at, tz),
@@ -105,7 +103,7 @@ async function slotsFor(key: PromptKey): Promise<{ slots: Record<string, string>
     return { slots: reflectVars((await gatherReflectParts(now(), { kind: "turn" })).parts), note: "这是她刚说完话时，这一刻心思会读到的材料。" };
   }
   if (key === "editor") {
-    return { slots: await editorSlots(), note: "整理时会带上这一天没被清空的对话。这里先给出记得的、心里、打算和今天。" };
+    return { slots: await editorSlots(), note: "整理时会带上这一天没被清空的对话。这里先给出记得的、打算和今天。" };
   }
   if (key === "report") {
     return {

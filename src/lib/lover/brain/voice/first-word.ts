@@ -21,7 +21,7 @@ function quietText(ms: number): string {
 /**
  * A message he starts himself (a plan came due while she was away).
  * The mind only decided to reach her and what for; the words come from the same voice that answers her:
- * same persona, current mode, memory, heart and recent talk, told that nothing new came from her.
+ * same persona, current mode, memory, the item he is working on and recent talk, told that nothing new came from her.
  */
 export async function speakFirst(input: {
   intent: string;
@@ -37,7 +37,7 @@ export async function speakFirst(input: {
   const [history, dossier, mind, today, clock, voicePrompt] = await Promise.all([
     listHistoryWindow(null, inject.history),
     inject.dossier ? dossierTextForModel() : Promise.resolve(""),
-    inject.moment ? mindForReply(input.nowMs, input.timeZone) : Promise.resolve(""),
+    inject.moment ? mindForReply(input.nowMs) : Promise.resolve(""),
     inject.moment ? todayText(input.nowMs, input.timeZone) : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.nowMs),
     loadPrompt("voice"),

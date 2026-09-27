@@ -10,7 +10,7 @@ import { getDossier, publishMemory } from "./dossier.ts";
 import { effectiveMode, recordMode } from "./mode.ts";
 import { isPromptKey } from "./prompts/catalog.ts";
 import { savePrompt } from "./prompts/store.ts";
-import { formatLocal, getHeart, listPlans, parseLocalTime, setHeart } from "./heart.ts";
+import { formatLocal, listPlans, parseLocalTime } from "./heart.ts";
 import { STATE_KIND, STATE_VERSION, type StateFile, type StateMessage } from "./state-public.ts";
 
 const EXPORT_PAGE = 1000;
@@ -39,9 +39,8 @@ export const brainExportState = createServerFn({ method: "POST" })
 
     const at = now();
     const profile = lockedProfile(await getProfileData());
-    const [dossier, heart, plans, days, prompts, mode] = await Promise.all([
+    const [dossier, plans, days, prompts, mode] = await Promise.all([
       getDossier(),
-      getHeart(),
       listPlans(),
       db.query<{ day: string; timeline: string }>(`select day, timeline from qr_days order by day asc`),
       db.query<{ key: string; body: string }>(`select key, body from qr_prompts order by key`),
@@ -54,7 +53,6 @@ export const brainExportState = createServerFn({ method: "POST" })
       timeZone: tz,
       profile: profile as unknown as Record<string, unknown>,
       memory: dossier.body,
-      heart: heart.text,
       mode,
       plans: plans.map((p) => ({ text: p.text, at: p.at == null ? null : formatLocal(p.at, tz), setBy: p.setBy })),
       days: days.map((d) => ({ day: String(d.day), timeline: String(d.timeline ?? "") })),
@@ -89,10 +87,6 @@ export const brainImportState = createServerFn({ method: "POST" })
     if (typeof state.memory === "string") {
       await publishMemory(state.memory, "import", at);
       done.push("记忆");
-    }
-    if (typeof state.heart === "string") {
-      await setHeart(state.heart, at);
-      done.push("心里");
     }
     if (Array.isArray(state.plans)) {
       await db.query(`delete from qr_reach_plans where done_at is null`);

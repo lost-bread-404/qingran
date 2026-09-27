@@ -638,7 +638,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <SettingsLink label="清然是谁" hint="身份、人设" onClick={() => setPage("who")} />
-            <SettingsLink label="他的心" hint="心里、打算、模式、今天、记得的" onClick={() => setPage("heart")} />
+            <SettingsLink label="他的心" hint="打算、模式、今天、记得的" onClick={() => setPage("heart")} />
             <SettingsLink label="主动消息" hint="开关、下一次、记录" onClick={() => setPage("reach")} />
             <SettingsLink label="声音和听力" hint="语速、静音、灵敏度" onClick={() => setPage("sound")} />
             <SettingsLink label="数据" hint="导出、导入、清空、退出" onClick={() => setPage("data")} />
@@ -806,7 +806,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                     persistProfile({ injectMind: next });
                   }}
                 />
-                <span className="text-sm">他心里和眼前这一件</span>
+                <span className="text-sm">他现在要做成的事和今天</span>
               </label>
               <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
                 <input
@@ -997,7 +997,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             ) : (
               <div className="flex flex-col gap-2">
                 <p className="text-sm text-subtle">
-                  清掉屏幕上的聊天和今天还没整理进记忆的对话，清空他心里，放下他接下来要做的事，适合他轴在一个话题上的时候用。定了时间的打算（叫你吃饭、睡觉）、你加的打算和他记得的都还在。
+                  清掉屏幕上的聊天和今天还没整理进记忆的对话，放下他接下来要做的事，适合他轴在一个话题上的时候用。定了时间的打算（叫你吃饭、睡觉）、你加的打算和他记得的都还在。
                 </p>
                 <div className="flex gap-2">
                   <Button

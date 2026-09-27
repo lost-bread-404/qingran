@@ -8,15 +8,15 @@ import { effectiveMode, recordMode } from "./mode.ts";
 import { insertManualEdit } from "./life-store.ts";
 import { runInBackground } from "./wait-until.ts";
 import { LONG_DRAIN_MS } from "./config.ts";
-import { addPlan, formatLocal, getHeart, listPlans, parseLocalTime, recentDays, removePlan, saveDayTimeline, setFocus, setHeart, todayText } from "./heart.ts";
+import { addPlan, currentPlan, formatLocal, getInner, listPlans, parseLocalTime, recentDays, removePlan, saveDayTimeline, todayText } from "./heart.ts";
 
 /** Settings → 他的心: everything the brain holds, readable and editable. */
 export const brainGetMind = createServerFn({ method: "GET" }).handler(async () => {
   const at = now();
   const tz = resolveTz((await getMeta()).timeZone);
   const profile = lockedProfile(await getProfileData());
-  const [heart, plans, days, current, today] = await Promise.all([
-    getHeart(),
+  const [inner, plans, days, current, today] = await Promise.all([
+    getInner(),
     listPlans(),
     recentDays(14, localDay(at, tz)),
     effectiveMode(at, tz, profile.modes.map((m) => m.id)),
@@ -24,12 +24,13 @@ export const brainGetMind = createServerFn({ method: "GET" }).handler(async () =
   ]);
   return {
     timeZone: tz,
-    heart: { text: heart.text, focus: heart.focus, updatedAt: heart.updatedAt },
+    thought: { text: inner.thought, updatedAt: inner.updatedAt },
     plans: plans.map((p) => ({
       id: p.id,
       at: p.at,
       atText: p.at == null ? "" : formatLocal(p.at, tz),
       due: p.at != null && p.at <= at,
+      current: p === currentPlan(plans, at),
       text: p.text,
       setBy: p.setBy,
     })),
@@ -39,22 +40,6 @@ export const brainGetMind = createServerFn({ method: "GET" }).handler(async () =
     modes: profile.modes.map((m) => ({ id: m.id, name: m.name })),
   };
 });
-
-export const brainSaveHeartText = createServerFn({ method: "POST" })
-  .validator((input: { text: string }) => ({ text: String(input?.text ?? "") }))
-  .handler(async ({ data }) => {
-    const before = await getHeart();
-    await setHeart(data.text.trim(), now());
-    await insertManualEdit("heart", { text: before.text }, { text: data.text.trim() });
-    return { ok: true as const };
-  });
-
-export const brainSaveFocus = createServerFn({ method: "POST" })
-  .validator((input: { text: string }) => ({ text: String(input?.text ?? "") }))
-  .handler(async ({ data }) => {
-    await setFocus(data.text.trim());
-    return { ok: true as const };
-  });
 
 export const brainEditPlan = createServerFn({ method: "POST" })
   .validator((input: { add?: { text: string; at?: string }; remove?: number }) => input ?? {})
@@ -90,7 +75,7 @@ export const brainSetModeNow = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-/** 整理今天：fold today into the memory now (plans and heart stay). Runs after the response. */
+/** 整理今天：fold today into the memory now (plans stay). Runs after the response. */
 export const brainNightNow = createServerFn({ method: "POST" }).handler(async () => {
   const { enqueueNightNow } = await import("./night.ts");
   const { drainJobs } = await import("./jobs.ts");

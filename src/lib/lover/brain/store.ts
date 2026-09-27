@@ -127,7 +127,7 @@ export async function appendInnerLog(entry: {
 /** Clearing the room also clears what he had in mind right now (the plans with a time stay). */
 export async function resetInnerTurn(): Promise<void> {
   const db = await getSql();
-  await db.query(`update qr_inner set now_text = '', focus = '', turn_seq = 0, updated_at = $1 where id = 1`, [now()]);
+  await db.query(`update qr_inner set now_text = '', turn_seq = 0, updated_at = $1 where id = 1`, [now()]);
 }
 
 export async function forgetUnarchivedMessages(at: number): Promise<number> {
@@ -172,18 +172,18 @@ export async function setRoomClearedAt(at: number): Promise<void> {
 }
 
 /** Hide recent turns not yet folded into memory, from the screen and from Qingran; rows stay for analysis.
- * His heart is emptied (it may hold the stuck topic) and what he meant to do next is dropped.
+ * His last thought is emptied and what he meant to do next is dropped.
  * Plans with a time (dinner, bedtime), plans she added, and the memory stay. */
 export async function clearRecentConversation(): Promise<void> {
   const ts = now();
-  const { dropUntimedPlans, getHeart } = await import("./heart.ts");
-  const heart = await getHeart();
+  const { dropUntimedPlans, getInner } = await import("./heart.ts");
+  const inner = await getInner();
   await setRoomClearedAt(ts);
   await forgetUnarchivedMessages(ts);
   await resetInnerTurn();
   await dropUntimedPlans();
   await appendInnerLog({
-    turnSeq: heart.turnSeq,
+    turnSeq: inner.turnSeq,
     data: { kind: "cleared_by_rosie" },
   });
 }

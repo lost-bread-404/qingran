@@ -133,7 +133,7 @@ export function parsePromptBody(key: PromptKey, body: string | null | undefined)
 export function renderPromptMessages(
   messages: PromptMessage[],
   vars: Record<string, string>,
-  history: Array<{ role: "user" | "assistant"; content: string }> = [],
+  history: RenderedMessage[] = [],
 ): RenderedMessage[] {
   const out: RenderedMessage[] = [];
   for (const message of messages) {
@@ -150,7 +150,7 @@ export function renderVariant(
   doc: PromptDoc,
   variantId: string,
   vars: Record<string, string>,
-  history: Array<{ role: "user" | "assistant"; content: string }> = [],
+  history: RenderedMessage[] = [],
 ): RenderedMessage[] {
   return renderPromptMessages(variantMessages(doc, variantId), vars, history);
 }

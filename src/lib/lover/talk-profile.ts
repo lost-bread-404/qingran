@@ -1,7 +1,7 @@
 import { lockedProfile, NEUTRAL_PERSONA, storedSystemPrompt, type Profile } from "./types.ts";
 
 /** A mode sets the tone, not a script: what is really happening and how he feels come first. */
-const MODE_FRAME = "现在大致是这样的时候，下面是你这时本来在做的事。这是基调，不是规定：眼前真的发生了什么、你心里是什么感觉，比这里写的优先；场面变了，就按场面来。";
+const MODE_FRAME = "现在大致是这样的时候，下面是你这时本来在做的事。这是基调，不是规定：眼前真的发生了什么、你现在要做成的事，比这里写的优先；场面变了，就按场面来。";
 
 export type ResolvedTalkProfile = {
   profile: Profile;
