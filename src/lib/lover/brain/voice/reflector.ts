@@ -83,10 +83,21 @@ export function formatReflectConversation(history: StoredMessage[], timeZone: st
     .join("\n");
 }
 
+/**
+ * Her modes as the models see them: by the name she gave, never by the internal id (an old id like "bed" still
+ * reads as "sex" after she renamed the mode 发疯, and the mind kept picking it for any intimacy).
+ */
 export function modesText(modes: TalkModeDef[], current: string): string {
   return modes
-    .map((m) => `- ${m.id}（${m.name}）${m.id === current ? "【现在】" : ""}：${m.when.trim() || "（没写什么时候用）"}`)
+    .map((m) => `- ${m.name.trim() || m.id}${m.id === current ? "【现在】" : ""}：${m.when.trim() || "（没写什么时候用）"}`)
     .join("\n");
+}
+
+/** The mode a model named (by its name; an id still works), or null. */
+export function modeByName(modes: TalkModeDef[], said: string): TalkModeDef | null {
+  const name = said.replace(/[【】（）()\s]/g, "").replace(/现在$/, "");
+  if (!name) return null;
+  return modes.find((m) => m.name.trim() === name) ?? modes.find((m) => m.id === name) ?? null;
 }
 
 export type ReflectorParts = {
@@ -292,8 +303,8 @@ export async function runReflector(
   const text = (key: string) => (typeof json[key] === "string" ? String(json[key]).trim() : "");
   await setThought(text("thought"), at, kind === "turn" ? turnSeq : undefined);
   if (json.plans_changed === true) await replaceMindPlans(parsePlans(json.plans, tz, at), at);
-  const mode = text("mode");
-  if (mode && mode !== current && modes.some((m) => m.id === mode)) {
+  const mode = modeByName(modes, text("mode"))?.id ?? "";
+  if (mode && mode !== current) {
     await recordMode({ at, mode, until: null, why: kind === "turn" ? "" : kind === "silence" ? "她沉默时想的" : "到时间时想的" });
   }
   // Today's text is rewritten when a stretch of talking ends, so each stretch goes in once.

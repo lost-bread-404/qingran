@@ -12,7 +12,7 @@ import { identityBlock } from "./life.ts";
 import { readIdentity } from "./life-store.ts";
 import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
-import { modesText, parsePlans } from "./voice/reflector.ts";
+import { modeByName, modesText, parsePlans } from "./voice/reflector.ts";
 import { recordMode } from "./mode.ts";
 import { dayWindow, hasDay, listPlans, plansText, replaceMindPlans, saveDayTimeline, setThought } from "./heart.ts";
 
@@ -177,8 +177,8 @@ export async function runNight(
     await saveDayTimeline(day, typeof json.timeline === "string" ? json.timeline.trim() : "", at);
     await replaceMindPlans(parsePlans(json.plans, tz, at), at, "night");
     await setThought("", at);
-    const mode = typeof json.mode === "string" ? json.mode.trim() : "";
-    if (profile.modes.some((m) => m.id === mode)) await recordMode({ at, mode, until: null, why: "夜里整理定的明早" });
+    const mode = modeByName(profile.modes, typeof json.mode === "string" ? json.mode : "")?.id;
+    if (mode) await recordMode({ at, mode, until: null, why: "夜里整理定的明早" });
   }
   await appendInnerLog({ turnSeq: 0, data: { kind: "night", day, output: result.json }, model: result.model, ms: result.ms });
   return { ok: true };
