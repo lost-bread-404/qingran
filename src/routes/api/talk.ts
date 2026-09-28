@@ -128,7 +128,6 @@ export const Route = createFileRoute("/api/talk")({
               const safety = voiceSafetyPick();
               // Each mode may set its own temperature (e.g. a high one for intimate scenes).
               const modeTemperature = profile.modes.find((m) => m.id === profile.mode)?.temperature ?? undefined;
-              const toolStarted = { ms: 0, name: "", args: "" };
               let sentDone = false;
               const fallback = await runVoiceWithFallback(
                 {
@@ -215,7 +214,6 @@ export const Route = createFileRoute("/api/talk")({
                   failMessage: fallback.failMessage,
                   modelFallback: fallback.modelFallback,
                   injectLine: formatVoiceInjectLine(ctx.inject),
-                  toolLine: fallback.toolNote,
                 }),
               });
               await recordTurnTrace({
@@ -236,9 +234,6 @@ export const Route = createFileRoute("/api/talk")({
                   unexpected_state_block: streamResult.innerCut === true,
                   persona_missing: resolved.personaMissing,
                   inner: ctx.injected,
-                  tool: toolStarted.name
-                    ? { name: toolStarted.name, arguments: toolStarted.args, ms: toolStarted.ms }
-                    : null,
                 },
                 reply: {
                   text: display,

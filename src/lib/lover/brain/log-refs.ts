@@ -5,8 +5,6 @@ import { getMeta, patchMeta } from "./store.ts";
 import { clipLogJson } from "./log-clip.ts";
 import { resolveTz } from "./tz.ts";
 
-export const HIGH_FREQ_ROUTES = new Set(["voice", "reflect", "archive"]);
-
 export type VoiceRefs = {
   charterHash: string;
   longtermHash: string;

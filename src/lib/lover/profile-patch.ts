@@ -44,7 +44,6 @@ const PATCH_KEYS = [
   "nightMinMs",
   "hearingSense",
   "promptModels",
-  "hearingInstruction",
   "sttKeyterms",
   "dossierMaxChars",
   "identity",

@@ -22,7 +22,6 @@ export type HearingSession = {
   nightVoicedMin: number;
   nightMinMs: number;
   sense: HearingSense;
-  hearingInstruction: string;
   sttKeyterms: string[];
   /** performance.now() when Qingran last stopped speaking. Infinity while she is speaking. */
   floorQuietAt: number;
@@ -46,7 +45,6 @@ const session: HearingSession = {
   nightVoicedMin: DEFAULT_HEARING_SENSE.voicedMin,
   nightMinMs: DEFAULT_HEARING_SENSE.noiseMinMs,
   sense: DEFAULT_HEARING_SENSE,
-  hearingInstruction: "",
   sttKeyterms: [...STT_KEYTERMS],
   floorQuietAt: 0,
 };

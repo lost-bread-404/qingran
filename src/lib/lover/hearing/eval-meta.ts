@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lastDialogueTurns, HEARING_CONTEXT_ROUNDS, type ContextTurn } from "./context.ts";
+import { type ContextTurn } from "./context.ts";
 import { promptFingerprint } from "../prompt.ts";
 
 export function gitCommitSha(): string {
@@ -19,6 +19,3 @@ export function hashQingranPrompt(systemPrompt: string): string {
 
 export type { ContextTurn };
 
-export function lastContextTurns(messages: ContextTurn[], rounds = HEARING_CONTEXT_ROUNDS): ContextTurn[] {
-  return lastDialogueTurns(messages, rounds);
-}

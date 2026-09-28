@@ -203,12 +203,6 @@ function loadMigrationFiles(): Record<string, string> {
 let sqlPromise: Promise<Sql> | null = null;
 let testSql: Sql | null = null;
 
-/** Eval / unit tests: swap in an isolated PGLite client. Pass null to restore. */
-export function installTestSql(sql: Sql | null): void {
-  testSql = sql;
-  sqlPromise = sql ? Promise.resolve(sql) : null;
-}
-
 async function createSql(): Promise<Sql> {
   if (typeof window !== "undefined") {
     throw new Error(

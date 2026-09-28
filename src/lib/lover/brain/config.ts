@@ -118,8 +118,7 @@ export const RECENT_CLIP_KEEP = 20;
 
 export const JOB_MAX_ATTEMPTS = 3;
 export const DRAIN_BUDGET_MS = 15_000;
-export const FUNCTION_MAX_MS = 300_000; // Vercel Hobby 上限
-export const LONG_DRAIN_MS = 270_000; // 留 30s 余量给收尾
+export const LONG_DRAIN_MS = 270_000; // Vercel 函数上限 300s，留 30s 余量给收尾
 export const LOCK_SLACK_MS = 30_000;
 
 export const MODEL_PRICES: Record<string, { input: number; cached: number; output: number }> = {
@@ -136,10 +135,6 @@ export const VOICE_PRICES = {
   sttRestPerHour: 0.1,
   sttStreamingPerHour: 0.2,
 };
-
-export const PRICES_CHECKED_AT = "2026-09";
-
-export const LOG_FULL_DAYS = 90;
 
 function envNum(name: string, fallback: number): number {
   const n = Number(process.env[name] ?? fallback);

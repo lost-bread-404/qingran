@@ -79,8 +79,6 @@ const REPORT_DIGEST = `把这一段对话收成摘要，给月报用。
 不诊断，不贴临床标签，不补没有说过的数字。
 用中文写一段，不要 JSON。`;
 
-const NONE = "（没有）";
-const NONE_YET = "（还没有）";
 
 const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   SYSTEM_PROMPT,
@@ -231,4 +229,3 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
   ],
 };
 
-export const EMPTY_MARK = { none: NONE, noneYet: NONE_YET };

@@ -36,27 +36,12 @@ export type JsonSchema = {
   schema: Record<string, unknown>;
 };
 
-export type ToolDef = {
-  type: "function";
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-};
-
-export type ToolCall = {
-  callId: string;
-  name: string;
-  arguments: Record<string, unknown>;
-};
-
 export type CallModelInput = {
   system: string;
   input: string;
   inputParts?: string[];
   messages?: Array<{ role: string; content: string }>;
   schema?: JsonSchema;
-  tools?: ToolDef[];
-  previous?: unknown[];
   jobId?: string;
   turnSeq?: number | null;
   refs?: unknown;
@@ -75,7 +60,6 @@ export type CallModelResult = {
   ok: boolean;
   text: string;
   json: unknown;
-  toolCalls: ToolCall[];
   raw: unknown;
   model: string;
   effort: Effort;
@@ -119,39 +103,6 @@ function outputText(raw: unknown): string {
   }
   const chat = body.choices?.[0]?.message?.content;
   return typeof chat === "string" ? chat : "";
-}
-
-function outputToolCalls(raw: unknown): ToolCall[] {
-  if (!raw || typeof raw !== "object") return [];
-  const body = raw as {
-    output?: Array<{
-      type?: string;
-      call_id?: string;
-      id?: string;
-      name?: string;
-      arguments?: string | Record<string, unknown>;
-    }>;
-  };
-  const calls: ToolCall[] = [];
-  for (const item of body.output ?? []) {
-    if (item?.type !== "function_call" && item?.type !== "tool_call") continue;
-    let args: Record<string, unknown> = {};
-    if (typeof item.arguments === "string") {
-      try {
-        args = JSON.parse(item.arguments) as Record<string, unknown>;
-      } catch {
-        args = {};
-      }
-    } else if (item.arguments && typeof item.arguments === "object") {
-      args = item.arguments;
-    }
-    calls.push({
-      callId: String(item.call_id || item.id || ""),
-      name: String(item.name || ""),
-      arguments: args,
-    });
-  }
-  return calls;
 }
 
 function parseJsonLoose(text: string): unknown {
@@ -205,14 +156,6 @@ function responseSnippet(raw: unknown, err?: unknown): string {
 
 function logMessagesOf(input: CallModelInput): Array<{ role: string; content: string }> {
   const messages = [...apiMessagesOf(input)];
-  if (input.previous?.length) {
-    for (const part of input.previous) {
-      if (!part || typeof part !== "object") continue;
-      const row = part as { role?: unknown; content?: unknown };
-      if (row.content == null) continue;
-      messages.push({ role: String(row.role || "user"), content: String(row.content) });
-    }
-  }
   return messages;
 }
 
@@ -229,8 +172,6 @@ export function asModelInput(
     messages,
   };
 }
-
-export const SPEND_HOLD_ERR = "spend-paused";
 
 export function classifyReflectFailure(result: CallModelResult): string {
   if (result.failKind === "timeout") return "timeout";
@@ -262,7 +203,6 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     ok: false,
     text: "",
     json: null,
-    toolCalls: [],
     raw: null,
     model: resolved.model,
     effort: resolved.effort,
@@ -306,7 +246,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
   const apiMessages = apiMessagesOf(input);
   const body: Record<string, unknown> = {
     model: resolved.model,
-    input: input.previous?.length ? [...apiMessages, ...input.previous] : apiMessages,
+    input: apiMessages,
     max_output_tokens: resolved.maxOutput,
     store: xaiStoreEnabled(),
   };
@@ -321,7 +261,6 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       },
     };
   }
-  if (input.tools?.length) body.tools = input.tools;
   if (route === "reflect") body.prompt_cache_key = REFLECT_PROMPT_CACHE_KEY;
   if (input.temperature != null) body.temperature = input.temperature;
   else if (route === "reflect") body.temperature = 1.0;
@@ -352,7 +291,6 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     const { res, cred } = sent;
     const raw = await res.json().catch(() => null);
     const text = outputText(raw);
-    const toolCalls = outputToolCalls(raw);
     const json = parseJsonLoose(text);
     const ms = Date.now() - started;
     const usageRaw = (raw && typeof raw === "object" ? (raw as { usage?: unknown }).usage : null) ?? null;
@@ -405,7 +343,6 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       ok: true,
       text,
       json,
-      toolCalls,
       raw,
       model: resolved.model,
       effort: resolved.effort,

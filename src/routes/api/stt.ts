@@ -94,7 +94,6 @@ export const Route = createFileRoute("/api/stt")({
           holdToTalk: false,
           prosody: downsampleProsody(frames),
           senseLine: `${formatSenseLine(sense)} · 手机`,
-          hearingInstruction: profile.hearingInstruction,
           voicedMin: profile.nightVoicedMin,
           noiseMinMs: profile.nightMinMs,
           voicedClarity: sense.voicedClarity,

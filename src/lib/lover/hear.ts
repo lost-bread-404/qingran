@@ -113,7 +113,6 @@ export async function hearUtterance(input: {
         holdToTalk: Boolean(input.holdToTalk),
         prosody: downsampleProsody(input.frames),
         senseLine,
-        hearingInstruction: session.hearingInstruction,
         voicedMin: session.nightVoicedMin,
         noiseMinMs: session.nightMinMs,
         voicedClarity: session.sense.voicedClarity,

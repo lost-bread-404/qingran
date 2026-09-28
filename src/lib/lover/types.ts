@@ -1,5 +1,4 @@
 import { DEFAULT_HEARING_PROVIDER, type HearingProviderId, lockSttKeyterms } from "./hearing/config.ts";
-import { HEARING_INSTRUCTION } from "./hearing/instruction.ts";
 import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
 import { DEFAULT_HEARING_SENSE, lockHearingSense, type HearingSense } from "./hearing/sense.ts";
@@ -15,8 +14,6 @@ export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "steer" | "setting" | "unheard" | "proactive" | "system_notice";
 export type VoiceEffort = "low" | "medium" | "high" | null;
-
-export const CONTEXT_WINDOW = 40;
 
 export const DEFAULT_VOICE_MODEL = "grok-4.20-0309-non-reasoning";
 export const DEFAULT_VOICE_EFFORT: VoiceEffort = "low";
@@ -54,7 +51,6 @@ export type Profile = {
   /** Per-instruction chat model. Missing keys keep the code default. */
   promptModels: Partial<Record<PromptKey, PromptModelPick>>;
   /** Leftover audio-LLM instruction. Live hearing is xAI + Apple and does not send this. */
-  hearingInstruction: string;
   /** Fixed words sent to xAI as keyterm. Recent dialogue terms are added on top. */
   sttKeyterms: string[];
   /** Dossier character cap. 2000–8000, default 4000. */
@@ -119,9 +115,6 @@ export type ChatMessage = {
 
 /** Used only when nothing is saved. Not a character. */
 export const NEUTRAL_PERSONA = "你是清然。";
-
-/** Kept for callers that still import the old name. Empty profiles stay empty. */
-export const DEFAULT_SYSTEM_PROMPT = NEUTRAL_PERSONA;
 
 /**
  * A mode she defines. `when` is free text for the inner mind. `prompt` goes after the persona.
@@ -209,7 +202,6 @@ export const DEFAULT_PROFILE: Profile = {
   nightMinMs: NIGHT_MIN_MS,
   hearingSense: DEFAULT_HEARING_SENSE,
   promptModels: {},
-  hearingInstruction: "",
   sttKeyterms: lockSttKeyterms(undefined),
   dossierMaxChars: 4000,
   identity: "",
@@ -251,7 +243,6 @@ type LooseProfile = Partial<Profile> & {
   nightMinMs?: number;
   hearingSense?: unknown;
   promptModels?: unknown;
-  hearingInstruction?: unknown;
   sttKeyterms?: unknown;
   dossierMaxChars?: number;
   identity?: string;
@@ -292,7 +283,6 @@ export function lockedProfile(input?: unknown): Profile {
     nightMinMs: hearingSense.noiseMinMs,
     hearingSense,
     promptModels: lockPromptModels(raw.promptModels),
-    hearingInstruction: lockHearingInstruction(raw.hearingInstruction),
     sttKeyterms: lockSttKeyterms(raw.sttKeyterms),
     dossierMaxChars: clampDossierMaxChars(raw.dossierMaxChars),
     identity: typeof raw.identity === "string" ? raw.identity.slice(0, 2000) : "",
@@ -369,13 +359,6 @@ function pickVoiceEffort(raw: LooseProfile): VoiceEffort {
     return null;
   }
   return DEFAULT_VOICE_EFFORT;
-}
-
-function lockHearingInstruction(raw: unknown): string {
-  if (typeof raw !== "string") return "";
-  const text = raw.replace(/\r\n/g, "\n").trim().slice(0, 8000);
-  if (!text || text === HEARING_INSTRUCTION.trim()) return "";
-  return text;
 }
 
 function pickSystemPrompt(input?: LooseProfile | null): string {

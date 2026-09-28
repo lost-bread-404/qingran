@@ -10,7 +10,6 @@ import {
   isRetryableEmptyTalk,
   logTalkTurn,
   takeTalkDelta,
-  takeToolCallDeltas,
   talkFailFromResult,
 } from "./talk-fail.ts";
 import { recordTtsSpend } from "./brain/spend/check";
@@ -57,10 +56,6 @@ export type TalkStreamInput = {
   timeoutMs?: number;
   /** The current mode's temperature. Missing → 1.0. */
   temperature?: number;
-  tools?: Array<{
-    type: "function";
-    function: { name: string; description: string; parameters: Record<string, unknown> };
-  }>;
 };
 
 type Emit = (event: TalkStreamEvent) => void;
@@ -83,7 +78,6 @@ export type TalkStreamResult = {
   ms: number;
   chars: number;
   otherEvents: string;
-  toolCalls?: Array<{ id: string; name: string; arguments: string }>;
   /** Text after ⟦心⟧. null when the model never wrote the mark. */
   innerTail?: string | null;
   innerCut?: boolean;
@@ -104,7 +98,6 @@ function emptyResult(partial: Partial<TalkStreamResult> = {}): TalkStreamResult 
     ms: 0,
     chars: 0,
     otherEvents: "",
-    toolCalls: [],
     ...partial,
   };
 }
@@ -188,10 +181,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       messages: data.messages,
     };
     if (route.effort) body.reasoning_effort = route.effort;
-    if (data.tools?.length) {
-      body.tools = data.tools;
-      body.tool_choice = "auto";
-    }
     t0 = Date.now();
     const sent = await xaiFetch("https://api.x.ai/v1/chat/completions", {
       method: "POST",
@@ -260,7 +249,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   const cut = new InnerCutBuffer();
   let released = false;
   let releaseWait: Promise<void> | null = null;
-  const toolMap = new Map<number, { id: string; name: string; arguments: string }>();
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -325,13 +313,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     if (obj.usage) usage = obj.usage;
     const { token, finishReason: nextReason } = takeTalkDelta(json);
     if (nextReason) finishReason = nextReason;
-    for (const piece of takeToolCallDeltas(json)) {
-      const cur = toolMap.get(piece.index) ?? { id: "", name: "", arguments: "" };
-      if (piece.id) cur.id = piece.id;
-      if (piece.name) cur.name = piece.name;
-      if (piece.arguments) cur.arguments += piece.arguments;
-      toolMap.set(piece.index, cur);
-    }
     const described = describeNonTextTalkEvent(json);
     if (described) otherParts.push(described);
     if (token) ingestToken(token);
@@ -384,30 +365,10 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   emitVisible(cut.finish());
   releaseSpoken();
   if (releaseWait) await releaseWait;
-  const toolCalls = [...toolMap.values()].filter((call) => call.name);
   const speech = cut.speech.trim();
   const innerTail = cut.seen ? cut.tail : null;
   const innerCut = cut.seen;
 
-  if (toolCalls.length && !speech) {
-    live.tts?.abort();
-    return {
-      usage,
-      ttftMs,
-      firstAudioMs,
-      model: route.model,
-      effort: route.effort,
-      ttsChars: 0,
-      status,
-      finishReason,
-      ms: Date.now() - t0,
-      chars: 0,
-      otherEvents: takeOtherEvents(),
-      toolCalls,
-      innerTail,
-      innerCut,
-    };
-  }
 
   if (replyBodyMissing(cut.speech, cut.seen)) live.tts?.abort();
   if (!released && pending.trim()) ensureTts().push(pending);

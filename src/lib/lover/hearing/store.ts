@@ -65,7 +65,6 @@ import {
 } from "./tags.ts";
 
 export type { LabClipFilter, LabeledClipRow, ReplyFlagRow } from "./persist.ts";
-export type { EngineEvalScore } from "./eval-compare.ts";
 export type { ConfusionRule } from "./confusions.ts";
 
 export type HearingTurnPatch = {
@@ -140,7 +139,6 @@ export type RunHearingInput = {
   toneFade?: number | null;
   tonePeak?: number | null;
   toneMark?: string | null;
-  hearingInstruction?: string;
   voicedMin?: number;
   noiseMinMs?: number;
   voicedClarity?: number;

@@ -49,28 +49,6 @@ export function useVisualViewportHeight(active = true) {
   return { ...box, keyboardUp };
 }
 
-export function useVisualViewport() {
-  const [pad, setPad] = useState(0);
-
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-    const sync = () => {
-      const hidden = window.innerHeight - viewport.height - viewport.offsetTop;
-      setPad(Math.max(0, hidden));
-    };
-    sync();
-    viewport.addEventListener("resize", sync);
-    viewport.addEventListener("scroll", sync);
-    return () => {
-      viewport.removeEventListener("resize", sync);
-      viewport.removeEventListener("scroll", sync);
-    };
-  }, []);
-
-  return pad;
-}
-
 export type CaretField = HTMLTextAreaElement | HTMLInputElement;
 
 function focusedField(): CaretField | null {

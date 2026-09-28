@@ -6,8 +6,6 @@ import { lockedProfile } from "../types.ts";
 import { localDay } from "./time.ts";
 import { effectiveMode, recordMode } from "./mode.ts";
 import { insertManualEdit } from "./life-store.ts";
-import { runInBackground } from "./wait-until.ts";
-import { LONG_DRAIN_MS } from "./config.ts";
 import { addPlan, currentPlan, formatLocal, getInner, listPlans, parseLocalTime, recentDays, removePlan, saveDayTimeline, todayText } from "./heart.ts";
 
 /** Settings → 他的心: everything the brain holds, readable and editable. */
@@ -75,11 +73,3 @@ export const brainSetModeNow = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-/** 整理今天：fold today into the memory now (plans stay). Runs after the response. */
-export const brainNightNow = createServerFn({ method: "POST" }).handler(async () => {
-  const { enqueueNightNow } = await import("./night.ts");
-  const { drainJobs } = await import("./jobs.ts");
-  const day = await enqueueNightNow();
-  await runInBackground(() => drainJobs(LONG_DRAIN_MS));
-  return { ok: true as const, day };
-});

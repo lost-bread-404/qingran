@@ -1,7 +1,6 @@
 import { VOICE_IO } from "./brain/config.ts";
 
 export const TTS_SPEED_NORMAL = 1;
-export const TTS_SPEED_SOFT = 0.92;
 
 export const TTS_VOICE_RATES = [
   { id: "normal", label: "1.0", speed: 1 },

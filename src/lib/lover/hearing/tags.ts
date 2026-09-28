@@ -20,35 +20,6 @@ export type AcousticTags = {
   events?: TagEvent[];
 };
 
-export const TAG_LABELS: Record<TagKey, string> = {
-  length: "长短",
-  contour: "走向",
-  voice: "声线",
-  events: "事件",
-};
-
-export const TAG_VALUE_LABELS: {
-  length: Record<TagLength, string>;
-  contour: Record<TagContour, string>;
-  voice: Record<TagVoice, string>;
-  events: Record<TagEvent, string>;
-} = {
-  length: { short: "短", long: "长" },
-  contour: { rising: "升", falling: "降", flat: "平", wavering: "晃" },
-  voice: { normal: "正常", breathy: "气声" },
-  events: { laugh: "笑", cry: "哭", sigh: "叹", moan: "喘", meow: "猫叫", coy: "撒娇" },
-};
-
-export const EVENT_CHIP_LABELS: Record<EventChip, string> = {
-  none: "无",
-  laugh: "笑",
-  cry: "哭",
-  sigh: "叹",
-  moan: "喘",
-  meow: "猫叫",
-  coy: "撒娇",
-};
-
 const TAG_RE = /〔[^〕]*〕/g;
 
 export function isTagLength(value: unknown): value is TagLength {

@@ -152,33 +152,11 @@ export async function lastUserAt(before = Number.MAX_SAFE_INTEGER): Promise<numb
   return at > 0 ? at : null;
 }
 
-/** When she was talking to him today, as spans split by 20-minute gaps. */
-export async function todaySpans(nowMs: number, timeZone: string): Promise<string> {
-  const { from } = dayWindow(localDay(nowMs, timeZone), timeZone);
-  const db = await sql();
-  const rows = await db.query<{ at: number }>(
-    `select created_at::float8 as at from qingran_messages
-     where role = 'user' and kind is distinct from 'system_notice' and created_at >= $1 and created_at <= $2
-     order by created_at asc`,
-    [from, nowMs],
-  );
-  const spans: Array<[number, number]> = [];
-  for (const row of rows) {
-    const at = Number(row.at);
-    const last = spans[spans.length - 1];
-    if (last && at - last[1] <= 20 * 60_000) last[1] = at;
-    else spans.push([at, at]);
-  }
-  if (!spans.length) return "今天我还没来找过你。";
-  return `今天我来找你的时段：${spans.map(([a, b]) => (a === b ? clockOf(a, timeZone) : `${clockOf(a, timeZone)}–${clockOf(b, timeZone)}`)).join("、")}`;
-}
-
 /** Plain facts a person would just know: the time, how long she has been quiet, when she was around today. */
 export async function timeFacts(nowMs: number, timeZone: string, excludeAfter?: number): Promise<string> {
-  const [last, spans] = await Promise.all([lastUserAt(excludeAfter ?? nowMs - 5_000), todaySpans(nowMs, timeZone)]);
+  const last = await lastUserAt(excludeAfter ?? nowMs - 5_000);
   const lines = [formatClock(nowMs, timeZone)];
   if (last) lines.push(`我上一次说话是 ${clockOf(last, timeZone)}，距现在 ${gap(nowMs - last)}。`);
-  lines.push(spans);
   return lines.join("\n");
 }
 

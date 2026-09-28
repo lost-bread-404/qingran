@@ -152,18 +152,6 @@ export const deleteRoomMessages = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-export const markRoomMessagesScanned = createServerFn({ method: "POST" })
-  .validator((input: { ids: string[] }) => input)
-  .handler(async ({ data }) => {
-    if (!data.ids.length) return { ok: true as const };
-    const sql = await getSql();
-    const now = Date.now();
-    for (const id of data.ids) {
-      await sql`update qingran_messages set archived_at = coalesce(archived_at, ${now}) where id = ${id}`;
-    }
-    return { ok: true as const };
-  });
-
 function decodeStoredMessage(row: {
   id: string;
   role: ChatMessage["role"];

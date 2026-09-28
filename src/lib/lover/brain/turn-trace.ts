@@ -48,7 +48,6 @@ export type TurnTraceInput = {
     unexpected_state_block?: boolean;
     persona_missing?: boolean;
     inner?: { now: string; today: string };
-    tool?: { name: string; arguments: string; ms: number } | null;
   };
   reply?: {
     text?: string;
