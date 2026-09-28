@@ -16,7 +16,6 @@ import { identityBlock } from "../life.ts";
 import { lockedProfile, type TalkModeDef } from "../../types.ts";
 import { readIdentity } from "../life-store.ts";
 import { effectiveMode, recordMode } from "../mode.ts";
-import { spokenOnly, VERBATIM_REPLIES } from "./pack-build.ts";
 import {
   dayWindow,
   daysText,
@@ -77,22 +76,10 @@ export const INNER_SCHEMA = {
 export type ReflectKind = "turn" | "silence" | "due";
 
 export function formatReflectConversation(history: StoredMessage[], timeZone: string): string {
-  const rows = history.filter((m) => m.kind !== "system_notice" && !isNightNoiseBody(m.text));
-  let kept = 0;
-  const verbatim = new Set<number>();
-  for (let i = rows.length - 1; i >= 0 && kept < VERBATIM_REPLIES; i -= 1) {
-    if (rows[i]!.role === "assistant") {
-      verbatim.add(i);
-      kept += 1;
-    }
-  }
-  return rows
-    .map((m, i) => {
-      const text = modelFacingText(m.text);
-      const body = m.role === "assistant" && !verbatim.has(i) ? spokenOnly(text) : text;
-      // Same point of view as every other text the mind reads: 「我」 is Rosie, 「你」 is 清然.
-      return `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "我" : "你"}：${body}`;
-    })
+  return history
+    .filter((m) => m.kind !== "system_notice" && !isNightNoiseBody(m.text))
+    // Same point of view as every other text the mind reads: 「我」 is Rosie, 「你」 is 清然.
+    .map((m) => `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "我" : "你"}：${modelFacingText(m.text)}`)
     .join("\n");
 }
 

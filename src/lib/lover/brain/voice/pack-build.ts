@@ -44,12 +44,9 @@ export function stripLabel(strip: VoiceStrip): string {
   return "未裁剪";
 }
 
-/** How many of his latest replies stay word for word; older ones keep only what he said aloud. */
-export const VERBATIM_REPLIES = 2;
-
 /**
- * Like a person remembers a conversation: the gist of what he said, not every gesture.
- * Older replies drop their action narration so the model stops copying its own template and growing it.
+ * His lines with the actions taken out, for the night pass in modes that do not keep actions.
+ * The reply and the mind always read his replies whole: without the actions he loses track of the scene.
  */
 export function spokenOnly(text: string): string {
   const quotes = [...text.matchAll(/[“"「]([^”"」]{1,200})[”"」]/g)].map((m) => m[1]!.trim()).filter(Boolean);
@@ -73,21 +70,11 @@ export function voiceHistoryMessages(
 ): Array<{ role: "system" | "user" | "assistant"; content: string }> {
   if (limit <= 0) return [];
   const rows = history.filter((message) => !isNightNoiseBody(message.text)).slice(-limit);
-  let replies = 0;
-  const keep = new Set<number>();
-  for (let i = rows.length - 1; i >= 0 && replies < VERBATIM_REPLIES; i -= 1) {
-    if (rows[i]!.role === "assistant") {
-      keep.add(i);
-      replies += 1;
-    }
-  }
   const out: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
   rows.forEach((message, i) => {
     const gap = i > 0 ? message.createdAt - rows[i - 1]!.createdAt : 0;
     if (gap >= GAP_MARK_MS) out.push({ role: "system", content: `（过了 ${gapText(gap)}）` });
-    const text = modelFacingText(message.text);
-    const assistant = message.role === "assistant";
-    out.push({ role: assistant ? "assistant" : "user", content: assistant && !keep.has(i) ? spokenOnly(text) : text });
+    out.push({ role: message.role === "assistant" ? "assistant" : "user", content: modelFacingText(message.text) });
   });
   return out;
 }
