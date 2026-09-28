@@ -33,7 +33,6 @@ const PATCH_KEYS = [
   "hearingProvider",
   "captureAudio",
   "debugHearing",
-  "hearingNbest",
   "voiceModel",
   "voiceEffort",
   "silenceMs",

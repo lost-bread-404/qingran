@@ -97,7 +97,6 @@ export async function hearUtterance(input: {
         endpoint_fired: input.endpoint_fired,
         upload_start,
         context: session.context || undefined,
-        nbest: session.nbest,
         extraKeyterms: session.extraKeyterms,
         keyterms: session.sttKeyterms,
         debugHearing,

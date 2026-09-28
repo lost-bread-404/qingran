@@ -183,7 +183,6 @@ export function VoiceRoom() {
       provider: "xai",
       capture: profile.debugHearing,
       debugHearing: profile.debugHearing,
-      nbest: profile.hearingNbest,
       mode: callActiveRef.current ? "call" : "text",
       context,
       extraKeyterms,

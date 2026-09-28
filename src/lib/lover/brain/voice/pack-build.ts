@@ -7,7 +7,7 @@ import { NEUTRAL_PERSONA } from "../../types.ts";
 
 /**
  * What the reply is given (docs/brain.md「回复看到的」):
- * persona (+ identity + current mode) → 你记得的 → 你现在要做成的事 → 今天到现在 → intimate notes → recent talk → 现在是… → her line.
+ * persona (+ identity + current mode) → 你记得的 → 你心里现在要做成的事 → 今天到现在 → intimate notes → recent talk → 现在是… → her line.
  * A block whose value is empty is left out.
  */
 export type VoicePackParts = {
@@ -139,7 +139,7 @@ export function insertIntimateNotes<T extends { role: string; content: string }>
   const text = notes.trim();
   if (!text) return messages;
   const block = { role: "system", content: `你在亲密时的样子：\n${text}` } as T;
-  const now = messages.findIndex((message) => message.role === "system" && message.content.startsWith("你现在要做成的事"));
+  const now = messages.findIndex((message) => message.role === "system" && message.content.startsWith("你心里现在要做成的事"));
   const talk = messages.findIndex((message) => message.role !== "system");
   const at = now >= 0 ? now + 1 : talk >= 0 ? talk : messages.length;
   return [...messages.slice(0, at), block, ...messages.slice(at)];

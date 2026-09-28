@@ -7,7 +7,6 @@ export type AdapterOutcome = HearingAdapterOutcome;
 
 export type HearingCallOpts = {
   context?: string;
-  nbest?: boolean;
   /** Replaces the built-in system instruction. xAI and Apple never receive this. */
   instruction?: string;
 };

@@ -81,7 +81,6 @@ export const Route = createFileRoute("/api/stt")({
           endpoint_fired: endpointFired,
           upload_start: started,
           context: context || undefined,
-          nbest: profile.hearingNbest,
           extraKeyterms,
           keyterms: profile.sttKeyterms,
           debugHearing: profile.debugHearing,

@@ -11,7 +11,6 @@ export type HearingSession = {
   lastTurnId: string | null;
   coldStartMs: number | null;
   debugHearing: boolean;
-  nbest: boolean;
   mode: HearingMode;
   audioRoute: AudioRoute;
   context: string;
@@ -36,7 +35,6 @@ const session: HearingSession = {
   lastTurnId: null,
   coldStartMs: null,
   debugHearing: true,
-  nbest: false,
   mode: "text",
   audioRoute: "unknown",
   context: "",

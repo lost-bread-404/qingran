@@ -34,7 +34,6 @@ export type Profile = {
   hearingProvider: HearingProviderId;
   captureAudio: boolean;
   debugHearing: boolean;
-  hearingNbest: boolean;
   voiceModel: string;
   voiceEffort: VoiceEffort;
   /** Pause that ends a turn, milliseconds. 800–3000, default 1500. */
@@ -199,7 +198,6 @@ export const DEFAULT_PROFILE: Profile = {
   hearingProvider: DEFAULT_HEARING_PROVIDER,
   captureAudio: true,
   debugHearing: true,
-  hearingNbest: false,
   voiceModel: DEFAULT_VOICE_MODEL,
   voiceEffort: DEFAULT_VOICE_EFFORT,
   silenceMs: SILENCE_MS,
@@ -241,7 +239,6 @@ type LooseProfile = Partial<Profile> & {
   hearingProvider?: string;
   captureAudio?: boolean;
   debugHearing?: boolean;
-  hearingNbest?: boolean;
   voiceChat?: string;
   voiceModel?: string;
   voiceEffort?: string | null;
@@ -284,7 +281,6 @@ export function lockedProfile(input?: unknown): Profile {
     hearingProvider: DEFAULT_HEARING_PROVIDER,
     debugHearing: raw.debugHearing !== false,
     captureAudio: raw.debugHearing !== false,
-    hearingNbest: Boolean(raw.hearingNbest),
     voiceModel: pickVoiceModel(raw),
     voiceEffort: pickVoiceEffort(raw),
     silenceMs: hearingSense.endWaitMs,

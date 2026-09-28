@@ -17,11 +17,7 @@ export function lastDialogueTurns(messages: ContextTurn[], rounds = HEARING_CONT
 }
 
 export function stripHearingMarkup(text: string): string {
-  return stripAltTags(stripCueTags(text));
-}
-
-export function stripAltTags(text: string): string {
-  return text.replace(/\{([^|{}]+)\|[^}]+\}/g, "$1");
+  return stripCueTags(text);
 }
 
 export function buildHearingContext(messages: ContextTurn[], rounds = HEARING_CONTEXT_ROUNDS): string {

@@ -119,7 +119,6 @@ export type RunHearingInput = {
   endpoint_fired?: number;
   upload_start?: number;
   context?: string;
-  nbest?: boolean;
   extraKeyterms?: string[];
   debugHearing?: boolean;
   silenceWaitMs?: number;
