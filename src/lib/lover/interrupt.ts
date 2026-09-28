@@ -1,5 +1,3 @@
-export const INTERRUPTED_MARK = "（被 Rosie 打断）";
-
 export type InterruptQingranPlan = {
   abort: true;
   stopPlayback: true;

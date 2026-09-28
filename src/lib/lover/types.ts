@@ -153,7 +153,7 @@ export const DEFAULT_MODES: TalkModeDef[] = [
   {
     id: "real",
     name: "现实",
-    when: "工作日白天她该起床开工、学习、准备面试的时候",
+    when: "工作日白天我该起床开工、学习、准备面试的时候",
     prompt: "",
     temperature: null,
     keepActions: true,

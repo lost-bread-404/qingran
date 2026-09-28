@@ -90,7 +90,8 @@ export function formatReflectConversation(history: StoredMessage[], timeZone: st
     .map((m, i) => {
       const text = modelFacingText(m.text);
       const body = m.role === "assistant" && !verbatim.has(i) ? spokenOnly(text) : text;
-      return `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "Rosie" : "清然"}：${body}`;
+      // Same point of view as every other text the mind reads: 「我」 is Rosie, 「你」 is 清然.
+      return `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "我" : "你"}：${body}`;
     })
     .join("\n");
 }
