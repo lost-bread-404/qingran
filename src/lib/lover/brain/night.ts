@@ -104,7 +104,7 @@ export function nightConversation(
         const text = modelFacingText(r.body);
         const mode = modeAtTime(log, r.created_at);
         const body = r.role === "assistant" && (allSpoken || (mode != null && quiet.has(mode))) ? spokenOnly(text) : text;
-        return `[${clockOf(r.created_at, timeZone)}] ${r.role === "user" ? "我" : "你"}：${body}`;
+        return `[${clockOf(r.created_at, timeZone)}] ${r.role === "user" ? "你" : "我"}：${body}`;
       })
       .join("\n");
   let text = render(false);

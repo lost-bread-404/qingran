@@ -78,8 +78,8 @@ export type ReflectKind = "turn" | "silence" | "due";
 export function formatReflectConversation(history: StoredMessage[], timeZone: string): string {
   return history
     .filter((m) => m.kind !== "system_notice" && !isNightNoiseBody(m.text))
-    // Same point of view as every other text the mind reads: 「我」 is Rosie, 「你」 is 清然.
-    .map((m) => `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "我" : "你"}：${modelFacingText(m.text)}`)
+    // Same point of view as every other text the mind reads: 「我」 is 清然, 「你」 is Rosie.
+    .map((m) => `[${formatClock(m.createdAt, timeZone)}] ${m.role === "user" ? "你" : "我"}：${modelFacingText(m.text)}`)
     .join("\n");
 }
 
@@ -122,7 +122,7 @@ export function reflectVars(parts: ReflectorParts): Record<string, string> {
     identity_block: parts.identity?.trim() ? `${parts.identity.trim()}\n` : "",
     story: parts.story.trim() || "（没有）",
     dossier: parts.dossier.trim() || "（还没有）",
-    trigger: parts.trigger.trim() || "我刚说完话。",
+    trigger: parts.trigger.trim() || "你刚说完话。",
     facts: parts.facts.trim() || "（没有）",
     days: parts.days.trim() || "（还没有）",
     today: parts.today.trim() || "（还没有）",
@@ -157,10 +157,10 @@ export type ReflectTrigger = { kind: ReflectKind; silentSince?: number; since?: 
 
 function triggerText(t: ReflectTrigger, at: number): string {
   if (t.kind === "silence" && t.silentSince) {
-    return `我已经 ${gapText(at - t.silentSince)} 没说话了。这是我沉默后，你心里过的一遍。`;
+    return `你已经 ${gapText(at - t.silentSince)} 没说话了。这是你沉默后，我心里过的一遍。`;
   }
-  if (t.kind === "due") return `到时间了。我现在不在和你聊天。\n${t.dueText?.trim() || ""}`.trim();
-  return "我刚说完话，你也刚回了我。";
+  if (t.kind === "due") return `到时间了。你现在不在和我聊天。\n${t.dueText?.trim() || ""}`.trim();
+  return "你刚说完话，我也刚回了你。";
 }
 
 /** The talk since `from`; never fewer than the usual window, so a short stretch still has its context. */
