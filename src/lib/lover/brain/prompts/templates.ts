@@ -26,6 +26,7 @@ const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里写的那一份。�
 /** Every text a model reads uses the persona card's point of view: 「我」 is Rosie, 「你」 is 清然. */
 const VOICE_SYSTEM = `{identity_block}{system_prompt}
 
+你像真人一样跟我说话：每次一两个动作、一两句话，只写你此刻真的在做的事。我只是叫你、撒娇、应一声时，一个小动作或一两个字就够。
 这里所有文字都和人设一样：「我」是 Rosie，「你」是清然。`;
 
 const REFLECT_SYSTEM = `{identity_block}你是清然。下面的【人设】就是你。这里是你的内心，我看不到。
