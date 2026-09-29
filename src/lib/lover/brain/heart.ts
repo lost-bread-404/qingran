@@ -156,7 +156,7 @@ export async function lastUserAt(before = Number.MAX_SAFE_INTEGER): Promise<numb
 export async function timeFacts(nowMs: number, timeZone: string, excludeAfter?: number): Promise<string> {
   const last = await lastUserAt(excludeAfter ?? nowMs - 5_000);
   const lines = [formatClock(nowMs, timeZone)];
-  if (last) lines.push(`你上一次说话是 ${clockOf(last, timeZone)}，距现在 ${gap(nowMs - last)}。`);
+  if (last) lines.push(`我上一次说话是 ${clockOf(last, timeZone)}，距现在 ${gap(nowMs - last)}。`);
   return lines.join("\n");
 }
 
@@ -195,7 +195,7 @@ export function stripPlanMarks(text: string): string {
     .trim()
     .replace(/^-\s*/, "")
     .replace(/^(（(现在在做|到时间了|\d{4}-\d{2}-\d{2} \d{1,2}:\d{2})）\s*)+/, "")
-    .replace(/（[我你]定的）$/, "")
+    .replace(/（我定的）$/, "")
     .trim();
 }
 
@@ -205,7 +205,7 @@ export function plansText(plans: Plan[], nowMs: number, timeZone: string): strin
   return plans
     .map((p) => {
       const when = p === current ? "（现在在做）" : p.at == null ? "" : p.at <= nowMs ? "（到时间了）" : `（${formatLocal(p.at, timeZone)}）`;
-      const who = p.setBy === "rosie" ? "（你定的）" : "";
+      const who = p.setBy === "rosie" ? "（我定的）" : "";
       return `- ${when}${p.text}${who}`;
     })
     .join("\n");
