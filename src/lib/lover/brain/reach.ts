@@ -157,11 +157,11 @@ export async function runWake(opts: {
 
   const dueLines =
     trigger === "manual"
-      ? "我要你现在想起我。"
+      ? "Rosie 叫清然现在就去找 Rosie。"
       : `到时间的事：\n${due.map((plan) => `- ${plan.text || "（没写）"}${plan.setAt ? `（${ago(at - plan.setAt)}前定的）` : ""}`).join("\n")}`;
   const quiet = silence.lastUserAt
-    ? `我最后一次说话是 ${ago(at - silence.lastUserAt)} 前。之后你已经发了 ${silence.unanswered} 条，我还没回${silence.lines.length ? `：\n${silence.lines.join("\n")}` : "。"}`
-    : "我还没有说过话。";
+    ? `Rosie 最后一次说话是 ${ago(at - silence.lastUserAt)} 前。之后清然已经发了 ${silence.unanswered} 条，Rosie 还没回${silence.lines.length ? `：\n${silence.lines.join("\n")}` : "。"}`
+    : "Rosie 还没有说过话。";
   const laterText = later.length ? `\n之后还打算：\n${later.map((plan) => `- ${formatLocal(plan.at!, zone)} ${plan.text}`).join("\n")}` : "";
 
   const { runReflector } = await import("./voice/reflector.ts");

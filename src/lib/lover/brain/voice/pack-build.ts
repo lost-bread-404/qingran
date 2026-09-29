@@ -7,13 +7,13 @@ import { NEUTRAL_PERSONA } from "../../types.ts";
 
 /**
  * What the reply is given (docs/brain.md「回复看到的」):
- * persona (+ identity + current mode) → 我们的故事 → 你心里现在要做成的事 → 今天到现在 → intimate notes → recent talk → 现在是… → her line.
+ * persona (+ identity + current mode) → 清然和 Rosie 的故事 → 清然心里现在要做成的事 → 今天到现在 → intimate notes → recent talk → 现在是… → her line.
  * A block whose value is empty is left out.
  */
 export type VoicePackParts = {
   charter: string;
   identity: string;
-  /** 我们的故事: the story she wrote in the persona page, whole ("" = not injected). */
+  /** 清然和 Rosie 的故事: the story she wrote in the persona page, whole ("" = not injected). */
   story: string;
   /** The one item from his plan list the reply works on now ("" = nothing / not injected). */
   mind: string;
@@ -39,7 +39,7 @@ export const VOICE_THIN_HISTORY = 8;
 
 export function stripLabel(strip: VoiceStrip): string {
   if (strip === "moment") return "去掉了现在要做成的事和今天";
-  if (strip === "story") return "去掉了现在要做成的事、今天和我们的故事";
+  if (strip === "story") return "去掉了现在要做成的事、今天和故事线";
   if (strip === "thin") return "只保留人设、最近 8 条对话和这一句";
   return "未裁剪";
 }
@@ -125,8 +125,8 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
 export function insertIntimateNotes<T extends { role: string; content: string }>(messages: T[], notes: string): T[] {
   const text = notes.trim();
   if (!text) return messages;
-  const block = { role: "system", content: `你在亲密时的样子：\n${text}` } as T;
-  const now = messages.findIndex((message) => message.role === "system" && message.content.startsWith("你心里现在要做成的事"));
+  const block = { role: "system", content: `清然在亲密时的样子：\n${text}` } as T;
+  const now = messages.findIndex((message) => message.role === "system" && message.content.startsWith("清然心里现在要做成的事"));
   const talk = messages.findIndex((message) => message.role !== "system");
   const at = now >= 0 ? now + 1 : talk >= 0 ? talk : messages.length;
   return [...messages.slice(0, at), block, ...messages.slice(at)];
