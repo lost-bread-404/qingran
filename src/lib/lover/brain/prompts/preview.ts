@@ -10,6 +10,8 @@ import { gatherReflectParts, modesText, reflectVars } from "../voice/reflector.t
 import { listPlans, mindForReply, plansText, timeFacts, todayText } from "../heart.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { identityBlock } from "../life.ts";
+import { effectiveMode } from "../mode.ts";
+import { resolveTalkProfile } from "../../talk-profile.ts";
 
 export type PromptPreview = {
   variantId: string;
@@ -22,9 +24,16 @@ export type PromptPreview = {
 async function voicePreview(body: string | undefined, variantId: string): Promise<Omit<PromptPreview, "variantId">> {
   const first = variantId === "first" ? { quiet: "25 分钟", intent: "（到时间时心思写的那件事）" } : undefined;
   const at = now();
-  const [meta, charter, profileData] = await Promise.all([getMeta(), getProfilePrompt(), getProfileData()]);
-  const profile = lockedProfile(profileData);
+  const [meta, profileData] = await Promise.all([getMeta(), getProfileData()]);
+  const saved = lockedProfile(profileData);
   const tz = resolveTz(meta.timeZone);
+  // The same persona + current mode the reply is given (api/talk): brain on → the mode the mind chose; off → her toggle.
+  const ids = saved.modes.map((m) => m.id);
+  const mode = saved.brainOn ? await effectiveMode(at, tz, ids) : ids.includes(saved.mode) ? saved.mode : ids[0];
+  const profile = resolveTalkProfile(undefined, profileData, mode).profile;
+  const charter = profile.systemPrompt;
+  const modeDef = profile.modes.find((m) => m.id === profile.mode);
+  const intimate = modeDef?.intimate ? profile.intimateNotes.trim() : "";
   const inject = voiceInjectFromProfile(profile);
   const brainOn = profile.brainOn;
   const story = inject.dossier && brainOn ? profile.storyline.trim() : "";
@@ -40,7 +49,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
     story,
     mind,
     today,
-    intimate: "",
+    intimate,
     clock,
     history,
     historyWindow: inject.history,
@@ -67,9 +76,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
       history_messages: historyText,
     },
     messages,
-    note: first
-      ? "主动找她：多久没说话、想做成什么用占位。人设这里不带当前模式的 prompt，亲密设定也不放。"
-      : "没有正在说的这一句，用「在吗」占位。人设这里不带当前模式的 prompt，亲密设定也不放。",
+    note: `${first ? "主动找她：多久没说话、想做成什么用占位。" : "没有正在说的这一句，用「在吗」占位。"}人设后面接的是现在的模式「${modeDef?.name ?? "（没有）"}」，和回复拿到的一样。`,
   };
 }
 
