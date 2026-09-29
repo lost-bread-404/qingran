@@ -117,31 +117,49 @@ export const brainGetTurnTrace = createServerFn({ method: "POST" })
     return { turn: asJson(turns[0] ?? null), logs: asJson(logs) };
   });
 
+/** One logged model call with exactly the messages it was sent (brain_log_raw) and what came back. */
+async function callLogById(id: number) {
+  const { getSql } = await import("../../db.ts");
+  const { messagesFromStored } = await import("../call-log-view.ts");
+  const db = await getSql();
+  const rows = await db.query<Record<string, unknown>>("select * from brain_log where id = $1", [id]);
+  const row = asJson(rows[0] ?? null) as Record<string, unknown> | null;
+  if (!row) return null;
+  const rawRows = await db.query<{ input: unknown }>("select input from brain_log_raw where log_id = $1", [id]);
+  const storedMessages = messagesFromStored(rawRows[0]?.input);
+  const fallbackMessages =
+    storedMessages ??
+    [
+      row.input_system ? { role: "system", content: String(row.input_system) } : null,
+      row.input_user ? { role: "user", content: String(row.input_user) } : null,
+    ].filter((item): item is { role: string; content: string } => Boolean(item));
+  const output = row.output_text ? String(row.output_text) : row.raw ? String(row.raw) : "";
+  return {
+    ...row,
+    assembled: fallbackMessages,
+    output,
+    stored: Boolean(fallbackMessages.length),
+    warnings: fallbackMessages.length ? [] : ["这一条没有存下发给模型的原文"],
+  };
+}
+
 export const brainGetCallLog = createServerFn({ method: "POST" })
   .validator((input: { id: number }) => input)
+  .handler(async ({ data }) => callLogById(data.id));
+
+/** The last call a prompt actually made (every call is logged as `<route>:<model>`), for the instructions page. */
+export const brainLastPromptCall = createServerFn({ method: "POST" })
+  .validator((input: { key: string }) => input)
   .handler(async ({ data }) => {
+    const { isPromptKey } = await import("./prompts/catalog.ts");
+    if (!isPromptKey(data.key)) throw new Error("unknown-prompt");
     const { getSql } = await import("../../db.ts");
-    const { messagesFromStored } = await import("../call-log-view.ts");
     const db = await getSql();
-    const rows = await db.query<Record<string, unknown>>("select * from brain_log where id = $1", [data.id]);
-    const row = asJson(rows[0] ?? null) as Record<string, unknown> | null;
-    if (!row) return null;
-    const rawRows = await db.query<{ input: unknown }>("select input from brain_log_raw where log_id = $1", [data.id]);
-    const storedMessages = messagesFromStored(rawRows[0]?.input);
-    const fallbackMessages =
-      storedMessages ??
-      [
-        row.input_system ? { role: "system", content: String(row.input_system) } : null,
-        row.input_user ? { role: "user", content: String(row.input_user) } : null,
-      ].filter((item): item is { role: string; content: string } => Boolean(item));
-    const output = row.output_text ? String(row.output_text) : row.raw ? String(row.raw) : "";
-    return {
-      ...row,
-      assembled: fallbackMessages,
-      output,
-      stored: Boolean(fallbackMessages.length),
-      warnings: fallbackMessages.length ? [] : ["这一条没有存下发给模型的原文"],
-    };
+    const rows = await db.query<{ id: number }>(
+      "select id from brain_log where step like $1 order by id desc limit 1",
+      [`${data.key}:%`],
+    );
+    return rows[0] ? callLogById(Number(rows[0].id)) : null;
   });
 
 export const brainGetDbSize = createServerFn({ method: "GET" }).handler(async () => {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { brainPreviewPrompt } from "@/lib/lover/brain/api";
+import { brainLastPromptCall, brainPreviewPrompt } from "@/lib/lover/brain/api";
 import { isPromptKey } from "@/lib/lover/brain/prompts/catalog";
 import { parsePromptBody, serializeDoc, type PromptDoc } from "@/lib/lover/brain/prompts/doc";
 import type { PromptRole } from "@/lib/lover/brain/prompts/templates";
@@ -58,7 +58,18 @@ type Preview = {
   cacheKey: string;
 };
 
+type LastCall = {
+  at: number;
+  step: string;
+  messages: Array<{ role: string; content: string }>;
+  output: string;
+};
+
 const ROLES: PromptRole[] = ["system", "user", "assistant"];
+
+function messagesText(messages: Array<{ role: string; content: string }>): string {
+  return messages.map((message) => `${message.role}\n${message.content}`).join("\n\n");
+}
 
 function tokensIn(text: string): string[] {
   return [...text.matchAll(/\{([a-z][a-z0-9_]*)\}/g)].map((match) => match[1] ?? "");
@@ -106,6 +117,8 @@ export function PromptStepEditor({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [last, setLast] = useState<LastCall | null | undefined>(undefined);
+  const [showLast, setShowLast] = useState(false);
   const variant = doc?.variants.find((row) => row.id === variantId) ?? doc?.variants[0];
   const dirty = draft !== item.body;
   const versions = (item.versions ?? []).filter((row) => row.hash !== item.hash).slice(0, 5);
@@ -163,6 +176,26 @@ export function PromptStepEditor({
       return null;
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadLast() {
+    setShowLast(true);
+    setLast(undefined);
+    try {
+      const row = (await brainLastPromptCall({ data: { key: item.key } })) as Record<string, unknown> | null;
+      setLast(
+        row
+          ? {
+              at: Number(row.at) || 0,
+              step: String(row.step ?? ""),
+              messages: (row.assembled as LastCall["messages"]) ?? [],
+              output: String(row.output ?? ""),
+            }
+          : null,
+      );
+    } catch {
+      setLast(null);
     }
   }
 
@@ -370,7 +403,33 @@ export function PromptStepEditor({
           >
             预览实际发送内容
           </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => void loadLast()}>
+            上一次真的发出去的
+          </Button>
         </div>
+
+        {showLast ? (
+          <div className="rounded-md bg-bg px-3 py-3">
+            <p className="text-xs text-subtle">
+              {last === undefined
+                ? "在读…"
+                : last === null
+                  ? "还没有这一步的记录。"
+                  : `${new Date(last.at).toLocaleString("zh-CN", { hour12: false })} · ${last.step} · 发给模型的原文，一个字没改`}
+            </p>
+            {last ? (
+              <>
+                <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-fg">
+                  {messagesText(last.messages) || "（这一条没有存下原文）"}
+                </pre>
+                <p className="mt-3 text-xs text-subtle">模型回的</p>
+                <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-fg">
+                  {last.output || "（空）"}
+                </pre>
+              </>
+            ) : null}
+          </div>
+        ) : null}
 
         {showSend ? (
           <div className="rounded-md bg-bg px-3 py-3">
@@ -391,7 +450,7 @@ export function PromptStepEditor({
               </button>
             </div>
             <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-fg">
-              {(preview?.messages ?? []).map((message) => `${message.role}\n${message.content}`).join("\n\n") || "（空）"}
+              {messagesText(preview?.messages ?? []) || "（空）"}
             </pre>
           </div>
         ) : null}
