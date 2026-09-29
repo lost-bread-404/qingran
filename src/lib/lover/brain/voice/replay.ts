@@ -5,7 +5,6 @@ import { lockedProfile, voiceInjectFromProfile, type Profile } from "../../types
 import { asModelInput, callModel, type CallModelResult } from "../llm.ts";
 import { now } from "../clock.ts";
 import type { Effort } from "../config.ts";
-import { dossierTextForModel } from "../dossier.ts";
 import { resolveTz } from "../tz.ts";
 import { identityBlock } from "../life.ts";
 import { mindForReply, timeFacts, todayText } from "../heart.ts";
@@ -55,9 +54,9 @@ export async function replayMessages(opts: {
   const brainOn = opts.profile.brainOn;
   const meta = await getMeta();
   const tz = resolveTz(meta.timeZone);
-  const [history, dossier, voicePrompt, mind, today, clockText] = await Promise.all([
+  const story = inject.dossier && brainOn ? opts.profile.storyline.trim() : "";
+  const [history, voicePrompt, mind, today, clockText] = await Promise.all([
     listHistoryWindow(user.id, inject.history, user.createdAt),
-    inject.dossier && brainOn ? dossierTextForModel() : Promise.resolve(""),
     loadPrompt("voice"),
     inject.moment && brainOn ? mindForReply(nowMs) : Promise.resolve(""),
     inject.moment && brainOn ? todayText(nowMs, tz) : Promise.resolve(""),
@@ -66,7 +65,7 @@ export async function replayMessages(opts: {
   const messages = buildVoiceMessages({
     charter: opts.charter,
     identity: identityBlock(opts.profile.identity),
-    dossier,
+    story,
     mind,
     today,
     intimate: opts.profile.modes.find((m) => m.id === opts.profile.mode)?.intimate ? opts.profile.intimateNotes : "",

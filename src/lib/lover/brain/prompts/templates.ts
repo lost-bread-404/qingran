@@ -89,7 +89,7 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
     "最近对话，条数由设置 → 高级 → 指令里的「上下文长度」决定（0–80，默认 20）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息。",
   ),
   ph("clock", "当前时间，用资料里的时区，带时间段；她上一次说话距现在多久；今天她来找他的时段。放在对话之后、她这一句之前。"),
-  ph("dossier", "「他记得的」全文（夜里整理写的那一份）。空就整块删掉。关掉心思时不放。"),
+  ph("story", "「我们的故事」全文（人设页里她写的那一份，原样）。空就整块删掉。"),
   ph("now", "打算单上现在在做的那一件：第一件到了时间的（没写时间就是现在）。做成了心思会拿掉，下一件接上。没有就整块删掉，他做当前模式里本来在做的事。整张打算单不给回复看。关掉心思时不放。"),
   ph("today", "今天到现在的一整段（她的事、他说过编过的关于自己的事、还欠着的事），她沉默时心思重写。空就整块删掉。关掉心思时不放。"),
 ];
@@ -97,8 +97,8 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
 /** Everything he knows before he opens his mouth; the same for a reply and for a message he starts himself. */
 const VOICE_CONTEXT: PromptMessage[] = [
   system(VOICE_SYSTEM),
-  system(`你记得的：
-{dossier}`),
+  system(`我们的故事（里面的清然就是你，Rosie 就是我）：
+{story}`),
   system(`你心里现在要做成的事：
 {now}`),
   system(`今天到现在：

@@ -1,5 +1,4 @@
 import { resolveVoiceChat, voiceSafetyPick, type VoiceModelPick } from "../config.ts";
-import { dossierTextForModel } from "../dossier.ts";
 import { mindForReply, timeFacts, todayText } from "../heart.ts";
 import { identityBlock } from "../life.ts";
 import { callModel } from "../llm.ts";
@@ -34,9 +33,9 @@ export async function speakFirst(input: {
   const mode = await effectiveMode(input.nowMs, input.timeZone, ids);
   const { profile } = resolveTalkProfile(undefined, saved, mode);
   const inject = voiceInjectFromProfile(profile);
-  const [history, dossier, mind, today, clock, voicePrompt] = await Promise.all([
+  const story = inject.dossier ? profile.storyline.trim() : "";
+  const [history, mind, today, clock, voicePrompt] = await Promise.all([
     listHistoryWindow(null, inject.history),
-    inject.dossier ? dossierTextForModel() : Promise.resolve(""),
     inject.moment ? mindForReply(input.nowMs) : Promise.resolve(""),
     inject.moment ? todayText(input.nowMs, input.timeZone) : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.nowMs),
@@ -46,7 +45,7 @@ export async function speakFirst(input: {
   const parts: VoicePackParts = {
     charter: profile.systemPrompt,
     identity: identityBlock(profile.identity),
-    dossier,
+    story,
     mind,
     today,
     intimate: modeDef?.intimate ? profile.intimateNotes.trim() : "",

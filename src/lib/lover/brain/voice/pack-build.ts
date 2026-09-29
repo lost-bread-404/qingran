@@ -7,14 +7,14 @@ import { NEUTRAL_PERSONA } from "../../types.ts";
 
 /**
  * What the reply is given (docs/brain.md「回复看到的」):
- * persona (+ identity + current mode) → 你记得的 → 你心里现在要做成的事 → 今天到现在 → intimate notes → recent talk → 现在是… → her line.
+ * persona (+ identity + current mode) → 我们的故事 → 你心里现在要做成的事 → 今天到现在 → intimate notes → recent talk → 现在是… → her line.
  * A block whose value is empty is left out.
  */
 export type VoicePackParts = {
   charter: string;
   identity: string;
-  /** 他记得的, whole text ("" = not injected). */
-  dossier: string;
+  /** 我们的故事: the story she wrote in the persona page, whole ("" = not injected). */
+  story: string;
   /** The one item from his plan list the reply works on now ("" = nothing / not injected). */
   mind: string;
   /** Today's running text ("" = not injected). */
@@ -32,14 +32,14 @@ export type VoicePackParts = {
   personaAck: string;
 };
 
-/** Retries when the model returns nothing (usually a refusal): drop what he is doing now and today, then the memory, then almost everything. */
-export type VoiceStrip = "none" | "moment" | "dossier" | "thin";
-export const VOICE_STRIPS: VoiceStrip[] = ["none", "moment", "dossier", "thin"];
+/** Retries when the model returns nothing (usually a refusal): drop what he is doing now and today, then our story, then almost everything. */
+export type VoiceStrip = "none" | "moment" | "story" | "thin";
+export const VOICE_STRIPS: VoiceStrip[] = ["none", "moment", "story", "thin"];
 export const VOICE_THIN_HISTORY = 8;
 
 export function stripLabel(strip: VoiceStrip): string {
   if (strip === "moment") return "去掉了现在要做成的事和今天";
-  if (strip === "dossier") return "去掉了现在要做成的事、今天和记得的";
+  if (strip === "story") return "去掉了现在要做成的事、今天和我们的故事";
   if (strip === "thin") return "只保留人设、最近 8 条对话和这一句";
   return "未裁剪";
 }
@@ -80,7 +80,7 @@ export function voiceHistoryMessages(
 }
 
 /** Tokens whose block disappears when their value is empty. */
-const OPTIONAL = ["dossier", "now", "today"] as const;
+const OPTIONAL = ["story", "now", "today"] as const;
 
 function optionalTokens(content: string): string[] {
   return OPTIONAL.filter((token) => content.includes(`{${token}}`));
@@ -92,7 +92,7 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
   const vars: Record<string, string> = {
     system_prompt: personaInSystem ? charter : "",
     identity_block: parts.identity.trim() ? `${parts.identity.trim()}\n` : "",
-    dossier: strip === "none" || strip === "moment" ? parts.dossier.trim() : "",
+    story: strip === "none" || strip === "moment" ? parts.story.trim() : "",
     now: strip === "none" ? parts.mind.trim() : "",
     today: strip === "none" ? parts.today.trim() : "",
     clock: parts.clock,
@@ -159,7 +159,7 @@ export function systemCharter(charter: string, template?: string): string {
 export type VoiceInputChars = {
   system: number;
   moment: number;
-  dossier: number;
+  story: number;
   history: number;
   user: number;
 };
@@ -169,23 +169,23 @@ export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
   return {
     system: systemCharter(parts.charter, parts.voiceTemplate).length,
     moment: parts.mind.length + parts.today.length,
-    dossier: parts.dossier.length,
+    story: parts.story.length,
     history: history.reduce((n, m) => n + m.content.length, 0),
     user: parts.userText.length,
   };
 }
 
 export function formatVoiceInputCharsLine(c: VoiceInputChars): string {
-  return `chars system=${c.system} moment=${c.moment} dossier=${c.dossier} history=${c.history} user=${c.user}`;
+  return `chars system=${c.system} moment=${c.moment} story=${c.story} history=${c.history} user=${c.user}`;
 }
 
 export function parseVoiceInputCharsLine(note: string | null | undefined): VoiceInputChars | null {
-  const next = (note ?? "").match(/chars system=(\d+) moment=(\d+) dossier=(\d+) history=(\d+) user=(\d+)/);
+  const next = (note ?? "").match(/chars system=(\d+) moment=(\d+) (?:story|dossier)=(\d+) history=(\d+) user=(\d+)/);
   if (!next) return null;
   return {
     system: Number(next[1]),
     moment: Number(next[2]),
-    dossier: Number(next[3]),
+    story: Number(next[3]),
     history: Number(next[4]),
     user: Number(next[5]),
   };

@@ -27,9 +27,9 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
   const tz = resolveTz(meta.timeZone);
   const inject = voiceInjectFromProfile(profile);
   const brainOn = profile.brainOn;
-  const [history, dossier, mind, today, clock] = await Promise.all([
+  const story = inject.dossier && brainOn ? profile.storyline.trim() : "";
+  const [history, mind, today, clock] = await Promise.all([
     listHistoryWindow(null, inject.history),
-    inject.dossier && brainOn ? dossierTextForModel() : Promise.resolve(""),
     inject.moment && brainOn ? mindForReply(at) : Promise.resolve(""),
     inject.moment && brainOn ? todayText(at, tz) : Promise.resolve(""),
     timeFacts(at, tz, at),
@@ -37,7 +37,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
   const messages = buildVoiceMessages({
     charter,
     identity: identityBlock(profile.identity),
-    dossier,
+    story,
     mind,
     today,
     intimate: "",
@@ -56,7 +56,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
       .join("\n") || "（没有对话）";
   return {
     slots: {
-      dossier,
+      story,
       now: mind,
       today,
       system_prompt: charter,

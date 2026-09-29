@@ -5,7 +5,6 @@ import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getMessage, listHistoryWindow, upsertMessage } from "../store.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadPrompt } from "../prompts/store.ts";
-import { dossierTextForModel } from "../dossier.ts";
 import { identityBlock } from "../life.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
 
@@ -60,10 +59,11 @@ export async function loadHotContext(input: {
   const inject = voiceInjectFromProfile(input.profile);
   inject.moment = inject.moment && brainOn;
   inject.dossier = inject.dossier && brainOn;
-  const [history, inner, dossier, mind, today, clockText, voicePrompt] = await Promise.all([
+  // What he remembers of the two of them is the story she wrote, as she wrote it.
+  const story = inject.dossier ? input.profile.storyline.trim() : "";
+  const [history, inner, mind, today, clockText, voicePrompt] = await Promise.all([
     listHistoryWindow(input.userMsgId, inject.history),
     getInner(),
-    inject.dossier ? dossierTextForModel() : Promise.resolve(""),
     inject.moment ? mindForReply(input.nowMs) : Promise.resolve(""),
     inject.moment ? todayText(input.nowMs, input.timeZone) : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
@@ -76,7 +76,7 @@ export async function loadHotContext(input: {
   const parts: VoicePackParts = {
     charter,
     identity: identityBlock(input.profile.identity),
-    dossier,
+    story,
     mind,
     today,
     intimate,
@@ -90,7 +90,7 @@ export async function loadHotContext(input: {
   };
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(charter.trim() || NEUTRAL_PERSONA),
-    rememberBlock("voice_longterm", dossier),
+    rememberBlock("voice_longterm", story),
   ]);
   const historyIds = history.map((m) => m.id);
   const mindAgeMs = inner.updatedAt ? input.nowMs - inner.updatedAt : 0;

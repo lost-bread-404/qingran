@@ -710,7 +710,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               onKeepMine={() => persistProfile({ systemPrompt: draft.trim() })}
             />
           ) : null}
-          <p className="mt-2 text-xs text-subtle">「我记得的」会另外附上，不用写进这段。其他步骤的指令在「指令」页。</p>
+          <p className="mt-2 text-xs text-subtle">「故事线」会另外附上，不用写进这段。其他步骤的指令在「指令」页。</p>
             </label>
             <label className="flex flex-col gap-2">
               <span className="text-sm">亲密设定</span>
@@ -766,7 +766,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 className="min-h-64 resize-none leading-relaxed"
                 placeholder="你们之前发生过的事"
               />
-              <p className="text-xs text-subtle">只给他的心思和记忆整理看，回复本身看不到。他从这里知道自己是谁、你们之间有过什么。</p>
+              <p className="text-xs text-subtle">回复、心思和记忆整理都看得到。他从这里知道自己是谁、你们之间有过什么。</p>
             </label>
           </div>
         </div>
@@ -810,7 +810,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                     persistProfile({ injectLongterm: next });
                   }}
                 />
-                <span className="text-sm">他记得的</span>
+                <span className="text-sm">故事线</span>
               </label>
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
@@ -1352,7 +1352,7 @@ function logClock(at: number): string {
 function logInputChars(row: BrainLogRow): string {
   const split = parseVoiceInputCharsLine(row.note);
   const parts = split
-    ? `system ${split.system} · 心里 ${split.moment} · 记得的 ${split.dossier} · 对话历史 ${split.history} · 用户消息 ${split.user}`
+    ? `system ${split.system} · 心里 ${split.moment} · 故事 ${split.story} · 对话历史 ${split.history} · 用户消息 ${split.user}`
     : "";
   if (parts && row.inputChars != null) return `${row.inputChars}（${parts}）`;
   if (parts) return parts;
