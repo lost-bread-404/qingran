@@ -12,7 +12,7 @@ import {
   } from "./http.ts";
 import { type HearingResult } from "./schema.ts";
 import { hashSplit } from "./split.ts";
-import { transcribeWithXai } from "./xai.ts";
+import { transcribeWithXai, xaiResult, type SttWord } from "./xai.ts";
 import { chooseHearing, emptyEngineUse, engineErrorDetailFromOutcome, logHearingTurn } from "./select.ts";
 import { deleteHearingWav, putHearingWav, readHearingWav } from "./blob.ts";
 import { isNoiseDisagreement, shouldDropAsNoise } from "./noise.ts";
@@ -127,7 +127,9 @@ export type RunHearingInput = {
   vadFloor?: number;
   hearToTriggerMs?: number;
   prerollPeakRms?: number;
-  liveTextSource?: "webspeech" | "none";
+  liveTextSource?: "webspeech" | "apple" | "none";
+  /** What xAI heard while she was still speaking (the phone streams her voice); the clip is then not sent to xAI again. */
+  streamed?: { text: string; words: SttWord[] };
   predictedTags?: AcousticTags;
   contextBefore?: { role: string; text: string }[];
   systemPrompt?: string;
@@ -234,15 +236,16 @@ export async function hearClip(data: RunHearingInput): Promise<RunHearingOutput>
   const extraKeyterms = hot.keyterms;
   const confusionRules = hot.rules;
   const sttStart = Date.now();
-  const xaiPromise = transcribeWithXai({
-    audioBase64: data.audioBase64,
-    mimeType: data.mimeType,
-    prompt: data.prompt,
-    extraKeyterms,
-    keyterms: data.keyterms,
-  });
   // xAI only (audio LLMs refuse intimate audio; requirements 第 7 节). No second engine to wait for.
-  const xai = await xaiPromise;
+  const xai = data.streamed
+    ? xaiResult(data.streamed.text, data.streamed.words, 0)
+    : await transcribeWithXai({
+        audioBase64: data.audioBase64,
+        mimeType: data.mimeType,
+        prompt: data.prompt,
+        extraKeyterms,
+        keyterms: data.keyterms,
+      });
   const outcome = null as AdapterOutcome | null;
 
   const picked = chooseHearing({ provider, outcome, xai });
