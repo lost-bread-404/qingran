@@ -11,6 +11,8 @@ export type NativeBridge = {
   interruptNativeCall?: () => void;
   /** Run a turn the page started (edit, re-ask, typed line) inside the shell's call. Shells built before 2026-09-28 do not have it. */
   talkNativeCall?: (turn: NativeTalkTurn) => void;
+  /** Speak one of his lines again (she pressed play) inside the shell's call. Shells built before 2026-10-01 do not have it. */
+  playNativeCall?: (clip: NativeClip) => void;
   keepAwake?: (on: boolean) => void;
 };
 
@@ -102,6 +104,25 @@ export function nativeTalkTurn(turn: NativeTalkTurn): boolean {
   if (!bridge?.talkNativeCall) return false;
   try {
     bridge.talkNativeCall(turn);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type NativeClip = { audio: string; mime: string };
+
+/**
+ * During the shell's call she pressed play on one of his lines: the shell stops what was playing and speaks it, mic
+ * deaf meanwhile. With null, only says whether the shell can. False when there is no shell call (or an old shell).
+ */
+export function nativePlayClip(clip: NativeClip | null): boolean {
+  if (nativeCallPlan().callStart !== "startNativeCall") return false;
+  const bridge = typeof window === "undefined" ? undefined : window.QingranNative;
+  if (!bridge?.playNativeCall) return false;
+  if (!clip) return true;
+  try {
+    bridge.playNativeCall(clip);
     return true;
   } catch {
     return false;

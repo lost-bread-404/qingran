@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useCall } from "@/hooks/use-call";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { useVoiceInput } from "@/hooks/use-voice-input";
-import { base64ToBytes, concatBytes } from "@/lib/lover/audio";
+import { base64ToBytes, blobToBase64, concatBytes } from "@/lib/lover/audio";
 import { collapseReplyVariants, dropIncompleteReplies, skipsQingran, unselectedReplyIds } from "@/lib/lover/pair-messages";
 import { planInterruptQingran } from "@/lib/lover/interrupt";
 import {
@@ -26,6 +26,7 @@ import {
   unlockPlayback,
   whenPlaybackIdle,
   isPlaybackActive,
+  isRawPcm,
 } from "@/lib/lover/playback";
 import {
   appendRoomMessage,
@@ -36,7 +37,7 @@ import {
   updateRoomMessage,
 } from "@/lib/lover/room";
 import { registerNativePush } from "@/lib/lover/push-client";
-import { nativeCallPlan, nativeInterruptCall, nativeTalkTurn } from "@/lib/lover/native-shell";
+import { nativeCallPlan, nativeInterruptCall, nativePlayClip, nativeTalkTurn } from "@/lib/lover/native-shell";
 import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { buildHearingContext, extractContextKeyterms, lastDialogueTurns, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
@@ -355,9 +356,37 @@ export function VoiceRoom() {
     }, POST_QINGRAN_MS);
   }
 
+  /** His voice for one line: the clip already heard if it covers the line, otherwise spoken again. */
+  const clipFor = useCallback(async (id: string, speech: string) => {
+    let clip = spokenCacheRef.current.get(id);
+    if (clip && !streamAudioCovers([clip.bytes], stripSpeechTags(speech))) {
+      spokenCacheRef.current.delete(id);
+      clip = undefined;
+    }
+    if (clip) return clip;
+    const spoken = await speakAsLover({
+      data: { text: speech, speed: profileRef.current.voiceSpeed },
+    });
+    if (!spoken.ok) return null;
+    clip = { bytes: base64ToBytes(spoken.audioBase64), mimeType: spoken.mimeType };
+    spokenCacheRef.current.set(id, clip);
+    return clip;
+  }, []);
+
   const playFull = useCallback(async (id: string, speech: string, turn: number) => {
-    // During the iPhone shell's call the shell owns the speaker and the mic; a clip played here would be heard as her.
-    if (callActiveRef.current && nativeCallPlan().callStart === "startNativeCall") return;
+    // During the iPhone shell's call the shell owns the speaker and the mic: a clip played here would be heard as her,
+    // so the line is handed to the shell to speak. Shells built before 2026-10-01 cannot, and nothing plays.
+    if (callActiveRef.current && nativeCallPlan().callStart === "startNativeCall") {
+      if (profileRef.current.muted) return;
+      if (!nativePlayClip(null)) {
+        setBanner("电话里重播要重新用 Xcode 装一次；挂断后可以直接点。");
+        return;
+      }
+      const clip = await clipFor(id, speech);
+      if (!clip || !callActiveRef.current || !isRawPcm(clip.bytes, clip.mimeType)) return;
+      nativePlayClip({ audio: await blobToBase64(new Blob([clip.bytes])), mime: clip.mimeType });
+      return;
+    }
     if (profileRef.current.muted) {
       resumeCallListen(turn);
       return;
@@ -370,19 +399,8 @@ export function VoiceRoom() {
     if (callActiveRef.current) deafenRef.current();
     let released = false;
     try {
-      let clip = spokenCacheRef.current.get(id);
-      if (clip && !streamAudioCovers([clip.bytes], stripSpeechTags(speech))) {
-        spokenCacheRef.current.delete(id);
-        clip = undefined;
-      }
-      if (!clip) {
-        const spoken = await speakAsLover({
-          data: { text: speech, speed: profileRef.current.voiceSpeed },
-        });
-        if (!spoken.ok || turn !== turnRef.current) return;
-        clip = { bytes: base64ToBytes(spoken.audioBase64), mimeType: spoken.mimeType };
-        spokenCacheRef.current.set(id, clip);
-      }
+      const clip = await clipFor(id, speech);
+      if (!clip || turn !== turnRef.current) return;
       const ok = await playMp3Bytes(clip.bytes, clip.mimeType);
       if (turn !== turnRef.current) return;
       if (speakingIdRef.current === id) speakingIdRef.current = null;
@@ -397,7 +415,7 @@ export function VoiceRoom() {
         resumeCallListen(turn);
       }
     }
-  }, []);
+  }, [clipFor]);
 
   const cycleVoiceSpeed = () => {
     const next = nextVoiceRate(profileRef.current.voiceSpeed);
