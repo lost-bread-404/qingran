@@ -11,6 +11,7 @@ export type TurnTraceInput = {
   turnSeq?: number;
   /** The moments that came back to him for this line, and how well they fit. */
   retrieve?: {
+    by?: string;
     selected?: string[];
     scores?: Array<{ id: number; score: number }>;
     texts?: string[];

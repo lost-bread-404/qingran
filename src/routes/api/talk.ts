@@ -213,6 +213,7 @@ export const Route = createFileRoute("/api/talk")({
                 userMsgId,
                 turnSeq: userCreatedAt,
                 retrieve: {
+                  by: ctx.recallBy,
                   selected: ctx.recalled.map((m) => String(m.id)),
                   scores: ctx.refs.queryScores,
                   texts: ctx.recalled.map((m) => m.body.slice(0, 200)),

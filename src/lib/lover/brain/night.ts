@@ -13,7 +13,7 @@ import { readIdentity } from "./life-store.ts";
 import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
 import { dayClockMs, dayWindow, saveDayTimeline } from "./heart.ts";
-import { addMemories, getMark, memoriesWithIds, recall, setMark, syncStory, updateMemory, type NewMemory } from "./memory.ts";
+import { addMemories, embedMissing, getMark, memoriesWithIds, recall, setMark, syncStory, updateMemory, type NewMemory } from "./memory.ts";
 
 /**
  * The night pass (docs/brain.md v6): once for each day that has ended, fold it into his memory.
@@ -126,7 +126,7 @@ export async function runNight(day: string, jobId?: string, complete: typeof cal
   const conversation = nightConversation(rows, tz);
   // The older moments this day is most about: the night pass may mark some of them as no longer so.
   const herLines = rows.filter((r) => r.role === "user").map((r) => modelFacingText(r.body)).join("\n");
-  const related = (await recall(herLines.slice(-6000), window.to, { top: NIGHT_RELATED, minFit: 4, keepShare: 0, withThread: 0 })).memories;
+  const related = (await recall(herLines.slice(-6000), window.to, { top: NIGHT_RELATED, minFit: 4, keepShare: 0, withThread: 0, minCos: 0.35 })).memories;
   const loaded = await loadPrompt("editor");
   const messages = renderVariant(parsePromptBody("editor", loaded.body), "main", {
     system_prompt: charter,
@@ -189,6 +189,7 @@ export async function runNight(day: string, jobId?: string, complete: typeof cal
   if (nextUs) await publishMemory(nextUs, "night", Math.min(window.to, at), { day, changes: str(json.changes).slice(0, 1000) });
   await saveDayTimeline(day, str(json.timeline), at);
   await setMark(`day:${day}`, "done", at);
+  await embedMissing().catch(() => 0);
   await appendInnerLog({ turnSeq: 0, data: { kind: "night", day, output: result.json }, model: result.model, ms: result.ms });
   return { ok: true };
 }
@@ -215,6 +216,7 @@ export async function enqueueMemoryWork(at = now()): Promise<string | null> {
   const profile = lockedProfile(await getProfileData());
   if (!profile.brainOn) return null;
   await syncStory(profile.storyline);
+  await embedMissing().catch(() => 0);
   const day = await nextNightDay(at);
   if (!day) return null;
   await enqueue("night", `memory:${day}`, { day });

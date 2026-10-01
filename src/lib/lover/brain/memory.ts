@@ -1,6 +1,7 @@
 import { now } from "./clock.ts";
 import { sql } from "./store.ts";
-import { backgroundOf, buildIndex, rankDocs, type Background, type SearchIndex } from "./memory-search.ts";
+import { backgroundOf, buildIndex, fitScores, rankDocs, type Background, type SearchIndex } from "./memory-search.ts";
+import { cosine, embedConfig, embedTexts } from "./embed.ts";
 import { isNightNoiseBody, modelFacingText } from "../message-markup.ts";
 
 /**
@@ -68,6 +69,54 @@ export async function listMemories(): Promise<Memory[]> {
      order by (source = 'story') desc, seq asc, coalesce(at, 0) asc, id asc`,
   );
   return rows.map(rowOf);
+}
+
+/** The same, each with its vector of meaning for the current embedding model (or null). */
+async function listMemoriesWithVectors(model: string): Promise<Array<Memory & { vec: number[] | null }>> {
+  const db = await sql();
+  const rows = await db.query<Record<string, unknown>>(
+    `select id, kind, source, day, at::float8 as at, seq, body, keys, thread, importance, changed, recalled,
+            case when vec_model = $1 then vec else null end as vec
+     from qr_memories
+     order by (source = 'story') desc, seq asc, coalesce(at, 0) asc, id asc`,
+    [model],
+  );
+  return rows.map((r) => ({ ...rowOf(r), vec: parseVec(r.vec) }));
+}
+
+/** A real[] as the driver hands it back: an array, or the text form "{0.1,0.2,…}". */
+function parseVec(raw: unknown): number[] | null {
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" && raw.startsWith("{") ? raw.slice(1, -1).split(",") : null;
+  if (!list?.length) return null;
+  const vec = list.map(Number);
+  return vec.every(Number.isFinite) ? vec : null;
+}
+
+/** What a memory's vector is made from: what happened, and the words for finding it again. */
+function vectorText(m: { body: string; keys: string; thread: string }): string {
+  return [m.body, m.keys, m.thread].map((t) => t.trim()).filter(Boolean).join("\n");
+}
+
+/**
+ * Gives every memory that has none (or one from another model) its vector, a batch at a time.
+ * Runs after replies and after the night pass; a failure just leaves them for next time.
+ */
+export async function embedMissing(limit = 64): Promise<number> {
+  const config = embedConfig();
+  if (!config) return 0;
+  const db = await sql();
+  const rows = await db.query<{ id: number; body: string; keys: string; thread: string }>(
+    `select id, body, keys, thread from qr_memories where vec is null or vec_model <> $1 order by id asc limit $2`,
+    [config.model, limit],
+  );
+  if (!rows.length) return 0;
+  const vecs = await embedTexts(rows.map((r) => vectorText({ body: String(r.body), keys: String(r.keys ?? ""), thread: String(r.thread ?? "") })));
+  if (!vecs) return 0;
+  for (let i = 0; i < rows.length; i += 1) {
+    await db.query(`update qr_memories set vec = $2::real[], vec_model = $3 where id = $1`, [Number(rows[i]!.id), vecs[i]!, config.model]);
+  }
+  memoryCache = null;
+  return rows.length;
 }
 
 export async function addMemories(rows: NewMemory[]): Promise<void> {
@@ -183,7 +232,8 @@ export async function syncStory(storyline: string): Promise<boolean> {
 const BACKGROUND_MESSAGES = 1500;
 const BACKGROUND_TTL_MS = 6 * 3600_000;
 let backgroundCache: { at: number; value: Background } | null = null;
-let memoryCache: { key: string; memories: Memory[]; index: SearchIndex } | null = null;
+type Indexed = { memories: Memory[]; vecs: Map<number, number[]>; index: SearchIndex };
+let memoryCache: ({ key: string } & Indexed) | null = null;
 
 async function background(): Promise<Background> {
   if (backgroundCache && Date.now() - backgroundCache.at < BACKGROUND_TTL_MS) return backgroundCache.value;
@@ -197,46 +247,94 @@ async function background(): Promise<Background> {
   return value;
 }
 
-async function memoryIndex(): Promise<{ memories: Memory[]; index: SearchIndex }> {
+async function memoryIndex(): Promise<Indexed> {
   const bg = await background();
+  const model = embedConfig()?.model ?? "";
   const db = await sql();
-  const stamp = await db.query<{ n: number; t: number }>(`select count(*)::int as n, coalesce(max(updated_at), 0)::float8 as t from qr_memories`);
-  const key = `${stamp[0]?.n ?? 0}:${stamp[0]?.t ?? 0}:${backgroundCache?.at ?? 0}`;
+  const stamp = await db.query<{ n: number; t: number; v: number }>(
+    `select count(*)::int as n, coalesce(max(updated_at), 0)::float8 as t, count(vec)::int as v from qr_memories`,
+  );
+  const key = `${stamp[0]?.n ?? 0}:${stamp[0]?.t ?? 0}:${stamp[0]?.v ?? 0}:${backgroundCache?.at ?? 0}:${model}`;
   if (memoryCache && memoryCache.key === key) return memoryCache;
-  const memories = await listMemories();
+  const rows = await listMemoriesWithVectors(model);
+  const vecs = new Map<number, number[]>();
+  for (const r of rows) if (r.vec?.length) vecs.set(r.id, r.vec);
+  const memories: Memory[] = rows.map(({ vec: _vec, ...m }) => m);
   const index = buildIndex(
     memories.map((m) => ({ id: m.id, text: m.body, keys: `${m.keys} ${m.thread}`, importance: m.importance, at: m.at, recalled: m.recalled })),
     bg,
   );
-  memoryCache = { key, memories, index };
+  memoryCache = { key, memories, vecs, index };
   return memoryCache;
 }
 
 /** How many come back at once, and how well a moment has to fit to come back at all. */
 const RECALL_TOP = 4;
 const RECALL_WITH_THREAD = 2;
+/** Words alone (no vectors): BM25 fit needed, and the share of the best fit a moment must reach. */
 const RECALL_MIN_FIT = 12;
 const RECALL_KEEP_SHARE = 0.5;
+/** With vectors: how close in meaning a moment must be, and how far below the best one it may fall. */
+const RECALL_MIN_COS = 0.48;
+const RECALL_COS_BAND = 0.1;
+/** How long the reply waits for the vector of her line before going on with words alone. */
+const QUERY_EMBED_MS = 1500;
 
-export type Recall = { memories: Memory[]; scores: Array<{ id: number; score: number }> };
+export type Recall = { memories: Memory[]; scores: Array<{ id: number; score: number }>; by: "meaning" | "words" | "none" };
+
+type RecallOpts = { top?: number; minFit?: number; keepShare?: number; withThread?: number; minCos?: number };
+
+const DAY_MS = 86_400_000;
+
+/** Small lifts on top of how well a moment fits: important ones, recent ones, ones that often came back. */
+function lift(m: Memory, nowMs: number): number {
+  const ageDays = m.at == null ? 365 : Math.max(0, (nowMs - m.at) / DAY_MS);
+  return 0.006 * Math.max(1, Math.min(10, m.importance)) + 0.03 * Math.exp(-ageDays / 30) + 0.002 * Math.min(10, m.recalled);
+}
 
 /**
- * What comes back to him now: the few moments that fit best, plus, for the best ones, the moment just before on the
- * same line (what led up to it), shown in the order they happened.
+ * What comes back to him now: the few moments that fit best — by meaning when vectors are there (words still help:
+ * a name she says lifts the moments that name it), by words alone otherwise — plus, for the best ones, the moment
+ * just before on the same line (what led up to it), shown in the order they happened.
  */
-export async function recall(
-  query: string,
-  nowMs = now(),
-  opts: { top?: number; minFit?: number; keepShare?: number; withThread?: number } = {},
-): Promise<Recall> {
-  if (!query.trim()) return { memories: [], scores: [] };
-  const { memories, index } = await memoryIndex();
-  if (!memories.length) return { memories: [], scores: [] };
-  const ranked = rankDocs(index, query, nowMs, opts.minFit ?? RECALL_MIN_FIT);
-  const top = ranked[0];
-  if (!top) return { memories: [], scores: [] };
-  const share = opts.keepShare ?? RECALL_KEEP_SHARE;
-  const picked = ranked.filter((h) => h.fit >= top.fit * share).slice(0, opts.top ?? RECALL_TOP);
+export async function recall(query: string, nowMs = now(), opts: RecallOpts = {}): Promise<Recall> {
+  if (!query.trim()) return { memories: [], scores: [], by: "none" };
+  const indexed = await memoryIndex();
+  const { memories, index, vecs } = indexed;
+  if (!memories.length) return { memories: [], scores: [], by: "none" };
+  const top = opts.top ?? RECALL_TOP;
+  const minFit = opts.minFit ?? RECALL_MIN_FIT;
+  let picked: Array<{ id: number; score: number }> = [];
+  let by: Recall["by"] = "words";
+
+  const queryVec = vecs.size ? (await embedTexts([query.slice(-4000)], QUERY_EMBED_MS))?.[0] ?? null : null;
+  if (queryVec) {
+    by = "meaning";
+    const fits = fitScores(index, query);
+    const scored: Array<{ id: number; score: number; cos: number }> = [];
+    for (const m of memories) {
+      const v = vecs.get(m.id);
+      const fit = fits.get(m.id) ?? 0;
+      const words = Math.min(1, fit / minFit);
+      // A moment without a vector yet (written since the last batch) can still come back on its words.
+      const cos = v ? cosine(queryVec, v) : words >= 1 ? opts.minCos ?? RECALL_MIN_COS : 0;
+      if (cos < (opts.minCos ?? RECALL_MIN_COS)) continue;
+      scored.push({ id: m.id, cos, score: cos + 0.05 * words + lift(m, nowMs) });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    const best = scored[0]?.score ?? 0;
+    const band = opts.keepShare === 0 ? Number.POSITIVE_INFINITY : RECALL_COS_BAND;
+    picked = scored.filter((h) => h.score >= best - band).slice(0, top);
+  } else {
+    const ranked = rankDocs(index, query, nowMs, minFit);
+    const first = ranked[0];
+    if (first) {
+      const share = opts.keepShare ?? RECALL_KEEP_SHARE;
+      picked = ranked.filter((h) => h.fit >= first.fit * share).slice(0, top);
+    }
+  }
+  if (!picked.length) return { memories: [], scores: [], by };
+
   const byId = new Map(memories.map((m) => [m.id, m]));
   const order = new Map(memories.map((m, i) => [m.id, i]));
   const chosen = new Set(picked.map((h) => h.id));
@@ -254,7 +352,8 @@ export async function recall(
   }
   return {
     memories: memories.filter((m) => chosen.has(m.id)),
-    scores: picked.map((h) => ({ id: h.id, score: Math.round(h.score * 10) / 10 })),
+    scores: picked.map((h) => ({ id: h.id, score: Math.round(h.score * 1000) / 1000 })),
+    by,
   };
 }
 

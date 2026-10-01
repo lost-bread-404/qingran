@@ -30,7 +30,13 @@ const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里写的那一份。�
  */
 const VOICE_SYSTEM = `{identity_block}{system_prompt}
 
-你是清然，下面材料里的「清然」就是你。你用第一人称跟 Rosie 说话：「我」是你自己，「你」是 Rosie；Rosie 发来的话里，「我」是 Rosie 自己。
+你是清然，下面材料里的「清然」就是你。你用第一人称跟 Rosie 说话：「我」是你自己，「你」是 Rosie；Rosie 发来的话里，「我」是 Rosie 自己。`;
+
+/**
+ * Right before her line, where it is read last: the time, and how to talk. Placed after the talk so a long day of
+ * replies does not pull him into long ones; everything above it stays the same from turn to turn (cached).
+ */
+const VOICE_NOW = `现在是{clock}。
 像真人一样说话：每次一两个动作、一两句话，只写你此刻真的在做的事。Rosie 只是叫你、撒娇、应一声时，一个小动作或一两个字就够。`;
 
 const EDITOR_SYSTEM = `{identity_block}你是清然。现在是夜里，清然在把这一天收进心里。下面的【人设】就是清然。
@@ -40,7 +46,7 @@ const EDITOR_SYSTEM = `{identity_block}你是清然。现在是夜里，清然�
 {system_prompt}
 
 给出：
-- moments：这一天值得记住的几个时刻，平淡的一天一两个，大事多的一天可以七八个。一个时刻是一段连着的经历，不是一句话，也不是一整天。每个写：time（开始的时间 HH:MM）；body（两三句：发生了什么、两个人说了什么要紧的话、对清然和 Rosie 意味着什么；清然自己编过、说过的关于自己的事也算）；keys（这件事里的人、地方、东西、情绪，和别的说法，用空格隔开，以后换个说法也想得起来）；thread（它接着哪一条一直在继续的事，几个字，比如「林泽」「找实习」「项圈」，没有就空）；importance（1–10：吃饭喝水 1–2，第一次、吵架、和好、说出心里话 8–10）。亲密时的动作不写，说的话和它的意义写。
+- moments：这一天值得记住的几个时刻，平淡的一天一两个，大事多的一天可以七八个。一个时刻是一段连着的经历，不是一句话，也不是一整天。每个写：time（开始的时间 HH:MM）；body（两三句：发生了什么、对清然和 Rosie 意味着什么；Rosie 说过的要紧的话照抄一两句原话；清然自己编过、说过的关于自己的事也算）；keys（这件事里的人、地方、东西、情绪，和别的说法，用空格隔开，以后换个说法也想得起来）；thread（它接着哪一条一直在继续的事，几个字，比如「林泽」「找实习」「项圈」，没有就空）；importance（1–10：吃饭喝水 1–2，第一次、吵架、和好、说出心里话 8–10）。亲密时的动作不写，说的话和它的意义写。
 - insights：这一天让清然对 Rosie 新看懂的东西，0–2 条，写清楚是从哪件事看出来的；没有就空。看错了以后还能改，不写成定论。keys、importance 同上。
 - changed：【以前的回忆】里因为这一天不再是那样的，写它的 id 和后来怎么样了；没有就空。
 - us：重写「清然和 Rosie 现在」，不超过 {max_chars} 字：两个人现在的关系、Rosie 现在的生活和在意的事、身边的人、还欠着的事。只写现在成立的，某一天发生了什么不写在这里（那些在回忆里）。
@@ -86,15 +92,19 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   ),
 ];
 
-/** Everything he knows before he opens his mouth; the same for a reply and for a message he starts himself. */
+/**
+ * Everything he knows before he opens his mouth; the same for a reply and for a message he starts himself.
+ * What stays the same from turn to turn comes first (persona, 现在, the day's talk, which only grows), so the
+ * model's prompt cache keeps it; what changes with her line (what came back to him, the time) comes last, closest to it.
+ */
 const VOICE_CONTEXT: PromptMessage[] = [
   system(VOICE_SYSTEM),
   system(`清然和 Rosie 现在：
 {us}`),
+  system("{history_messages}"),
   system(`清然此刻想起来的事（让你懂 Rosie 在说什么，不用念出来）：
 {recall}`),
-  system("{history_messages}"),
-  system("现在是{clock}。"),
+  system(VOICE_NOW),
 ];
 
 export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {

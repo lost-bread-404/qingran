@@ -29,8 +29,9 @@ export type HotContext = {
   promptKey: string;
   promptHash: string;
   inject: VoiceInjectFlags;
-  /** The moments that came back to him for this line. */
+  /** The moments that came back to him for this line, and whether they were found by meaning or by words. */
   recalled: Memory[];
+  recallBy: string;
   intimateInjected: boolean;
   personaPlacement: "system" | "first_user";
 };
@@ -86,7 +87,7 @@ export async function loadHotContext(input: {
     loadPrompt("voice"),
     inject.memory ? inIntimateScene(input.nowMs) : Promise.resolve(false),
   ]);
-  const recalled = inject.memory ? await recall(recallQuery(input.text, history), input.nowMs) : { memories: [], scores: [] };
+  const recalled = inject.memory ? await recall(recallQuery(input.text, history), input.nowMs) : { memories: [], scores: [], by: "none" as const };
   const charter = input.profile.systemPrompt;
   const intimate = intimateScene ? input.profile.intimateNotes.trim() : "";
   const parts: VoicePackParts = {
@@ -140,6 +141,7 @@ export async function loadHotContext(input: {
     promptHash: voicePrompt.hash,
     inject,
     recalled: recalled.memories,
+    recallBy: recalled.by,
     intimateInjected: Boolean(intimate),
     personaPlacement: input.profile.personaPlacement,
   };

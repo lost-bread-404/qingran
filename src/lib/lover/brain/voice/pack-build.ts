@@ -7,7 +7,7 @@ import { NEUTRAL_PERSONA } from "../../types.ts";
 
 /**
  * What the reply is given (docs/brain.md「回复看到的」):
- * persona (+ identity) → 清然和 Rosie 现在 → 清然此刻想起来的事 → intimate notes (only in a scene) → today's talk → 现在是… → her line.
+ * persona (+ identity) → 清然和 Rosie 现在 → today's talk → intimate notes (only in a scene) → 清然此刻想起来的事 → 现在是… + how to talk → her line.
  * A block whose value is empty is left out.
  */
 export type VoicePackParts = {
@@ -116,13 +116,14 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
   });
 }
 
-/** Intimate notes sit just before the talk. */
+/** Intimate notes sit right after the talk, before what came back to him and her line (they come and go with the scene). */
 export function insertIntimateNotes<T extends { role: string; content: string }>(messages: T[], notes: string): T[] {
   const text = notes.trim();
   if (!text) return messages;
   const block = { role: "system", content: `清然在亲密时的样子：\n${text}` } as T;
-  const talk = messages.findIndex((message) => message.role !== "system");
-  const at = talk >= 0 ? talk : messages.length;
+  const recalled = messages.findIndex((message) => message.role === "system" && message.content.startsWith("清然此刻想起来的事"));
+  const clock = messages.findIndex((message) => message.role === "system" && message.content.startsWith("现在是"));
+  const at = recalled >= 0 ? recalled : clock >= 0 ? clock : Math.max(0, messages.length - 1);
   return [...messages.slice(0, at), block, ...messages.slice(at)];
 }
 
