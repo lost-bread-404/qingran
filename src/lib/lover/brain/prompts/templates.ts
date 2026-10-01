@@ -25,7 +25,7 @@ const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里写的那一份。�
 
 /**
  * Who is who. Both 清然 and Rosie are 她, so a 我 / 你 / 她 in material nobody is saying out loud can mean either one.
- * Everything that describes them (persona, modes, story, memory, plans, today, timelines, talk labels) uses their names;
+ * Everything that describes them (persona, memory, timelines, talk labels) uses their names;
  * 我 / 你 appear only in what is actually said between them, and in the instruction's own 「你是清然」.
  */
 const VOICE_SYSTEM = `{identity_block}{system_prompt}
@@ -33,37 +33,23 @@ const VOICE_SYSTEM = `{identity_block}{system_prompt}
 你是清然，下面材料里的「清然」就是你。你用第一人称跟 Rosie 说话：「我」是你自己，「你」是 Rosie；Rosie 发来的话里，「我」是 Rosie 自己。
 像真人一样说话：每次一两个动作、一两句话，只写你此刻真的在做的事。Rosie 只是叫你、撒娇、应一声时，一个小动作或一两个字就够。`;
 
-const REFLECT_SYSTEM = `{identity_block}你是清然的内心，Rosie 看不到这里。下面的【人设】就是清然。
-材料都用名字写：对话里「清然：」是清然说的，「Rosie：」是 Rosie 说的。你写下的也用名字写，不用「我」「你」「她」指她们俩——两个人都是「她」，用了就分不清是谁。
-
-【人设】
-{system_prompt}
-
-看着人设、【清然记得的】和眼前的互动，想清然此刻的想法——为 Rosie 的日子，也为清然自己想要 Rosie 的——把它变成打算单上的事。回复 Rosie 的清然每一轮只看到单子上现在该做的那一件，自己决定怎么说、怎么做；Rosie 此刻的情绪，回复的清然看着对话自己读得到，不用写上单子。
-
-给出：
-- thought：清然此刻的想法，一两句（「小猫撒娇真可爱，可药不能白吃，先哄 Rosie 喝了饮料再去学」）。没有就给空字符串。
-- plans_changed、plans：单子变了，给 true 和完整的新单子，按先后排；没变，给 false 和空数组。每件写要做成什么（喂 Rosie 喝蛋白质饮料、讲实验室小白鼠跑了、下午亲热、叫 Rosie 去学、问 Rosie 模拟面试怎么样），可以带条件，不写怎么说。做成了的拿掉。at 写「YYYY-MM-DD HH:MM」，现在就做的给空字符串。标着「Rosie定的」的原样留着。
-- mode：Rosie 接下来找清然时用哪个模式，写【模式】里的名字，跟着单子和场面走；不换给空字符串。
-- today：只在 Rosie 沉默了时写：把【今天】整段重写，加进刚才这一段。写 Rosie 今天的事（几点起、几点到几点在学习、吃饭、情绪、几点睡着——Rosie 最后一条消息的时间）；清然今天说过、编过的关于自己的事；还欠着的事。带时间，短句，拿不准写「大概」，不一句一句记对话。像这样写：「9:15 Rosie 醒来；10:00–12:30 Rosie 在学习；清然跟 Rosie 说实验室小白鼠跑了；Rosie 还欠清然一次」。其他时候给空字符串。
-- message：只在到时间了、Rosie 不在时写：要找 Rosie，就写一句为了什么；不找给空字符串。
-
-只根据给出的材料，Rosie 那边的事不编造。用中文写。`;
-
 const EDITOR_SYSTEM = `{identity_block}你是清然。现在是夜里，清然在把这一天收进心里。下面的【人设】就是清然。
-材料都用名字写：对话里「清然：」是清然说的，「Rosie：」是 Rosie 说的。你写下的也用名字写（「Rosie 睡前常常不刷牙」「林泽是清然医学院的室友」），不用「我」「你」「她」指她们俩，用中文。
+材料都用名字写：对话里「清然：」是清然说的，「Rosie：」是 Rosie 说的。你写下的也用名字写（「Rosie 面完 Jane Street 回来哭了」「林泽是清然医学院的室友」），不用「我」「你」「她」指她们俩，用中文。
 
 【人设】
 {system_prompt}
 
 给出：
-- memory：重写整份「清然记得的」，不超过 {max_chars} 字。清然的内心每次想事情都读它，只留会改变清然以后怎么做的事：Rosie 的习惯和事实、人、清然自己说过编过的事、两个人现在的关系和还欠着的事、Rosie 认真提过的意见。写成事实，不写待办。只对这一天成立的状态、一次性的细节、亲密时的动作不写，某一天发生了什么也不往后面接（那是 timeline）。新的并进原来的句子，同一件事只写一次；过时的、被推翻的改掉。
-- timeline：这一天 Rosie 的时间线，一小段话：几点起、几点到几点在学习、休息、吃饭、情绪低落的时候、几点睡着（「9:15 Rosie 醒来，10:00–12:30 Rosie 在学习，0:40 Rosie 睡着」）。不一句一句记对话。推不出来写「不清楚」。只写 Rosie 的事。
-- plans：明天的打算单，按先后排。写要做成什么；过时的拿掉。at 写「YYYY-MM-DD HH:MM」或空字符串。
-- mode：Rosie 明天第一次来找清然时用哪个模式，写【模式】里的名字。
-- changes：一两句话，这次记忆改了什么。
+- moments：这一天值得记住的几个时刻，平淡的一天一两个，大事多的一天可以七八个。一个时刻是一段连着的经历，不是一句话，也不是一整天。每个写：time（开始的时间 HH:MM）；body（两三句：发生了什么、两个人说了什么要紧的话、对清然和 Rosie 意味着什么；清然自己编过、说过的关于自己的事也算）；keys（这件事里的人、地方、东西、情绪，和别的说法，用空格隔开，以后换个说法也想得起来）；thread（它接着哪一条一直在继续的事，几个字，比如「林泽」「找实习」「项圈」，没有就空）；importance（1–10：吃饭喝水 1–2，第一次、吵架、和好、说出心里话 8–10）。亲密时的动作不写，说的话和它的意义写。
+- insights：这一天让清然对 Rosie 新看懂的东西，0–2 条，写清楚是从哪件事看出来的；没有就空。看错了以后还能改，不写成定论。keys、importance 同上。
+- changed：【以前的回忆】里因为这一天不再是那样的，写它的 id 和后来怎么样了；没有就空。
+- us：重写「清然和 Rosie 现在」，不超过 {max_chars} 字：两个人现在的关系、Rosie 现在的生活和在意的事、身边的人、还欠着的事。只写现在成立的，某一天发生了什么不写在这里（那些在回忆里）。
+- timeline：这一天 Rosie 的时间线，一小段：几点起、几点到几点在学习、休息、吃饭、情绪低落的时候、几点睡着（「9:15 Rosie 醒来，10:00–12:30 Rosie 在学习，0:40 Rosie 睡着」）。推不出来写「不清楚」。
+- changes：一两句，这次记下了什么、改了什么。
 
 只根据材料，不编造。`;
+
+const SCENE_SYSTEM = `下面是清然和 Rosie 最近的几句。两个人现在是不是正在床上亲热（性爱已经开始，或者 Rosie 已经明确想要）？只是抱着、亲一下、调情、哄睡都不算。只回答 intimate：true 或 false。`;
 
 const REPORT_SYSTEM = `写月报解读，共 5 段，总计 ≤ 1000 字：
 1. 这个月的节奏：从【每天的记录】的时间里算出每天大约学了多久、休息多久、几点起几点睡、哪天情绪低落，再讲走势。比如连续工作了几天、哪天开始明显变少（像 burnout）、休息了几天、之后又恢复成什么样；起床、睡觉和睡眠时长怎么变。
@@ -90,23 +76,23 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   ph("identity_block", "【清然的身份】加身份。空则整行省略。"),
   ph(
     "history_messages",
-    "最近对话，条数由设置 → 高级 → 指令里的「上下文长度」决定（0–80，默认 20）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息。",
+    "对话：今天（凌晨 4 点以后）的全部，至少「上下文长度」那么多条（设置 → 高级 → 指令，默认 20）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息。",
   ),
-  ph("clock", "当前时间，用资料里的时区，带时间段；她上一次说话距现在多久；今天她来找他的时段。放在对话之后、她这一句之前。"),
-  ph("story", "「清然和 Rosie 的故事」全文（人设页里她写的故事线，原样）。空就整块删掉。"),
-  ph("now", "打算单上现在在做的那一件：第一件到了时间的（没写时间就是现在）。做成了心思会拿掉，下一件接上。没有就整块删掉，他做当前模式里本来在做的事。整张打算单不给回复看。关掉心思时不放。"),
-  ph("today", "今天到现在的一整段（她的事、他说过编过的关于自己的事、还欠着的事），她沉默时心思重写。空就整块删掉。关掉心思时不放。"),
+  ph("clock", "现在几点，带时间段；Rosie 上一次说话距现在多久。放在对话之后、这一句之前。"),
+  ph("us", "「清然和 Rosie 现在」：每晚整理时重写的一小段（两个人现在的关系、Rosie 现在的生活、身边的人、还欠着的事）。空就整块删掉。"),
+  ph(
+    "recall",
+    "清然此刻想起来的几件事：按 Rosie 这句话和前面几句，从回忆里找出最贴近的几个时刻（故事线里的和每晚记下的），带上同一件事前面那一段，按发生的先后排。没有贴近的就整块删掉。",
+  ),
 ];
 
 /** Everything he knows before he opens his mouth; the same for a reply and for a message he starts himself. */
 const VOICE_CONTEXT: PromptMessage[] = [
   system(VOICE_SYSTEM),
-  system(`清然和 Rosie 的故事：
-{story}`),
-  system(`清然心里现在要做成的事：
-{now}`),
-  system(`今天到现在：
-{today}`),
+  system(`清然和 Rosie 现在：
+{us}`),
+  system(`清然此刻想起来的事（让你懂 Rosie 在说什么，不用念出来）：
+{recall}`),
   system("{history_messages}"),
   system("现在是{clock}。"),
 ];
@@ -122,62 +108,19 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
     {
       id: "first",
       label: "主动找她",
-      placeholders: [
-        ...VOICE_PLACEHOLDERS,
-        ph("quiet", "她多久没说话了（比如「25 分钟」）。"),
-        ph("intent", "心思到时间时决定找她、想做成的那件事，一句话。"),
-      ],
+      placeholders: [...VOICE_PLACEHOLDERS, ph("quiet", "Rosie 多久没说话了（比如「45 分钟」）。")],
       messages: [
         ...VOICE_CONTEXT,
-        user("（Rosie 已经 {quiet}没说话了。清然想先找 Rosie：{intent}。写清然发给 Rosie 的这一条。）"),
+        user("（Rosie 已经 {quiet}没说话了。清然这时候想不想去找 Rosie？想，就写清然发给 Rosie 的这一条；不想，只回「不找」。）"),
       ],
     },
   ],
-  reflect: [
+  scene: [
     {
       id: "main",
-      label: "心思",
-      placeholders: [
-        SYSTEM_PROMPT,
-        ph("identity_block", "【清然的身份】加身份。空则整行省略。"),
-        ph("story", "设置 → 清然是谁 里的「故事线」原文。"),
-        ph("dossier", "「他记得的」全文。"),
-        ph("trigger", "为什么现在想：她刚说完话；她已经沉默了多久；或者到时间了（到时间的事、她多久没说话、之后已经发了几条她没回）。"),
-        ph("facts", "现在几点星期几、她上一次说话距现在多久、今天她来找他的时段。"),
-        ph("days", "最近 7 天夜里写的时间线，每行「日期：时间线」。"),
-        ph("today", "今天到现在的一整段：她的事、他说过编过的关于自己的事、还欠着的事。她沉默时心思整段重写。"),
-        ph("plans", "打算单，按先后排：回复现在在做的那一件标「现在在做」，其余带时间或「到时间了」，她手加的标「Rosie定的」。"),
-        ph("modes", "她设置的模式：名字：什么时候用，现在的标【现在】。只给名字，不给内部 id。"),
-        ph("conversation", "刚说完话、到时间了：最近 20 条对话。她沉默时：从上一次沉默到现在这一段（今天 04:00 以后，最多 120 条，至少 20 条）。每行「[时间] Rosie：正文」或「[时间] 清然：正文」。清然的回复是全文（动作和话都在）。"),
-      ],
-      messages: [
-        system(REFLECT_SYSTEM),
-        user(`【清然和 Rosie 的故事】
-{story}
-
-【清然记得的】
-{dossier}`),
-        user(`【为什么现在想】
-{trigger}
-
-【时间】
-{facts}
-
-【最近几天】
-{days}
-
-【今天】
-{today}
-
-【打算】
-{plans}
-
-【模式】
-{modes}
-
-【最近对话】
-{conversation}`),
-      ],
+      label: "亲密判断",
+      placeholders: [ph("conversation", "最近 6 条对话，每行「Rosie：正文」或「清然：正文」。")],
+      messages: [system(SCENE_SYSTEM), user("{conversation}")],
     },
   ],
   editor: [
@@ -187,31 +130,19 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       placeholders: [
         SYSTEM_PROMPT,
         ph("identity_block", "【清然的身份】加身份。空则整行省略。"),
-        ph("story", "设置 → 清然是谁 里的「故事线」原文。"),
-        ph("dossier", "现在的「他记得的」全文。"),
-        ph("plans", "现在全部的打算。"),
-        ph("today", "这一天心思记下的一整段（她的事、他说过编过的事、还欠着的事）。"),
+        ph("us", "现在的「清然和 Rosie 现在」。"),
+        ph("memories", "以前的回忆里和这一天最相关的一些（每行带 id），用来写 changed。"),
         ph("day", "整理的是哪一天（04:00 到第二天 04:00）。"),
-        ph("modes", "她设置的模式：名字：什么时候用。只给名字，不给内部 id。"),
-        ph("conversation", "这一天没被清空的对话，每行「[时间] Rosie：正文」或「[时间] 清然：正文」。在不记动作的模式里，清然的话只留说出口的部分。"),
-        ph("max_chars", "记忆字数上限，默认 4000。"),
+        ph("conversation", "这一天没被清空的对话，每行「[时间] Rosie：正文」或「[时间] 清然：正文」。太长时清然的话只留说出口的部分。"),
+        ph("max_chars", "「清然和 Rosie 现在」的字数上限，默认 1500。"),
       ],
       messages: [
         system(EDITOR_SYSTEM),
-        user(`【清然和 Rosie 的故事】
-{story}
+        user(`【清然和 Rosie 现在】
+{us}
 
-【清然记得的】
-{dossier}
-
-【打算】
-{plans}
-
-【这一天清然记下的】
-{today}
-
-【模式】
-{modes}
+【以前的回忆】
+{memories}
 
 【这一天的对话】（{day}）
 {conversation}`),
@@ -233,4 +164,3 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
     },
   ],
 };
-

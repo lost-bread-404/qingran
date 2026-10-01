@@ -34,7 +34,7 @@ TTS / STT **不返回** ticks，按价格表入账（`cost_source = price_table`
 
 所有 Responses 请求默认 `store: false`（`QR_XAI_STORE`，只有设为 `true` 才打开）。本项目每轮自行发送完整上下文，不用 `previous_response_id`。
 
-上线后对比开启前后 reflect 的缓存命中率。如果命中率明显下降，把默认改回 `true`，并在这里记下结论。
+（v6 起没有心思了；回复和夜里整理的缓存命中率在费用页看。）
 
 ## 月度汇总
 

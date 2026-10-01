@@ -3,14 +3,14 @@ import { createHash } from "node:crypto";
 import { now } from "./clock.ts";
 import { getMeta, getProfileData, patchMeta, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
-import { clockOf, localDay } from "./time.ts";
+import { localDay } from "./time.ts";
 import { lockedProfile, type Profile } from "../types.ts";
 import { applyProfilePatch } from "../profile-patch.ts";
 import { getDossier, publishMemory } from "./dossier.ts";
-import { effectiveMode, recordMode } from "./mode.ts";
 import { isPromptKey } from "./prompts/catalog.ts";
 import { savePrompt } from "./prompts/store.ts";
-import { formatLocal, listPlans, parseLocalTime } from "./heart.ts";
+import { formatLocal, parseLocalTime } from "./heart.ts";
+import { addMemories, listMemories, syncStory, updateMemory } from "./memory.ts";
 import { STATE_KIND, STATE_VERSION, type StateFile, type StateMessage } from "./state-public.ts";
 
 const EXPORT_PAGE = 1000;
@@ -39,12 +39,11 @@ export const brainExportState = createServerFn({ method: "POST" })
 
     const at = now();
     const profile = lockedProfile(await getProfileData());
-    const [dossier, plans, days, prompts, mode] = await Promise.all([
+    const [dossier, memories, days, prompts] = await Promise.all([
       getDossier(),
-      listPlans(),
+      listMemories(),
       db.query<{ day: string; timeline: string }>(`select day, timeline from qr_days order by day asc`),
       db.query<{ key: string; body: string }>(`select key, body from qr_prompts order by key`),
-      effectiveMode(at, tz, profile.modes.map((m) => m.id)),
     ]);
     const head: StateFile = {
       kind: STATE_KIND,
@@ -53,8 +52,19 @@ export const brainExportState = createServerFn({ method: "POST" })
       timeZone: tz,
       profile: profile as unknown as Record<string, unknown>,
       memory: dossier.body,
-      mode,
-      plans: plans.map((p) => ({ text: p.text, at: p.at == null ? null : formatLocal(p.at, tz), setBy: p.setBy })),
+      memories: memories
+        .filter((m) => m.source !== "story")
+        .map((m) => ({
+          kind: m.kind,
+          source: m.source,
+          day: m.day,
+          at: m.at == null ? null : formatLocal(m.at, tz),
+          body: m.body,
+          keys: m.keys,
+          thread: m.thread,
+          importance: m.importance,
+          changed: m.changed,
+        })),
       days: days.map((d) => ({ day: String(d.day), timeline: String(d.timeline ?? "") })),
       prompts: Object.fromEntries(prompts.map((p) => [String(p.key), String(p.body)])),
     };
@@ -88,19 +98,43 @@ export const brainImportState = createServerFn({ method: "POST" })
       await publishMemory(state.memory, "import", at);
       done.push("记忆");
     }
-    if (Array.isArray(state.plans)) {
-      await db.query(`delete from qr_reach_plans where done_at is null`);
-      for (const p of state.plans.slice(0, 30)) {
-        const text = String(p?.text ?? "").trim();
-        if (!text) continue;
-        await db.query(`insert into qr_reach_plans (at, intent, set_by, set_at) values ($1, $2, $3, $4)`, [
-          parseLocalTime(p.at, tz),
-          text.slice(0, 500),
-          typeof p.setBy === "string" && p.setBy ? p.setBy : "import",
-          at,
+    if (Array.isArray(state.memories)) {
+      await db.query(`delete from qr_memories where source <> 'story'`);
+      for (const m of state.memories) {
+        const body = String(m?.body ?? "").trim();
+        if (!body) continue;
+        const when = parseLocalTime(m.at, tz);
+        await addMemories([
+          {
+            kind: m.kind === "insight" ? "insight" : "moment",
+            source: m.source === "rosie" ? "rosie" : "night",
+            day: typeof m.day === "string" && m.day ? m.day : when != null ? localDay(when, tz) : "",
+            at: when,
+            body,
+            keys: typeof m.keys === "string" ? m.keys : "",
+            thread: typeof m.thread === "string" ? m.thread : "",
+            importance: Number(m.importance),
+          },
         ]);
       }
-      done.push("打算");
+      if (state.memories.some((m) => typeof m?.changed === "string" && m.changed.trim())) {
+        // Notes of what became of a moment, matched back by its text.
+        const stored = await listMemories();
+        for (const m of state.memories) {
+          const note = typeof m?.changed === "string" ? m.changed.trim() : "";
+          if (!note) continue;
+          const hit = stored.find((x) => x.source !== "story" && x.body === String(m.body ?? "").trim());
+          if (hit) await updateMemory(hit.id, { changed: note });
+        }
+      }
+      // Days the file brings are already in his memory: the night pass does not write them again.
+      for (const d of new Set(state.memories.map((m) => (typeof m?.day === "string" ? m.day : "")).filter(Boolean))) {
+        await db.query(
+          `insert into qr_memory_marks (key, value, at) values ($1, 'import', $2) on conflict (key) do update set value = excluded.value, at = excluded.at`,
+          [`day:${d}`, at],
+        );
+      }
+      done.push("回忆");
     }
     if (Array.isArray(state.days)) {
       await db.query(`delete from qr_days`);
@@ -114,37 +148,14 @@ export const brainImportState = createServerFn({ method: "POST" })
       }
       done.push("每天的时间线");
     }
-    if (Array.isArray(state.dayNotes) && state.dayNotes.length) {
-      // Older files kept a list of notes; they become lines in that day's text.
-      const byDay = new Map<string, string[]>();
-      for (const n of state.dayNotes) {
-        const when = parseLocalTime(n?.at, tz);
-        const text = String(n?.text ?? "").trim();
-        if (when == null || !text) continue;
-        const day = localDay(when, tz);
-        byDay.set(day, [...(byDay.get(day) ?? []), `${clockOf(when, tz)} ${text}`]);
-      }
-      for (const [day, lines] of byDay) {
-        await db.query(
-          `insert into qr_days (day, timeline, updated_at) values ($1, $2, $3)
-           on conflict (day) do update set timeline = case when qr_days.timeline = '' then excluded.timeline else qr_days.timeline end`,
-          [day, lines.join("\n").slice(0, 3000), at],
-        );
-      }
-      done.push("旧的每天记录");
-    }
     if (state.prompts && typeof state.prompts === "object") {
       for (const [key, body] of Object.entries(state.prompts)) {
         if (isPromptKey(key) && typeof body === "string" && body.trim()) await savePrompt(key, body);
       }
       done.push("指令");
     }
-    if (typeof state.mode === "string" && state.mode.trim()) {
-      const profile = lockedProfile(await getProfileData());
-      if (profile.modes.some((m) => m.id === state.mode)) {
-        await recordMode({ at, mode: state.mode, until: null, why: "导入" });
-        done.push("模式");
-      }
+    if (state.profile && typeof state.profile === "object") {
+      await syncStory(lockedProfile(await getProfileData()).storyline);
     }
     return { ok: true as const, done };
   });

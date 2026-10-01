@@ -1,7 +1,6 @@
 import {
   applyAvailabilityFallback,
   checkModelAvailability,
-  REFLECT_PROMPT_CACHE_KEY,
   resolveRoute,
   type Effort,
   type Route,
@@ -52,7 +51,7 @@ export type CallModelInput = {
   /** Replay comparison. When set, this model is used instead of the route default. */
   model?: string | null;
   effort?: Effort;
-  /** Sampling temperature; the reflect route defaults to 1.0. */
+  /** Sampling temperature; unset keeps the model default. */
   temperature?: number;
 };
 
@@ -173,17 +172,6 @@ export function asModelInput(
   };
 }
 
-export function classifyReflectFailure(result: CallModelResult): string {
-  if (result.failKind === "timeout") return "timeout";
-  if (result.failKind === "http_error") {
-    const status = result.httpStatus ?? "";
-    const body = (result.responseSnippet ?? "").slice(0, 200);
-    return `http_error ${status} ${body}`.trim();
-  }
-  if (!result.json) return "parse_error";
-  return result.failKind === "error" ? "error" : "parse_error";
-}
-
 export async function callModel(route: Route, input: CallModelInput): Promise<CallModelResult> {
   const started = Date.now();
   const apiKey = process.env.XAI_API_KEY;
@@ -261,9 +249,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       },
     };
   }
-  if (route === "reflect") body.prompt_cache_key = REFLECT_PROMPT_CACHE_KEY;
   if (input.temperature != null) body.temperature = input.temperature;
-  else if (route === "reflect") body.temperature = 1.0;
 
   const baseLog = {
     jobId: input.jobId,

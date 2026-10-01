@@ -85,8 +85,6 @@ export async function recordVoiceTurn(opts: {
     replyMsgId: opts.display ? opts.replyId : null,
     localDay: opts.localDay,
     sessionId: opts.ctx.sessionId,
-    mindTurnSeq: opts.ctx.mindTurnSeq,
-    mindAgeMs: opts.ctx.mindAgeMs,
     replyChars: opts.display.length,
     packMs: opts.ctx.packMs,
     dbFirstMs: opts.ctx.dbFirstMs,

@@ -7,46 +7,43 @@ import { NEUTRAL_PERSONA } from "../../types.ts";
 
 /**
  * What the reply is given (docs/brain.md「回复看到的」):
- * persona (+ identity + current mode) → 清然和 Rosie 的故事 → 清然心里现在要做成的事 → 今天到现在 → intimate notes → recent talk → 现在是… → her line.
+ * persona (+ identity) → 清然和 Rosie 现在 → 清然此刻想起来的事 → intimate notes (only in a scene) → today's talk → 现在是… → her line.
  * A block whose value is empty is left out.
  */
 export type VoicePackParts = {
   charter: string;
   identity: string;
-  /** 清然和 Rosie 的故事: the story she wrote in the persona page, whole ("" = not injected). */
-  story: string;
-  /** The one item from his plan list the reply works on now ("" = nothing / not injected). */
-  mind: string;
-  /** Today's running text ("" = not injected). */
-  today: string;
-  /** Intimate notes, already decided by the current mode ("" = not injected). */
+  /** 清然和 Rosie 现在: the short text the night pass rewrites ("" = not injected). */
+  us: string;
+  /** The moments that came back to him for this line, already written out ("" = none). */
+  recall: string;
+  /** Intimate notes, only while they are in an intimate scene ("" = not injected). */
   intimate: string;
   clock: string;
   history: StoredMessage[];
   historyWindow: number;
   userText: string;
-  /** Set when he writes first (nothing from her to answer): the「主动找她」variant. */
-  first?: { quiet: string; intent: string };
+  /** Set when he may write first (nothing from her to answer): the「主动找她」variant. */
+  first?: { quiet: string };
   voiceTemplate?: string;
   personaPlacement: "system" | "first_user";
   personaAck: string;
 };
 
-/** Retries when the model returns nothing (usually a refusal): drop what he is doing now and today, then our story, then almost everything. */
-export type VoiceStrip = "none" | "moment" | "story" | "thin";
-export const VOICE_STRIPS: VoiceStrip[] = ["none", "moment", "story", "thin"];
+/** Retries when the model returns nothing (usually a refusal): drop what came back to him and the intimate notes, then almost everything. */
+export type VoiceStrip = "none" | "memory" | "thin";
+export const VOICE_STRIPS: VoiceStrip[] = ["none", "memory", "thin"];
 export const VOICE_THIN_HISTORY = 8;
 
 export function stripLabel(strip: VoiceStrip): string {
-  if (strip === "moment") return "去掉了现在要做成的事和今天";
-  if (strip === "story") return "去掉了现在要做成的事、今天和故事线";
+  if (strip === "memory") return "去掉了想起来的事、现在的我们和亲密设定";
   if (strip === "thin") return "只保留人设、最近 8 条对话和这一句";
   return "未裁剪";
 }
 
 /**
  * His lines with the actions taken out, for the night pass in modes that do not keep actions.
- * The reply and the mind always read his replies whole: without the actions he loses track of the scene.
+ * The reply always reads his replies whole: without the actions he loses track of the scene.
  */
 export function spokenOnly(text: string): string {
   const quotes = [...text.matchAll(/[“"「]([^”"」]{1,200})[”"」]/g)].map((m) => m[1]!.trim()).filter(Boolean);
@@ -80,7 +77,7 @@ export function voiceHistoryMessages(
 }
 
 /** Tokens whose block disappears when their value is empty. */
-const OPTIONAL = ["story", "now", "today"] as const;
+const OPTIONAL = ["us", "recall"] as const;
 
 function optionalTokens(content: string): string[] {
   return OPTIONAL.filter((token) => content.includes(`{${token}}`));
@@ -92,13 +89,11 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
   const vars: Record<string, string> = {
     system_prompt: personaInSystem ? charter : "",
     identity_block: parts.identity.trim() ? `${parts.identity.trim()}\n` : "",
-    story: strip === "none" || strip === "moment" ? parts.story.trim() : "",
-    now: strip === "none" ? parts.mind.trim() : "",
-    today: strip === "none" ? parts.today.trim() : "",
+    us: strip === "none" ? parts.us.trim() : "",
+    recall: strip === "none" ? parts.recall.trim() : "",
     clock: parts.clock,
     user_text: parts.userText,
     quiet: parts.first?.quiet ?? "",
-    intent: parts.first?.intent ?? "",
   };
   const variant = parts.first ? "first" : "main";
   const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant).filter((message) => {
@@ -114,21 +109,20 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
     const first = rendered.findIndex((message) => message.role === "system");
     rendered = rendered.filter((message, i) => message.role !== "system" || i === first);
   }
-  return placePersona(insertIntimateNotes(rendered, parts.intimate), {
+  return placePersona(insertIntimateNotes(rendered, strip === "none" ? parts.intimate : ""), {
     placement: parts.personaPlacement,
     charter,
     ack: parts.personaAck,
   });
 }
 
-/** Intimate notes sit right after what he is doing now (or, without it, just before the talk). */
+/** Intimate notes sit just before the talk. */
 export function insertIntimateNotes<T extends { role: string; content: string }>(messages: T[], notes: string): T[] {
   const text = notes.trim();
   if (!text) return messages;
   const block = { role: "system", content: `清然在亲密时的样子：\n${text}` } as T;
-  const now = messages.findIndex((message) => message.role === "system" && message.content.startsWith("清然心里现在要做成的事"));
   const talk = messages.findIndex((message) => message.role !== "system");
-  const at = now >= 0 ? now + 1 : talk >= 0 ? talk : messages.length;
+  const at = talk >= 0 ? talk : messages.length;
   return [...messages.slice(0, at), block, ...messages.slice(at)];
 }
 
@@ -148,7 +142,7 @@ export function placePersona<T extends { role: string; content: string }>(
   return [...messages.slice(0, index), ...block, ...messages.slice(index)];
 }
 
-/** The system text alone (persona + mode + identity), for previews and size notes. */
+/** The system text alone (persona + identity), for previews and size notes. */
 export function systemCharter(charter: string, template?: string): string {
   const first = variantMessages(parsePromptBody("voice", template), "main").find(
     (message) => message.role === "system" && message.content.trim() !== "{history_messages}",
@@ -168,8 +162,8 @@ export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
   const history = voiceHistoryMessages(parts.history, parts.historyWindow);
   return {
     system: systemCharter(parts.charter, parts.voiceTemplate).length,
-    moment: parts.mind.length + parts.today.length,
-    story: parts.story.length,
+    moment: parts.us.length,
+    story: parts.recall.length,
     history: history.reduce((n, m) => n + m.content.length, 0),
     user: parts.userText.length,
   };

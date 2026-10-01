@@ -114,21 +114,4 @@ export async function insertBrainTurn(row: BrainTurnRow): Promise<void> {
   }
 }
 
-export async function fillReflectTurn(
-  turnSeq: number,
-  ok: boolean,
-  ms: number,
-  error?: string | null,
-): Promise<void> {
-  try {
-    const db = await getSql();
-    await db.query(
-      `update brain_turns set reflect_ok = $2, reflect_ms = $3, reflect_error = $4
-       where turn_seq = $1`,
-      [turnSeq, ok, ms, error ?? null],
-    );
-  } catch {
-    /* ignore */
-  }
-}
 

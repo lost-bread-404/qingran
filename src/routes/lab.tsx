@@ -712,7 +712,7 @@ function HearingLabPage() {
                 <p className="mb-2 font-display text-lg">反馈</p>
                 <p className="mb-3 text-xs text-subtle">
                   {feedbackRows.length
-                    ? "按标签筛选。点开看这一轮检索、内心和回复。"
+                    ? "按标签筛选。点开看这一轮想起来的回忆和回复。"
                     : "还没有反馈。"}
                 </p>
                 {feedbackRows.length ? (
@@ -752,17 +752,12 @@ function HearingLabPage() {
                         row.trace && row.trace.reply && typeof row.trace.reply === "object"
                           ? String((row.trace.reply as { text?: string }).text ?? "")
                           : "";
-                      const retrieve = Array.isArray(
-                        row.trace && typeof row.trace.retrieve === "object"
-                          ? (row.trace.retrieve as { items?: unknown }).items
-                          : null,
-                      )
-                        ? ((row.trace!.retrieve as { items: Array<{ id: string; title: string; reason: string; score: number | null }> }).items)
-                        : [];
-                      const mind =
-                        row.trace && row.trace.reflector && typeof row.trace.reflector === "object"
-                          ? (row.trace.reflector as { mind?: unknown; model?: string; ms?: number })
+                      // The moments that came back to him for that line.
+                      const retrieve =
+                        row.trace && row.trace.retrieve && typeof row.trace.retrieve === "object" && !Array.isArray(row.trace.retrieve)
+                          ? (row.trace.retrieve as { texts?: unknown }).texts
                           : null;
+                      const recalled = Array.isArray(retrieve) ? retrieve.map(String) : [];
                       return (
                         <li key={row.id} className="rounded-md bg-surface-2 px-3 py-3">
                           <button
@@ -786,23 +781,16 @@ function HearingLabPage() {
                           </button>
                           {open ? (
                             <div className="mt-3 flex flex-col gap-2 border-t border-bg pt-3 text-sm">
-                              <p className="text-xs text-subtle">检索</p>
-                              {retrieve.length ? (
-                                retrieve.map((item) => (
-                                  <p key={item.id} className="text-xs">
-                                    {item.reason} · {item.title}
-                                    {item.score != null ? ` · ${item.score}` : ""}
+                              <p className="text-xs text-subtle">想起来的</p>
+                              {recalled.length ? (
+                                recalled.map((text, i) => (
+                                  <p key={i} className="text-xs">
+                                    {text}
                                   </p>
                                 ))
                               ) : (
-                                <p className="text-xs text-subtle">没有检索记录。</p>
+                                <p className="text-xs text-subtle">这一句没有想起什么。</p>
                               )}
-                              <p className="mt-2 text-xs text-subtle">
-                                内心 {mind?.model ?? ""} {mind?.ms != null ? `· ${mind.ms}ms` : ""}
-                              </p>
-                              <pre className="whitespace-pre-wrap break-words text-xs text-muted">
-                                {mind?.mind ? JSON.stringify(mind.mind, null, 2) : "还没有 Reflector 输出。"}
-                              </pre>
                               <p className="mt-2 text-xs text-subtle">回复</p>
                               <p className="whitespace-pre-wrap text-sm">{replyText || "（空）"}</p>
                             </div>

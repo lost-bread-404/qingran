@@ -7,17 +7,14 @@ import {
 import { now } from "./clock.ts";
 import { canStartJob, retryDelayMs, timeoutFor } from "./jobs-policy.ts";
 import {
-  appendInnerLog,
   claimJob,
   cleanupOldJobs,
   deferJob,
   deferPendingUntil,
   finishJob,
-  finishReflectJob,
   insertJob,
   peekNextJob,
   restoreClaim,
-  upsertReflectJob,
 } from "./store.ts";
 import { newId } from "../storage.ts";
 import type { BrainJob, JobType } from "./types.ts";
@@ -46,26 +43,10 @@ export async function enqueue(
     createdAt: ts,
     updatedAt: ts,
   };
-  const inserted = type === "reflect" && !force
-    ? (await upsertReflectJob(Number(payload.turnSeq ?? 0)), true)
-    : await insertJob(job, force);
-  return inserted;
-}
-
-/** One reflect for the latest reply. A newer turn replaces a pending one; failures are not retried. */
-export async function enqueueReflect(turnSeq: number): Promise<void> {
-  if (!Number.isFinite(turnSeq) || turnSeq <= 0) return;
-  await enqueue("reflect", "reflect", { turnSeq });
+  return insertJob(job, force);
 }
 
 async function runOne(job: BrainJob): Promise<void> {
-  if (job.type === "reflect") {
-    const turnSeq = Number(job.payload.turnSeq ?? 0);
-    const { runReflector } = await import("./voice/reflector");
-    await runReflector(turnSeq, job.id);
-    await finishReflectJob(job.id, turnSeq);
-    return;
-  }
   if (job.type === "report") {
     const { runReport } = await import("./diary/report");
     await runReport(String(job.payload.month ?? ""), job.id);
@@ -74,7 +55,7 @@ async function runOne(job: BrainJob): Promise<void> {
   }
   if (job.type === "night") {
     const { runNight } = await import("./night");
-    await runNight(String(job.payload.day ?? ""), job.id, undefined, { manual: job.payload.manual === true });
+    await runNight(String(job.payload.day ?? ""), job.id);
     await finishJob(job.id, "done");
     return;
   }
@@ -111,21 +92,16 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
         await deferPendingUntil(now() + 10 * 60_000, "spend-rate");
         break;
       }
-      if (job.type === "reflect") {
-        const turnSeq = Number(job.payload.turnSeq ?? 0);
-        await appendInnerLog({
-          turnSeq,
-          data: { kind: "reflect", error: message },
-        }).catch(() => undefined);
-        if ((await finishReflectJob(job.id, turnSeq)) === "pending") continue;
-        await finishJob(job.id, "failed", { error: message });
-        continue;
-      }
       if (job.attempts < JOB_MAX_ATTEMPTS) {
         const delay = retryDelayMs(job.attempts);
         await finishJob(job.id, "pending", { runAfter: now() + delay, error: message });
       } else {
         await finishJob(job.id, "failed", { error: message });
+        // A day that keeps failing is set aside, so the days after it still get their night pass.
+        if (job.type === "night" && job.payload.day) {
+          const { setMark } = await import("./memory.ts");
+          await setMark(`day:${String(job.payload.day)}`, "failed").catch(() => undefined);
+        }
       }
     }
   }
@@ -136,5 +112,3 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
 export async function runJobsNow(budgetMs = LONG_DRAIN_MS): Promise<number> {
   return drainJobs(budgetMs);
 }
-
-export { upsertReflectJob };

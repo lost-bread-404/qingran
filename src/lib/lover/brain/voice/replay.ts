@@ -7,7 +7,10 @@ import { now } from "../clock.ts";
 import type { Effort } from "../config.ts";
 import { resolveTz } from "../tz.ts";
 import { identityBlock } from "../life.ts";
-import { mindForReply, timeFacts, todayText } from "../heart.ts";
+import { timeFacts } from "../heart.ts";
+import { dossierTextForModel } from "../dossier.ts";
+import { recall, recallText } from "../memory.ts";
+import { recallQuery } from "./pack.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import {
   getMessage,
@@ -51,24 +54,21 @@ export async function replayMessages(opts: {
   if (!user || user.role !== "user") throw new Error("找不到这句");
   const nowMs = opts.nowMs ?? now();
   const inject = voiceInjectFromProfile(opts.profile);
-  const brainOn = opts.profile.brainOn;
   const meta = await getMeta();
   const tz = resolveTz(meta.timeZone);
-  const story = inject.dossier && brainOn ? opts.profile.storyline.trim() : "";
-  const [history, voicePrompt, mind, today, clockText] = await Promise.all([
+  const [history, voicePrompt, us, clockText] = await Promise.all([
     listHistoryWindow(user.id, inject.history, user.createdAt),
     loadPrompt("voice"),
-    inject.moment && brainOn ? mindForReply(nowMs) : Promise.resolve(""),
-    inject.moment && brainOn ? todayText(nowMs, tz) : Promise.resolve(""),
+    inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(nowMs, tz, user.createdAt),
   ]);
+  const recalled = inject.memory ? await recall(recallQuery(user.text, history), user.createdAt) : { memories: [] };
   const messages = buildVoiceMessages({
     charter: opts.charter,
     identity: identityBlock(opts.profile.identity),
-    story,
-    mind,
-    today,
-    intimate: opts.profile.modes.find((m) => m.id === opts.profile.mode)?.intimate ? opts.profile.intimateNotes : "",
+    us,
+    recall: recallText(recalled.memories),
+    intimate: "",
     clock: clockText,
     history: collapseReplyVariants(history),
     historyWindow: inject.history,

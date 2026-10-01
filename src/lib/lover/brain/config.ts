@@ -64,14 +64,14 @@ export const MODEL_CAPS: Record<
   },
 };
 
-export type Route = "voice" | "reflect" | "report" | "editor" | "replay";
+export type Route = "voice" | "scene" | "report" | "editor" | "replay";
 
 export const ROUTES: Record<
   Route,
   { cls: ModelClass; effort?: Effort; timeoutMs: number; maxOutput: number }
 > = {
   voice: { cls: "FAST_THINKER", effort: "low", timeoutMs: 60_000, maxOutput: 2_000 },
-  reflect: { cls: "FAST_THINKER", effort: "medium", timeoutMs: 240_000, maxOutput: 4_000 },
+  scene: { cls: "REALTIME", timeoutMs: 30_000, maxOutput: 200 },
   report: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 4_000 },
   editor: { cls: "ANALYST", timeoutMs: 240_000, maxOutput: 12_000 },
   replay: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 4_000 },
@@ -98,11 +98,10 @@ export function clampHistoryWindow(value: unknown, fallback = HISTORY_WINDOW): n
   if (!Number.isFinite(n)) return fallback;
   return Math.max(HISTORY_WINDOW_MIN, Math.min(HISTORY_WINDOW_MAX, Math.round(n)));
 }
-export const REFLECT_WINDOW = 20;
-export const REFLECT_PROMPT_CACHE_KEY = "qingran-reflect";
-export const DOSSIER_MAX_CHARS = 4000;
-export const DOSSIER_MAX_CHARS_MIN = 2000;
-export const DOSSIER_MAX_CHARS_MAX = 8000;
+/** 「清然和 Rosie 现在」 is short: what holds now. The moments themselves live in the memory, without a cap. */
+export const DOSSIER_MAX_CHARS = 1500;
+export const DOSSIER_MAX_CHARS_MIN = 500;
+export const DOSSIER_MAX_CHARS_MAX = 3000;
 
 export function clampDossierMaxChars(value: unknown, fallback = DOSSIER_MAX_CHARS): number {
   const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;

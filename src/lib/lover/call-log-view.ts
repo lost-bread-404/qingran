@@ -6,8 +6,8 @@ export type CallLogMessage = {
 
 export const LOG_ROUTE_FILTERS = [
   ["voice", "回复"],
-  ["reflect", "内心"],
-  ["editor", "整理记忆"],
+  ["scene", "亲密判断"],
+  ["editor", "夜里整理"],
   ["report", "月报"],
   ["hear", "听力"],
   ["manual", "手改"],

@@ -5,11 +5,7 @@ import { sendApns } from "../push/apns.ts";
 import type { Effort } from "./config.ts";
 import { adoptPersona, listPersonaVersions, listReplayTargets, runReplay } from "./voice/replay.ts";
 import {
-  addReachPlan,
-  clearReachPlans,
   getReach,
-  listReachPlans,
-  removeReachPlan,
   insertManualEdit,
   listReachLog,
   profileClockZone,
@@ -21,31 +17,20 @@ import {
 export const brainGetLife = createServerFn({ method: "GET" }).handler(async () => {
   const at = now();
   const zone = await profileClockZone();
-  const { listPlans } = await import("./heart.ts");
-  const [reach, plans, log, counts] = await Promise.all([getReach(), listPlans(), listReachLog(30), reachCountsToday(zone, at)]);
+  const [reach, log, counts] = await Promise.all([getReach(), listReachLog(30), reachCountsToday(zone, at)]);
   return {
     reach,
-    // Only timed plans can make him message her.
-    plans: plans.filter((p) => p.at != null).map((p) => ({ id: p.id, at: p.at as number, intent: p.text, setBy: p.setBy, setAt: p.setAt })),
     log: log.map((row) => JSON.parse(JSON.stringify(row))),
     counts,
   };
 });
 
 export const brainSetReach = createServerFn({ method: "POST" })
-  .validator(
-    (input: { enabled?: boolean; add?: { at: number; intent: string }; remove?: number; clear?: boolean }) => input,
-  )
+  .validator((input: { enabled?: boolean }) => input)
   .handler(async ({ data }) => {
-    const at = now();
-    const before = { reach: await getReach(), plans: await listReachPlans() };
+    const before = { reach: await getReach() };
     if (data.enabled !== undefined) await saveReach({ enabled: data.enabled });
-    if (data.clear) await clearReachPlans();
-    if (typeof data.remove === "number") await removeReachPlan(data.remove);
-    if (data.add && Number.isFinite(data.add.at)) {
-      await addReachPlan({ at: data.add.at, intent: String(data.add.intent ?? ""), setBy: "rosie", setAt: at });
-    }
-    const after = { reach: await getReach(), plans: await listReachPlans() };
+    const after = { reach: await getReach() };
     await insertManualEdit("reach", before, after);
     return { ok: true as const, ...after };
   });

@@ -124,12 +124,6 @@ export async function appendInnerLog(entry: {
   );
 }
 
-/** Clearing the room also clears what he had in mind right now (the plans with a time stay). */
-export async function resetInnerTurn(): Promise<void> {
-  const db = await getSql();
-  await db.query(`update qr_inner set now_text = '', turn_seq = 0, updated_at = $1 where id = 1`, [now()]);
-}
-
 export async function forgetUnarchivedMessages(at: number): Promise<number> {
   const db = await getSql();
   const dossier = await db.query<{ active: boolean; cursor_at: number }>(
@@ -172,20 +166,14 @@ export async function setRoomClearedAt(at: number): Promise<void> {
 }
 
 /** Hide recent turns not yet folded into memory, from the screen and from Qingran; rows stay for analysis.
- * His last thought is emptied and what he meant to do next is dropped.
- * Plans with a time (dinner, bedtime), plans she added, and the memory stay. */
+ * The memory (moments, 清然和 Rosie 现在) stays; the scene starts over. */
 export async function clearRecentConversation(): Promise<void> {
   const ts = now();
-  const { dropUntimedPlans, getInner } = await import("./heart.ts");
-  const inner = await getInner();
   await setRoomClearedAt(ts);
   await forgetUnarchivedMessages(ts);
-  await resetInnerTurn();
-  await dropUntimedPlans();
-  await appendInnerLog({
-    turnSeq: inner.turnSeq,
-    data: { kind: "cleared_by_rosie" },
-  });
+  const { setIntimate } = await import("./heart.ts");
+  await setIntimate(false, ts);
+  await appendInnerLog({ turnSeq: 0, data: { kind: "cleared_by_rosie" } });
 }
 
 
@@ -410,9 +398,7 @@ export async function peekNextJob(at: number): Promise<BrainJob | null> {
   const rows = await db.query<Record<string, unknown>>(
     `select * from brain_jobs
      where (status = 'pending' and run_after <= $1) or (status = 'running' and locked_until < $1)
-     order by case type
-       when 'reflect' then 0 when 'archive' then 1 when 'dusk' then 2
-       when 'backfill' then 3 when 'synth' then 4 else 5 end, run_after
+     order by case type when 'night' then 0 when 'report' then 1 else 2 end, run_after
      limit 1`,
     [at],
   );
@@ -487,9 +473,7 @@ export async function claimJob(nowMs: number, lockMs: number, preferId?: string)
   const candidates = await db.query<Record<string, unknown>>(
     `select * from brain_jobs
      where (status = 'pending' and run_after <= $1) or (status = 'running' and locked_until < $1)
-     order by case type
-       when 'reflect' then 0 when 'archive' then 1 when 'dusk' then 2
-       when 'backfill' then 3 when 'synth' then 4 else 5 end, run_after
+     order by case type when 'night' then 0 when 'report' then 1 else 2 end, run_after
      limit 8`,
     [nowMs],
   );
@@ -549,59 +533,6 @@ export async function restoreClaim(id: string, attempts: number): Promise<void> 
      where id = $1`,
     [id, Math.max(0, attempts - 1), now()],
   );
-}
-
-export const REFLECT_DEDUPE_KEY = "reflect";
-
-export async function upsertReflectJob(turnSeq: number): Promise<void> {
-  const db = await getSql();
-  const ts = now();
-  await db.query(
-    `insert into brain_jobs (id, type, dedupe_key, payload, status, attempts, run_after, created_at, updated_at)
-     values ($1, 'reflect', $2, $3::jsonb, 'pending', 0, $4, $4, $4)
-     on conflict (dedupe_key) do update set
-       payload = jsonb_build_object(
-         'turnSeq', greatest(
-           coalesce((brain_jobs.payload->>'turnSeq')::bigint, 0),
-           (excluded.payload->>'turnSeq')::bigint
-         )
-       ),
-       status = case when brain_jobs.status = 'running' then 'running' else 'pending' end,
-       run_after = case when brain_jobs.status = 'running' then brain_jobs.run_after else excluded.run_after end,
-       attempts = case when brain_jobs.status = 'running' then brain_jobs.attempts else 0 end,
-       last_error = case when brain_jobs.status = 'running' then brain_jobs.last_error else null end,
-       locked_until = case when brain_jobs.status = 'running' then brain_jobs.locked_until else null end,
-       updated_at = excluded.updated_at`,
-    [newId(), REFLECT_DEDUPE_KEY, JSON.stringify({ turnSeq }), ts],
-  );
-}
-
-/** Atomically done-or-reopen so a concurrent upsertReflectJob cannot lose a follow-up. */
-export async function finishReflectJob(id: string, ranSeq: number): Promise<"pending" | "done"> {
-  const db = await getSql();
-  const ts = now();
-  const rows = await db.query<{ status: string }>(
-    `update brain_jobs
-     set status = case
-           when coalesce((payload->>'turnSeq')::bigint, 0) > $2 then 'pending'
-           else 'done'
-         end,
-         attempts = case
-           when coalesce((payload->>'turnSeq')::bigint, 0) > $2 then 0
-           else attempts
-         end,
-         last_error = case
-           when coalesce((payload->>'turnSeq')::bigint, 0) > $2 then null
-           else last_error
-         end,
-         locked_until = null,
-         run_after = $3,
-         updated_at = $3
-     where id = $1
-     returning status`,
-    [id, ranSeq, ts],
-  );
-  return rows[0]?.status === "pending" ? "pending" : "done";
 }
 
 export async function cleanupOldJobs(now: number): Promise<void> {

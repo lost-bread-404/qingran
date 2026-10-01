@@ -81,7 +81,7 @@ export function ReplayPanel({ profile }: { profile: Profile }) {
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4">
       <p className="text-xs text-subtle">
-        用当时的对话、他记得的、他现在要做成的事，各生成一次。不写入聊天，也不改他的心。同一句可以多跑几次看稳不稳。
+        用当时的对话、现在的你们、他想起来的回忆，各生成一次。不写入聊天，也不改他的记忆。同一句可以多跑几次看稳不稳。
       </p>
       {error ? <p className="text-sm text-live">{error}</p> : null}
       <label className="flex flex-col gap-1">
@@ -181,7 +181,7 @@ function SideCard({ title, side, open }: { title: string; side: Side; open: bool
       <p className="whitespace-pre-wrap text-sm leading-relaxed">{side.speech || "（没有正文）"}</p>
       {open ? (
         <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[10px]">
-          {side.innerJson ? side.innerJson : "重放只比较说出来的话。心思在这句之后另写，这里不生成。"}
+          {side.innerJson ? side.innerJson : "重放只比较说出来的话。"}
         </pre>
       ) : null}
     </div>

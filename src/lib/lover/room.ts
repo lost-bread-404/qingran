@@ -89,6 +89,11 @@ export const saveProfilePatch = createServerFn({ method: "POST" })
       baseRevs: data.baseRevs,
       source: await clientSource(),
     });
+    // The storyline is the start of his memory: an edit re-cuts its moments now.
+    if (typeof data.patch.storyline === "string") {
+      const { syncStory } = await import("./brain/memory");
+      await syncStory(data.patch.storyline).catch((err) => console.error(err));
+    }
     return result;
   });
 

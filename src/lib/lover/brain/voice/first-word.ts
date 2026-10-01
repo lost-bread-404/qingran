@@ -1,14 +1,16 @@
 import { resolveVoiceChat, voiceSafetyPick, type VoiceModelPick } from "../config.ts";
-import { mindForReply, timeFacts, todayText } from "../heart.ts";
+import { timeFacts } from "../heart.ts";
 import { identityBlock } from "../life.ts";
 import { callModel } from "../llm.ts";
-import { effectiveMode } from "../mode.ts";
 import { loadPrompt } from "../prompts/store.ts";
-import { getProfileData, listHistoryWindow } from "../store.ts";
+import { getProfileData } from "../store.ts";
+import { dossierTextForModel } from "../dossier.ts";
+import { recall, recallText } from "../memory.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
-import { lockedProfile, voiceInjectFromProfile } from "../../types.ts";
+import { voiceInjectFromProfile } from "../../types.ts";
 import { InnerCutBuffer } from "./inner-cut.ts";
 import { buildVoiceMessages, type VoicePackParts } from "./pack-build.ts";
+import { recallQuery, replyHistory } from "./pack.ts";
 
 function quietText(ms: number): string {
   const m = Math.max(1, Math.round(ms / 60_000));
@@ -17,46 +19,39 @@ function quietText(ms: number): string {
   return m % 60 ? `${h} 小时 ${m % 60} 分钟` : `${h} 小时`;
 }
 
+/** His answer when he does not want to write to her now. */
+const PASS = /^[（(]?\s*不找\s*[。.]?\s*[）)]?$/;
+
 /**
- * A message he starts himself (a plan came due while she was away).
- * The mind only decided to reach her and what for; the words come from the same voice that answers her:
- * same persona, current mode, memory, the item he is working on and recent talk, told that nothing new came from her.
+ * A message he may start himself, when she has been quiet a while (requirements 第 5 节).
+ * The same voice that answers her decides whether to write and what: same persona, memory and today's talk,
+ * told how long she has been quiet. 「不找」 = he lets it be.
  */
 export async function speakFirst(input: {
-  intent: string;
   nowMs: number;
   timeZone: string;
   lastUserAt: number | null;
-}): Promise<{ text: string; model: string; ms: number; reason: string | null }> {
-  const saved = await getProfileData();
-  const ids = lockedProfile(saved).modes.map((m) => m.id);
-  const mode = await effectiveMode(input.nowMs, input.timeZone, ids);
-  const { profile } = resolveTalkProfile(undefined, saved, mode);
+}): Promise<{ text: string; passed: boolean; model: string; ms: number; reason: string | null }> {
+  const { profile } = resolveTalkProfile(undefined, await getProfileData());
   const inject = voiceInjectFromProfile(profile);
-  const story = inject.dossier ? profile.storyline.trim() : "";
-  const [history, mind, today, clock, voicePrompt] = await Promise.all([
-    listHistoryWindow(null, inject.history),
-    inject.moment ? mindForReply(input.nowMs) : Promise.resolve(""),
-    inject.moment ? todayText(input.nowMs, input.timeZone) : Promise.resolve(""),
+  const [history, us, clock, voicePrompt] = await Promise.all([
+    replyHistory(null, inject.history, input.nowMs, input.timeZone),
+    inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.nowMs),
     loadPrompt("voice"),
   ]);
-  const modeDef = profile.modes.find((m) => m.id === profile.mode);
+  const recalled = inject.memory ? await recall(recallQuery("", history), input.nowMs) : { memories: [] };
   const parts: VoicePackParts = {
     charter: profile.systemPrompt,
     identity: identityBlock(profile.identity),
-    story,
-    mind,
-    today,
-    intimate: modeDef?.intimate ? profile.intimateNotes.trim() : "",
+    us,
+    recall: recallText(recalled.memories),
+    intimate: "",
     clock,
     history,
-    historyWindow: inject.history,
+    historyWindow: history.length,
     userText: "",
-    first: {
-      quiet: input.lastUserAt ? quietText(input.nowMs - input.lastUserAt) : "很久",
-      intent: input.intent.trim(),
-    },
+    first: { quiet: input.lastUserAt ? quietText(input.nowMs - input.lastUserAt) : "很久" },
     voiceTemplate: voicePrompt.body,
     personaPlacement: profile.personaPlacement,
     personaAck: profile.personaAck,
@@ -75,7 +70,6 @@ export async function speakFirst(input: {
       messages,
       model: pick.model,
       effort: pick.effort,
-      temperature: modeDef?.temperature ?? undefined,
       promptKey: voicePrompt.key,
       promptHash: voicePrompt.hash,
       outputRef: `first:${input.nowMs}`,
@@ -86,7 +80,8 @@ export async function speakFirst(input: {
     cut.push(result.text);
     cut.finish();
     const text = cut.speech.trim();
-    if (text) return { text: text.slice(0, 2000), model: result.model, ms: result.ms, reason: null };
+    if (PASS.test(text)) return { text: "", passed: true, model: result.model, ms: result.ms, reason: null };
+    if (text) return { text: text.slice(0, 2000), passed: false, model: result.model, ms: result.ms, reason: null };
   }
-  return { text: "", model: last.model, ms: last.ms, reason: "模型没有回话" };
+  return { text: "", passed: false, model: last.model, ms: last.ms, reason: "模型没有回话" };
 }

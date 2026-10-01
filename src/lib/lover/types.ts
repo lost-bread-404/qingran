@@ -35,10 +35,9 @@ export type Profile = {
   voiceEffort: VoiceEffort;
   /** Pause that ends a turn, milliseconds. 800–3000, default 1500. */
   silenceMs: number;
-  injectMind: boolean;
-  /** Self / bond / portrait block in the voice prompt. */
+  /** 清然和 Rosie 现在 and the moments that come back to him, in the voice prompt. */
   injectLongterm: boolean;
-  /** Recent messages in the voice prompt, and the archive slide-out window. 0–80. */
+  /** At least this many recent messages in the voice prompt (it gets all of today's talk), and the archive slide-out window. 0–80. */
   historyWindow: number;
   /** Kept for older profiles. Voice input no longer has a night switch; the pitch gate is always on. */
   nightMode: boolean;
@@ -53,7 +52,7 @@ export type Profile = {
   /** Leftover audio-LLM instruction. Live hearing is xAI + Apple and does not send this. */
   /** Fixed words sent to xAI as keyterm. Recent dialogue terms are added on top. */
   sttKeyterms: string[];
-  /** Dossier character cap. 2000–8000, default 4000. */
+  /** Cap on 清然和 Rosie 现在. 500–3000, default 1500. */
   dossierMaxChars: number;
   /** Fixed life, separate from the system prompt. Empty omits the identity line. */
   identity: string;
@@ -61,16 +60,12 @@ export type Profile = {
   rhythm: string;
   /** Monthly diary. Off until Rosie turns it on. Manual reports still run. */
   diaryEnabled: boolean;
-  /** Shown to the reply only while the current mode is marked intimate. */
+  /** Shown to the reply only while the two of them are in an intimate scene. */
   intimateNotes: string;
-  /** Rosie's story line. Only the inner mind and the memory editor read it; the reply never does. */
+  /** The story Rosie wrote of their months before this app. Cut into moments, it is the start of his memory. */
   storyline: string;
-  /** Run the inner mind (reflect) and memory editor. Off → reply uses persona + context only. */
+  /** Memory, the night pass and proactive messages. Off → reply uses persona + context only. */
   brainOn: boolean;
-  /** Current mode id (set by reflect, or by her toggle when the brain is off). */
-  mode: string;
-  /** Her modes: each has a name, when it applies (free text for reflect), and a prompt added after the persona. One reply model for all. */
-  modes: TalkModeDef[];
   /** Where the persona text sits: system prompt, or the first user message. */
   personaPlacement: "system" | "first_user";
   /** With the persona as the first message: his line right after it (a fixed line, no model call). */
@@ -116,73 +111,6 @@ export type ChatMessage = {
 /** Used only when nothing is saved. Not a character. */
 export const NEUTRAL_PERSONA = "你是清然。";
 
-/**
- * A mode she defines. `when` is free text for the inner mind. `prompt` goes after the persona.
- * `temperature` overrides the reply's default (1.0) while this mode is on; null keeps the default.
- * `keepActions`: false → the night pass keeps only what was said in this mode, not his actions.
- * `intimate`: the intimate notes are shown to the reply while this mode is on.
- */
-export type TalkModeDef = {
-  id: string;
-  name: string;
-  when: string;
-  prompt: string;
-  temperature: number | null;
-  keepActions: boolean;
-  intimate: boolean;
-};
-
-export const DEFAULT_MODES: TalkModeDef[] = [
-  {
-    id: "play",
-    name: "戏",
-    when: "休息、哄睡、午休、亲密、剧情；晚上收工后和周末",
-    prompt: "",
-    temperature: null,
-    keepActions: true,
-    intimate: true,
-  },
-  {
-    id: "real",
-    name: "现实",
-    when: "工作日白天我该起床开工、学习、准备面试的时候",
-    prompt: "",
-    temperature: null,
-    keepActions: true,
-    intimate: false,
-  },
-];
-
-function lockTemperature(value: unknown): number | null {
-  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
-  if (!Number.isFinite(n)) return null;
-  return Math.max(0, Math.min(2, Math.round(n * 100) / 100));
-}
-
-export function lockModes(raw: unknown): TalkModeDef[] {
-  if (!Array.isArray(raw)) return DEFAULT_MODES.map((m) => ({ ...m }));
-  const seen = new Set<string>();
-  const out: TalkModeDef[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const row = item as Record<string, unknown>;
-    const id = typeof row.id === "string" ? row.id.trim().slice(0, 40) : "";
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push({
-      id,
-      name: typeof row.name === "string" && row.name.trim() ? row.name.trim().slice(0, 20) : id,
-      when: typeof row.when === "string" ? row.when.slice(0, 1000) : "",
-      prompt: typeof row.prompt === "string" ? row.prompt.slice(0, 8000) : "",
-      temperature: lockTemperature(row.temperature),
-      keepActions: row.keepActions !== false,
-      intimate: row.intimate === true,
-    });
-    if (out.length >= 8) break;
-  }
-  return out.length ? out : DEFAULT_MODES.map((m) => ({ ...m }));
-}
-
 export const DEFAULT_PROFILE: Profile = {
   systemPrompt: "",
   muted: false,
@@ -194,7 +122,6 @@ export const DEFAULT_PROFILE: Profile = {
   voiceModel: DEFAULT_VOICE_MODEL,
   voiceEffort: DEFAULT_VOICE_EFFORT,
   silenceMs: SILENCE_MS,
-  injectMind: true,
   injectLongterm: true,
   historyWindow: HISTORY_WINDOW,
   nightMode: true,
@@ -203,15 +130,13 @@ export const DEFAULT_PROFILE: Profile = {
   hearingSense: DEFAULT_HEARING_SENSE,
   promptModels: {},
   sttKeyterms: lockSttKeyterms(undefined),
-  dossierMaxChars: 4000,
+  dossierMaxChars: 1500,
   identity: "",
   rhythm: "",
   diaryEnabled: false,
   intimateNotes: "",
   storyline: "",
   brainOn: true,
-  mode: "play",
-  modes: DEFAULT_MODES,
   personaPlacement: "system",
   personaAck: "嗯。",
 };
@@ -235,7 +160,6 @@ type LooseProfile = Partial<Profile> & {
   voiceModel?: string;
   voiceEffort?: string | null;
   silenceMs?: number;
-  injectMind?: boolean;
   injectLongterm?: boolean;
   historyWindow?: number;
   nightMode?: boolean;
@@ -251,8 +175,6 @@ type LooseProfile = Partial<Profile> & {
   intimateNotes?: string;
   storyline?: string;
   brainOn?: boolean;
-  mode?: string;
-  modes?: unknown;
   personaPlacement?: string;
   personaAck?: string;
 };
@@ -275,7 +197,6 @@ export function lockedProfile(input?: unknown): Profile {
     voiceModel: pickVoiceModel(raw),
     voiceEffort: pickVoiceEffort(raw),
     silenceMs: hearingSense.endWaitMs,
-    injectMind: raw.injectMind !== false,
     injectLongterm: raw.injectLongterm !== false,
     historyWindow: clampHistoryWindow(raw.historyWindow),
     nightMode: raw.nightMode !== false,
@@ -291,37 +212,37 @@ export function lockedProfile(input?: unknown): Profile {
     intimateNotes: typeof raw.intimateNotes === "string" ? raw.intimateNotes.slice(0, 8000) : "",
     storyline: typeof raw.storyline === "string" ? raw.storyline.slice(0, 20000) : "",
     brainOn: raw.brainOn !== false,
-    mode: typeof raw.mode === "string" && raw.mode.trim() ? raw.mode.trim().slice(0, 40) : "play",
-    modes: lockModes(raw.modes),
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
     personaAck: typeof raw.personaAck === "string" && raw.personaAck.trim() ? raw.personaAck.trim().slice(0, 200) : "嗯。",
   };
 }
 
 export type VoiceInjectFlags = {
-  moment: boolean;
-  dossier: boolean;
+  /** 清然和 Rosie 现在 + the moments that come back to him. */
+  memory: boolean;
+  /** At least this many recent messages (all of today's talk is given anyway). */
   history: number;
 };
 
 export function voiceInjectFromProfile(profile: {
-  injectMind?: boolean;
   injectLongterm?: boolean;
+  brainOn?: boolean;
   historyWindow?: number;
 }): VoiceInjectFlags {
   return {
-    moment: profile.injectMind !== false,
-    dossier: profile.injectLongterm !== false,
+    memory: profile.injectLongterm !== false && profile.brainOn !== false,
     history: clampHistoryWindow(profile.historyWindow),
   };
 }
 
 export function formatVoiceInjectLine(flags: VoiceInjectFlags): string {
-  return `我此刻：${flags.moment ? "开" : "关"} · 我记得的：${flags.dossier ? "开" : "关"} · 历史：${flags.history}`;
+  return `回忆：${flags.memory ? "开" : "关"} · 历史：至少 ${flags.history}`;
 }
 
 export function parseVoiceInjectLine(note: string | null | undefined): string | null {
   const text = note ?? "";
+  const v6 = text.match(/回忆：[开关] · 历史：至少 \d{1,2}/);
+  if (v6) return v6[0];
   const next = text.match(/我此刻：[开关] · 我记得的：[开关] · 历史：\d{1,2}/);
   if (next) return next[0];
   const old = text.match(/记忆：[开关] · 长期：[开关] · 历史：\d{1,2}/);

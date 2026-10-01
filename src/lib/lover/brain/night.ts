@@ -2,8 +2,8 @@ import { callModel, type CallModelResult } from "./llm.ts";
 import { now } from "./clock.ts";
 import { appendInnerLog, getMeta, getProfileData, getProfilePrompt, patchBrainLog, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
-import { clockOf, localDay, shiftDay, zonedParts } from "./time.ts";
-import { lockedProfile, type TalkModeDef } from "../types.ts";
+import { clockOf, localDay } from "./time.ts";
+import { lockedProfile } from "../types.ts";
 import { isNightNoiseBody, modelFacingText } from "../message-markup.ts";
 import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
 import { loadPrompt } from "./prompts/store.ts";
@@ -12,34 +12,57 @@ import { identityBlock } from "./life.ts";
 import { readIdentity } from "./life-store.ts";
 import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
-import { modeByName, modesText, parsePlans } from "./voice/reflector.ts";
-import { recordMode } from "./mode.ts";
-import { dayWindow, hasDay, listPlans, plansText, replaceMindPlans, saveDayTimeline, setThought } from "./heart.ts";
+import { dayClockMs, dayWindow, saveDayTimeline } from "./heart.ts";
+import { addMemories, getMark, memoriesWithIds, recall, setMark, syncStory, updateMemory, type NewMemory } from "./memory.ts";
 
 /**
- * The night pass: once a day after 04:00 local, fold the day that just ended into his memory.
- * One call rewrites the whole memory, writes the day's timeline, writes tomorrow's plans (what he wants of her included)
- * and the mode she meets first.
+ * The night pass (docs/brain.md v6): once for each day that has ended, fold it into his memory.
+ * One call writes the day's moments (added, never rewritten), what he newly understood about Rosie, which older
+ * moments are no longer so, a fresh 「清然和 Rosie 现在」 and the day's timeline (for the monthly report).
+ * Days are done oldest first, one at a time, so a backlog (the days before this design, or a missed night) catches up
+ * in order and each day sees the 「现在」 the day before left.
  */
+const ITEM = {
+  type: "object",
+  additionalProperties: false,
+  required: ["time", "body", "keys", "thread", "importance"] as string[],
+  properties: {
+    time: { type: "string" },
+    body: { type: "string" },
+    keys: { type: "string" },
+    thread: { type: "string" },
+    importance: { type: "integer" },
+  },
+};
+
 export const NIGHT_SCHEMA = {
   name: "night",
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["memory", "timeline", "plans", "mode", "changes"] as string[],
+    required: ["moments", "insights", "changed", "us", "timeline", "changes"] as string[],
     properties: {
-      memory: { type: "string" },
-      timeline: { type: "string" },
-      plans: {
+      moments: { type: "array", items: ITEM },
+      insights: {
         type: "array",
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["text", "at"],
-          properties: { text: { type: "string" }, at: { type: "string" } },
+          required: ["body", "keys", "importance"] as string[],
+          properties: { body: { type: "string" }, keys: { type: "string" }, importance: { type: "integer" } },
         },
       },
-      mode: { type: "string" },
+      changed: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "note"] as string[],
+          properties: { id: { type: "integer" }, note: { type: "string" } },
+        },
+      },
+      us: { type: "string" },
+      timeline: { type: "string" },
       changes: { type: "string" },
     },
   },
@@ -47,9 +70,8 @@ export const NIGHT_SCHEMA = {
 
 /** Cap on the day's conversation sent at night. Past this, his lines keep only what he said aloud. */
 const NIGHT_CONVERSATION_MAX = 60_000;
-/** The night pass runs from 04:00 until noon local, for the day that ended at 04:00. */
-const NIGHT_FROM_HOUR = 4;
-const NIGHT_UNTIL_HOUR = 12;
+/** How many older moments the night pass sees, to tell which of them the day changed. */
+const NIGHT_RELATED = 20;
 
 type Row = { id: string; role: string; body: string; created_at: number };
 
@@ -64,46 +86,13 @@ async function dayMessages(from: number, to: number): Promise<Row[]> {
   return rows.map((r) => ({ ...r, created_at: Number(r.created_at) }));
 }
 
-/** The text the mind kept for this day (before the night pass, the running 今天). */
-async function dayText(day: string): Promise<string> {
-  const db = await sql();
-  const rows = await db.query<{ timeline: string }>(`select timeline from qr_days where day = $1`, [day]);
-  return String(rows[0]?.timeline ?? "").trim();
-}
-
-/** Which mode was on at each moment, from the mode log. */
-async function modeTimeline(to: number): Promise<Array<{ at: number; mode: string }>> {
-  const db = await sql();
-  const rows = await db.query<{ at: number; mode: string }>(
-    `select at::float8 as at, mode from qr_mode_log where at < $1 order by at asc, id asc`,
-    [to],
-  );
-  return rows.map((r) => ({ at: Number(r.at), mode: String(r.mode) }));
-}
-
-function modeAtTime(log: Array<{ at: number; mode: string }>, at: number): string | null {
-  let current: string | null = null;
-  for (const row of log) {
-    if (row.at > at) break;
-    current = row.mode;
-  }
-  return current;
-}
-
-export function nightConversation(
-  rows: Row[],
-  modes: TalkModeDef[],
-  log: Array<{ at: number; mode: string }>,
-  timeZone: string,
-): string {
-  const quiet = new Set(modes.filter((m) => !m.keepActions).map((m) => m.id));
-  const render = (allSpoken: boolean) =>
+export function nightConversation(rows: Row[], timeZone: string): string {
+  const render = (spoken: boolean) =>
     rows
       .filter((r) => !isNightNoiseBody(r.body))
       .map((r) => {
         const text = modelFacingText(r.body);
-        const mode = modeAtTime(log, r.created_at);
-        const body = r.role === "assistant" && (allSpoken || (mode != null && quiet.has(mode))) ? spokenOnly(text) : text;
+        const body = r.role === "assistant" && spoken ? spokenOnly(text) : text;
         return `[${clockOf(r.created_at, timeZone)}] ${r.role === "user" ? "Rosie" : "清然"}：${body}`;
       })
       .join("\n");
@@ -113,42 +102,39 @@ export function nightConversation(
   return text;
 }
 
-/** `manual` (整理今天 in the middle of the day) only rewrites the memory; today's text, plans and mode stay. */
-export async function runNight(
-  day: string,
-  jobId?: string,
-  complete: typeof callModel = callModel,
-  opts: { manual?: boolean } = {},
-): Promise<{ ok: boolean; skipped?: string }> {
+function str(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export async function runNight(day: string, jobId?: string, complete: typeof callModel = callModel): Promise<{ ok: boolean; skipped?: string }> {
   const at = now();
   const tz = resolveTz((await getMeta()).timeZone);
   const window = dayWindow(day, tz);
-  const [rows, today, profileData, charter, dossier, ident, plans, modeLog] = await Promise.all([
+  const [rows, profileData, charter, us, ident] = await Promise.all([
     dayMessages(window.from, window.to),
-    dayText(day),
     getProfileData(),
     getProfilePrompt(),
     dossierTextForModel(),
     readIdentity(),
-    listPlans(),
-    modeTimeline(window.to),
   ]);
-  if (!rows.length && !today) {
-    await saveDayTimeline(day, "", at);
+  if (!rows.length) {
+    await setMark(`day:${day}`, "empty", at);
     return { ok: true, skipped: "empty" };
   }
   const profile = lockedProfile(profileData);
+  await syncStory(profile.storyline);
+  const conversation = nightConversation(rows, tz);
+  // The older moments this day is most about: the night pass may mark some of them as no longer so.
+  const herLines = rows.filter((r) => r.role === "user").map((r) => modelFacingText(r.body)).join("\n");
+  const related = (await recall(herLines.slice(-6000), window.to, { top: NIGHT_RELATED, minFit: 4, keepShare: 0, withThread: 0 })).memories;
   const loaded = await loadPrompt("editor");
   const messages = renderVariant(parsePromptBody("editor", loaded.body), "main", {
     system_prompt: charter,
     identity_block: identityBlock(ident.identity) ? `${identityBlock(ident.identity)}\n` : "",
-    story: profile.storyline.trim() || "（没有）",
-    dossier: dossier.trim() || "（还没有）",
-    plans: plansText(plans, at, tz) || "（没有）",
-    today: today || "（没有）",
+    us: us.trim() || "（还没有）",
+    memories: memoriesWithIds(related) || "（没有）",
     day,
-    conversation: nightConversation(rows, profile.modes, modeLog, tz) || "（没有）",
-    modes: modesText(profile.modes, "") || "（没有）",
+    conversation: conversation || "（没有）",
     max_chars: String(profile.dossierMaxChars),
   });
   const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
@@ -169,36 +155,68 @@ export async function runNight(
     throw new Error(`night:${result.failKind ?? "failed"}`);
   }
   const json = result.json as Record<string, unknown>;
-  const memory = typeof json.memory === "string" ? json.memory.trim() : "";
-  const changes = typeof json.changes === "string" ? json.changes.trim().slice(0, 1000) : "";
-  if (memory) await publishMemory(memory, "night", Math.min(window.to, at), { day, changes });
-  if (!opts.manual) {
-    // The day's timeline is final only at night; during the day 「今天」 keeps being the mind's running text.
-    await saveDayTimeline(day, typeof json.timeline === "string" ? json.timeline.trim() : "", at);
-    await replaceMindPlans(parsePlans(json.plans, tz, at), at, "night");
-    await setThought("", at);
-    const mode = modeByName(profile.modes, typeof json.mode === "string" ? json.mode : "")?.id;
-    if (mode) await recordMode({ at, mode, until: null, why: "夜里整理定的明早" });
+  const fresh: NewMemory[] = [];
+  for (const raw of Array.isArray(json.moments) ? json.moments : []) {
+    const item = (raw ?? {}) as Record<string, unknown>;
+    const body = str(item.body);
+    if (!body) continue;
+    fresh.push({
+      kind: "moment",
+      source: "night",
+      day,
+      at: dayClockMs(day, str(item.time), tz) ?? window.from,
+      body,
+      keys: str(item.keys),
+      thread: str(item.thread),
+      importance: Number(item.importance),
+    });
   }
+  for (const raw of Array.isArray(json.insights) ? json.insights : []) {
+    const item = (raw ?? {}) as Record<string, unknown>;
+    const body = str(item.body);
+    if (!body) continue;
+    fresh.push({ kind: "insight", source: "night", day, at: window.to - 1, body, keys: str(item.keys), importance: Number(item.importance) });
+  }
+  await addMemories(fresh);
+  const relatedIds = new Set(related.map((m) => m.id));
+  for (const raw of Array.isArray(json.changed) ? json.changed : []) {
+    const item = (raw ?? {}) as Record<string, unknown>;
+    const id = Number(item.id);
+    const note = str(item.note);
+    if (relatedIds.has(id) && note) await updateMemory(id, { changed: note });
+  }
+  const nextUs = str(json.us);
+  if (nextUs) await publishMemory(nextUs, "night", Math.min(window.to, at), { day, changes: str(json.changes).slice(0, 1000) });
+  await saveDayTimeline(day, str(json.timeline), at);
+  await setMark(`day:${day}`, "done", at);
   await appendInnerLog({ turnSeq: 0, data: { kind: "night", day, output: result.json }, model: result.model, ms: result.ms });
   return { ok: true };
 }
 
-/** Called from the wake: after 04:00, the day that just ended gets its night pass once. */
-export async function enqueueNightIfDue(at = now()): Promise<string | null> {
+/** The oldest day that has ended (04:00 local) and has messages, but is not in his memory yet. */
+export async function nextNightDay(at = now()): Promise<string | null> {
   const tz = resolveTz((await getMeta()).timeZone);
-  const hour = zonedParts(at, tz).hour;
-  if (hour < NIGHT_FROM_HOUR || hour >= NIGHT_UNTIL_HOUR) return null;
-  const day = shiftDay(localDay(at, tz), -1);
-  if (await hasDay(day, dayWindow(day, tz).to)) return null;
-  await enqueue("night", `night:${day}`, { day });
-  return day;
+  const today = localDay(at, tz);
+  const db = await sql();
+  const rows = await db.query<{ day: string }>(
+    `select distinct local_day as day from qingran_messages
+     where local_day is not null and local_day < $1 and forgotten_at is null and kind is distinct from 'system_notice'
+       and not exists (select 1 from qr_memory_marks m where m.key = 'day:' || qingran_messages.local_day)
+     order by local_day asc limit 1`,
+    [today],
+  );
+  const day = rows[0]?.day ? String(rows[0].day) : null;
+  if (!day) return null;
+  return (await getMark(`day:${day}`)) ? null : day;
 }
 
-/** "整理今天" in settings: fold today in now, without waiting for the night. */
-export async function enqueueNightNow(at = now()): Promise<string> {
-  const tz = resolveTz((await getMeta()).timeZone);
-  const day = localDay(at, tz);
-  await enqueue("night", `night:manual:${at}`, { day, manual: true }, at, true);
+/** Called after each reply and from the wake: the story's moments are kept in step, and one ended day gets its night pass. */
+export async function enqueueMemoryWork(at = now()): Promise<string | null> {
+  const profile = lockedProfile(await getProfileData());
+  if (!profile.brainOn) return null;
+  await syncStory(profile.storyline);
+  const day = await nextNightDay(at);
+  if (!day) return null;
+  await enqueue("night", `memory:${day}`, { day });
   return day;
 }

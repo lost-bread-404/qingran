@@ -1,8 +1,5 @@
 import { lockedProfile, NEUTRAL_PERSONA, storedSystemPrompt, type Profile } from "./types.ts";
 
-/** A mode sets the tone, not a script: what is really happening and how he feels come first. */
-const MODE_FRAME = "现在大致是这样的时候（是基调，场面变了就按场面来）：";
-
 export type ResolvedTalkProfile = {
   profile: Profile;
   personaMissing: boolean;
@@ -12,7 +9,7 @@ export type ResolvedTalkProfile = {
  * Persona, model, and what gets injected come from the saved profile.
  * The client may still choose playback (speed, mute).
  */
-export function resolveTalkProfile(given: unknown, saved: unknown, mode?: string): ResolvedTalkProfile {
+export function resolveTalkProfile(given: unknown, saved: unknown): ResolvedTalkProfile {
   const savedProfile = lockedProfile(saved);
   const stored = storedSystemPrompt(saved);
   const personaMissing = !stored;
@@ -25,9 +22,5 @@ export function resolveTalkProfile(given: unknown, saved: unknown, mode?: string
     profile.voiceSpeed = client.voiceSpeed;
     profile.muted = client.muted;
   }
-  if (mode) profile.mode = mode;
-  // One reply model for every mode; a mode only adds its own prompt after the persona.
-  const def = profile.modes.find((m) => m.id === profile.mode);
-  if (def?.prompt.trim()) profile.systemPrompt = `${profile.systemPrompt.trim()}\n\n${MODE_FRAME}\n${def.prompt.trim()}`;
   return { profile, personaMissing };
 }

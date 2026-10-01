@@ -6,12 +6,14 @@ import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
 import { buildVoiceMessages, voiceHistoryMessages } from "../voice/pack-build.ts";
-import { gatherReflectParts, modesText, reflectVars } from "../voice/reflector.ts";
-import { listPlans, mindForReply, plansText, timeFacts, todayText } from "../heart.ts";
+import { recallQuery, replyHistory } from "../voice/pack.ts";
+import { timeFacts } from "../heart.ts";
 import { dossierTextForModel } from "../dossier.ts";
+import { listMemories, memoriesWithIds, recall, recallText } from "../memory.ts";
+import { inIntimateScene } from "../scene.ts";
 import { identityBlock } from "../life.ts";
-import { effectiveMode } from "../mode.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
+import { modelFacingText } from "../../message-markup.ts";
 
 export type PromptPreview = {
   variantId: string;
@@ -22,95 +24,84 @@ export type PromptPreview = {
 
 /** What the reply would be given right now, with 「在吗」 standing in for her line. */
 async function voicePreview(body: string | undefined, variantId: string): Promise<Omit<PromptPreview, "variantId">> {
-  const first = variantId === "first" ? { quiet: "25 分钟", intent: "（到时间时心思写的那件事）" } : undefined;
+  const first = variantId === "first" ? { quiet: "45 分钟" } : undefined;
+  const userText = first ? "" : "在吗";
   const at = now();
   const [meta, profileData] = await Promise.all([getMeta(), getProfileData()]);
-  const saved = lockedProfile(profileData);
   const tz = resolveTz(meta.timeZone);
-  // The same persona + current mode the reply is given (api/talk): brain on → the mode the mind chose; off → her toggle.
-  const ids = saved.modes.map((m) => m.id);
-  const mode = saved.brainOn ? await effectiveMode(at, tz, ids) : ids.includes(saved.mode) ? saved.mode : ids[0];
-  const profile = resolveTalkProfile(undefined, profileData, mode).profile;
+  const profile = resolveTalkProfile(undefined, profileData).profile;
   const charter = profile.systemPrompt;
-  const modeDef = profile.modes.find((m) => m.id === profile.mode);
-  const intimate = modeDef?.intimate ? profile.intimateNotes.trim() : "";
   const inject = voiceInjectFromProfile(profile);
-  const brainOn = profile.brainOn;
-  const story = inject.dossier && brainOn ? profile.storyline.trim() : "";
-  const [history, mind, today, clock] = await Promise.all([
-    listHistoryWindow(null, inject.history),
-    inject.moment && brainOn ? mindForReply(at) : Promise.resolve(""),
-    inject.moment && brainOn ? todayText(at, tz) : Promise.resolve(""),
+  const [history, us, clock, scene] = await Promise.all([
+    replyHistory(null, inject.history, at, tz),
+    inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(at, tz, at),
+    inject.memory ? inIntimateScene(at) : Promise.resolve(false),
   ]);
+  const recalled = inject.memory ? await recall(recallQuery(userText, history), at) : { memories: [] };
+  const intimate = scene ? profile.intimateNotes.trim() : "";
+  const recallBlock = recallText(recalled.memories);
   const messages = buildVoiceMessages({
     charter,
     identity: identityBlock(profile.identity),
-    story,
-    mind,
-    today,
+    us,
+    recall: recallBlock,
     intimate,
     clock,
     history,
-    historyWindow: inject.history,
-    userText: "在吗",
+    historyWindow: history.length,
+    userText,
     first,
     voiceTemplate: body,
     personaPlacement: profile.personaPlacement,
     personaAck: profile.personaAck,
   });
   const historyText =
-    voiceHistoryMessages(history, inject.history)
+    voiceHistoryMessages(history, history.length)
       .map((message) => `${message.role}：${message.content}`)
       .join("\n") || "（没有对话）";
   return {
     slots: {
-      story,
-      now: mind,
-      today,
+      us,
+      recall: recallBlock,
       system_prompt: charter,
       clock,
-      user_text: "在吗",
+      user_text: userText,
       quiet: first?.quiet ?? "",
-      intent: first?.intent ?? "",
       history_messages: historyText,
     },
     messages,
-    note: `${first ? "主动找她：多久没说话、想做成什么用占位。" : "没有正在说的这一句，用「在吗」占位。"}人设后面接的是现在的模式「${modeDef?.name ?? "（没有）"}」，和回复拿到的一样。`,
+    note: `${first ? "主动找她：多久没说话用占位。" : "没有正在说的这一句，用「在吗」占位；想起来的事按最近几句找。"}${intimate ? "现在判断为正在亲热，带上了亲密设定。" : "现在不在亲热，没带亲密设定。"}`,
+  };
+}
+
+async function sceneSlots(): Promise<Record<string, string>> {
+  const rows = await listHistoryWindow(null, 6);
+  return {
+    conversation: rows.map((m) => `${m.role === "user" ? "Rosie" : "清然"}：${modelFacingText(m.text)}`).join("\n") || "（没有对话）",
   };
 }
 
 async function editorSlots(): Promise<Record<string, string>> {
   const tz = resolveTz((await getMeta()).timeZone);
   const at = now();
-  const [dossier, charter, plans, today, profileData] = await Promise.all([
-    dossierTextForModel(),
-    getProfilePrompt(),
-    listPlans(),
-    todayText(at, tz),
-    getProfileData(),
-  ]);
+  const [us, charter, profileData, memories] = await Promise.all([dossierTextForModel(), getProfilePrompt(), getProfileData(), listMemories()]);
   const profile = lockedProfile(profileData);
   return {
     system_prompt: charter,
     identity_block: identityBlock(profile.identity) ? `${identityBlock(profile.identity)}\n` : "",
-    story: profile.storyline || "（没有）",
-    dossier: dossier || "（还没有）",
-    plans: plansText(plans, at, tz) || "（没有）",
-    today: today || "（没有）",
+    us: us || "（还没有）",
+    memories: memoriesWithIds(memories.slice(-20)) || "（没有）",
     day: localDay(at, tz),
-    modes: modesText(profile.modes, "") || "（没有）",
     conversation: "（要等这次整理才有：这一天没被清空的对话）",
     max_chars: String(profile.dossierMaxChars),
   };
 }
 
 async function slotsFor(key: PromptKey): Promise<{ slots: Record<string, string>; note: string }> {
-  if (key === "reflect") {
-    return { slots: reflectVars((await gatherReflectParts(now(), { kind: "turn" })).parts), note: "这是她刚说完话时，这一刻心思会读到的材料。" };
-  }
+  if (key === "scene") return { slots: await sceneSlots(), note: "每轮回复之后，用最近 6 条判断。" };
   if (key === "editor") {
-    return { slots: await editorSlots(), note: "整理时会带上这一天没被清空的对话。这里先给出记得的、打算和今天。" };
+    return { slots: await editorSlots(), note: "整理时带上这一天的对话，和以前回忆里跟这一天最相关的 20 条（这里先放最近的 20 条）。" };
   }
   if (key === "report") {
     return {

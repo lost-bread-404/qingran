@@ -1300,31 +1300,6 @@ export function VoiceRoom() {
                 <BookOpen className="size-5" />
               </Link>
             </Button>
-            {!profile.brainOn ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-label={`现在是「${profile.modes.find((m) => m.id === profile.mode)?.name ?? profile.mode}」，点一下换下一个模式`}
-                className="text-xs"
-                onClick={() => {
-                  const ids = profileRef.current.modes.map((m) => m.id);
-                  const at = ids.indexOf(profileRef.current.mode);
-                  const mode = ids[(at + 1) % ids.length] ?? ids[0]!;
-                  const next = lockedProfile({ ...profileRef.current, mode });
-                  profileRef.current = next;
-                  setProfile(next);
-                  void saveProfilePatch({ data: { patch: { mode } } })
-                    .then((result) => {
-                      if (!result?.ok) return;
-                      revsRef.current = result.revs;
-                      setRevs(result.revs);
-                    })
-                    .catch(() => undefined);
-                }}
-              >
-                {profile.modes.find((m) => m.id === profile.mode)?.name ?? profile.modes[0]?.name}
-              </Button>
-            ) : null}
             <Button
               variant="ghost"
               size="sm"

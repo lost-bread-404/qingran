@@ -36,7 +36,6 @@ const PATCH_KEYS = [
   "voiceModel",
   "voiceEffort",
   "silenceMs",
-  "injectMind",
   "injectLongterm",
   "historyWindow",
   "nightMode",
@@ -52,8 +51,6 @@ const PATCH_KEYS = [
   "intimateNotes",
   "storyline",
   "brainOn",
-  "mode",
-  "modes",
   "personaPlacement",
   "personaAck",
 ] as const satisfies readonly (keyof Profile)[];

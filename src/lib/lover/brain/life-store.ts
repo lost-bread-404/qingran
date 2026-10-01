@@ -83,49 +83,6 @@ export async function saveReach(next: Partial<ReachRow> & { at?: number }): Prom
   return row;
 }
 
-export type ReachPlan = { id: number; at: number; intent: string; setBy: string; setAt: number };
-
-/** Pending plans to reach out, soonest first. */
-export async function listReachPlans(): Promise<ReachPlan[]> {
-  const db = await getSql();
-  const rows = await db.query<Record<string, unknown>>(
-    `select id, at, intent, set_by, set_at from qr_reach_plans where done_at is null order by at asc, id asc`,
-  );
-  return rows.map((row) => ({
-    id: asInt(row.id),
-    at: asInt(row.at),
-    intent: String(row.intent ?? ""),
-    setBy: String(row.set_by ?? ""),
-    setAt: asInt(row.set_at),
-  }));
-}
-
-export async function addReachPlan(plan: { at: number; intent: string; setBy: string; setAt: number }): Promise<void> {
-  const db = await getSql();
-  await db.query(`insert into qr_reach_plans (at, intent, set_by, set_at) values ($1, $2, $3, $4)`, [
-    Math.round(plan.at),
-    plan.intent.slice(0, 500),
-    plan.setBy,
-    plan.setAt,
-  ]);
-}
-
-export async function delayReachPlans(ids: number[], to: number): Promise<void> {
-  if (!ids.length) return;
-  const db = await getSql();
-  await db.query(`update qr_reach_plans set at = $2 where id = any($1::bigint[])`, [ids, Math.round(to)]);
-}
-
-export async function removeReachPlan(id: number): Promise<void> {
-  const db = await getSql();
-  await db.query(`delete from qr_reach_plans where id = $1 and done_at is null`, [id]);
-}
-
-export async function clearReachPlans(): Promise<void> {
-  const db = await getSql();
-  await db.query(`delete from qr_reach_plans where done_at is null`);
-}
-
 export async function insertReachLog(entry: {
   at: number;
   trigger: string;
@@ -183,33 +140,6 @@ export async function reachCountsToday(timeZone: string, at = now()): Promise<{ 
     [zonedWallMs(day, 4, 0, timeZone)],
   );
   return { llm: asInt(rows[0]?.llm), sent: asInt(rows[0]?.sent), day };
-}
-
-export async function silenceSnapshot(_at = now()): Promise<{
-  lastUserAt: number | null;
-  unanswered: number;
-  lines: string[];
-}> {
-  const db = await getSql();
-  const users = await db.query<{ created_at: number }>(
-    `select created_at from qingran_messages
-     where role = 'user' and forgotten_at is null
-       and created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
-     order by created_at desc limit 1`,
-  );
-  const lastUserAt = users[0] ? asInt(users[0].created_at) : null;
-  const after = lastUserAt ?? 0;
-  const sent = await db.query<{ body: string; created_at: number }>(
-    `select body, created_at from qingran_messages
-     where role = 'assistant' and kind = 'proactive' and forgotten_at is null and created_at > $1
-     order by created_at asc`,
-    [after],
-  );
-  return {
-    lastUserAt,
-    unanswered: sent.length,
-    lines: sent.map((row) => String(row.body ?? "")),
-  };
 }
 
 export async function insertManualEdit(target: string, before: unknown, after: unknown, at = now()): Promise<void> {
