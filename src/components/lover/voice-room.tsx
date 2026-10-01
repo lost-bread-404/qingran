@@ -275,7 +275,16 @@ export function VoiceRoom() {
         const id = detail.id;
         const text = detail.text;
         const at = detail.at || Date.now();
-        setMessages((prev) => (prev.some((m) => m.id === id) ? prev : [...prev, { id, role: "user", text, createdAt: at }]));
+        // The same id again means she went on with that line and the phone heard it whole: the text is replaced.
+        setMessages((prev) =>
+          prev.some((m) => m.id === id)
+            ? prev.map((m) => (m.id === id ? { ...m, text } : m))
+            : [...prev, { id, role: "user", text, createdAt: at }],
+        );
+      } else if (detail.type === "retract") {
+        // The phone dropped an answer to a line she went on with; it is asked again under the same id.
+        const id = detail.id;
+        setMessages((prev) => prev.filter((m) => m.id !== id));
       } else if (detail.type === "reply" && detail.text) {
         const id = detail.id;
         const text = detail.text;

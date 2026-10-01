@@ -39,6 +39,8 @@ enum NativeVad {
   static let preRollMs = 1_500
   /// While Qingran plays and this long after, the floor stays frozen and no turn starts (his voice still in the room).
   static let postPlaybackMs: Float = 300
+  /// While he is still thinking about her last words, sound this long means she is going on with them.
+  static let goOnHoldMs: Float = 250
 }
 
 struct NativeVadParams {

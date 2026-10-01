@@ -4,7 +4,7 @@ import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } f
 import { enqueueReportIfDue } from "@/lib/lover/brain/diary/report";
 import { drainJobs, enqueueReflect } from "@/lib/lover/brain/jobs";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
-import { upsertMessage, appendBrainLog, getProfileData } from "@/lib/lover/brain/store";
+import { upsertMessage, appendBrainLog, getMessage, getProfileData } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
 import { loadHotContext } from "@/lib/lover/brain/voice/pack";
 import { runVoiceWithFallback, formatVoiceLogNote } from "@/lib/lover/brain/voice/voice-fallback";
@@ -166,7 +166,14 @@ export const Route = createFileRoute("/api/talk")({
 
               const display = speech.trim();
               const replyAt = Number(body.replyCreatedAt);
-              if (display) {
+              // Her line changed while this answer was being written (the phone heard her go on and sent the whole
+              // sentence again, or she edited it): this answer is to words she has not finished, so it is not kept.
+              const now = await getMessage(userMsgId);
+              const superseded = Boolean(now) && !String(now?.text ?? "").endsWith(text.trim());
+              if (superseded) {
+                await appendBrainLog({ step: "talk-superseded", ok: true, route: "voice", note: "她的这一句后来变了（接着说了或改了），这条回复不保存" }).catch(() => undefined);
+              }
+              if (display && !superseded) {
                 await upsertMessage({
                   id: replyId,
                   role: "assistant",
@@ -242,7 +249,7 @@ export const Route = createFileRoute("/api/talk")({
                 },
               });
 
-              if (profile.brainOn && !failed && display) await enqueueReflect(userCreatedAt);
+              if (profile.brainOn && !failed && display && !superseded) await enqueueReflect(userCreatedAt);
               await enqueueReportIfDue(nowMs, timeZone);
               await runInBackground(() => drainJobs(LONG_DRAIN_MS));
             } catch (err) {

@@ -33,6 +33,11 @@ final class NativePipeline {
   private var triggerFloor: Float = 0
 
   // Turn and playback
+  /// Her words already sent but not yet answered aloud, and the ids they were sent under. If she goes on before his
+  /// voice starts, they are joined to what she says next and sent again as one line under the same ids, so a pause in
+  /// the middle of a sentence cuts nothing off.
+  private var held: [Int16] = []
+  private var heldTurn: (user: String, reply: String, at: Int, start: Int)?
   private var busy = false
   private var turnGen = 0
   private var talkTask: Task<Void, Never>?
@@ -103,6 +108,7 @@ final class NativePipeline {
       self.inSpeech = false
       self.speech.removeAll()
       self.preroll.removeAll()
+      self.release()
       self.dropPlayback()
       if self.engine.isRunning { self.player.play() }
       self.busy = true
@@ -128,6 +134,8 @@ final class NativePipeline {
       self.talkTask?.cancel()
       self.talkTask = nil
       self.busy = false
+      // If she is in the middle of going on with a line, that line stays one line.
+      if !self.inSpeech { self.release() }
       self.dropPlayback()
       if self.engine.isRunning { self.player.play() }
       self.emit?(["type": "phase", "phase": "listening"])
@@ -266,6 +274,7 @@ final class NativePipeline {
     busy = false
     inSpeech = false
     riseMs = 0
+    release()
     dropPlayback()
     preroll.removeAll()
     speech.removeAll()
@@ -317,10 +326,12 @@ final class NativePipeline {
       floor = nextFloor(floor, level, chunkMs, inTurn: inSpeech)
     }
 
-    // Like the web call: while he is thinking or speaking (and a moment after) the mic is not listening, and nothing
-    // from then is kept for the next turn's pre-roll — without echo cancelling, his voice from the speaker would be
-    // sent as hers.
-    if busy || !afterPlayback {
+    // While his voice is in the room (playing, or a moment after) the mic is not listening, and nothing from then is
+    // kept for the next turn's pre-roll — without echo cancelling, his voice from the speaker would be sent as hers.
+    // While he is only thinking about her last words, it still listens: if she goes on, those words were not the end.
+    let canGoOn = busy && !replyStarted && heldTurn != nil
+      && Float(held.count) * 1000 / Float(NativeVad.sampleRate) < params.maxUtteranceMs
+    if !afterPlayback || (busy && !canGoOn) {
       riseMs = 0
       preroll.removeAll(keepingCapacity: true)
       return
@@ -333,14 +344,33 @@ final class NativePipeline {
     if !inSpeech {
       if level >= max(params.startMin, floor * params.startMult) {
         riseMs += chunkMs
-        if riseMs < params.startHoldMs { return }
+        // Going on with a line already sent takes a little more than a click or a rustle.
+        if riseMs < (canGoOn ? max(params.startHoldMs, NativeVad.goOnHoldMs) : params.startHoldMs) { return }
         inSpeech = true
         riseMs = 0
-        speech = preroll
-        speechMs = 0
         quietMs = 0
-        triggerFloor = floor
-        speechStartAt = Int(Date().timeIntervalSince1970 * 1000)
+        if canGoOn, let turn = heldTurn {
+          // She went on: the answer being prepared is dropped and the same line keeps recording.
+          turnGen += 1
+          talkTask?.cancel()
+          talkTask = nil
+          busy = false
+          waiting.removeAll()
+          waitingFrames = 0
+          playConverter = nil
+          pcmCarry = Data()
+          // The start of his answer to the unfinished line may already be on the page; it goes.
+          emit?(["type": "retract", "id": turn.reply])
+          speech = held + preroll
+          speechMs = Float(speech.count) * 1000 / Float(NativeVad.sampleRate)
+          speechStartAt = turn.start
+          mark("she went on")
+        } else {
+          speech = preroll
+          speechMs = 0
+          triggerFloor = floor
+          speechStartAt = Int(Date().timeIntervalSince1970 * 1000)
+        }
         emit?(["type": "phase", "phase": "speaking-you"])
       } else {
         riseMs = 0
@@ -370,7 +400,17 @@ final class NativePipeline {
       let gen = turnGen
       let start = speechStartAt
       let vadFloor = triggerFloor
-      talkTask = Task { await self.utter(said, gen: gen, speechStart: start, silenceWaitMs: silenceWait, vadFloor: vadFloor) }
+      let turn = heldTurn ?? (
+        user: UUID().uuidString.lowercased(),
+        reply: UUID().uuidString.lowercased(),
+        at: Int(Date().timeIntervalSince1970 * 1000),
+        start: start
+      )
+      held = said
+      heldTurn = turn
+      // The last reply is over; this one has not started, so she can still go on until it does.
+      replyStarted = false
+      talkTask = Task { await self.utter(said, gen: gen, speechStart: start, silenceWaitMs: silenceWait, vadFloor: vadFloor, turn: turn) }
     }
   }
 
@@ -384,6 +424,12 @@ final class NativePipeline {
       next = min(level, f * exp(dtMs / rise))
     }
     return min(NativeVad.floorMax, max(NativeVad.floorMin, next))
+  }
+
+  /// Her line is settled (his voice started, the turn ended, or it was stopped): nothing more is joined to it.
+  private func release() {
+    held.removeAll()
+    heldTurn = nil
   }
 
   private func dropPlayback() {
@@ -402,13 +448,14 @@ final class NativePipeline {
     queue.sync { self.running && self.turnGen == gen }
   }
 
-  private func utter(_ samples: [Int16], gen: Int, speechStart: Int, silenceWaitMs: Int, vadFloor: Float) async {
+  private func utter(_ samples: [Int16], gen: Int, speechStart: Int, silenceWaitMs: Int, vadFloor: Float, turn: (user: String, reply: String, at: Int, start: Int)) async {
     emit?(["type": "phase", "phase": "transcribing"])
     defer {
       queue.async {
         guard self.turnGen == gen else { return }
         self.busy = false
         self.talkTask = nil
+        self.release()
         if self.running && !self.playing { self.emit?(["type": "phase", "phase": "listening"]) }
       }
     }
@@ -423,11 +470,10 @@ final class NativePipeline {
       guard self.turnGen == gen else { return }
       self.emit?(["type": "phase", "phase": "thinking"])
     }
-    let userId = UUID().uuidString.lowercased()
-    let replyId = UUID().uuidString.lowercased()
+    // A line she went on with keeps its ids: the page and the server update the same message instead of adding one.
     let now = Int(Date().timeIntervalSince1970 * 1000)
-    emit?(["type": "heard", "id": userId, "text": text, "at": now])
-    await talk(text: text, userId: userId, replyId: replyId, now: now, gen: gen)
+    emit?(["type": "heard", "id": turn.user, "text": text, "at": turn.at])
+    await talk(text: text, userId: turn.user, replyId: turn.reply, now: now, gen: gen, userAt: turn.at)
   }
 
   private func transcribe(_ wav: Data, speechStart: Int, endpointFired: Int, silenceWaitMs: Int, vadFloor: Float) async -> String? {
@@ -540,10 +586,10 @@ final class NativePipeline {
           let kind = event["t"] as? String ?? ""
           if kind == "text", let delta = event["d"] as? String {
             speech += delta
-            emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
+            showReply(replyId, speech, to: userId, gen: gen)
           } else if kind == "text_end", let full = event["speech"] as? String, !full.isEmpty {
             speech = full
-            emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
+            showReply(replyId, speech, to: userId, gen: gen)
           } else if kind == "audio", let b64 = event["b"] as? String {
             let replace = event["replace"] as? Bool ?? false
             let mime = event["m"] as? String ?? ""
@@ -558,7 +604,7 @@ final class NativePipeline {
             failures = 0
             if speech.isEmpty, let full = event["speech"] as? String {
               speech = full
-              emit?(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
+              showReply(replyId, speech, to: userId, gen: gen)
             }
             // The reply is complete at "done"; the stream stays open a moment longer while the server saves it.
             queue.async {
@@ -576,6 +622,14 @@ final class NativePipeline {
     } catch {
       if Task.isCancelled { return }
       softFail("talk \(error.localizedDescription)")
+    }
+  }
+
+  /// His words on the page, unless this answer has been dropped in the meantime (she went on, or tapped him).
+  private func showReply(_ id: String, _ text: String, to userId: String, gen: Int) {
+    queue.async {
+      guard self.turnGen == gen else { return }
+      self.emit?(["type": "reply", "id": id, "text": text, "replyTo": userId])
     }
   }
 
@@ -667,6 +721,7 @@ final class NativePipeline {
     }
     if !replyStarted {
       replyStarted = true
+      release()
       emit?(["type": "phase", "phase": "speaking"])
     }
     for buffer in waiting { schedule(buffer) }
