@@ -254,10 +254,11 @@ export function applyNightVoiceGate(
   }
   if (stats.frameCount === 0 && !(stats.durationMs > 0 && stats.durationMs < input.minMs)) return heard;
   if (!nightIsNoise(stats, { voicedMin: input.voicedMin, minMs: input.minMs, pitchHoldMs })) {
-    // Voice-like sound keeps what was heard. If nothing was heard (or it was a made-up transcript), nothing is sent:
-    // the sound alone does not become a 嗯 / 啊.
-    const text = usableTranscript(heard.text);
-    return { ...heard, text, skipQingran: !text, nightNoise: false };
+    // Voice-like sound keeps xAI's words. A transcript flagged only because there was no Apple text to compare
+    // (the shell never has one) is still her words. If xAI heard nothing, nothing is sent: the sound alone does not
+    // become a 嗯 / 啊.
+    const text = usableTranscript(heard.text) || usableTranscript(input.rawText ?? "");
+    return { ...heard, text, skipQingran: !text, nightNoise: false, hallucinationSuspect: false };
   }
   return {
     ...heard,
