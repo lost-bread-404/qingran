@@ -1,4 +1,4 @@
-import { cuesFromProsody, voicedIslands, type ProsodyFrame } from "../prosody.ts";
+import { voicedIslands, type ProsodyFrame } from "../prosody.ts";
 import { UNRECOGNIZED_TEXT, type HeardUtterance } from "./heard.ts";
 
 /** Stable pitch: same clarity cut the pitch tracker uses before it reports a frequency. */
@@ -220,16 +220,6 @@ function usableTranscript(text: string): string {
   return trimmed;
 }
 
-/** Human voice keeps the real words. A soft murmur with no words stays a murmur, not a drop. */
-function textForVoiceReply(heard: HeardUtterance, raw: string, frames: ProsodyFrame[]): string {
-  const heardText = usableTranscript(heard.text);
-  const rawText = usableTranscript(raw);
-  if (heardText) return heardText;
-  if (rawText) return rawText;
-  const cue = cuesFromProsody(frames).trim();
-  if (cue) return cue;
-  return "嗯";
-}
 
 /** Asking her to answer a noise mark does not invent 嗯. A real transcript, if one was kept, is used. */
 export function nightNoiseReplyText(stored: string): string {
@@ -264,13 +254,10 @@ export function applyNightVoiceGate(
   }
   if (stats.frameCount === 0 && !(stats.durationMs > 0 && stats.durationMs < input.minMs)) return heard;
   if (!nightIsNoise(stats, { voicedMin: input.voicedMin, minMs: input.minMs, pitchHoldMs })) {
-    return {
-      ...heard,
-      text: textForVoiceReply(heard, input.rawText ?? "", frames),
-      skipQingran: false,
-      nightNoise: false,
-      hallucinationSuspect: false,
-    };
+    // Voice-like sound keeps what was heard. If nothing was heard (or it was a made-up transcript), nothing is sent:
+    // the sound alone does not become a 嗯 / 啊.
+    const text = usableTranscript(heard.text);
+    return { ...heard, text, skipQingran: !text, nightNoise: false };
   }
   return {
     ...heard,

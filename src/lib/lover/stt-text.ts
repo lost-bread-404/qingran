@@ -1,4 +1,4 @@
-import { classifyCue, cuesFromProsody, DEFAULT_TONE_THRESHOLDS, glueCueParts, hasCueEnergy, hasVoicedPitch, markForFrames, utteranceToneMark, voicedIslands, type CueWord, type ProsodyFrame, type ToneThresholds } from "./prosody.ts";
+import { classifyCue, cuesFromProsody, DEFAULT_TONE_THRESHOLDS, glueCueParts, markForFrames, utteranceToneMark, voicedIslands, type CueWord, type ProsodyFrame, type ToneThresholds } from "./prosody.ts";
 import { islandVoiced, listenVocal } from "./vocal-event.ts";
 import { STT_KEYTERMS, VOCAL_CUES } from "./hearing/config.ts";
 
@@ -399,10 +399,14 @@ export function pickTranscript(server: string, browser: string): string {
   return salvaged ? punctuateSpeech(salvaged) : "";
 }
 
+/**
+ * xAI decides whether she made a sound; the sound itself decides what those sounds were like.
+ * Nothing heard is nothing: the sound alone never makes up a 嗯 / 啊 / 喘 (asleep, breathing and rustling came out as 啊啊).
+ * Only sounds heard: xAI folds a long run of them into one 嗯, so when the sound has more of them it says how many and which.
+ */
 export function recoverCues(stt: string, frames?: ProsodyFrame[], th?: ToneThresholds): string {
   const existing = stripHehe(stt.trim());
-  if (!frames?.length) return existing;
-  const heard = listenVocal(frames);
+  if (!frames?.length || !existing) return existing;
   const fixed = rewriteMisheardCues(existing, frames);
 
   if (fixed && !isMostlyFiller(fixed)) {
@@ -410,6 +414,12 @@ export function recoverCues(stt: string, frames?: ProsodyFrame[], th?: ToneThres
   }
 
   if (fixed && isMostlyFiller(fixed)) {
+    const said = [...stripMarks(fixed)].filter((ch) => FILLER.test(ch)).length;
+    const sounds = voicedIslands(frames).filter(islandVoiced).length;
+    if (sounds > said) {
+      const cues = cuesFromProsody(frames, th);
+      if (cues) return cues;
+    }
     const mark = utteranceToneMark(frames, th);
     const stripped = fixed.replace(/[，。！？…～~!?]+$/g, "");
     if (!stripped) return fixed;
@@ -417,17 +427,7 @@ export function recoverCues(stt: string, frames?: ProsodyFrame[], th?: ToneThres
     return `${stripped}${mark === "？" || mark === "！" ? "～" : mark}`;
   }
 
-  if (heard.kind === "laugh") return heard.text;
-  if (heard.kind === "cry") return heard.text;
-  if (heard.kind === "pant") return heard.text;
-  if (heard.kind === "hum") return heard.text;
-
-  if (hasCueEnergy(frames) && hasVoicedPitch(frames)) return cuesFromProsody(frames, th);
-  const islands = voicedIslands(frames);
-  const voiced = islands.filter(islandVoiced);
-  if (!voiced.length) return "";
-  if (voiced.length === islands.length) return cuesFromProsody(frames, th);
-  return "";
+  return fixed;
 }
 
 export function applyTonePunctuation(
