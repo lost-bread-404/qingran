@@ -56,8 +56,9 @@ export const Route = createFileRoute("/api/stt")({
 
         const { profile, turns, context, extraKeyterms } = await phoneHearingInputs();
         const sense = profile.hearingSense;
+        // An empty stream is not trusted as "nothing said": the clip goes to xAI once more.
         const streamed =
-          typeof body.streamText === "string"
+          typeof body.streamText === "string" && body.streamText.trim()
             ? { text: body.streamText, words: Array.isArray(body.streamWords) ? body.streamWords : [] }
             : undefined;
         const liveText = typeof body.liveText === "string" ? body.liveText.trim() : "";
@@ -134,7 +135,7 @@ export const Route = createFileRoute("/api/stt")({
           note: [
             skip ? "native · noise" : "native",
             streamed ? "边说边听" : "整段",
-            apple ? "苹果" : "",
+            apple ? (liveText ? "苹果" : "苹果没听到") : "",
             ENDED[String(body.endedBy)] ?? "",
             cutTrace(sent, sense, num(body.vadFloor), num(body.silenceWaitMs) ?? sense.endWaitMs),
           ]

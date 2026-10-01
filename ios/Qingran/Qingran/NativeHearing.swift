@@ -33,12 +33,25 @@ struct LineHeard {
   var apple: String?
 
   /// She went on after a pause: the two parts are one line, and each ear's text is whole only if it heard both.
+  /// The word timings of each part start at its own zero, so a joined line keeps only the text.
   func then(_ next: LineHeard) -> LineHeard {
     LineHeard(
-      stream: stream.flatMap { a in next.stream.map { b in (text: a.text + b.text, words: a.words + b.words) } },
+      stream: stream.flatMap { a in next.stream.map { b in (text: a.text + b.text, words: [[String: Any]]()) } },
       apple: apple.flatMap { a in next.apple.map { a + $0 } }
     )
   }
+
+  static let empty = LineHeard(stream: nil, apple: nil)
+}
+
+/// What a line tells the call while she is still speaking. Called on the line's own queue.
+struct LineHooks {
+  /// xAI accepted the stream; from now on its turn model may end the line.
+  var onLive: () -> Void
+  /// xAI's turn model says she has finished the sentence.
+  var onFinished: () -> Void
+  /// The stream stopped working before the line was done (why, for the call log).
+  var onDead: (String) -> Void
 }
 
 /**
@@ -68,12 +81,7 @@ final class LineHearing {
   private var finishing: CheckedContinuation<LineHeard, Never>?
   private var closed = false
 
-  /// xAI's turn model says she has finished the sentence.
-  var onFinished: (() -> Void)?
-  /// The stream is live (xAI accepted it); until then the phone ends lines on its own pause rule.
-  var onLive: (() -> Void)?
-  /// Why the stream did not work, for the call log.
-  var onTrouble: ((String) -> Void)?
+  private let hooks: LineHooks
 
   private static let recognizer: SFSpeechRecognizer? = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
 
@@ -84,7 +92,8 @@ final class LineHearing {
   }
 
   /// No ticket in hand → one is fetched now (her first words wait for it); no way to get one → not streamed.
-  init(ticket: StreamTicket?, fetch: (() async -> StreamTicket?)?) {
+  init(ticket: StreamTicket?, fetch: (() async -> StreamTicket?)?, hooks: LineHooks) {
+    self.hooks = hooks
     if let ticket {
       connect(ticket)
     } else if let fetch {
@@ -98,6 +107,7 @@ final class LineHearing {
             self.connecting = false
             self.streamFailed = true
             self.waitingAudio.removeAll()
+            self.hooks.onDead("stream: no ticket")
             self.settle()
           }
         }
@@ -128,6 +138,8 @@ final class LineHearing {
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
     request.taskHint = .dictation
+    // On the phone itself when it can: works with the screen locked, no time limit, nothing leaves the phone.
+    request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
     if #available(iOS 16.0, *) { request.addsPunctuation = true }
     appleRequest = request
     appleFormat = format
@@ -193,7 +205,7 @@ final class LineHearing {
       self.closed = true
       self.socket?.cancel(with: .goingAway, reason: nil)
       self.appleTask?.cancel()
-      self.finishing?.resume(returning: LineHeard(stream: nil, apple: nil))
+      self.finishing?.resume(returning: LineHeard.empty)
       self.finishing = nil
     }
   }
@@ -204,9 +216,10 @@ final class LineHearing {
       switch result {
       case .failure(let error):
         self.queue.async {
-          if !self.streamDone && !self.closed {
+          // Once per line: an error event already said so, or the line is over and the socket was closed on purpose.
+          if !self.streamDone && !self.streamFailed && !self.closed {
             let code = (task.response as? HTTPURLResponse)?.statusCode ?? 0
-            self.onTrouble?("stream \(code > 0 ? String(code) : error.localizedDescription)")
+            self.hooks.onDead("stream \(code > 0 ? String(code) : error.localizedDescription)")
           }
           self.connecting = false
           self.streamFailed = true
@@ -230,13 +243,13 @@ final class LineHearing {
       connecting = false
       for chunk in waitingAudio { socket?.send(.data(chunk)) { _ in } }
       waitingAudio.removeAll()
-      onLive?()
+      hooks.onLive()
       if finishing != nil { socket?.send(.string("{\"type\":\"audio.done\"}")) { _ in } }
     case "transcript.partial":
       guard event["is_final"] as? Bool == true else { return }
       if let piece = event["text"] as? String { finals.append(piece) }
       words += event["words"] as? [[String: Any]] ?? []
-      if event["speech_final"] as? Bool == true { onFinished?() }
+      if event["speech_final"] as? Bool == true { hooks.onFinished() }
     case "transcript.done":
       doneText = event["text"] as? String ?? ""
       doneWords = event["words"] as? [[String: Any]] ?? []
@@ -244,7 +257,7 @@ final class LineHearing {
       socket?.cancel(with: .normalClosure, reason: nil)
       settle()
     case "error":
-      onTrouble?("stream \(event["message"] as? String ?? "error")")
+      if !streamDone && !streamFailed && !closed { hooks.onDead("stream \(event["message"] as? String ?? "error")") }
       streamFailed = true
       socket?.cancel(with: .goingAway, reason: nil)
       settle()
@@ -266,14 +279,14 @@ final class LineHearing {
     }
     finishing = nil
     closed = true
+    if !streamSettled { hooks.onDead("stream: no final words in time") }
     var heard = LineHeard(stream: nil, apple: appleText)
     if streamDone {
-      // The final transcript is the whole line; the locked pieces are kept in case it only carries the last one.
-      let joined = finals.joined()
+      // The final transcript is the whole line; the locked pieces only stand in when it came back empty.
       let done = doneText ?? ""
-      heard.stream = done.count >= joined.count
-        ? (text: done, words: doneWords.isEmpty ? words : doneWords)
-        : (text: joined, words: words)
+      heard.stream = done.isEmpty
+        ? (text: finals.joined(), words: words)
+        : (text: done, words: doneWords.isEmpty ? words : doneWords)
     }
     if !streamDone { socket?.cancel(with: .goingAway, reason: nil) }
     if !appleDone { appleTask?.cancel() }

@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { getProfileData, listHistoryWindow } from "../brain/store.ts";
 import { lockedProfile } from "../types.ts";
 import { xaiCreds } from "../xai-auth.ts";
@@ -53,26 +54,29 @@ export type StreamTicket = {
 };
 
 function streamUrl(terms: string[]): string {
-  const url = new URL(STREAM_URL);
-  const q = url.searchParams;
-  q.set("model", HEARING.xai.model);
-  q.set("sample_rate", "16000");
-  q.set("encoding", "pcm");
-  q.set("filler_words", "true");
-  q.set("vad_threshold", String(xaiVadThreshold()));
-  q.set("endpointing", String(STREAM_ENDPOINTING_MS));
-  q.set("smart_turn", String(STREAM_SMART_TURN));
-  q.set("smart_turn_timeout", String(STREAM_BACKSTOP_MS));
+  // Built by hand so a space is %20, not the form encoding's "+".
+  const pair = (k: string, v: string) => `${k}=${encodeURIComponent(v)}`;
+  let url = `${STREAM_URL}?${[
+    pair("model", HEARING.xai.model),
+    pair("sample_rate", "16000"),
+    pair("encoding", "pcm"),
+    pair("filler_words", "true"),
+    pair("vad_threshold", String(xaiVadThreshold())),
+    pair("endpointing", String(STREAM_ENDPOINTING_MS)),
+    pair("smart_turn", String(STREAM_SMART_TURN)),
+    pair("smart_turn_timeout", String(STREAM_BACKSTOP_MS)),
+  ].join("&")}`;
   for (const term of terms) {
-    q.append("keyterm", term);
-    if (url.toString().length > URL_MAX) {
-      const kept = q.getAll("keyterm").slice(0, -1);
-      q.delete("keyterm");
-      for (const k of kept) q.append("keyterm", k);
-      break;
+    let next: string;
+    try {
+      next = `${url}&${pair("keyterm", term)}`;
+    } catch {
+      continue; // a term cut in the middle of an emoji has half a character, which cannot be encoded
     }
+    if (next.length > URL_MAX) break;
+    url = next;
   }
-  return url.toString();
+  return url;
 }
 
 /** A short-lived xAI secret for one stream, so the phone never holds a real credential. */
@@ -104,10 +108,16 @@ async function clientSecret(): Promise<{ token: string; expiresAt: number } | nu
 export async function streamTicket(): Promise<StreamTicket | null> {
   const [{ profile, extraKeyterms }, secret] = await Promise.all([phoneHearingInputs(), clientSecret()]);
   if (!secret) return null;
+  // Whatever words are cached now; refreshing them can take a while and the phone is waiting. Only a fresh server
+  // with nothing cached yet waits a moment, so her corrected words are in the stream.
   let hot = hotPathHearingStt(extraKeyterms);
-  if (hot.stale) {
-    await backgroundRefreshHearingStt();
-    hot = hotPathHearingStt(extraKeyterms);
+  if (hot.needsRefresh) {
+    const refresh = backgroundRefreshHearingStt();
+    if (!hot.rules.length) {
+      await Promise.race([refresh, new Promise((resolve) => setTimeout(resolve, 1500))]);
+      hot = hotPathHearingStt(extraKeyterms);
+    }
+    waitUntil(refresh);
   }
   return {
     url: streamUrl(keytermList(profile.sttKeyterms, hot.keyterms)),

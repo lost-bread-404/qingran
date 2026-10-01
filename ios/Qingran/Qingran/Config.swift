@@ -38,7 +38,9 @@ enum NativeVad {
   static let minSpeechMs: Float = 220
   static let preRollMs = 1_500
   /// While Qingran plays and this long after, the floor stays frozen and no turn starts (his voice still in the room).
-  static let postPlaybackMs: Float = 300
+  /// Longer than before 10/1: his voice now plays at full loudness from the speaker and hers is lifted, so the
+  /// room's echo of his last word takes a little longer to fall under her start line.
+  static let postPlaybackMs: Float = 500
   /// While he is still thinking about her last words, sound this long means she is going on with them.
   static let goOnHoldMs: Float = 250
   /// Her voice reaches the phone's mic several times softer than the browser's (the browser raises it itself), so a
