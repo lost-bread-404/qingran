@@ -8,6 +8,7 @@ import {
   stripHearingMarkup,
   type ContextTurn,
 } from "@/lib/lover/hearing/context";
+import { cutTrace } from "@/lib/lover/hearing/cut-trace";
 import { finishHearing } from "@/lib/lover/hearing/finish";
 import { extractTfIdfTerms } from "@/lib/lover/hearing/keyterms";
 import { formatSenseLine, toneFromSense } from "@/lib/lover/hearing/sense";
@@ -129,7 +130,9 @@ export const Route = createFileRoute("/api/stt")({
           ok: true,
           ms,
           route: "voice",
-          note: skip ? "native · noise" : "native",
+          note: [skip ? "native · noise" : "native", cutTrace(sent, sense, num(body.vadFloor), num(body.silenceWaitMs) ?? sense.endWaitMs)]
+            .filter(Boolean)
+            .join(" · "),
           outputText: (text || result.xaiText || "").slice(0, 500),
           error: null,
         }).catch(() => undefined);
