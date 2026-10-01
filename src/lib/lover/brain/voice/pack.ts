@@ -8,7 +8,7 @@ import { loadPrompt } from "../prompts/store.ts";
 import { identityBlock } from "../life.ts";
 import { localDay } from "../time.ts";
 import { dossierTextForModel } from "../dossier.ts";
-import { recall, recallText, type Memory } from "../memory.ts";
+import { recall, recallText, recentInner, type Memory } from "../memory.ts";
 import { inIntimateScene } from "../scene.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
 
@@ -88,6 +88,8 @@ export async function loadHotContext(input: {
     inject.memory ? inIntimateScene(input.nowMs) : Promise.resolve(false),
   ]);
   const recalled = inject.memory ? await recall(recallQuery(input.text, history), input.nowMs) : { memories: [], scores: [], by: "none" as const };
+  const inner = await recentInner(input.nowMs);
+  const clockWithInner = inner ? `${clockText}\n你心里记着、Rosie 看不到的：\n${inner}` : clockText;
   const charter = input.profile.systemPrompt;
   const intimate = intimateScene ? input.profile.intimateNotes.trim() : "";
   const parts: VoicePackParts = {
@@ -96,7 +98,7 @@ export async function loadHotContext(input: {
     us,
     recall: recallText(recalled.memories),
     intimate,
-    clock: clockText,
+    clock: clockWithInner,
     history,
     historyWindow: history.length,
     userText: input.text,

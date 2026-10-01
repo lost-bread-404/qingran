@@ -14,7 +14,7 @@ import { isNightNoiseBody, modelFacingText } from "../message-markup.ts";
 export type Memory = {
   id: number;
   kind: "moment" | "insight";
-  source: "story" | "night" | "rosie";
+  source: "story" | "night" | "rosie" | "inner";
   day: string;
   at: number | null;
   seq: number;
@@ -28,7 +28,7 @@ export type Memory = {
 
 export type NewMemory = {
   kind: "moment" | "insight";
-  source: "story" | "night" | "rosie";
+  source: "story" | "night" | "rosie" | "inner";
   day: string;
   at: number | null;
   seq?: number;
@@ -42,7 +42,7 @@ function rowOf(r: Record<string, unknown>): Memory {
   return {
     id: Number(r.id),
     kind: r.kind === "insight" ? "insight" : "moment",
-    source: r.source === "story" ? "story" : r.source === "rosie" ? "rosie" : "night",
+    source: r.source === "story" ? "story" : r.source === "rosie" ? "rosie" : r.source === "inner" ? "inner" : "night",
     day: String(r.day ?? ""),
     at: r.at == null ? null : Number(r.at),
     seq: Number(r.seq ?? 0) || 0,
@@ -395,4 +395,16 @@ export async function memoryCounts(): Promise<{ story: number; moments: number; 
     else moments += Number(r.n);
   }
   return { story, moments, insights };
+}
+
+/** What he wrote inside ｛｝ lately (a game answer, his hand): shown back to him every turn, not left to recall. */
+const INNER_KEEP_MS = 16 * 3_600_000;
+
+export async function recentInner(nowMs = now()): Promise<string> {
+  const db = await sql();
+  const rows = await db.query<{ body: string }>(
+    `select body from qr_memories where source = 'inner' and at > $1 order by at asc, id asc limit 8`,
+    [nowMs - INNER_KEEP_MS],
+  );
+  return rows.map((r) => String(r.body).trim()).filter(Boolean).join("\n");
 }

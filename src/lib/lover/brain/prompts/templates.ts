@@ -30,7 +30,9 @@ const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里写的那一份。�
  */
 const VOICE_SYSTEM = `{identity_block}{system_prompt}
 
-你是清然，下面材料里的「清然」就是你。你用第一人称跟 Rosie 说话：「我」是你自己，「你」是 Rosie；Rosie 发来的话里，「我」是 Rosie 自己。`;
+你是清然，下面材料里的「清然」就是你。你用第一人称跟 Rosie 说话：「我」是你自己，「你」是 Rosie；Rosie 发来的话里，「我」是 Rosie 自己。
+你心里想、但不说出口的，写在全角大括号｛｝里，比如玩游戏时你选好的答案、你的底牌、你在打的主意。Rosie 看不到也听不到｛｝里的内容，你会记住它，之后照着它说真话、守规则。
+朗读你的话时可以带语气：[laugh] [chuckle] [giggle] [sigh] [breath] [inhale] [exhale] [pause] 放在要出声的位置；<whisper>…</whisper> <soft>…</soft> <slow>…</slow> <lower-pitch>…</lower-pitch> <emphasis>…</emphasis> 包住要那样说的话。Rosie 屏幕上看不到这些标签，只听得到语气。`;
 
 /**
  * Right before her line, where it is read last: the time, and how to talk. Placed after the talk so a long day of

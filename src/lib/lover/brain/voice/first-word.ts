@@ -9,6 +9,7 @@ import { recall, recallText } from "../memory.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
 import { voiceInjectFromProfile } from "../../types.ts";
 import { InnerCutBuffer } from "./inner-cut.ts";
+import { BraceCut } from "./brace-cut.ts";
 import { buildVoiceMessages, type VoicePackParts } from "./pack-build.ts";
 import { recallQuery, replyHistory } from "./pack.ts";
 
@@ -77,7 +78,7 @@ export async function speakFirst(input: {
     last = { model: result.model, ms: result.ms };
     if (!result.ok) continue;
     const cut = new InnerCutBuffer();
-    cut.push(result.text);
+    cut.push(new BraceCut().push(result.text));
     cut.finish();
     const text = cut.speech.trim();
     if (PASS.test(text)) return { text: "", passed: true, model: result.model, ms: result.ms, reason: null };

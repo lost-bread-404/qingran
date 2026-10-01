@@ -10,7 +10,7 @@ export type StateDay = { day: string; timeline: string };
 /** One moment of his memory (or something he came to understand about Rosie). */
 export type StateMemory = {
   kind?: "moment" | "insight";
-  source?: "story" | "night" | "rosie";
+  source?: "story" | "night" | "rosie" | "inner";
   day?: string;
   at?: string | null;
   body: string;

@@ -238,6 +238,13 @@ export const Route = createFileRoute("/api/talk")({
                 },
               });
 
+              const innerNotes = streamResult.innerNotes?.trim() ?? "";
+              if (!failed && !superseded && innerNotes) {
+                const { addMemories } = await import("@/lib/lover/brain/memory");
+                await addMemories([
+                  { kind: "moment", source: "inner", day: localDay(nowMs, timeZone), at: nowMs, body: innerNotes, importance: 3 },
+                ]).catch((err) => console.error(err));
+              }
               if (profile.brainOn && !failed && display && !superseded) {
                 const recalledIds = ctx.recalled.map((m) => m.id);
                 await runInBackground(async () => {

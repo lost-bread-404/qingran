@@ -107,7 +107,7 @@ export const brainImportState = createServerFn({ method: "POST" })
         await addMemories([
           {
             kind: m.kind === "insight" ? "insight" : "moment",
-            source: m.source === "rosie" ? "rosie" : "night",
+            source: m.source === "rosie" ? "rosie" : m.source === "inner" ? "inner" : "night",
             day: typeof m.day === "string" && m.day ? m.day : when != null ? localDay(when, tz) : "",
             at: when,
             body,
