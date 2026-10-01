@@ -36,7 +36,7 @@ import {
   updateRoomMessage,
 } from "@/lib/lover/room";
 import { registerNativePush } from "@/lib/lover/push-client";
-import { nativeCallPlan, nativeInterruptCall } from "@/lib/lover/native-shell";
+import { nativeCallPlan, nativeInterruptCall, nativeTalkTurn } from "@/lib/lover/native-shell";
 import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { buildHearingContext, extractContextKeyterms, lastDialogueTurns, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
@@ -591,6 +591,24 @@ export function VoiceRoom() {
           persistReply(text);
         }
       };
+      if (
+        callActiveRef.current &&
+        nativeTalkTurn({
+          text: tagged,
+          userMsgId: userMsg.id,
+          userCreatedAt: userMsg.createdAt || at,
+          replyId: reply.id,
+          replyCreatedAt: reply.createdAt,
+        })
+      ) {
+        // The shell's call runs this turn; its reply fills this message as it streams, and its phases drive the status.
+        pendingIdsRef.current.delete(reply.id);
+        if (inflightRef.current?.id === reply.id) inflightRef.current = null;
+        speakingIdRef.current = null;
+        busyRef.current = false;
+        setStatus("idle");
+        return;
+      }
       try {
         const ac = new AbortController();
         abortRef.current = ac;

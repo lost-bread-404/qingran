@@ -89,6 +89,37 @@ final class NativePipeline {
     }
   }
 
+  /**
+   * A turn the page starts during the call (she edited or re-asked a line, or typed one): the shell runs it, like a
+   * turn it heard itself. Whatever he was saying stops, and the mic stays deaf while the new reply plays, so the
+   * reply is never spoken by the page and heard back as her.
+   */
+  func talkFromPage(text: String, userId: String, userAt: Int, replyId: String, replyAt: Int) {
+    queue.async { [weak self] in
+      guard let self, self.running else { return }
+      self.turnGen += 1
+      let gen = self.turnGen
+      self.talkTask?.cancel()
+      self.inSpeech = false
+      self.speech.removeAll()
+      self.preroll.removeAll()
+      self.dropPlayback()
+      if self.engine.isRunning { self.player.play() }
+      self.busy = true
+      self.emit?(["type": "phase", "phase": "thinking"])
+      self.talkTask = Task {
+        let now = Int(Date().timeIntervalSince1970 * 1000)
+        await self.talk(text: text, userId: userId, replyId: replyId, now: now, gen: gen, userAt: userAt, replyAt: replyAt)
+        self.queue.async {
+          guard self.turnGen == gen else { return }
+          self.busy = false
+          self.talkTask = nil
+          if self.running && !self.playing { self.emit?(["type": "phase", "phase": "listening"]) }
+        }
+      }
+    }
+  }
+
   /// She tapped him (the orb on the page), as in the web call: his reply stops and the call listens again.
   func interrupt() {
     queue.async { [weak self] in
@@ -451,7 +482,7 @@ final class NativePipeline {
     }
   }
 
-  private func talk(text: String, userId: String, replyId: String, now: Int, gen: Int) async {
+  private func talk(text: String, userId: String, replyId: String, now: Int, gen: Int, userAt: Int? = nil, replyAt: Int? = nil) async {
     queue.async {
       guard self.turnGen == gen else { return }
       self.replyEnded = false
@@ -476,14 +507,15 @@ final class NativePipeline {
     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
     req.setValue(await cookieHeader(), forHTTPHeaderField: "Cookie")
     let zone = TimeZone.current.identifier
-    let body: [String: Any] = [
+    var body: [String: Any] = [
       "text": text,
       "userMsgId": userId,
-      "userCreatedAt": now,
+      "userCreatedAt": userAt ?? now,
       "replyId": replyId,
       "timeZone": zone,
       "nowMs": now,
     ]
+    if let replyAt { body["replyCreatedAt"] = replyAt }
     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
     do {
       let (bytes, res) = try await Self.stream(req)

@@ -9,6 +9,8 @@ export type NativeBridge = {
   endNativeCall?: () => void;
   /** Stop his reply and listen again (she tapped him). Shells built before 2026-09-27 do not have it. */
   interruptNativeCall?: () => void;
+  /** Run a turn the page started (edit, re-ask, typed line) inside the shell's call. Shells built before 2026-09-28 do not have it. */
+  talkNativeCall?: (turn: NativeTalkTurn) => void;
   keepAwake?: (on: boolean) => void;
 };
 
@@ -80,6 +82,30 @@ export function nativeStartCall(params: NativeCallParams) {
   const plan = nativeCallPlan();
   if (plan.callStart === "startNativeCall") post((bridge) => bridge.startNativeCall?.(params));
   else nativePrepareAudio();
+}
+
+export type NativeTalkTurn = {
+  text: string;
+  userMsgId: string;
+  userCreatedAt: number;
+  replyId: string;
+  replyCreatedAt: number;
+};
+
+/**
+ * During the shell's call the shell owns the speaker and the mic, so a turn the page starts is handed to it:
+ * it stops what he was saying and speaks the new reply itself. False when there is no shell call (or an old shell).
+ */
+export function nativeTalkTurn(turn: NativeTalkTurn): boolean {
+  if (nativeCallPlan().callStart !== "startNativeCall") return false;
+  const bridge = typeof window === "undefined" ? undefined : window.QingranNative;
+  if (!bridge?.talkNativeCall) return false;
+  try {
+    bridge.talkNativeCall(turn);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function nativeInterruptCall() {
