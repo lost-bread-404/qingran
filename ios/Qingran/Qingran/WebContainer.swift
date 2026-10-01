@@ -162,6 +162,10 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
         let replyAt = (body["replyCreatedAt"] as? NSNumber)?.intValue ?? userAt
         NativePipeline.shared.talkFromPage(text: text, userId: userId, userAt: userAt, replyId: replyId, replyAt: replyAt)
       }
+    case "playNativeCall":
+      if let body = message.body as? [String: Any], let audio = body["audio"] as? String {
+        NativePipeline.shared.playFromPage(audio, mime: body["mime"] as? String ?? "")
+      }
     case "keepAwake":
       var on = false
       if let body = message.body as? [String: Any], let flag = body["on"] as? Bool {
@@ -304,6 +308,7 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       endNativeCall: function () { post('endNativeCall'); },
       interruptNativeCall: function () { post('interruptNativeCall'); },
       talkNativeCall: function (turn) { post('talkNativeCall', turn || {}); },
+      playNativeCall: function (clip) { post('playNativeCall', clip || {}); },
       keepAwake: function (on) { post('keepAwake', { on: !!on }); }
     };
   })();

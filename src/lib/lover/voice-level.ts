@@ -64,7 +64,9 @@ function limit(y: number): number {
   return Math.sign(y) * (KNEE + (1 - KNEE) * Math.tanh((m - KNEE) / (1 - KNEE)));
 }
 
-/** A whole clip from the non-streaming endpoint, leveled the same way when it is raw PCM. */
+/** A whole clip from the non-streaming endpoint, leveled the same way when it is raw PCM (as the players read it). */
 export function levelClip(buf: Buffer, mime: string): Buffer {
-  return /pcm/i.test(mime) ? new VoiceLeveler().pcm(buf) : buf;
+  const head = buf.subarray(0, 4).toString("latin1");
+  const packed = head === "RIFF" || head.startsWith("ID3") || (buf[0] === 0xff && ((buf[1] ?? 0) & 0xe0) === 0xe0);
+  return !packed && (/pcm|octet-stream/i.test(mime) || !mime.trim()) ? new VoiceLeveler().pcm(buf) : buf;
 }

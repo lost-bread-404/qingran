@@ -126,6 +126,29 @@ final class NativePipeline {
     }
   }
 
+  /**
+   * She pressed play on one of his lines during the call. The shell owns the speaker, so the shell speaks it: whatever
+   * he was saying or about to say stops (as when she taps him), the clip plays as one reply, and the mic is deaf while
+   * it plays and listens again after.
+   */
+  func playFromPage(_ audio: String, mime: String) {
+    queue.async { [weak self] in
+      guard let self, self.running else { return }
+      self.turnGen += 1
+      self.talkTask?.cancel()
+      self.talkTask = nil
+      self.busy = false
+      if !self.inSpeech { self.release() }
+      self.dropPlayback()
+      if self.engine.isRunning { self.player.play() }
+      self.replyStarted = false
+      self.replyEnded = true
+      self.playPCM(audio, mime: mime, replace: false)
+      self.drainPlayConverter()
+      self.flushPlayback()
+    }
+  }
+
   /// She tapped him (the orb on the page), as in the web call: his reply stops and the call listens again.
   func interrupt() {
     queue.async { [weak self] in

@@ -151,7 +151,7 @@ function looksLikeWav(bytes: Uint8Array) {
   return bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46;
 }
 
-function isRawPcm(bytes: Uint8Array, mimeType: string) {
+export function isRawPcm(bytes: Uint8Array, mimeType: string) {
   if (looksLikeWav(bytes) || looksLikeMpeg(bytes)) return false;
   const mime = mimeType.toLowerCase();
   return /pcm/.test(mime) || /octet-stream/.test(mime) || mime.trim() === "";
