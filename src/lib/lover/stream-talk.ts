@@ -15,6 +15,7 @@ import {
 import { recordTtsSpend } from "./brain/spend/check";
 import { xaiCreds, xaiFetch, type XaiCred } from "./xai-auth";
 import { InnerCutBuffer, replyBodyMissing } from "./brain/voice/inner-cut";
+import { VoiceLeveler, levelClip } from "./voice-level";
 
 const MAX_INPUT = 2000;
 const PCM_MIME = `audio/pcm;rate=${VOICE_IO.sampleRate}`;
@@ -483,6 +484,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
 class LiveTts {
   gotAudio = false;
+  private level = new VoiceLeveler();
   complete = false;
   chars = 0;
   private socket: WebSocket | null = null;
@@ -608,7 +610,7 @@ class LiveTts {
     }
     if (event.type === "audio.delta" && event.delta) {
       this.gotAudio = true;
-      this.emit({ t: "audio", i: this.seq, b: event.delta, m: PCM_MIME });
+      this.emit({ t: "audio", i: this.seq, b: this.level.base64(event.delta), m: PCM_MIME });
       this.seq += 1;
       return;
     }
@@ -650,10 +652,11 @@ async function speakRest(text: string, speed: number): Promise<{ b: string; m: s
     if (!sent?.res.ok) return null;
     const res = sent.res;
     void recordTtsSpend(spoken.length, null, sent.cred.kind);
-    const buf = Buffer.from(await res.arrayBuffer());
+    const mime = res.headers.get("content-type") || PCM_MIME;
+    const buf = levelClip(Buffer.from(await res.arrayBuffer()), mime);
     return {
       b: buf.toString("base64"),
-      m: res.headers.get("content-type") || PCM_MIME,
+      m: mime,
     };
   } catch {
     return null;

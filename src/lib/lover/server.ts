@@ -7,6 +7,7 @@ import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./hearing/config";
 import { recordSttSpend, recordTtsSpend } from "./brain/spend/check";
 import { xaiFetch } from "./xai-auth";
 import { VOICE_IO } from "./brain/config";
+import { levelClip } from "./voice-level";
 
 type TtsInput = {
   text: string;
@@ -38,11 +39,12 @@ export const speakAsLover = createServerFn({ method: "POST" })
       return { ok: false as const, error: await readXaiFail(res) };
     }
 
-    const buf = Buffer.from(await res.arrayBuffer());
+    const mimeType = res.headers.get("content-type") || `audio/pcm;rate=${VOICE_IO.sampleRate}`;
+    const buf = levelClip(Buffer.from(await res.arrayBuffer()), mimeType);
     void recordTtsSpend(text.length, null, cred.kind);
     return {
       ok: true as const,
-      mimeType: res.headers.get("content-type") || `audio/pcm;rate=${VOICE_IO.sampleRate}`,
+      mimeType,
       audioBase64: buf.toString("base64"),
     };
   });
