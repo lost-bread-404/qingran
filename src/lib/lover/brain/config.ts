@@ -295,8 +295,9 @@ export function resolveVoiceChat(model?: string | null, effort?: string | null):
   return { model: id, effort: nextEffort, timeoutMs: voiceTimeoutMs(nextEffort) };
 }
 
+/** Second try when her chosen model gives nothing back: a thinking model of the same family (never a non-thinking one). */
 export function voiceSafetyPick(): VoiceModelPick {
-  return resolveVoiceChat("4.20");
+  return resolveVoiceChat("grok-4.20-0309-reasoning", null);
 }
 
 export function sameVoicePick(a: VoiceModelPick, b: VoiceModelPick): boolean {

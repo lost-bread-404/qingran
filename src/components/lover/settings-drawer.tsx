@@ -638,7 +638,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <p className="text-xs text-subtle">调试用，平时不用进。</p>
-            <SettingsLink label="指令" hint="记忆开关、上下文、每一步的 prompt 和模型" onClick={() => setPage("prompts")} />
+            <SettingsLink label="指令" hint="记忆开关、上下文、温度、每一步的 prompt 和模型" onClick={() => setPage("prompts")} />
             <SettingsLink label="记录" hint="调用记录、改动记录、重放对比" onClick={() => setPage("log")} />
             <SettingsLink label="费用" onClick={() => setPage("spend")} />
             <SettingsLink label="听力参数" onClick={() => setPage("hearing")} />

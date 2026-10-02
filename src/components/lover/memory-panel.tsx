@@ -52,7 +52,7 @@ export function MemoryPanel() {
     <div className="flex flex-col gap-3">
       <p className="text-sm">回忆</p>
       <p className="text-xs text-subtle">
-        他记得的每一件事，一件一件存着，不会被重写。你说话时，他会按你这句话想起最贴近的几件（带上前因后果）。故事线里的 {data.counts.story} 件跟着故事线变；每天凌晨整理时，把那一天的几件接在后面（现在 {data.counts.moments} 件，看懂你的 {data.counts.insights} 条）。
+        他记得的事，一个话题一件：以后会让他做得不一样的事，和看懂你的地方。你说话时，他会按你这句话想起最贴近的几件。故事线里的 {data.counts.story} 件跟着故事线变；每天凌晨整理时，接着以前话题的合并进原来那一件，新的事接在后面（现在 {data.counts.moments} 件，看懂你的 {data.counts.insights} 条）。
       </p>
       {data.pendingDay ? (
         <Button

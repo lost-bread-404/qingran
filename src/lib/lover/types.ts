@@ -15,7 +15,7 @@ export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "er
 export type MessageKind = "say" | "unheard" | "proactive" | "system_notice";
 export type VoiceEffort = "low" | "medium" | "high" | null;
 
-export const DEFAULT_VOICE_MODEL = "grok-4.20-0309-non-reasoning";
+export const DEFAULT_VOICE_MODEL = "grok-4.20-0309-reasoning";
 export const DEFAULT_VOICE_EFFORT: VoiceEffort = "low";
 export const VOICE_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
 
