@@ -57,8 +57,6 @@ const EDITOR_SYSTEM = `{identity_block}你是清然。现在是夜里，清然�
 
 只根据材料，不编造。`;
 
-const SCENE_SYSTEM = `下面是清然和 Rosie 最近的几句。两个人现在是不是正在床上亲热（性爱已经开始，或者 Rosie 已经明确想要）？只是抱着、亲一下、调情、哄睡都不算。只回答 intimate：true 或 false。`;
-
 const REPORT_SYSTEM = `写月报解读，共 5 段，总计 ≤ 1000 字：
 1. 这个月的节奏：从【每天的记录】的时间里算出每天大约学了多久、休息多久、几点起几点睡、哪天情绪低落，再讲走势。比如连续工作了几天、哪天开始明显变少（像 burnout）、休息了几天、之后又恢复成什么样；起床、睡觉和睡眠时长怎么变。
 2. 这个月的你：状态、情绪低落出现在什么时候、你倾诉过什么。
@@ -125,14 +123,6 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
         ...VOICE_CONTEXT,
         user("（Rosie 已经 {quiet}没说话了。清然这时候想不想去找 Rosie？想，就写清然发给 Rosie 的这一条；不想，只回「不找」。）"),
       ],
-    },
-  ],
-  scene: [
-    {
-      id: "main",
-      label: "亲密判断",
-      placeholders: [ph("conversation", "最近 6 条对话，每行「Rosie：正文」或「清然：正文」。")],
-      messages: [system(SCENE_SYSTEM), user("{conversation}")],
     },
   ],
   editor: [

@@ -42,7 +42,7 @@ export type StateFile = {
   memories?: StateMemory[];
   /** Each past day's timeline (04:00–04:00). */
   days?: StateDay[];
-  /** Custom prompt bodies by key (voice, scene, editor, report). Keys left out keep their current text. */
+  /** Custom prompt bodies by key (voice, editor, report). Keys left out keep their current text. */
   prompts?: Record<string, string>;
   messages?: StateMessage[];
 };

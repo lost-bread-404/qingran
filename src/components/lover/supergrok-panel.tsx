@@ -47,7 +47,7 @@ export function SuperGrokPanel() {
     <div className="flex flex-col gap-2 rounded-xl bg-surface p-4 text-sm leading-relaxed">
       <p className="font-medium">先用 SuperGrok 额度</p>
       <p className="text-xs text-subtle">
-        连上以后，回复、亲密判断、夜里整理、听写和朗读都先用你 SuperGrok 订阅的额度；额度用完或被拒，同一个请求自动改走 xAI API（按量付费），过一阵再试订阅。走订阅的记录在这里记 $0。
+        连上以后，回复、夜里整理、听写和朗读都先用你 SuperGrok 订阅的额度；额度用完或被拒，同一个请求自动改走 xAI API（按量付费），过一阵再试订阅。走订阅的记录在这里记 $0。
       </p>
       {status.connected ? (
         <p>

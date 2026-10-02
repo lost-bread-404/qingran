@@ -727,9 +727,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 }}
                 maxLength={8000}
                 className="min-h-36 resize-none leading-relaxed"
-                placeholder="只在你们正在亲热时给他看"
+                placeholder="清然在床上是什么样子"
               />
-              <p className="text-xs text-subtle">每轮回复之后判断一次你们是不是正在床上亲热，是的话下一轮才给他看。平时躺着、调情、哄睡都不给，他就不会把每次靠近都往床上带。</p>
+              <p className="text-xs text-subtle">接在人设后面，每轮都在，是他是谁的一部分。什么时候亲热、怎么亲热，他看你们正在说的话来定。</p>
               {conflict?.field === "intimateNotes" ? (
                 <VersionConflict
                   latest={conflict.latest}
@@ -848,7 +848,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
               [
-                ["清然", ["voice", "scene", "editor"]],
+                ["清然", ["voice", "editor"]],
                 ["日记", ["report"]],
               ].map(([title, keys]) => (
                 <div key={String(title)} className="flex flex-col gap-2">

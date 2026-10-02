@@ -7,7 +7,7 @@ import { getProfileData } from "../store.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { keepInner, recall, recallText, recentInner } from "../memory.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
-import { voiceInjectFromProfile } from "../../types.ts";
+import { personaText, voiceInjectFromProfile } from "../../types.ts";
 import { InnerCutBuffer } from "./inner-cut.ts";
 import { BraceCut } from "./brace-cut.ts";
 import { buildVoiceMessages, type VoicePackParts } from "./pack-build.ts";
@@ -45,11 +45,10 @@ export async function speakFirst(input: {
   const clock = withInner(clockText, inner);
   const recalled = inject.memory ? await recall(recallQuery("", history), input.nowMs) : { memories: [] };
   const parts: VoicePackParts = {
-    charter: profile.systemPrompt,
+    charter: personaText(profile),
     identity: identityBlock(profile.identity),
     us,
     recall: recallText(recalled.memories),
-    intimate: "",
     clock,
     history,
     historyWindow: history.length,

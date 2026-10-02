@@ -25,7 +25,6 @@ export type TurnTraceInput = {
     injectMemory?: boolean;
     historyWindow?: number;
     injectLine?: string;
-    intimateInjected?: boolean;
     personaPlacement?: "system" | "first_user";
     unexpected_state_block?: boolean;
     persona_missing?: boolean;

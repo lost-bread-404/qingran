@@ -1,6 +1,6 @@
 import { timeFacts, dayWindow } from "../heart.ts";
 import { mergeEditedUserBody, modelFacingText } from "../../message-markup.ts";
-import { NEUTRAL_PERSONA, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
+import { NEUTRAL_PERSONA, personaText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getMessage, listHistoryWindow, upsertMessage } from "../store.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
@@ -9,7 +9,6 @@ import { identityBlock } from "../life.ts";
 import { localDay } from "../time.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { recall, recallText, recentInner, type Memory } from "../memory.ts";
-import { inIntimateScene } from "../scene.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
 
 export type HotContext = {
@@ -32,7 +31,6 @@ export type HotContext = {
   /** The moments that came back to him for this line, and whether they were found by meaning or by words. */
   recalled: Memory[];
   recallBy: string;
-  intimateInjected: boolean;
   personaPlacement: "system" | "first_user";
 };
 
@@ -80,23 +78,20 @@ export async function loadHotContext(input: {
 
   // Memory off → persona + context only.
   const inject = voiceInjectFromProfile(input.profile);
-  const [history, us, clockText, voicePrompt, intimateScene] = await Promise.all([
+  const [history, us, clockText, voicePrompt] = await Promise.all([
     replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone),
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
     loadPrompt("voice"),
-    inject.memory ? inIntimateScene(input.nowMs) : Promise.resolve(false),
   ]);
   const recalled = inject.memory ? await recall(recallQuery(input.text, history), input.nowMs) : { memories: [], scores: [], by: "none" as const };
   const clockWithInner = withInner(clockText, await recentInner(input.nowMs));
-  const charter = input.profile.systemPrompt;
-  const intimate = intimateScene ? input.profile.intimateNotes.trim() : "";
+  const charter = personaText(input.profile);
   const parts: VoicePackParts = {
     charter,
     identity: identityBlock(input.profile.identity),
     us,
     recall: recallText(recalled.memories),
-    intimate,
     clock: clockWithInner,
     history,
     historyWindow: history.length,
@@ -120,7 +115,6 @@ export async function loadHotContext(input: {
     userMsgId: input.userMsgId,
     timeZone: input.timeZone,
     injectMemory: inject.memory,
-    intimate: Boolean(intimate),
     historyWindow: inject.history,
   };
 
@@ -143,7 +137,6 @@ export async function loadHotContext(input: {
     inject,
     recalled: recalled.memories,
     recallBy: recalled.by,
-    intimateInjected: Boolean(intimate),
     personaPlacement: input.profile.personaPlacement,
   };
 }

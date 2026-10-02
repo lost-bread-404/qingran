@@ -166,13 +166,11 @@ export async function setRoomClearedAt(at: number): Promise<void> {
 }
 
 /** Hide recent turns not yet folded into memory, from the screen and from Qingran; rows stay for analysis.
- * The memory (moments, 清然和 Rosie 现在) stays; the scene starts over. */
+ * The memory (moments, 清然和 Rosie 现在) stays. */
 export async function clearRecentConversation(): Promise<void> {
   const ts = now();
   await setRoomClearedAt(ts);
   await forgetUnarchivedMessages(ts);
-  const { setIntimate } = await import("./heart.ts");
-  await setIntimate(false, ts);
   await appendInnerLog({ turnSeq: 0, data: { kind: "cleared_by_rosie" } });
 }
 

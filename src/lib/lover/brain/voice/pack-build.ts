@@ -7,7 +7,8 @@ import { NEUTRAL_PERSONA } from "../../types.ts";
 
 /**
  * What the reply is given (docs/brain.md「回复看到的」):
- * persona (+ identity) → 清然和 Rosie 现在 → today's talk → intimate notes (only in a scene) → 清然此刻想起来的事 → 现在是… + how to talk → her line.
+ * persona with his intimate side (+ identity) → 清然和 Rosie 现在 → today's talk → 清然此刻想起来的事 → 现在是… + how to talk
+ * → her line.
  * A block whose value is empty is left out.
  */
 export type VoicePackParts = {
@@ -17,8 +18,6 @@ export type VoicePackParts = {
   us: string;
   /** The moments that came back to him for this line, already written out ("" = none). */
   recall: string;
-  /** Intimate notes, only while they are in an intimate scene ("" = not injected). */
-  intimate: string;
   clock: string;
   history: StoredMessage[];
   historyWindow: number;
@@ -30,13 +29,13 @@ export type VoicePackParts = {
   personaAck: string;
 };
 
-/** Retries when the model returns nothing (usually a refusal): drop what came back to him and the intimate notes, then almost everything. */
+/** Retries when the model returns nothing (usually a refusal): drop what came back to him, then almost everything. */
 export type VoiceStrip = "none" | "memory" | "thin";
 export const VOICE_STRIPS: VoiceStrip[] = ["none", "memory", "thin"];
 export const VOICE_THIN_HISTORY = 8;
 
 export function stripLabel(strip: VoiceStrip): string {
-  if (strip === "memory") return "去掉了想起来的事、现在的我们和亲密设定";
+  if (strip === "memory") return "去掉了想起来的事和现在的我们";
   if (strip === "thin") return "只保留人设、最近 8 条对话和这一句";
   return "未裁剪";
 }
@@ -109,22 +108,11 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
     const first = rendered.findIndex((message) => message.role === "system");
     rendered = rendered.filter((message, i) => message.role !== "system" || i === first);
   }
-  return placePersona(insertIntimateNotes(rendered, strip === "none" ? parts.intimate : ""), {
+  return placePersona(rendered, {
     placement: parts.personaPlacement,
     charter,
     ack: parts.personaAck,
   });
-}
-
-/** Intimate notes sit right after the talk, before what came back to him and her line (they come and go with the scene). */
-export function insertIntimateNotes<T extends { role: string; content: string }>(messages: T[], notes: string): T[] {
-  const text = notes.trim();
-  if (!text) return messages;
-  const block = { role: "system", content: `清然在亲密时的样子：\n${text}` } as T;
-  const recalled = messages.findIndex((message) => message.role === "system" && message.content.startsWith("清然此刻想起来的事"));
-  const clock = messages.findIndex((message) => message.role === "system" && message.content.startsWith("现在是"));
-  const at = recalled >= 0 ? recalled : clock >= 0 ? clock : Math.max(0, messages.length - 1);
-  return [...messages.slice(0, at), block, ...messages.slice(at)];
 }
 
 export function placePersona<T extends { role: string; content: string }>(

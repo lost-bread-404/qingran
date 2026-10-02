@@ -1,6 +1,6 @@
-import { lockedProfile, voiceInjectFromProfile } from "../../types.ts";
+import { lockedProfile, personaText, voiceInjectFromProfile } from "../../types.ts";
 import { now } from "../clock.ts";
-import { getMeta, getProfileData, getProfilePrompt, listHistoryWindow } from "../store.ts";
+import { getMeta, getProfileData, getProfilePrompt } from "../store.ts";
 import { localDay } from "../time.ts";
 import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
@@ -10,10 +10,8 @@ import { recallQuery, replyHistory } from "../voice/pack.ts";
 import { timeFacts } from "../heart.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { listMemories, memoriesWithIds, recall, recallText } from "../memory.ts";
-import { inIntimateScene } from "../scene.ts";
 import { identityBlock } from "../life.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
-import { modelFacingText } from "../../message-markup.ts";
 
 export type PromptPreview = {
   variantId: string;
@@ -30,23 +28,20 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
   const [meta, profileData] = await Promise.all([getMeta(), getProfileData()]);
   const tz = resolveTz(meta.timeZone);
   const profile = resolveTalkProfile(undefined, profileData).profile;
-  const charter = profile.systemPrompt;
+  const charter = personaText(profile);
   const inject = voiceInjectFromProfile(profile);
-  const [history, us, clock, scene] = await Promise.all([
+  const [history, us, clock] = await Promise.all([
     replyHistory(null, inject.history, at, tz),
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(at, tz, at),
-    inject.memory ? inIntimateScene(at) : Promise.resolve(false),
   ]);
   const recalled = inject.memory ? await recall(recallQuery(userText, history), at) : { memories: [] };
-  const intimate = scene ? profile.intimateNotes.trim() : "";
   const recallBlock = recallText(recalled.memories);
   const messages = buildVoiceMessages({
     charter,
     identity: identityBlock(profile.identity),
     us,
     recall: recallBlock,
-    intimate,
     clock,
     history,
     historyWindow: history.length,
@@ -71,14 +66,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
       history_messages: historyText,
     },
     messages,
-    note: `${first ? "主动找她：多久没说话用占位。" : "没有正在说的这一句，用「在吗」占位；想起来的事按最近几句找。"}${intimate ? "现在判断为正在亲热，带上了亲密设定。" : "现在不在亲热，没带亲密设定。"}`,
-  };
-}
-
-async function sceneSlots(): Promise<Record<string, string>> {
-  const rows = await listHistoryWindow(null, 6);
-  return {
-    conversation: rows.map((m) => `${m.role === "user" ? "Rosie" : "清然"}：${modelFacingText(m.text)}`).join("\n") || "（没有对话）",
+    note: first ? "主动找她：多久没说话用占位。" : "没有正在说的这一句，用「在吗」占位；想起来的事按最近几句找。",
   };
 }
 
@@ -99,7 +87,6 @@ async function editorSlots(): Promise<Record<string, string>> {
 }
 
 async function slotsFor(key: PromptKey): Promise<{ slots: Record<string, string>; note: string }> {
-  if (key === "scene") return { slots: await sceneSlots(), note: "每轮回复之后，用最近 6 条判断。" };
   if (key === "editor") {
     return { slots: await editorSlots(), note: "整理时带上这一天的对话，和以前回忆里跟这一天最相关的 20 条（这里先放最近的 20 条）。" };
   }

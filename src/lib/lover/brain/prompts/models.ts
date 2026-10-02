@@ -6,7 +6,7 @@ export type PromptModelPick = {
   effort: Effort;
 };
 
-const ROUTE_KEYS = new Set<string>(["voice", "scene", "report", "editor"]);
+const ROUTE_KEYS = new Set<string>(["voice", "report", "editor"]);
 
 function asRoute(key: string): Route | null {
   return ROUTE_KEYS.has(key) ? (key as Route) : null;

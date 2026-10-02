@@ -64,14 +64,13 @@ export const MODEL_CAPS: Record<
   },
 };
 
-export type Route = "voice" | "scene" | "report" | "editor" | "replay";
+export type Route = "voice" | "report" | "editor" | "replay";
 
 export const ROUTES: Record<
   Route,
   { cls: ModelClass; effort?: Effort; timeoutMs: number; maxOutput: number }
 > = {
   voice: { cls: "FAST_THINKER", effort: "low", timeoutMs: 60_000, maxOutput: 2_000 },
-  scene: { cls: "REALTIME", timeoutMs: 30_000, maxOutput: 200 },
   report: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 4_000 },
   editor: { cls: "ANALYST", timeoutMs: 240_000, maxOutput: 12_000 },
   replay: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 4_000 },

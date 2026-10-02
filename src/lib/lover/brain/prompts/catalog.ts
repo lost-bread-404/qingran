@@ -5,7 +5,7 @@ import {
   type PromptVariantTemplate,
 } from "./templates.ts";
 
-export type PromptKey = "voice" | "scene" | "editor" | "report";
+export type PromptKey = "voice" | "editor" | "report";
 
 export type { PromptMessage, PromptPlaceholder };
 
@@ -24,12 +24,7 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
   {
     key: "voice",
     name: "每轮回复",
-    blurb: "他说出口的每一句都由它写：你说完话立刻跑（每轮回复）；你很久没说话时，它也用同一个声音想要不要来找你，想就写那一条（主动找她）。它读：人设、身份、「清然和 Rosie 现在」、此刻想起来的几件事（按你这句话从回忆里找的，不调用模型）、亲密设定（正在亲热时）、今天的对话、现在几点。",
-  },
-  {
-    key: "scene",
-    name: "亲密判断",
-    blurb: "每轮回复之后跑一次，读最近 6 条，判断你们是不是正在床上亲热。是的话，下一轮回复才带上亲密设定；平时躺着、调情、哄睡都不带。",
+    blurb: "他说出口的每一句都由它写：你说完话立刻跑（每轮回复）；你很久没说话时，它也用同一个声音想要不要来找你，想就写那一条（主动找她）。它读：人设（亲密设定接在后面）、身份、「清然和 Rosie 现在」、此刻想起来的几件事（按你这句话从回忆里找的，不调用模型）、今天的对话、现在几点。",
   },
   {
     key: "editor",

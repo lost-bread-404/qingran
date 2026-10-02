@@ -60,7 +60,7 @@ export type Profile = {
   rhythm: string;
   /** Monthly diary. Off until Rosie turns it on. Manual reports still run. */
   diaryEnabled: boolean;
-  /** Shown to the reply only while the two of them are in an intimate scene. */
+  /** 清然's intimate side. Part of the persona the reply reads (personaText), right after it. */
   intimateNotes: string;
   /** The story Rosie wrote of their months before this app. Cut into moments, it is the start of his memory. */
   storyline: string;
@@ -320,4 +320,14 @@ function assembleLegacyPrompt(input: LooseProfile): string {
     .map((s) => (s ?? "").trim())
     .filter(Boolean);
   return chunks.join("\n\n");
+}
+
+/**
+ * The persona the reply reads: what Rosie wrote about 清然, with his intimate side right after it. Both sit at the top
+ * as who he is, like a character card, so the talk itself (read last) decides what the moment is; given near her line
+ * instead, the intimate notes read as the task and outweighed what she was saying.
+ */
+export function personaText(p: { systemPrompt: string; intimateNotes: string }): string {
+  const notes = p.intimateNotes.trim();
+  return notes ? `${p.systemPrompt.trim()}\n\n清然在床上的样子：\n${notes}` : p.systemPrompt;
 }

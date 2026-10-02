@@ -17,7 +17,6 @@ export type VoiceRefs = {
   userMsgId: string;
   timeZone: string;
   injectMemory?: boolean;
-  intimate?: boolean;
   historyWindow?: number;
 };
 

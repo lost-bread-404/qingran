@@ -226,7 +226,6 @@ export const Route = createFileRoute("/api/talk")({
                   injectMemory: ctx.inject.memory,
                   historyWindow: ctx.inject.history,
                   injectLine: formatVoiceInjectLine(ctx.inject),
-                  intimateInjected: ctx.intimateInjected,
                   personaPlacement: ctx.personaPlacement,
                   unexpected_state_block: streamResult.innerCut === true,
                   persona_missing: resolved.personaMissing,
@@ -245,13 +244,11 @@ export const Route = createFileRoute("/api/talk")({
               if (profile.brainOn && !failed && display && !superseded) {
                 const recalledIds = ctx.recalled.map((m) => m.id);
                 await runInBackground(async () => {
-                  const [{ markRecalled }, { judgeScene }, { enqueueMemoryWork }] = await Promise.all([
+                  const [{ markRecalled }, { enqueueMemoryWork }] = await Promise.all([
                     import("@/lib/lover/brain/memory"),
-                    import("@/lib/lover/brain/scene"),
                     import("@/lib/lover/brain/night"),
                   ]);
                   await markRecalled(recalledIds).catch((err) => console.error(err));
-                  await judgeScene(userCreatedAt).catch((err) => console.error(err));
                   await enqueueMemoryWork(nowMs).catch((err) => console.error(err));
                   await drainJobs(LONG_DRAIN_MS);
                 });

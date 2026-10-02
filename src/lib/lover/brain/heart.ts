@@ -5,34 +5,23 @@ import { clockOf } from "./time.ts";
 
 /**
  * What 清然 keeps between turns besides the memory (docs/brain.md v6):
- * - whether the two of them are in an intimate scene now (judged after each reply, read by the next);
  * - for proactive messages, which silence he last thought about and how far into it;
  * - one timeline per day (qr_days), written by the night pass, for the monthly report.
  */
 
-export type Inner = { silenceSeen: number; reachStage: number; intimate: boolean; intimateAt: number };
+export type Inner = { silenceSeen: number; reachStage: number };
 
 export async function getInner(): Promise<Inner> {
   const db = await sql();
   const rows = await db.query<Record<string, unknown>>(
-    `select silence_seen, reach_stage, intimate, intimate_at from qr_inner where id = 1`,
+    `select silence_seen, reach_stage from qr_inner where id = 1`,
   );
   const row = rows[0] ?? {};
   return {
     silenceSeen: Number(row.silence_seen ?? 0) || 0,
     reachStage: Number(row.reach_stage ?? 0) || 0,
-    intimate: row.intimate === true || row.intimate === "t" || row.intimate === "true",
-    intimateAt: Number(row.intimate_at ?? 0) || 0,
   };
 }
-
-export async function setIntimate(intimate: boolean, at: number): Promise<void> {
-  const db = await sql();
-  await db.query(`update qr_inner set intimate = $1, intimate_at = $2 where id = 1`, [intimate, at]);
-}
-
-/** A scene does not outlast a long break: after this, the next reply starts without the intimate notes. */
-export const INTIMATE_HOLD_MS = 2 * 3600_000;
 
 export async function setReachStage(silenceSeen: number, stage: number): Promise<void> {
   const db = await sql();

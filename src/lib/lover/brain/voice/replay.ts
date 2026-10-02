@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { getSql } from "../../../db.ts";
 import { collapseReplyVariants } from "../../pair-messages.ts";
-import { lockedProfile, voiceInjectFromProfile, type Profile } from "../../types.ts";
+import { lockedProfile, personaText, voiceInjectFromProfile, type Profile } from "../../types.ts";
 import { asModelInput, callModel, type CallModelResult } from "../llm.ts";
 import { now } from "../clock.ts";
 import type { Effort } from "../config.ts";
@@ -69,7 +69,6 @@ export async function replayMessages(opts: {
     identity: identityBlock(opts.profile.identity),
     us,
     recall: recallText(recalled.memories),
-    intimate: "",
     clock: withInner(clockText, await recentInner(user.createdAt)),
     history: collapseReplyVariants(history),
     historyWindow: inject.history,
@@ -107,7 +106,7 @@ export async function runReplay(opts: {
   complete?: Complete;
 }): Promise<{ a: ReplaySide; b: ReplaySide }> {
   const profile = lockedProfile(await getProfileData());
-  const charter = profile.systemPrompt;
+  const charter = personaText(profile);
   const complete = opts.complete ?? callModel;
   const [aPack, bPack] = await Promise.all([
     replayMessages({ userMsgId: opts.userMsgId, charter, placement: profile.personaPlacement, profile }),

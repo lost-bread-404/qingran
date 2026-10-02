@@ -25,7 +25,6 @@
 | Route | `refs` | 输出 |
 |---|---|---|
 | `voice` | charterHash、longtermHash、historyIds、mindTurnSeq、mindStale、pickedIds、fallbackIds、careHint、clockText、userMsgId、timeZone、mindAgeMs | `output_ref = message:<replyId>` |
-| `scene` | 最近 6 条 | `output_ref = scene:<turn_seq>` |
 | 低频（editor / report） | — | 存完整 `input_system` / `input_user` / `output_text` |
 
 所有 route 的完整 messages 另写入 `brain_log_raw`。设置 → 记录页点开某一条，分区显示输入（按 messages 段折叠）、输出、参数与耗时，并可复制全部。
