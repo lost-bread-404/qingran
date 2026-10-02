@@ -9,7 +9,6 @@ struct StreamTicket {
   let token: String
   let expiresAt: Date
   let backstopMs: Float
-  let quietMs: Float
 
   init?(_ json: [String: Any]) {
     guard json["ok"] as? Bool == true,
@@ -20,7 +19,6 @@ struct StreamTicket {
     let at = (json["expiresAt"] as? NSNumber)?.doubleValue ?? 0
     expiresAt = at > 0 ? Date(timeIntervalSince1970: at / 1000) : Date().addingTimeInterval(240)
     backstopMs = (json["backstopMs"] as? NSNumber)?.floatValue ?? 3000
-    quietMs = (json["quietMs"] as? NSNumber)?.floatValue ?? 600
   }
 
   /// Still good for a whole line.
@@ -50,6 +48,8 @@ struct LineHooks {
   var onLive: () -> Void
   /// xAI's turn model says she has finished the sentence.
   var onFinished: () -> Void
+  /// Apple heard new words.
+  var onWords: () -> Void
   /// The stream stopped working before the line was done (why, for the call log).
   var onDead: (String) -> Void
 }
@@ -82,6 +82,8 @@ final class LineHearing {
   private var closed = false
 
   private let hooks: LineHooks
+  /// Apple's recognizer listens to this line (permission given, recognizer available).
+  private(set) var appleOn = false
 
   private static let recognizer: SFSpeechRecognizer? = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
 
@@ -143,11 +145,14 @@ final class LineHearing {
     if #available(iOS 16.0, *) { request.addsPunctuation = true }
     appleRequest = request
     appleFormat = format
+    appleOn = true
     appleTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
       self?.queue.async {
         guard let self else { return }
         if let result {
-          self.appleText = result.bestTranscription.formattedString
+          let text = result.bestTranscription.formattedString
+          if text != self.appleText && !self.closed { self.hooks.onWords() }
+          self.appleText = text
           if result.isFinal { self.appleDone = true }
         }
         if let error = error as NSError?, !self.appleDone {

@@ -78,7 +78,7 @@ async function listMemoriesWithVectors(model: string): Promise<Array<Memory & { 
   const rows = await db.query<Record<string, unknown>>(
     `select id, kind, source, day, at::float8 as at, seq, body, keys, thread, importance, changed, recalled,
             case when vec_model = $1 then vec else null end as vec
-     from qr_memories
+     from qr_memories where source <> 'inner'
      order by (source = 'story') desc, seq asc, coalesce(at, 0) asc, id asc`,
     [model],
   );
@@ -107,7 +107,7 @@ export async function embedMissing(limit = 64): Promise<number> {
   if (!config) return 0;
   const db = await sql();
   const rows = await db.query<{ id: number; body: string; keys: string; thread: string }>(
-    `select id, body, keys, thread from qr_memories where vec is null or vec_model <> $1 order by id asc limit $2`,
+    `select id, body, keys, thread from qr_memories where source <> 'inner' and (vec is null or vec_model <> $1) order by id asc limit $2`,
     [config.model, limit],
   );
   if (!rows.length) return 0;
@@ -401,7 +401,11 @@ export async function memoryCounts(): Promise<{ story: number; moments: number; 
 /** What he wrote inside ｛｝ lately (a game answer, his hand): shown back to him every turn, not left to recall. */
 const INNER_KEEP_MS = 16 * 3_600_000;
 
-/** What he wrote in ｛｝ this turn: kept as his own memory, never shown or spoken. */
+/**
+ * What he wrote in ｛｝ this turn: never shown or spoken; he sees it again with the clock for 16 hours, then the night
+ * pass has the day. It is not recalled later: plans he made in passing ("晚上再…") came back every turn for a day and
+ * kept pulling him toward them.
+ */
 export async function keepInner(notes: string, atMs: number, timeZone: string): Promise<void> {
   const body = notes.trim();
   if (!body) return;

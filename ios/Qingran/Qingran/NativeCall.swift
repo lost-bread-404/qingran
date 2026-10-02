@@ -41,8 +41,10 @@ final class NativePipeline {
   private var line: LineHearing?
   /// xAI accepted this line's stream, so its turn model may end the line.
   private var lineLive = false
-  /// xAI's turn model said the sentence is finished, and she has not made a sound since.
+  /// xAI's turn model said the sentence is finished.
   private var lineSaysDone = false
+  /// When Apple last heard new words in this line (Apple on) or nil (Apple off for this line).
+  private var lineWordsAt: Date?
   /// What her held words are being heard as (still finishing when she goes on quickly), for joining.
   private var heldHeard: Task<LineHeard, Never>?
   private var ticket: StreamTicket?
@@ -52,7 +54,6 @@ final class NativePipeline {
   private var streamTroubles = 0
   private var streamPauses = 0
   private var streamOff: Bool { Date() < streamPausedUntil }
-  private var smartQuietMs = NativeVad.smartQuietMs
   private var backstopMs = NativeVad.backstopMs
 
   // Turn and playback
@@ -452,7 +453,6 @@ final class NativePipeline {
     speechMs += chunkMs
     if level >= max(params.holdMin, floor * params.holdMult) {
       quietMs = 0
-      lineSaysDone = false
       if voicedRaw.count < 30_000 {
         voicedRaw.append(level / gain)
         peaksRaw.append(peak)
@@ -460,21 +460,24 @@ final class NativePipeline {
     } else {
       quietMs += chunkMs
     }
-    // While xAI hears the line it says when the sentence is finished, so a pause inside one is waited out; without
-    // it, her own pause setting ends the line.
+    // How the line ends. The phone's ear only measures loudness, so outdoors (traffic, wind) the room never sounds
+    // quiet; the ears that hear words decide instead: xAI's turn model saying the sentence is finished, or no new
+    // words from Apple for a while. Without either, her own pause setting on loudness.
     let streaming = lineLive
-    let smart = streaming && lineSaysDone && quietMs >= smartQuietMs
+    let smart = streaming && lineSaysDone
+    let wordless = lineWordsAt.map { Float(Date().timeIntervalSince($0) * 1000) >= NativeVad.wordlessMs } ?? false
     let wait = streaming ? max(params.endWaitMs, backstopMs) : params.endWaitMs
     let capped = speechMs >= params.maxUtteranceMs
-    let ended = speechMs >= NativeVad.minSpeechMs && (smart || quietMs >= wait)
+    let ended = speechMs >= NativeVad.minSpeechMs && (smart || wordless || quietMs >= wait)
     if capped || ended {
       let said = speech
       let silenceWait = Int(quietMs)
-      let endedBy = capped ? "cap" : smart ? "smart" : "quiet"
+      let endedBy = capped ? "cap" : smart ? "smart" : wordless ? "wordless" : "quiet"
       let hearing = line
       line = nil
       lineLive = false
       lineSaysDone = false
+      lineWordsAt = nil
       let voice = voiceOf(voicedRaw, peaks: peaksRaw)
       inSpeech = false
       speech.removeAll(keepingCapacity: true)
@@ -581,9 +584,15 @@ final class NativePipeline {
       onFinished: { [weak self] in
         guard let this = made else { return }
         self?.queue.async {
-          // Only if she is still quiet: a "finished" that arrives after she went on is about an earlier pause.
-          guard let self, self.line === this, self.inSpeech, self.quietMs >= 300 else { return }
+          guard let self, self.line === this, self.inSpeech else { return }
           self.lineSaysDone = true
+        }
+      },
+      onWords: { [weak self] in
+        guard let this = made else { return }
+        self?.queue.async {
+          guard let self, self.line === this else { return }
+          self.lineWordsAt = Date()
         }
       },
       onDead: { [weak self] why in
@@ -612,6 +621,7 @@ final class NativePipeline {
     line = next
     lineLive = false
     lineSaysDone = false
+    lineWordsAt = next.appleOn ? Date() : nil
   }
 
   private func dropLine() {
@@ -619,6 +629,7 @@ final class NativePipeline {
     line = nil
     lineLive = false
     lineSaysDone = false
+    lineWordsAt = nil
   }
 
   private func prefetchTicket() {
@@ -632,7 +643,6 @@ final class NativePipeline {
         // No ticket now: the next line asks for its own.
         guard let got else { return }
         self.ticket = got
-        self.smartQuietMs = got.quietMs
         self.backstopMs = got.backstopMs
       }
     }

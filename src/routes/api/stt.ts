@@ -28,7 +28,7 @@ type SttBody = {
   endedBy?: string;
 };
 
-const ENDED: Record<string, string> = { smart: "说完了", quiet: "停顿", cap: "太长" };
+const ENDED: Record<string, string> = { smart: "说完了", wordless: "没有新的字", quiet: "停顿", cap: "太长" };
 
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 

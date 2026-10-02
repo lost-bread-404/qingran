@@ -40,8 +40,6 @@ const STREAM_ENDPOINTING_MS = 500;
 const STREAM_SMART_TURN = 0.5;
 /** However unfinished the sentence sounds, this much silence ends it (xAI and the phone both). */
 export const STREAM_BACKSTOP_MS = 3000;
-/** The phone's own ear must also have heard this much quiet before xAI's "she is done" counts. */
-export const STREAM_QUIET_MS = 600;
 /** Long keyterm lists are cut so the address stays a normal length. */
 const URL_MAX = 7000;
 
@@ -50,7 +48,6 @@ export type StreamTicket = {
   token: string;
   expiresAt: number;
   backstopMs: number;
-  quietMs: number;
 };
 
 function streamUrl(terms: string[]): string {
@@ -124,6 +121,5 @@ export async function streamTicket(): Promise<StreamTicket | null> {
     token: secret.token,
     expiresAt: secret.expiresAt,
     backstopMs: STREAM_BACKSTOP_MS,
-    quietMs: STREAM_QUIET_MS,
   };
 }

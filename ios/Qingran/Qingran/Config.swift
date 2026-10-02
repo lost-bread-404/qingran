@@ -52,10 +52,10 @@ enum NativeVad {
   static let gainMin: Float = 1
   static let gainMax: Float = 10
   static let gainKey = "qingran.micGain"
-  /// While xAI streams the line: its turn model saying "finished" ends the line after this much quiet, and however
-  /// unfinished it sounds, this long a pause ends it anyway. The server sends its own values with each ticket.
-  static let smartQuietMs: Float = 600
+  /// While xAI streams the line, however unfinished it sounds, this long a pause ends it (the server sends its value).
   static let backstopMs: Float = 3000
+  /// While Apple hears the line: this long without a new word ends it, whatever the loudness says (outdoors).
+  static let wordlessMs: Float = 3000
 }
 
 struct NativeVadParams {
