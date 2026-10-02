@@ -4,7 +4,7 @@ import { appendInnerLog, getMeta, getProfileData, getProfilePrompt, patchBrainLo
 import { resolveTz } from "./tz.ts";
 import { clockOf, localDay } from "./time.ts";
 import { lockedProfile } from "../types.ts";
-import { isNightNoiseBody, modelFacingText } from "../message-markup.ts";
+import { modelFacingText, readMeta } from "../message-meta.ts";
 import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
 import { loadPrompt } from "./prompts/store.ts";
 import { dossierTextForModel, publishMemory } from "./dossier.ts";
@@ -69,12 +69,12 @@ const NIGHT_CONVERSATION_MAX = 60_000;
 /** The night pass sees every event and understanding so far (they are few), to merge into the right one. */
 const NIGHT_MEMORIES = 200;
 
-type Row = { id: string; role: string; body: string; created_at: number };
+type Row = { id: string; role: string; body: string; meta: unknown; created_at: number };
 
 async function dayMessages(from: number, to: number): Promise<Row[]> {
   const db = await sql();
   const rows = await db.query<Row>(
-    `select id, role, body, created_at::float8 as created_at from qingran_messages
+    `select id, role, body, meta, created_at::float8 as created_at from qingran_messages
      where created_at >= $1 and created_at < $2 and forgotten_at is null and kind is distinct from 'system_notice'
      order by created_at asc, id asc`,
     [from, to],
@@ -85,9 +85,10 @@ async function dayMessages(from: number, to: number): Promise<Row[]> {
 export function nightConversation(rows: Row[], timeZone: string): string {
   const render = (spoken: boolean) =>
     rows
-      .filter((r) => !isNightNoiseBody(r.body))
+      .map((r) => ({ ...r, meta: readMeta(r.meta) }))
+      .filter((r) => !r.meta.nightNoise)
       .map((r) => {
-        const text = modelFacingText(r.body);
+        const text = modelFacingText({ text: r.body, meta: r.meta });
         const body = r.role === "assistant" && spoken ? spokenOnly(text) : text;
         return `[${clockOf(r.created_at, timeZone)}] ${r.role === "user" ? "Rosie" : "清然"}：${body}`;
       })

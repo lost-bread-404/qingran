@@ -22,10 +22,13 @@ export type StateMemory = {
 export type StateMessage = {
   id?: string;
   role: "user" | "assistant";
+  /** The words only. Files from before 2026-10-02 may have ⟦…⟧ marks in front; they are read into `meta`. */
   text: string;
   at: string | number;
   kind?: string;
   forgotten?: boolean;
+  /** What is known about it besides the words (see src/lib/lover/message-meta.ts). */
+  meta?: Record<string, unknown>;
 };
 
 export type StateFile = {

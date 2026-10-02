@@ -1,5 +1,4 @@
 import { getSql } from "../../db.ts";
-import { decodeStoredBody } from "../message-markup.ts";
 import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
 import { fromPgArray, pgTextArray } from "./store.ts";
 
@@ -57,7 +56,7 @@ export async function listTurnFeedback(limit = 200): Promise<TurnFeedbackRow[]> 
     note: String(r.note ?? ""),
     tags: clampReplyDownTags(fromPgArray(r.tags)),
     createdAt: String(r.created_at ?? ""),
-    reply: r.reply_body ? decodeStoredBody(String(r.reply_body)).text : "",
+    reply: String(r.reply_body ?? ""),
     recalled: Array.isArray(r.recalled) ? r.recalled.map(String) : [],
   }));
 }

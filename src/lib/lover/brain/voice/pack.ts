@@ -1,5 +1,5 @@
 import { timeFacts, dayWindow } from "../heart.ts";
-import { decodeStoredBody, mergeEditedUserBody, modelFacingText, photoNote } from "../../message-markup.ts";
+import { modelFacingText, photoNote } from "../../message-meta.ts";
 import { NEUTRAL_PERSONA, personaText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getMessage, getMeta, listHistoryWindow, upsertMessage } from "../store.ts";
@@ -80,7 +80,7 @@ export async function replyHistory(
 
 /** What she is talking about now: her line (weighted), and the few lines before it. */
 export function recallQuery(text: string, history: StoredMessage[]): string {
-  const before = history.slice(-3).map((m) => modelFacingText(m.text));
+  const before = history.slice(-3).map((m) => modelFacingText(m));
   return [text, text, ...before].filter((line) => line.trim()).join("\n");
 }
 
@@ -92,20 +92,20 @@ export async function loadHotContext(input: {
   profile: Profile;
   nowMs: number;
   timeZone: string;
-  /** Photos she sent with this line (also in the stored body; sent along so a slow save does not lose them). */
+  /** Photos she sent with this line (also in the stored meta; sent along so a slow save does not lose them). */
   images?: string[];
   replyId?: string;
 }): Promise<HotContext> {
   const t0 = Date.now();
   const userExisting = await getMessage(input.userMsgId);
   const dbFirstMs = Date.now() - t0;
-  const images = input.images?.length ? input.images : (userExisting ? decodeStoredBody(userExisting.text).images : undefined) ?? [];
+  const images = input.images?.length ? input.images : (userExisting?.meta.images ?? []);
   const user = await upsertMessage({
     id: input.userMsgId,
     role: "user",
-    text: userExisting
-      ? mergeEditedUserBody(userExisting.text, input.text)
-      : `${images.length ? `⟦图:${images.join(",")}⟧` : ""}${input.text.trim()}`,
+    // Her words as sent now (a photo with no words keeps what is there); what else is known about it stays.
+    text: input.text.trim() || userExisting?.text || "",
+    meta: images.length ? { images } : {},
     createdAt: userExisting?.createdAt || input.userCreatedAt || input.nowMs,
     kind: userExisting?.kind,
     timeZone: input.timeZone,

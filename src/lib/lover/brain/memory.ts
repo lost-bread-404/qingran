@@ -3,7 +3,7 @@ import { localDay } from "./time.ts";
 import { sql } from "./store.ts";
 import { backgroundOf, buildIndex, fitScores, rankDocs, type Background, type SearchIndex } from "./memory-search.ts";
 import { cosine, embedConfig, embedTexts } from "./embed.ts";
-import { isNightNoiseBody, modelFacingText } from "../message-markup.ts";
+import { modelFacingText, readMeta } from "../message-meta.ts";
 
 /**
  * 清然's memory (docs/brain.md v6): only what changes how he acts or thinks later, a handful at a time.
@@ -280,11 +280,16 @@ let memoryCache: ({ key: string } & Indexed) | null = null;
 async function background(): Promise<Background> {
   if (backgroundCache && Date.now() - backgroundCache.at < BACKGROUND_TTL_MS) return backgroundCache.value;
   const db = await sql();
-  const rows = await db.query<{ body: string }>(
-    `select body from qingran_messages where kind is distinct from 'system_notice' order by created_at desc limit $1`,
+  const rows = await db.query<{ body: string; meta: unknown }>(
+    `select body, meta from qingran_messages where kind is distinct from 'system_notice' order by created_at desc limit $1`,
     [BACKGROUND_MESSAGES],
   );
-  const value = backgroundOf(rows.map((r) => String(r.body ?? "")).filter((b) => !isNightNoiseBody(b)).map(modelFacingText));
+  const value = backgroundOf(
+    rows
+      .map((r) => ({ text: String(r.body ?? ""), meta: readMeta(r.meta) }))
+      .filter((m) => !m.meta.nightNoise)
+      .map(modelFacingText),
+  );
   backgroundCache = { at: Date.now(), value };
   return value;
 }

@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { parseLegacyBody, readMeta } from "../message-meta.ts";
 import { createHash } from "node:crypto";
 import { now } from "./clock.ts";
 import { getMeta, getProfileData, patchMeta, sql } from "./store.ts";
@@ -22,18 +23,22 @@ export const brainExportState = createServerFn({ method: "POST" })
     const tz = resolveTz((await getMeta()).timeZone);
     const db = await sql();
     const rows = await db.query<Record<string, unknown>>(
-      `select id, role, body, created_at::float8 as created_at, kind, forgotten_at from qingran_messages
+      `select id, role, body, meta, created_at::float8 as created_at, kind, forgotten_at from qingran_messages
        order by created_at asc, id asc limit $1 offset $2`,
       [EXPORT_PAGE, data.offset],
     );
-    const messages: StateMessage[] = rows.map((r) => ({
-      id: String(r.id),
-      role: r.role === "assistant" ? "assistant" : "user",
-      text: String(r.body ?? ""),
-      at: formatLocal(Number(r.created_at), tz, true),
-      kind: String(r.kind ?? "say"),
-      ...(r.forgotten_at != null ? { forgotten: true } : {}),
-    }));
+    const messages: StateMessage[] = rows.map((r) => {
+      const meta = readMeta(r.meta);
+      return {
+        id: String(r.id),
+        role: r.role === "assistant" ? "assistant" : "user",
+        text: String(r.body ?? ""),
+        at: formatLocal(Number(r.created_at), tz, true),
+        kind: String(r.kind ?? "say"),
+        ...(r.forgotten_at != null ? { forgotten: true } : {}),
+        ...(Object.keys(meta).length ? { meta } : {}),
+      };
+    });
     const next = rows.length === EXPORT_PAGE ? data.offset + EXPORT_PAGE : null;
     if (data.offset > 0) return { head: null as string | null, messages, next };
 
@@ -175,17 +180,20 @@ export const brainImportStateMessages = createServerFn({ method: "POST" })
     let skipped = 0;
     for (const m of data.messages ?? []) {
       const at = parseLocalTime(m?.at, tz);
-      const text = typeof m?.text === "string" ? m.text : "";
-      if (at == null || !text.trim() || (m.role !== "user" && m.role !== "assistant")) {
+      const raw = typeof m?.text === "string" ? m.text : "";
+      // Old files: the facts were marks in front of the words.
+      const legacy = m?.meta ? { text: raw, meta: readMeta(m.meta) } : parseLegacyBody(raw);
+      const text = legacy.text;
+      if (at == null || (!text.trim() && !legacy.meta.images?.length) || (m.role !== "user" && m.role !== "assistant")) {
         skipped += 1;
         continue;
       }
       const kind = typeof m.kind === "string" && m.kind ? m.kind : "say";
       await db.query(
-        `insert into qingran_messages (id, role, body, created_at, kind, local_day, forgotten_at)
-         values ($1, $2, $3, $4, $5, $6, $7)
-         on conflict (id) do update set body = excluded.body, kind = excluded.kind`,
-        [messageId(m, at), m.role, text, at, kind, localDay(at, tz), m.forgotten ? at : null],
+        `insert into qingran_messages (id, role, body, meta, created_at, kind, local_day, forgotten_at)
+         values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8)
+         on conflict (id) do update set body = excluded.body, meta = excluded.meta, kind = excluded.kind`,
+        [messageId(m, at), m.role, text, JSON.stringify(legacy.meta), at, kind, localDay(at, tz), m.forgotten ? at : null],
       );
       written += 1;
     }

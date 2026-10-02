@@ -1,3 +1,4 @@
+import type { MessageMeta } from "../message-meta.ts";
 export type JobType = "report" | "wake" | "night";
 export type JobStatus = "pending" | "running" | "done" | "failed";
 
@@ -62,7 +63,10 @@ export type BrainLogRow = {
 export type StoredMessage = {
   id: string;
   role: "user" | "assistant";
+  /** The words only. */
   text: string;
+  /** What is known about it besides the words (which line it answers, photos, recording, …). */
+  meta: MessageMeta;
   createdAt: number;
   kind: "say" | "proactive" | "system_notice";
   archivedAt: number | null;

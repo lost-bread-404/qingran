@@ -16,7 +16,6 @@ import {
 } from "./tags.ts";
 import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
 import { fromPgArray, pgTextArray } from "../brain/store.ts";
-import { decodeStoredBody } from "../message-markup.ts";
 
 export type Sql = {
   <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
@@ -672,7 +671,7 @@ export async function clipLabelByTurn(sql: Sql, turnId: string): Promise<ClipLab
 }
 
 function visibleMessageBody(body: string | null): string {
-  return body ? decodeStoredBody(body).text : "";
+  return body ?? "";
 }
 
 

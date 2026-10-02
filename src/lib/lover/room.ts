@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
-import { decodeStoredBody, encodeStoredMessage } from "./message-markup";
+import { chatFromRow, metaOfChat } from "./message-meta";
 import {
   applyProfilePatch,
   emptyFieldRevs,
@@ -49,10 +49,11 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
         id: string;
         role: ChatMessage["role"];
         body: string;
+        meta: unknown;
         created_at: number;
         kind?: string;
       }>`
-        select id, role, body, created_at, kind
+        select id, role, body, meta, created_at, kind
         from qingran_messages
         where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
           and forgotten_at is null
@@ -68,7 +69,7 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
       revs: saved.revs,
       messages: sortConversation(
         applyMemoryCursor(
-          messages.reverse().map((m) => decodeStoredMessage(m)),
+          messages.reverse().map((m) => chatFromRow(m)),
           profile.memoryCursor,
         ),
       ),
@@ -117,17 +118,16 @@ export const appendRoomMessage = createServerFn({ method: "POST" })
   .validator((input: ChatMessage) => input)
   .handler(async ({ data }) => {
     const sql = await getSql();
-    const body = encodeStoredMessage(data);
+    const meta = JSON.stringify(metaOfChat(data));
     await sql`
-      insert into qingran_messages (id, role, body, created_at, kind)
-      values (${data.id}, ${data.role}, ${body}, ${data.createdAt}, 'say')
+      insert into qingran_messages (id, role, body, meta, created_at, kind)
+      values (${data.id}, ${data.role}, ${data.text}, ${meta}::jsonb, ${data.createdAt}, 'say')
       on conflict (id) do update
-        set body = excluded.body
+        set body = excluded.body, meta = qingran_messages.meta || excluded.meta
     `;
     return { ok: true as const };
   });
 
-/** One photo she is about to send, already shrunk on her phone. Returns its id for the message. */
 export const uploadPhoto = createServerFn({ method: "POST" })
   .validator((input: { dataUrl: string }) => ({ dataUrl: String(input?.dataUrl ?? "") }))
   .handler(async ({ data }) => {
@@ -146,9 +146,9 @@ export const clearRoomMessages = createServerFn({ method: "POST" }).handler(
 export const updateRoomMessage = createServerFn({ method: "POST" })
   .validator((input: ChatMessage) => input)
   .handler(async ({ data }) => {
-    const { updateMessageText } = await import("./brain/store");
+    const { updateMessage } = await import("./brain/store");
     // The kind stays as it was (a message he wrote first stays his).
-    await updateMessageText(data.id, encodeStoredMessage(data));
+    await updateMessage(data.id, data.text, metaOfChat(data));
     return { ok: true as const };
   });
 
@@ -163,29 +163,3 @@ export const deleteRoomMessages = createServerFn({ method: "POST" })
     }
     return { ok: true as const };
   });
-
-function decodeStoredMessage(row: {
-  id: string;
-  role: ChatMessage["role"];
-  body: string;
-  created_at: number;
-  kind?: string;
-}): ChatMessage {
-  const decoded = decodeStoredBody(row.body, row.kind);
-  return {
-    id: row.id,
-    role: row.role === "assistant" ? "assistant" : "user",
-    text: decoded.text,
-    createdAt: Number(row.created_at),
-    kind: decoded.kind,
-    scanned: decoded.scanned || undefined,
-    voiceTurnId: decoded.voiceTurnId,
-    hearingGold: decoded.hearingGold,
-    replyTo: decoded.replyTo,
-    activeReply: decoded.activeReply,
-    predictedTags: decoded.predictedTags,
-    interrupted: decoded.interrupted || undefined,
-    nightNoise: decoded.nightNoise || undefined,
-    images: decoded.images,
-  };
-}

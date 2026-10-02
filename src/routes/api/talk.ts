@@ -181,7 +181,8 @@ export const Route = createFileRoute("/api/talk")({
                 await upsertMessage({
                   id: replyId,
                   role: "assistant",
-                  text: `⟦回:${userMsgId}⟧${display}`,
+                  text: display,
+                  meta: { replyTo: userMsgId },
                   createdAt: Number.isFinite(replyAt) && replyAt > 0 ? replyAt : userCreatedAt + 1,
                   timeZone,
                 });

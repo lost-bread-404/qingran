@@ -1,6 +1,5 @@
 import { waitUntil } from "@vercel/functions";
 import { getProfileData, listHistoryWindow } from "../brain/store.ts";
-import { decodeStoredBody } from "../message-markup.ts";
 import { lockedProfile } from "../types.ts";
 import { xaiCreds } from "../xai-auth.ts";
 import { HEARING, xaiVadThreshold } from "./config.ts";
@@ -22,7 +21,7 @@ export async function phoneHearingInputs() {
   const profile = lockedProfile(savedProfile);
   const turns: ContextTurn[] = recent
     .filter((m) => m.kind === "say" || m.kind === "proactive")
-    .map((m) => ({ role: m.role, text: decodeStoredBody(m.text).text }));
+    .map((m) => ({ role: m.role, text: m.text }));
   const context = buildHearingContext(turns);
   const extraKeyterms = mergeKeyterms(
     extractTfIdfTerms([{ text: profile.systemPrompt }], 50),

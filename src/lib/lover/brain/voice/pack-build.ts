@@ -2,7 +2,7 @@ import { HISTORY_WINDOW } from "../config.ts";
 import { parsePromptBody, renderPromptMessages, variantMessages } from "../prompts/doc.ts";
 import { fillTemplate } from "../prompts/fill.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
-import { decodeStoredBody, isNightNoiseBody, modelFacingText } from "../../message-markup.ts";
+import { modelFacingText } from "../../message-meta.ts";
 import { NEUTRAL_PERSONA } from "../../types.ts";
 
 /**
@@ -64,15 +64,15 @@ function gapText(ms: number): string {
 
 export function voiceHistoryMessages(history: StoredMessage[], limit = HISTORY_WINDOW): VoiceChatMessage[] {
   if (limit <= 0) return [];
-  const rows = history.filter((message) => !isNightNoiseBody(message.text)).slice(-limit);
+  const rows = history.filter((message) => !message.meta.nightNoise).slice(-limit);
   const out: VoiceChatMessage[] = [];
   rows.forEach((message, i) => {
     const gap = i > 0 ? message.createdAt - rows[i - 1]!.createdAt : 0;
     if (gap >= GAP_MARK_MS) out.push({ role: "system", content: `（过了 ${gapText(gap)}）` });
-    const images = message.role === "user" ? decodeStoredBody(message.text).images : undefined;
+    const images = message.role === "user" ? message.meta.images : undefined;
     out.push({
       role: message.role === "assistant" ? "assistant" : "user",
-      content: modelFacingText(message.text),
+      content: modelFacingText(message),
       ...(images?.length ? { images } : {}),
     });
   });

@@ -2,6 +2,7 @@ import { getSql, type Sql } from "../../db.ts";
 import { NEUTRAL_PERSONA, storedSystemPrompt } from "../types.ts";
 import { newId } from "../storage.ts";
 import { collapseReplyVariants } from "../pair-messages.ts";
+import { readMeta, type MessageMeta } from "../message-meta.ts";
 import { HISTORY_WINDOW, SESSION_GAP_MS } from "./config.ts";
 import { clipLogRecord } from "./log-clip.ts";
 import { now } from "./clock.ts";
@@ -180,6 +181,7 @@ function rowMessage(r: Record<string, unknown>): StoredMessage {
     id: String(r.id),
     role: r.role === "assistant" ? "assistant" : "user",
     text: String(r.body ?? ""),
+    meta: readMeta(r.meta),
     createdAt: asInt(r.created_at),
     kind:
       r.kind === "proactive" || r.kind === "system_notice"
@@ -194,7 +196,7 @@ function rowMessage(r: Record<string, unknown>): StoredMessage {
 export async function listRecentMessages(limit = 240): Promise<StoredMessage[]> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
-    `select id, role, body, created_at, kind, archived_at, session_id, local_day
+    `select id, role, body, meta, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
      where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
      order by created_at desc, id desc
@@ -213,7 +215,7 @@ export async function listHistoryWindow(
   const db = await getSql();
   const fetchN = Math.min(limit + 32, 240);
   const rows = await db.query<Record<string, unknown>>(
-    `select id, role, body, created_at, kind, archived_at, session_id, local_day
+    `select id, role, body, meta, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
      where ($1::text is null or id <> $1)
        and forgotten_at is null
@@ -227,7 +229,7 @@ export async function listHistoryWindow(
   return collapseReplyVariants(rows.map(rowMessage).reverse())
     .filter((message) => {
       if (!excludeId || message.role !== "assistant") return true;
-      return !message.text.includes(`⟦回:${excludeId}⟧`);
+      return message.meta.replyTo !== excludeId;
     })
     .slice(-limit);
 }
@@ -235,7 +237,7 @@ export async function listHistoryWindow(
 export async function getMessage(id: string): Promise<StoredMessage | null> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
-    `select id, role, body, created_at, kind, archived_at, session_id, local_day
+    `select id, role, body, meta, created_at, kind, archived_at, session_id, local_day
      from qingran_messages where id = $1`,
     [id],
   );
@@ -262,7 +264,7 @@ export async function hasUserAfter(at: number): Promise<boolean> {
 export async function lastMessage(): Promise<StoredMessage | null> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
-    `select id, role, body, created_at, kind, archived_at, session_id, local_day
+    `select id, role, body, meta, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
      where created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
      order by created_at desc, id desc
@@ -271,10 +273,12 @@ export async function lastMessage(): Promise<StoredMessage | null> {
   return rows[0] ? rowMessage(rows[0]) : null;
 }
 
+/** Write a message. `meta` is added to what is already known about it (nothing known is dropped). */
 export async function upsertMessage(msg: {
   id: string;
   role: "user" | "assistant";
   text: string;
+  meta?: MessageMeta;
   createdAt: number;
   kind?: StoredMessage["kind"];
   timeZone: string;
@@ -289,20 +293,22 @@ export async function upsertMessage(msg: {
   );
   const kind = msg.kind ?? "say";
   await db.query(
-    `insert into qingran_messages (id, role, body, created_at, kind, session_id, local_day)
-     values ($1, $2, $3, $4, $5, $6, $7)
+    `insert into qingran_messages (id, role, body, created_at, kind, session_id, local_day, meta)
+     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
      on conflict (id) do update set
        body = excluded.body,
+       meta = qingran_messages.meta || excluded.meta,
        kind = excluded.kind,
        created_at = excluded.created_at,
        session_id = coalesce(qingran_messages.session_id, excluded.session_id),
        local_day = coalesce(qingran_messages.local_day, excluded.local_day)`,
-    [msg.id, msg.role, msg.text, msg.createdAt, kind, sess, day],
+    [msg.id, msg.role, msg.text, msg.createdAt, kind, sess, day, JSON.stringify(msg.meta ?? {})],
   );
   return {
     id: msg.id,
     role: msg.role,
     text: msg.text,
+    meta: msg.meta ?? {},
     createdAt: msg.createdAt,
     kind,
     archivedAt: null,
@@ -311,26 +317,23 @@ export async function upsertMessage(msg: {
   };
 }
 
-export async function updateMessageText(id: string, text: string, kind?: StoredMessage["kind"]): Promise<void> {
+/** Her edit (or the page's update) of a message: the words and everything known about it, as the page has them. */
+export async function updateMessage(id: string, text: string, meta: MessageMeta): Promise<void> {
   const existing = await getMessage(id);
   const db = await getSql();
-  const next = text;
   const ts = now();
-  if (existing && existing.text !== next) {
+  if (existing && existing.text !== text) {
     await db.query(
       `insert into qingran_message_edits (message_id, before, at) values ($1,$2,$3)`,
       [id, existing.text, ts],
     );
   }
-
-  if (kind) {
-    await db.query(
-      `update qingran_messages set body = $2, kind = $3, edited_at = $4 where id = $1`,
-      [id, next, kind, ts],
-    );
-  } else {
-    await db.query(`update qingran_messages set body = $2, edited_at = $3 where id = $1`, [id, next, ts]);
-  }
+  await db.query(`update qingran_messages set body = $2, meta = $3::jsonb, edited_at = $4 where id = $1`, [
+    id,
+    text,
+    JSON.stringify(meta),
+    ts,
+  ]);
 }
 
 export async function upsertReport(row: {

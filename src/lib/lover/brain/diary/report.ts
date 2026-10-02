@@ -6,7 +6,7 @@ import { localDay, monthRange } from "../time.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { lockedProfile } from "../../types.ts";
-import { modelFacingText } from "../../message-markup.ts";
+import { modelFacingText, readMeta } from "../../message-meta.ts";
 import { enqueue } from "../jobs.ts";
 
 /**
@@ -22,8 +22,8 @@ export async function loadMonthDialogue(month: string): Promise<MonthLine[]> {
   if (!/^\d{4}-\d{2}$/.test(month)) return [];
   const { start, end } = monthRange(month);
   const db = await getSql();
-  const rows = await db.query<{ role: string; body: string; local_day: string | null }>(
-    `select role, body, local_day
+  const rows = await db.query<{ role: string; body: string; meta: unknown; local_day: string | null }>(
+    `select role, body, meta, local_day
      from qingran_messages
      where forgotten_at is null
        and kind is distinct from 'system_notice'
@@ -35,7 +35,7 @@ export async function loadMonthDialogue(month: string): Promise<MonthLine[]> {
     .map((row) => ({
       day: String(row.local_day ?? ""),
       role: row.role === "assistant" ? ("assistant" as const) : ("user" as const),
-      text: modelFacingText(String(row.body ?? "")).replace(/\s+/g, " ").trim(),
+      text: modelFacingText({ text: String(row.body ?? ""), meta: readMeta(row.meta) }).replace(/\s+/g, " ").trim(),
     }))
     .filter((row) => row.day && row.text);
 }

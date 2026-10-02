@@ -1,5 +1,4 @@
 import { UNRECOGNIZED_TEXT } from "./hearing/heard.ts";
-import { decodeStoredBody } from "./message-markup.ts";
 import { type ChatMessage } from "./types.ts";
 
 export type ChatPair = {
@@ -17,13 +16,14 @@ type VariantMessage = {
   createdAt: number;
   replyTo?: string;
   activeReply?: string;
+  /** Stored messages carry these in meta; the page's messages as fields. */
+  meta?: { replyTo?: string; activeReply?: string };
 };
 
 function variantLinks(message: VariantMessage): { replyTo?: string; activeReply?: string } {
-  const decoded = decodeStoredBody(message.text);
   return {
-    replyTo: message.replyTo || decoded.replyTo,
-    activeReply: message.activeReply || decoded.activeReply,
+    replyTo: message.replyTo || message.meta?.replyTo,
+    activeReply: message.activeReply || message.meta?.activeReply,
   };
 }
 

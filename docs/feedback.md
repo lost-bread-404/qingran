@@ -39,7 +39,7 @@ from qingran_messages where created_at <= <at> and forgotten_at is null order by
 -- 她点过大拇指的回复，和她当时说的那句
 select f.created_at, u.body as rosie, m.body as qingran
 from turn_feedback f join qingran_messages m on m.id = f.message_id
-left join qingran_messages u on m.body like '%⟦回:' || u.id || '⟧%'
+left join qingran_messages u on u.id = m.meta->>'replyTo'
 where f.rating = 'up' order by f.created_at desc limit 30;
 ```
 
