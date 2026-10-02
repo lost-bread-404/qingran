@@ -37,6 +37,8 @@ export type TalkClientInput = {
   profile: Profile;
   nowMs?: number;
   timeZone?: string;
+  /** Photos sent with this line (qr_photos ids). */
+  images?: string[];
 };
 
 export async function streamTalk(

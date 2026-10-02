@@ -17,6 +17,7 @@ import { xaiCreds, xaiFetch, type XaiCred } from "./xai-auth";
 import { InnerCutBuffer, replyBodyMissing } from "./brain/voice/inner-cut";
 import { BraceCut } from "./brain/voice/brace-cut";
 import { VoiceLeveler, levelClip } from "./voice-level";
+import { withPhotos } from "./photos";
 
 const MAX_INPUT = 2000;
 const PCM_MIME = `audio/pcm;rate=${VOICE_IO.sampleRate}`;
@@ -116,7 +117,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   let cred: XaiCred = { kind: "api", token: apiKey ?? "" };
 
   const say = data.text.trim().slice(0, MAX_INPUT);
-  if (!say) {
+  const herLine = [...data.messages].reverse().find((m) => m.role === "user");
+  if (!say && !herLine?.images?.length) {
     emit({ t: "err", m: "先说一句。" });
     return emptyResult({ otherEvents: "empty user text" });
   }
@@ -182,7 +184,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       max_tokens: route.maxOutput,
       stream: true,
       stream_options: { include_usage: true },
-      messages: data.messages,
+      messages: await withPhotos(data.messages),
     };
     if (route.effort) body.reasoning_effort = route.effort;
     t0 = Date.now();

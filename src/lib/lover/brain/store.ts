@@ -242,6 +242,13 @@ export async function getMessage(id: string): Promise<StoredMessage | null> {
   return rows[0] ? rowMessage(rows[0]) : null;
 }
 
+/** The message was taken back (she edited an earlier line and the talk went back to it, or cleared the chat). */
+export async function messageForgotten(id: string): Promise<boolean> {
+  const db = await getSql();
+  const rows = await db.query<{ forgotten_at: unknown }>(`select forgotten_at from qingran_messages where id = $1`, [id]);
+  return rows[0]?.forgotten_at != null;
+}
+
 export async function lastMessage(): Promise<StoredMessage | null> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(

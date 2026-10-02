@@ -3,6 +3,7 @@ import type { ChatMessage, MessageKind } from "./types";
 
 export function encodeStoredMessage(msg: ChatMessage): string {
   let text = msg.text;
+  if (msg.images?.length) text = `⟦图:${msg.images.join(",")}⟧${text}`;
   if (msg.kind === "steer") text = `⟦走向⟧${text}`;
   else if (msg.kind === "setting") text = `⟦设定⟧${text}`;
   else if (msg.kind === "unheard") text = `⟦未听⟧${text}`;
@@ -35,6 +36,7 @@ export function decodeStoredBody(body: string, kindCol?: string): {
   predictedTags?: AcousticTags;
   interrupted: boolean;
   nightNoise: boolean;
+  images?: string[];
 } {
   let text = body;
   let scanned = false;
@@ -104,7 +106,13 @@ export function decodeStoredBody(body: string, kindCol?: string): {
     kind = "unheard";
     text = text.slice(4);
   }
-  return { text, scanned, kind, voiceTurnId, hearingGold, replyTo, activeReply, predictedTags, interrupted, nightNoise };
+  let images: string[] | undefined;
+  const photos = text.match(/^⟦图:([^⟧]*)⟧/);
+  if (photos) {
+    images = photos[1]!.split(",").filter(Boolean);
+    text = text.slice(photos[0].length);
+  }
+  return { text, scanned, kind, voiceTurnId, hearingGold, replyTo, activeReply, predictedTags, interrupted, nightNoise, images };
 }
 
 /** Keep stored prefixes (hearing, chosen reply, …) and replace only the visible words. */
@@ -124,6 +132,13 @@ export function isNightNoiseBody(body: string): boolean {
   return body.includes("⟦夜噪⟧");
 }
 
+/** What the words say about photos she sent with them (the model may also see the photos themselves). */
+export function photoNote(count: number): string {
+  if (!count) return "";
+  return count === 1 ? "（发来一张照片）" : `（发来 ${count} 张照片）`;
+}
+
 export function modelFacingText(body: string): string {
-  return stripAcousticTags(decodeStoredBody(body).text).trim();
+  const decoded = decodeStoredBody(body);
+  return `${photoNote(decoded.images?.length ?? 0)}${stripAcousticTags(decoded.text).trim()}`;
 }

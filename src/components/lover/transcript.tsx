@@ -1,4 +1,5 @@
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Pencil, ThumbsUp, Volume2 } from "lucide-react";
+import { photoSrc } from "@/lib/lover/photo-client";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,7 +21,6 @@ type Props = {
   statusLine: string;
   thinking?: boolean;
   keyboardPad?: number;
-  editableId?: string | null;
   editingId?: string | null;
   editDraft?: string;
   debugHearing?: boolean;
@@ -33,7 +33,7 @@ type Props = {
   onConfirmQuick?: (id: string) => void;
   onUndoConfirm?: (id: string) => void;
   undoConfirmId?: string | null;
-  onFlagReply?: (assistantId: string, replyToId?: string, rating?: "up" | "down") => void;
+  onPraiseReply?: (assistantId: string, replyToId?: string) => void;
   praisedIds?: ReadonlySet<string>;
   onSelectReply?: (userId: string, replyId: string) => void;
   onNoiseReply?: (id: string) => void;
@@ -54,7 +54,6 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     statusLine,
     thinking,
     keyboardPad = 0,
-    editableId,
     editingId,
     editDraft,
     debugHearing,
@@ -67,7 +66,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     onConfirmQuick,
     onUndoConfirm,
     undoConfirmId,
-    onFlagReply,
+    onPraiseReply,
     praisedIds,
     onSelectReply,
     onNoiseReply,
@@ -97,6 +96,12 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
   };
 
   useImperativeHandle(ref, () => ({ pageUp }), []);
+
+  /** A photo finished loading and made the talk taller: stay at the bottom if she was there. */
+  const followIfPinned = () => {
+    const el = scrollerRef.current;
+    if (el && pinRef.current && !editingId) el.scrollTop = el.scrollHeight;
+  };
 
   useEffect(() => {
     const el = scrollerRef.current;
@@ -196,7 +201,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
               ) : (
                 <UserBubble
                   user={pair.user}
-                  editable={editableId === pair.user.id}
+                  editable
                   debugHearing={debugHearing}
                   onEditStart={onEditStart}
                   onConfirmStart={onConfirmStart}
@@ -204,6 +209,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                   onUndoConfirm={onUndoConfirm}
                   undoConfirmId={undoConfirmId}
                   onNoiseReply={onNoiseReply}
+                  onPhotoLoad={followIfPinned}
                 />
               )
             ) : null}
@@ -261,13 +267,13 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                     </button>
                   </div>
                 ) : null}
-                {onFlagReply && shown.text.trim() ? (
-                  <div className="relative z-10 flex items-center gap-6 self-start">
+                {onPraiseReply && shown.text.trim() ? (
+                  <div className="relative z-10 flex items-center self-start">
                     <button
                       type="button"
                       aria-label="这条回复好"
                       aria-pressed={praisedIds?.has(shown.id) ?? false}
-                      onClick={() => onFlagReply(shown.id, pair.user?.id ?? shown.replyTo, "up")}
+                      onClick={() => onPraiseReply(shown.id, pair.user?.id ?? shown.replyTo)}
                       className={
                         praisedIds?.has(shown.id)
                           ? "grid size-11 place-items-center text-fg [touch-action:manipulation]"
@@ -275,14 +281,6 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                       }
                     >
                       <ThumbsUp className={praisedIds?.has(shown.id) ? "size-4 fill-current" : "size-4"} />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="差在哪"
-                      onClick={() => onFlagReply(shown.id, pair.user?.id ?? shown.replyTo, "down")}
-                      className="min-h-11 rounded-md px-3 text-sm text-subtle transition-colors duration-150 hover:text-fg [touch-action:manipulation]"
-                    >
-                      差在哪
                     </button>
                   </div>
                 ) : null}
@@ -328,6 +326,7 @@ function UserBubble({
   onUndoConfirm,
   undoConfirmId,
   onNoiseReply,
+  onPhotoLoad,
 }: {
   user: ChatMessage;
   editable: boolean;
@@ -338,6 +337,7 @@ function UserBubble({
   onUndoConfirm?: (id: string) => void;
   undoConfirmId?: string | null;
   onNoiseReply?: (id: string) => void;
+  onPhotoLoad?: () => void;
 }) {
   const canConfirm = Boolean(debugHearing && user.voiceTurnId && onConfirmStart);
   const canMishear = Boolean(!debugHearing && user.voiceTurnId && onConfirmStart);
@@ -411,9 +411,24 @@ function UserBubble({
               aria-label="已标注"
             />
           ) : null}
-          <p className="whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
-            {stripAcousticTags(user.text)}
-          </p>
+          {user.images?.length ? (
+            <div className="mb-1 flex flex-wrap justify-end gap-1.5">
+              {user.images.map((id) => (
+                <img
+                  key={id}
+                  src={photoSrc(id)}
+                  alt="照片"
+                  onLoad={onPhotoLoad}
+                  className="max-h-60 max-w-full rounded-2xl object-cover"
+                />
+              ))}
+            </div>
+          ) : null}
+          {stripAcousticTags(user.text).trim() ? (
+            <p className="whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
+              {stripAcousticTags(user.text)}
+            </p>
+          ) : null}
           {debugHearing && (user.hearingTiming || user.injectLine) ? (
             <p className="text-[10px] text-subtle">
               {user.hearingTiming

@@ -128,6 +128,14 @@ export const appendRoomMessage = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+/** One photo she is about to send, already shrunk on her phone. Returns its id for the message. */
+export const uploadPhoto = createServerFn({ method: "POST" })
+  .validator((input: { dataUrl: string }) => ({ dataUrl: String(input?.dataUrl ?? "") }))
+  .handler(async ({ data }) => {
+    const { savePhoto } = await import("./photos");
+    return savePhoto(data.dataUrl);
+  });
+
 export const clearRoomMessages = createServerFn({ method: "POST" }).handler(
   async () => {
     const { clearRecentConversation } = await import("./brain/store");
@@ -179,5 +187,6 @@ function decodeStoredMessage(row: {
     predictedTags: decoded.predictedTags,
     interrupted: decoded.interrupted || undefined,
     nightNoise: decoded.nightNoise || undefined,
+    images: decoded.images,
   };
 }

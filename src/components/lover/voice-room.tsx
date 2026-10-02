@@ -1,9 +1,8 @@
-import { BookOpen, Settings, Volume2, VolumeX } from "lucide-react";
+import { BookOpen, ImagePlus, Settings, Volume2, VolumeX, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { CallButton } from "@/components/lover/call-button";
 import { ConfirmTurn } from "@/components/lover/confirm-turn";
-import { FlagReply } from "@/components/lover/flag-reply";
 import { MicButton } from "@/components/lover/mic-button";
 import { SettingsDrawer } from "@/components/lover/settings-drawer";
 import { Transcript, type TranscriptHandle } from "@/components/lover/transcript";
@@ -35,6 +34,7 @@ import {
   loadRoom,
   saveProfilePatch,
   updateRoomMessage,
+  uploadPhoto,
 } from "@/lib/lover/room";
 import { registerNativePush } from "@/lib/lover/push-client";
 import { nativeCallPlan, nativeInterruptCall, nativePlayClip, nativeTalkTurn } from "@/lib/lover/native-shell";
@@ -45,6 +45,7 @@ import { extractTfIdfTerms } from "@/lib/lover/hearing/keyterms";
 import { detectAudioRoute } from "@/lib/lover/hearing/route";
 import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
 import { newId } from "@/lib/lover/storage";
+import { shrinkPhoto } from "@/lib/lover/photo-client";
 import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
 import { warmBrain } from "@/lib/lover/brain/warm-client";
@@ -83,6 +84,9 @@ import {
 import type { FieldRevs } from "@/lib/lover/profile-patch";
 import { cn } from "@/lib/utils";
 
+/** Photos in one message. */
+const MAX_PHOTOS = 4;
+
 function lastUserSay(messages: ChatMessage[]): ChatMessage | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
@@ -102,6 +106,10 @@ export function VoiceRoom() {
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [draft, setDraft] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
+  /** Photos she is about to send: shown from `preview`, uploaded as soon as picked (`id` once saved). */
+  const [photos, setPhotos] = useState<Array<{ key: string; preview: string; id: string | null }>>([]);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -144,14 +152,7 @@ export function VoiceRoom() {
   const [confirmNote, setConfirmNote] = useState("");
   const [confirmDraft, setConfirmDraft] = useState("");
   const [confirmStt, setConfirmStt] = useState("");
-  const [flagTarget, setFlagTarget] = useState<{
-    messageId: string;
-    replyTo?: string;
-    trigger: string;
-    reply: string;
-  } | null>(null);
-  const [flagBusy, setFlagBusy] = useState(false);
-  const [flagError, setFlagError] = useState<string | null>(null);
+  const [praiseBusy, setPraiseBusy] = useState(false);
   const [praisedIds, setPraisedIds] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
@@ -460,10 +461,11 @@ export function VoiceRoom() {
         sttDoneAt?: number;
         predictedTags?: AcousticTags;
         engine?: string;
+        images?: string[];
       },
     ) => {
       const tagged = sayRaw.trim();
-      if (!tagged) return;
+      if (!tagged && !(opts?.images ?? opts?.existingUser?.images)?.length) return;
       if ((opts?.skipQingran || opts?.nightNoise) && !getHearingSession().debugHearing) {
         if (callActiveRef.current) hearRef.current();
         return;
@@ -489,6 +491,7 @@ export function VoiceRoom() {
             ? { hearMs, engine: opts?.engine }
             : undefined,
         injectLine,
+        images: opts?.images?.length ? opts.images : undefined,
       };
       if (opts?.existingUser && (hearMs != null || opts?.engine)) {
         userMsg.hearingTiming = { ...userMsg.hearingTiming, hearMs, engine: opts.engine ?? userMsg.hearingTiming?.engine };
@@ -646,6 +649,7 @@ export function VoiceRoom() {
             userCreatedAt: userMsg.createdAt || at,
             replyId: reply.id,
             replyCreatedAt: reply.createdAt,
+            images: userMsg.images,
             profile: lockedProfile(profileRef.current),
             nowMs: Date.now(),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -983,12 +987,43 @@ export function VoiceRoom() {
 
   async function submitComposer() {
     const say = draft.trim();
-    if (!say) return;
+    if (!say && !photos.length) return;
     if (status === "thinking" || status === "speaking") return;
+    if (photos.some((p) => !p.id)) {
+      setBanner("照片还在传，等一下。");
+      return;
+    }
+    const images = photos.map((p) => p.id!);
     stopPlayback();
     setDraft("");
+    setPhotos([]);
     setComposerOpen(false);
-    await sendTurn(say);
+    await sendTurn(say, { images });
+  }
+
+  async function addPhotos(files: FileList | null) {
+    // One pick at a time (the button is off until this one is done), so the count below holds.
+    const picked = Array.from(files ?? []).slice(0, Math.max(0, MAX_PHOTOS - photos.length));
+    if (!picked.length) return;
+    setPhotoBusy(true);
+    for (const file of picked) {
+      const key = newId();
+      const preview = await shrinkPhoto(file).catch(() => null);
+      if (!preview) {
+        setBanner("这张照片打不开，换一张试试。");
+        continue;
+      }
+      setPhotos((prev) => [...prev, { key, preview, id: null }]);
+      try {
+        const saved = await uploadPhoto({ data: { dataUrl: preview } });
+        if (!saved.ok) throw new Error(saved.error);
+        setPhotos((prev) => prev.map((p) => (p.key === key ? { ...p, id: saved.id } : p)));
+      } catch (err) {
+        setPhotos((prev) => prev.filter((p) => p.key !== key));
+        setBanner(err instanceof Error && /[\u4e00-\u9fff]/.test(err.message) ? err.message : "照片没传上去，再试一次。");
+      }
+    }
+    setPhotoBusy(false);
   }
 
   async function replyToNoise(id: string) {
@@ -1000,12 +1035,16 @@ export function VoiceRoom() {
   }
 
   async function saveEdit() {
-    const current = lastUserSay(chatRef.current);
+    const current = chatRef.current.find((m) => m.id === editingId && m.role === "user");
     const text = editDraft.trim();
-    if (!current || current.id !== editingId || !text) return;
-    if (text === current.text.trim()) {
+    if (!current || (!text && !current.images?.length)) return;
+    if (text === stripAcousticTags(current.text).trim()) {
       setEditingId(null);
       if (call.active) call.hear();
+      return;
+    }
+    if (current.id !== lastUserSay(chatRef.current)?.id) {
+      await branchFrom(current, text);
       return;
     }
     const updated: ChatMessage = { ...current, text };
@@ -1020,6 +1059,50 @@ export function VoiceRoom() {
       existingUser: updated,
       keepReplies: true,
       voiceTurnId: updated.voiceTurnId,
+    });
+  }
+
+  /**
+   * She changed an earlier line (like editing a message in Claude): the talk goes back to that point. The old line
+   * and everything after it are forgotten (kept in the database, gone from the screen and from what he sees), and the
+   * new line is said now, as a new message, so he answers it with the time as it is.
+   */
+  async function branchFrom(original: ChatMessage, text: string) {
+    const sliced = sliceAfterMessage(chatRef.current, original.id);
+    if (!sliced) return;
+    setEditingId(null);
+    abortRef.current?.abort();
+    turnRef.current += 1;
+    stopPlayback();
+    busyRef.current = true;
+    const said: ChatMessage = {
+      ...original,
+      id: newId(),
+      text,
+      createdAt: Date.now(),
+      kind: "say",
+      nightNoise: undefined,
+      activeReply: undefined,
+      scanned: undefined,
+      // The words changed, so what was heard is no longer confirmed for them.
+      hearingGold: original.voiceTurnId ? "unconfirmed" : undefined,
+    };
+    chatRef.current = [...sliced.history, said];
+    setMessages(chatRef.current);
+    try {
+      // The new line first, so a failure in between never loses what she said.
+      await appendRoomMessage({ data: said });
+      await deleteRoomMessages({ data: { ids: [original.id, ...sliced.removed.map((m) => m.id)] } });
+    } catch (err) {
+      busyRef.current = false;
+      setBanner(err instanceof Error ? err.message : String(err));
+      if (call.active) call.hear();
+      return;
+    }
+    await sendTurn(said.text, {
+      history: sliced.history,
+      existingUser: said,
+      voiceTurnId: said.voiceTurnId,
     });
   }
 
@@ -1046,10 +1129,11 @@ export function VoiceRoom() {
       return;
     }
     setMessages([...sliced.history, updated]);
-    void updateRoomMessage({ data: updated });
-    if (sliced.removed.length) {
-      void deleteRoomMessages({ data: { ids: sliced.removed.map((m) => m.id) } });
-    }
+    // Written before he is asked, so what he sees is the talk up to this line.
+    await Promise.all([
+      updateRoomMessage({ data: updated }),
+      sliced.removed.length ? deleteRoomMessages({ data: { ids: sliced.removed.map((m) => m.id) } }) : null,
+    ]).catch(() => undefined);
     await sendTurn(updated.text, {
       history: sliced.history,
       existingUser: updated,
@@ -1180,39 +1264,20 @@ export function VoiceRoom() {
     }
   }
 
-  async function saveReplyFlag(input: {
-    messageId: string;
-    replyTo?: string;
-    note: string;
-    rating: "up" | "down";
-    tags: string[];
-  }): Promise<boolean> {
-    setFlagBusy(true);
-    setFlagError(null);
+  /** Her thumbs-up: this reply was good (turn_feedback, rating up). Complaints she just says to him. */
+  async function praiseReply(messageId: string, replyTo?: string): Promise<boolean> {
+    setPraiseBusy(true);
     try {
       const result = await flagQingranReply({
-        data: {
-          messageId: input.messageId,
-          replyToMessageId: input.replyTo,
-          note: input.note,
-          rating: input.rating,
-          tags: input.tags,
-        },
+        data: { messageId, replyToMessageId: replyTo, note: "", rating: "up", tags: [] },
       });
-      if (!result.ok) {
-        if (input.rating === "up") setBanner(result.error);
-        else setFlagError(result.error);
-        return false;
-      }
-      if (input.rating === "down") setFlagTarget(null);
-      return true;
+      if (!result.ok) setBanner(result.error);
+      return result.ok;
     } catch (err) {
-      const text = err instanceof Error ? err.message : String(err);
-      if (input.rating === "up") setBanner(text);
-      else setFlagError(text);
+      setBanner(err instanceof Error ? err.message : String(err));
       return false;
     } finally {
-      setFlagBusy(false);
+      setPraiseBusy(false);
     }
   }
 
@@ -1251,7 +1316,6 @@ export function VoiceRoom() {
 
   const recording = voice.status === "recording";
   const transcribing = voice.status === "transcribing";
-  const editable = lastUserSay(messages);
   const composing = composerOpen && !recording && !call.active;
   // In the iPhone shell's call the shell does everything, so its phase alone says where the call is.
   const shellCall = call.active && nativeCallPlan().callStart === "startNativeCall";
@@ -1387,14 +1451,57 @@ export function VoiceRoom() {
               placeholder="写给她"
               className="min-h-0 flex-1 resize-none"
             />
+            {photos.length ? (
+              <div className="mt-3 flex shrink-0 gap-2 overflow-x-auto">
+                {photos.map((p) => (
+                  <div key={p.key} className="relative shrink-0">
+                    <img
+                      src={p.preview}
+                      alt=""
+                      className={cn("size-16 rounded-md object-cover", p.id ? "" : "opacity-50")}
+                    />
+                    <button
+                      type="button"
+                      aria-label="不发这张"
+                      onClick={() => setPhotos((prev) => prev.filter((x) => x.key !== p.key))}
+                      className="absolute -right-1.5 -top-1.5 grid size-6 place-items-center rounded-full bg-surface-2 text-muted"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/heic,image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                void addPhotos(e.currentTarget.files);
+                e.currentTarget.value = "";
+              }}
+            />
             <div className="mt-3 flex shrink-0 items-center justify-between gap-3">
-              <button
-                type="button"
-                className="text-xs text-muted underline-offset-4 hover:underline"
-                onClick={() => setComposerOpen(false)}
-              >
-                收起
-              </button>
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  className="text-xs text-muted underline-offset-4 hover:underline"
+                  onClick={() => setComposerOpen(false)}
+                >
+                  收起
+                </button>
+                <button
+                  type="button"
+                  aria-label="发照片"
+                  disabled={photoBusy || photos.length >= MAX_PHOTOS}
+                  onClick={() => photoInputRef.current?.click()}
+                  className="grid size-11 place-items-center text-muted transition-colors duration-150 hover:text-fg disabled:opacity-30"
+                >
+                  <ImagePlus className="size-5" />
+                </button>
+              </div>
               <Button type="button" size="pill" onClick={() => void submitComposer()}>
                 送出
               </Button>
@@ -1408,7 +1515,6 @@ export function VoiceRoom() {
               partnerName="清然"
               statusLine={statusLine}
               thinking={status === "thinking" || transcribing || call.phase === "transcribing" || call.phase === "thinking"}
-              editableId={editable?.id ?? null}
               editingId={editingId}
               editDraft={editDraft}
               debugHearing={profile.debugHearing}
@@ -1417,17 +1523,21 @@ export function VoiceRoom() {
                 void playFull(id, text, turnRef.current);
               }}
               onEditStart={(id) => {
-                stopPlayback();
-                abortRef.current?.abort();
-                turnRef.current += 1;
-                busyRef.current = false;
-                if (call.active) call.deafen();
                 const msg = messages.find((m) => m.id === id);
                 if (!msg) return;
+                // Changing her last line takes back his answer to it now. An earlier line only opens the editor:
+                // what he is saying goes on until she saves (in a call the mic still stops while she types).
+                if (id === lastUserSay(chatRef.current)?.id || call.active) {
+                  stopPlayback();
+                  abortRef.current?.abort();
+                  turnRef.current += 1;
+                  busyRef.current = false;
+                  if (call.active) call.deafen();
+                  setStatus("idle");
+                }
                 setEditingId(id);
                 setEditDraft(stripAcousticTags(msg.text));
                 setComposerOpen(false);
-                setStatus("idle");
               }}
               onEditDraft={setEditDraft}
               onEditCancel={() => {
@@ -1452,38 +1562,16 @@ export function VoiceRoom() {
               undoConfirmId={undoConfirmId}
               onNoiseReply={(id) => void replyToNoise(id)}
               praisedIds={praisedIds}
-              onFlagReply={(assistantId, replyToId, rating) => {
-                if (rating === "up") {
-                  if (flagBusy || praisedIds.has(assistantId)) return;
+              onPraiseReply={(assistantId, replyToId) => {
+                if (praiseBusy || praisedIds.has(assistantId)) return;
+                setPraisedIds((prev) => new Set(prev).add(assistantId));
+                void praiseReply(assistantId, replyToId).then((ok) => {
+                  if (ok) return;
                   setPraisedIds((prev) => {
                     const next = new Set(prev);
-                    next.add(assistantId);
+                    next.delete(assistantId);
                     return next;
                   });
-                  void saveReplyFlag({
-                    messageId: assistantId,
-                    replyTo: replyToId,
-                    note: "",
-                    rating: "up",
-                    tags: [],
-                  }).then((ok) => {
-                    if (ok) return;
-                    setPraisedIds((prev) => {
-                      const next = new Set(prev);
-                      next.delete(assistantId);
-                      return next;
-                    });
-                  });
-                  return;
-                }
-                const reply = chatRef.current.find((m) => m.id === assistantId);
-                const trigger = replyToId ? chatRef.current.find((m) => m.id === replyToId) : undefined;
-                setFlagError(null);
-                setFlagTarget({
-                  messageId: assistantId,
-                  replyTo: replyToId,
-                  trigger: trigger?.text ?? "",
-                  reply: reply?.text ?? "",
                 });
               }}
             />
@@ -1568,28 +1656,6 @@ export function VoiceRoom() {
             setConfirmError(null);
           }}
           onConfirm={(input) => void saveConfirm(input)}
-        />
-
-        <FlagReply
-          open={Boolean(flagTarget)}
-          triggerText={flagTarget?.trigger}
-          replyText={flagTarget?.reply}
-          busy={flagBusy}
-          error={flagError}
-          onClose={() => {
-            setFlagTarget(null);
-            setFlagError(null);
-          }}
-          onSave={async ({ note, tags }) => {
-            if (!flagTarget) return;
-            await saveReplyFlag({
-              messageId: flagTarget.messageId,
-              replyTo: flagTarget.replyTo,
-              note,
-              rating: "down",
-              tags,
-            });
-          }}
         />
 
         <SettingsDrawer

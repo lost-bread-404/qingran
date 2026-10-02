@@ -3,7 +3,7 @@ import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } f
 import { enqueueReportIfDue } from "@/lib/lover/brain/diary/report";
 import { drainJobs } from "@/lib/lover/brain/jobs";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
-import { upsertMessage, appendBrainLog, getMessage, getProfileData } from "@/lib/lover/brain/store";
+import { upsertMessage, appendBrainLog, getMessage, getProfileData, messageForgotten } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
 import { loadHotContext } from "@/lib/lover/brain/voice/pack";
 import { runVoiceWithFallback, formatVoiceLogNote } from "@/lib/lover/brain/voice/voice-fallback";
@@ -29,6 +29,8 @@ type TalkBody = {
   profile?: Profile;
   nowMs?: number;
   timeZone?: string;
+  /** Photos sent with this line (qr_photos ids). */
+  images?: string[];
 };
 
 export const Route = createFileRoute("/api/talk")({
@@ -103,6 +105,9 @@ export const Route = createFileRoute("/api/talk")({
                 profile,
                 nowMs,
                 timeZone,
+                images: Array.isArray(body.images)
+                  ? body.images.filter((id): id is string => typeof id === "string" && id.length > 0).slice(0, 6)
+                  : [],
               });
               const ctx = packed;
               send({ t: "timing", k: "pack_ms", ms: ctx.packMs });
@@ -152,9 +157,12 @@ export const Route = createFileRoute("/api/talk")({
               const display = speech.trim();
               const replyAt = Number(body.replyCreatedAt);
               // Her line changed while this answer was being written (the phone heard her go on and sent the whole
-              // sentence again, or she edited it): this answer is to words she has not finished, so it is not kept.
+              // sentence again, or she edited it), or she went back to an earlier line and this one was taken back:
+              // this answer is not kept.
               const now = await getMessage(userMsgId);
-              const superseded = Boolean(now) && !String(now?.text ?? "").endsWith(text.trim());
+              const superseded =
+                (Boolean(now) && !String(now?.text ?? "").endsWith(text.trim())) ||
+                (await messageForgotten(userMsgId).catch(() => false));
               if (superseded) {
                 await appendBrainLog({ step: "talk-superseded", ok: true, route: "voice", note: "她的这一句后来变了（接着说了或改了），这条回复不保存" }).catch(() => undefined);
               }

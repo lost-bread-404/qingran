@@ -98,6 +98,8 @@ export type ChatMessage = {
   injectLine?: string;
   /** Kept the clip and skipped the reply because it was not human voice. Tap to ask for one. */
   nightNoise?: boolean;
+  /** Photos she sent with this line (ids in qr_photos, shown from /api/photo). */
+  images?: string[];
   interrupted?: boolean;
   talkTrace?: {
     status?: number | null;

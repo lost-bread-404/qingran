@@ -67,5 +67,7 @@ export type StoredMessage = {
 export type VoiceChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Photos she sent with this line (qr_photos ids); turned into images when the reply is asked. */
+  images?: string[];
 };
 

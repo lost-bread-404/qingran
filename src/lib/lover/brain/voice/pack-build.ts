@@ -2,7 +2,7 @@ import { HISTORY_WINDOW } from "../config.ts";
 import { parsePromptBody, renderPromptMessages, variantMessages } from "../prompts/doc.ts";
 import { fillTemplate } from "../prompts/fill.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
-import { isNightNoiseBody, modelFacingText } from "../../message-markup.ts";
+import { decodeStoredBody, isNightNoiseBody, modelFacingText } from "../../message-markup.ts";
 import { NEUTRAL_PERSONA } from "../../types.ts";
 
 /**
@@ -22,6 +22,8 @@ export type VoicePackParts = {
   history: StoredMessage[];
   historyWindow: number;
   userText: string;
+  /** Photos she sent with this line (qr_photos ids). */
+  userImages?: string[];
   /** Set when he may write first (nothing from her to answer): the「主动找她」variant. */
   first?: { quiet: string };
   voiceTemplate?: string;
@@ -60,17 +62,19 @@ function gapText(ms: number): string {
   return m % 60 ? `${Math.floor(m / 60)} 小时 ${m % 60} 分钟` : `${Math.floor(m / 60)} 小时`;
 }
 
-export function voiceHistoryMessages(
-  history: StoredMessage[],
-  limit = HISTORY_WINDOW,
-): Array<{ role: "system" | "user" | "assistant"; content: string }> {
+export function voiceHistoryMessages(history: StoredMessage[], limit = HISTORY_WINDOW): VoiceChatMessage[] {
   if (limit <= 0) return [];
   const rows = history.filter((message) => !isNightNoiseBody(message.text)).slice(-limit);
-  const out: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
+  const out: VoiceChatMessage[] = [];
   rows.forEach((message, i) => {
     const gap = i > 0 ? message.createdAt - rows[i - 1]!.createdAt : 0;
     if (gap >= GAP_MARK_MS) out.push({ role: "system", content: `（过了 ${gapText(gap)}）` });
-    out.push({ role: message.role === "assistant" ? "assistant" : "user", content: modelFacingText(message.text) });
+    const images = message.role === "user" ? decodeStoredBody(message.text).images : undefined;
+    out.push({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: modelFacingText(message.text),
+      ...(images?.length ? { images } : {}),
+    });
   });
   return out;
 }
@@ -107,6 +111,11 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
     // Persona, recent talk, her line: the first system message and everything that is not a system message.
     const first = rendered.findIndex((message) => message.role === "system");
     rendered = rendered.filter((message, i) => message.role !== "system" || i === first);
+  }
+  if (parts.userImages?.length) {
+    // Her photos go with her line, the last thing he is given.
+    const at = rendered.map((message) => message.role).lastIndexOf("user");
+    if (at >= 0) rendered[at] = { ...rendered[at]!, images: parts.userImages };
   }
   return placePersona(rendered, {
     placement: parts.personaPlacement,

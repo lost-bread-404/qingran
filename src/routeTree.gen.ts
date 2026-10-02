@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as DiaryRouteImport } from './routes/diary'
 import { Route as LabRouteImport } from './routes/lab'
 import { Route as ApiNativeLogRouteImport } from './routes/api/native-log'
+import { Route as ApiPhotoRouteImport } from './routes/api/photo'
 import { Route as ApiSttRouteImport } from './routes/api/stt'
 import { Route as ApiSttStreamRouteImport } from './routes/api/stt-stream'
 import { Route as ApiTalkRouteImport } from './routes/api/talk'
@@ -39,6 +40,11 @@ const LabRoute = LabRouteImport.update({
 const ApiNativeLogRoute = ApiNativeLogRouteImport.update({
   id: '/api/native-log',
   path: '/api/native-log',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPhotoRoute = ApiPhotoRouteImport.update({
+  id: '/api/photo',
+  path: '/api/photo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSttRoute = ApiSttRouteImport.update({
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/diary': typeof DiaryRoute
   '/lab': typeof LabRoute
   '/api/native-log': typeof ApiNativeLogRoute
+  '/api/photo': typeof ApiPhotoRoute
   '/api/stt': typeof ApiSttRoute
   '/api/stt-stream': typeof ApiSttStreamRoute
   '/api/talk': typeof ApiTalkRoute
@@ -95,6 +102,7 @@ export interface FileRoutesByTo {
   '/diary': typeof DiaryRoute
   '/lab': typeof LabRoute
   '/api/native-log': typeof ApiNativeLogRoute
+  '/api/photo': typeof ApiPhotoRoute
   '/api/stt': typeof ApiSttRoute
   '/api/stt-stream': typeof ApiSttStreamRoute
   '/api/talk': typeof ApiTalkRoute
@@ -109,6 +117,7 @@ export interface FileRoutesById {
   '/diary': typeof DiaryRoute
   '/lab': typeof LabRoute
   '/api/native-log': typeof ApiNativeLogRoute
+  '/api/photo': typeof ApiPhotoRoute
   '/api/stt': typeof ApiSttRoute
   '/api/stt-stream': typeof ApiSttStreamRoute
   '/api/talk': typeof ApiTalkRoute
@@ -124,6 +133,7 @@ export interface FileRouteTypes {
     | '/diary'
     | '/lab'
     | '/api/native-log'
+    | '/api/photo'
     | '/api/stt'
     | '/api/stt-stream'
     | '/api/talk'
@@ -137,6 +147,7 @@ export interface FileRouteTypes {
     | '/diary'
     | '/lab'
     | '/api/native-log'
+    | '/api/photo'
     | '/api/stt'
     | '/api/stt-stream'
     | '/api/talk'
@@ -150,6 +161,7 @@ export interface FileRouteTypes {
     | '/diary'
     | '/lab'
     | '/api/native-log'
+    | '/api/photo'
     | '/api/stt'
     | '/api/stt-stream'
     | '/api/talk'
@@ -164,6 +176,7 @@ export interface RootRouteChildren {
   DiaryRoute: typeof DiaryRoute
   LabRoute: typeof LabRoute
   ApiNativeLogRoute: typeof ApiNativeLogRoute
+  ApiPhotoRoute: typeof ApiPhotoRoute
   ApiSttRoute: typeof ApiSttRoute
   ApiSttStreamRoute: typeof ApiSttStreamRoute
   ApiTalkRoute: typeof ApiTalkRoute
@@ -201,6 +214,13 @@ declare module '@tanstack/react-router' {
       path: '/api/native-log'
       fullPath: '/api/native-log'
       preLoaderRoute: typeof ApiNativeLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/photo': {
+      id: '/api/photo'
+      path: '/api/photo'
+      fullPath: '/api/photo'
+      preLoaderRoute: typeof ApiPhotoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/stt': {
@@ -260,6 +280,7 @@ const rootRouteChildren: RootRouteChildren = {
   DiaryRoute: DiaryRoute,
   LabRoute: LabRoute,
   ApiNativeLogRoute: ApiNativeLogRoute,
+  ApiPhotoRoute: ApiPhotoRoute,
   ApiSttRoute: ApiSttRoute,
   ApiSttStreamRoute: ApiSttStreamRoute,
   ApiTalkRoute: ApiTalkRoute,

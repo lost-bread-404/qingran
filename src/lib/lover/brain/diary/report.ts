@@ -6,6 +6,7 @@ import { localDay, monthRange } from "../time.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { lockedProfile } from "../../types.ts";
+import { modelFacingText } from "../../message-markup.ts";
 import { enqueue } from "../jobs.ts";
 
 /**
@@ -34,7 +35,7 @@ export async function loadMonthDialogue(month: string): Promise<MonthLine[]> {
     .map((row) => ({
       day: String(row.local_day ?? ""),
       role: row.role === "assistant" ? ("assistant" as const) : ("user" as const),
-      text: String(row.body ?? "").replace(/\s+/g, " ").trim(),
+      text: modelFacingText(String(row.body ?? "")).replace(/\s+/g, " ").trim(),
     }))
     .filter((row) => row.day && row.text);
 }

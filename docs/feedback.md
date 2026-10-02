@@ -26,6 +26,25 @@ select r.input from brain_log l join brain_log_raw r on r.log_id = l.id
 where l.route = 'voice' and l.step like 'voice:%' and l.at between <毫秒> and <毫秒>;
 ```
 
+## Rosie 怎么说好、怎么说不好（2026-10-02 起）
+
+- **不好**：没有按钮了（以前每条回复下面的「差在哪」已经删掉）。她不喜欢清然哪句回复，就直接在聊天里说他、骂他。夜里整理会把这些抱怨挑出来写进 `qr_feedback`（`at` 是她说那句话的时间）。
+- **好**：每条回复下面只留一个大拇指。她觉得哪句回得好就点一下，不会再跟清然说什么。存在 `turn_feedback`（`rating = 'up'`，`message_id` 是那条回复）。
+- **复盘时必须做的**：每条抱怨都去看它**前面**清然的那几句回复（下面第二个查询，按 `at` 往前找），抱怨针对的是那些回复，光看抱怨本身看不出他哪里不对。点过大拇指的回复是好例子，改 prompt 或人设之后，拿它们对照一下有没有被改坏。
+
+```sql
+-- 某条抱怨之前的 10 条原话（把 <at> 换成 qr_feedback.at）
+select to_char(to_timestamp(created_at/1000) at time zone 'America/New_York', 'MM-DD HH24:MI') t, role, body
+from qingran_messages where created_at <= <at> and forgotten_at is null order by created_at desc limit 10;
+-- 她点过大拇指的回复，和她当时说的那句
+select f.created_at, u.body as rosie, m.body as qingran
+from turn_feedback f join qingran_messages m on m.id = f.message_id
+left join qingran_messages u on m.body like '%⟦回:' || u.id || '⟧%'
+where f.rating = 'up' order by f.created_at desc limit 30;
+```
+
+`turn_feedback` 里 2026-10-02 以前还有一些 `rating = 'down'` 的（「差在哪」时代的，带标签），可以一起参考。
+
 ## 什么算抱怨、什么不算
 
 - **算（进 `qr_feedback`）**：Rosie 嫌清然本身——重复、太凶、不走心、套公式、乱安排、逼她、听不懂她、记错事，以及这些引起的吵架。这些多半是当时 prompt、记忆或代码没调好造成的，不是两个人之间真的发生的事，所以不进清然的回忆（进了他会记仇、会道歉个没完、会照着改成另一个极端）。

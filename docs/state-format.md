@@ -25,8 +25,8 @@
 | `memory` | 字符串 | 整篇换掉并立刻生效 | 「清然和 Rosie 现在」：回复每一轮都读的一小段。写法见下 |
 | `memories` | 数组 | 除故事线切出来的以外，全部换掉 | 一件一件的回忆，见下。文件里出现过的日子算已经整理过，夜里整理不会再写一遍 |
 | `days` | 数组 `{day, timeline}` | 全部换掉 | 每天 Rosie 的时间线，`day` 形如 `"2026-09-25"`。月报从这里算 |
-| `prompts` | 对象 `{key: 正文}` | 只覆盖写了的键 | 自定义指令。key 是 `voice`、`scene`、`editor`、`report`。一般不用写，用代码里的默认 |
-| `messages` | 数组 | 加上 / 按 id 更新 | `{id?, role: "user"｜"assistant", text, at, kind?, forgotten?}`。`kind` 默认 `"say"`，主动消息是 `"proactive"` |
+| `prompts` | 对象 `{key: 正文}` | 只覆盖写了的键 | 自定义指令。key 是 `voice`、`editor`、`report`。一般不用写，用代码里的默认 |
+| `messages` | 数组 | 加上 / 按 id 更新 | `{id?, role: "user"｜"assistant", text, at, kind?, forgotten?}`。`kind` 默认 `"say"`，主动消息是 `"proactive"`。带照片的话 `text` 以 `⟦图:id,id⟧` 开头；照片本身在 `qr_photos`，不在导出文件里，导到别的库里只剩「发来一张照片」 |
 
 ### `profile` 里常用的键
 

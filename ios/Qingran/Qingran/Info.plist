@@ -28,6 +28,10 @@
 	<string>清然通话需要麦克风，这样你说话她才能听见。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>通话时手机自己也听一遍你说的话，和 xAI 听到的对照，听得更准。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>拍照发给清然。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>从相册选照片发给清然。</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
