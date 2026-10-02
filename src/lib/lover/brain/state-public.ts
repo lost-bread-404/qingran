@@ -1,3 +1,4 @@
+import type { MessageMeta } from "../message-meta.ts";
 /**
  * The 清然 state file: what 设置 → 数据 exports, and what it imports. Importing = initializing.
  * Full description for people (and for Claude writing an init file): docs/state-format.md.
@@ -28,7 +29,7 @@ export type StateMessage = {
   kind?: string;
   forgotten?: boolean;
   /** What is known about it besides the words (see src/lib/lover/message-meta.ts). */
-  meta?: Record<string, unknown>;
+  meta?: MessageMeta;
 };
 
 export type StateFile = {
