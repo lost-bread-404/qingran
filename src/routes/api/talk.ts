@@ -126,6 +126,7 @@ export const Route = createFileRoute("/api/talk")({
                   voiceSpeed: profile.voiceSpeed,
                   primary,
                   safety,
+                  temperature: profile.voiceTemperature,
                 },
                 (event) => {
                   if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;

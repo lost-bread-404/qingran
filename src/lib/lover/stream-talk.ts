@@ -56,7 +56,7 @@ export type TalkStreamInput = {
   model?: string;
   effort?: Effort;
   timeoutMs?: number;
-  /** The current mode's temperature. Missing → 1.0. */
+  /** Her setting (profile.voiceTemperature). Missing → 1.0. */
   temperature?: number;
 };
 

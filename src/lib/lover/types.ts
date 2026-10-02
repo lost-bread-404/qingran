@@ -3,11 +3,11 @@ import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
 import { DEFAULT_HEARING_SENSE, lockHearingSense, type HearingSense } from "./hearing/sense.ts";
 import { SILENCE_MS } from "./vad.ts";
-import { clampHistoryWindow, clampDossierMaxChars, HISTORY_WINDOW } from "./brain/config.ts";
+import { clampHistoryWindow, clampDossierMaxChars, clampVoiceTemperature, HISTORY_WINDOW, VOICE_TEMPERATURE } from "./brain/config.ts";
 import { lockPromptModels, type PromptModelPick } from "./brain/prompts/models.ts";
 import type { PromptKey } from "./brain/prompts/catalog.ts";
 
-export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio, clampDossierMaxChars };
+export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio, clampDossierMaxChars, clampVoiceTemperature };
 export type { HearingSense };
 
 export type VoiceId = "eve";
@@ -33,6 +33,8 @@ export type Profile = {
   debugHearing: boolean;
   voiceModel: string;
   voiceEffort: VoiceEffort;
+  /** Temperature of the reply (and of his messages first). 0–2, default 1.0. */
+  voiceTemperature: number;
   /** Pause that ends a turn, milliseconds. 800–3000, default 1500. */
   silenceMs: number;
   /** 清然和 Rosie 现在 and the moments that come back to him, in the voice prompt. */
@@ -123,6 +125,7 @@ export const DEFAULT_PROFILE: Profile = {
   debugHearing: true,
   voiceModel: DEFAULT_VOICE_MODEL,
   voiceEffort: DEFAULT_VOICE_EFFORT,
+  voiceTemperature: VOICE_TEMPERATURE,
   silenceMs: SILENCE_MS,
   injectLongterm: true,
   historyWindow: HISTORY_WINDOW,
@@ -161,6 +164,7 @@ type LooseProfile = Partial<Profile> & {
   voiceChat?: string;
   voiceModel?: string;
   voiceEffort?: string | null;
+  voiceTemperature?: number;
   silenceMs?: number;
   injectLongterm?: boolean;
   historyWindow?: number;
@@ -198,6 +202,7 @@ export function lockedProfile(input?: unknown): Profile {
     captureAudio: raw.debugHearing !== false,
     voiceModel: pickVoiceModel(raw),
     voiceEffort: pickVoiceEffort(raw),
+    voiceTemperature: clampVoiceTemperature(raw.voiceTemperature),
     silenceMs: hearingSense.endWaitMs,
     injectLongterm: raw.injectLongterm !== false,
     historyWindow: clampHistoryWindow(raw.historyWindow),

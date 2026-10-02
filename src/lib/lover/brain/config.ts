@@ -97,6 +97,15 @@ export function clampHistoryWindow(value: unknown, fallback = HISTORY_WINDOW): n
   if (!Number.isFinite(n)) return fallback;
   return Math.max(HISTORY_WINDOW_MIN, Math.min(HISTORY_WINDOW_MAX, Math.round(n)));
 }
+/** How free the reply is (Rosie sets it in 高级 → 指令). Higher: more of his own mind, more surprising. */
+export const VOICE_TEMPERATURE = 1.0;
+export const VOICE_TEMPERATURE_MIN = 0;
+export const VOICE_TEMPERATURE_MAX = 2;
+export function clampVoiceTemperature(value: unknown, fallback = VOICE_TEMPERATURE): number {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(VOICE_TEMPERATURE_MIN, Math.min(VOICE_TEMPERATURE_MAX, Math.round(n * 20) / 20));
+}
 /** 「清然和 Rosie 现在」 is short: what holds now. The moments themselves live in the memory, without a cap. */
 export const DOSSIER_MAX_CHARS = 1500;
 export const DOSSIER_MAX_CHARS_MIN = 500;

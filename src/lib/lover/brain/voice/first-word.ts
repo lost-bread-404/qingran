@@ -85,6 +85,7 @@ export async function speakFirst(input: {
       messages,
       model: pick.model,
       effort: pick.effort,
+      temperature: profile.voiceTemperature,
       promptKey: voicePrompt.key,
       promptHash: voicePrompt.hash,
       outputRef: `first:${input.nowMs}`,

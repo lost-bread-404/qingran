@@ -50,7 +50,7 @@ import {
 } from "@/components/lover/settings-life";
 import { applyHearingTier, hearingTierOf, HEARING_TIER_BLURB } from "@/lib/lover/hearing/sense";
 import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
-import { clampHistoryWindow, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
+import { clampHistoryWindow, clampVoiceTemperature, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
 import { defaultPromptModel } from "@/lib/lover/brain/prompts/models";
 import { parseSenseLine } from "@/lib/lover/hearing/sense";
 import { cn } from "@/lib/utils";
@@ -185,6 +185,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   }, [profile.brainOn]);
   const [injectLongterm, setInjectLongterm] = useState(profile.injectLongterm);
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
+  const [voiceTemperature, setVoiceTemperature] = useState(profile.voiceTemperature);
   const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
   const [storyDraft, setStoryDraft] = useState(profile.storyline);
   useEffect(() => {
@@ -223,6 +224,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     setSense(profile.hearingSense);
     setInjectLongterm(profile.injectLongterm);
     setHistoryWindow(profile.historyWindow);
+    setVoiceTemperature(profile.voiceTemperature);
     if (!intimateDirty.current) setIntimateDraft(profile.intimateNotes);
     if (!identityDirty.current) setIdentityDraft(profile.identity);
     setKeytermDraft(profile.sttKeyterms.join("\n"));
@@ -808,6 +810,27 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                     voiceInjectFromProfile({ injectLongterm, brainOn, historyWindow }),
                   )}
                 </p>
+              </div>
+              <div className="px-1 pb-2">
+                <div className="mb-1 flex items-baseline justify-between gap-3">
+                  <p className="text-sm">温度（越高越有主见、越出人意料）</p>
+                  <p className="text-sm tabular-nums">{voiceTemperature.toFixed(2)}</p>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={voiceTemperature}
+                  aria-label="温度"
+                  onChange={(e) => {
+                    const next = clampVoiceTemperature(Number(e.target.value));
+                    setVoiceTemperature(next);
+                    persistProfile({ voiceTemperature: next });
+                  }}
+                  className="h-11 w-full accent-accent"
+                />
+                <p className="text-xs text-subtle">每轮回复和主动找她都用这个。默认 1.0。</p>
               </div>
               <div className="flex flex-col gap-1 px-1 pb-2">
                 <p className="text-sm">人设放在哪</p>
