@@ -6,11 +6,12 @@ import { cosine, embedConfig, embedTexts } from "./embed.ts";
 import { isNightNoiseBody, modelFacingText } from "../message-markup.ts";
 
 /**
- * 清然's memory (docs/brain.md v6): moments of the two of them, kept one by one and never rewritten by the night pass.
+ * 清然's memory (docs/brain.md v6): only what changes how he acts or thinks later, a handful at a time.
  * - story: cut from the storyline Rosie wrote (what happened before this app), paragraph by paragraph, her words as written;
- * - night: written each night from that day's talk;
- * - insight: something 清然 came to understand about Rosie, written by the night pass, which may later be corrected.
- * A moment that stopped being true keeps its text and gets a 「后来」 note (changed).
+ * - night: events (one per topic; a topic that continues on another day is merged into its event) and insights (what
+ *   he understood about Rosie), written each night from that day's talk;
+ * - inner: what he wrote in ｛｝, shown to him for 16 hours and never recalled.
+ * Her complaints about him go to qr_feedback, not here.
  */
 export type Memory = {
   id: number;
@@ -146,15 +147,55 @@ export async function addMemories(rows: NewMemory[]): Promise<void> {
   memoryCache = null;
 }
 
-export async function updateMemory(id: number, patch: { body?: string; changed?: string }): Promise<void> {
+/**
+ * Rewrites one memory: her edit, or the night pass merging a day into an event that continued. A new body gets its
+ * vector again (embedMissing).
+ */
+export async function updateMemory(
+  id: number,
+  patch: { body?: string; changed?: string; keys?: string; thread?: string; importance?: number; day?: string; at?: number },
+): Promise<void> {
   const db = await sql();
+  const ts = now();
   if (patch.body != null) {
-    await db.query(`update qr_memories set body = $2, updated_at = $3 where id = $1`, [id, patch.body.trim().slice(0, 4000), now()]);
+    await db.query(`update qr_memories set body = $2, vec = null, updated_at = $3 where id = $1`, [id, patch.body.trim().slice(0, 4000), ts]);
   }
   if (patch.changed != null) {
-    await db.query(`update qr_memories set changed = $2, updated_at = $3 where id = $1`, [id, patch.changed.trim().slice(0, 500), now()]);
+    await db.query(`update qr_memories set changed = $2, updated_at = $3 where id = $1`, [id, patch.changed.trim().slice(0, 500), ts]);
+  }
+  if (patch.keys != null || patch.thread != null || patch.importance != null || patch.day != null || patch.at != null) {
+    await db.query(
+      `update qr_memories set keys = coalesce($2, keys), thread = coalesce($3, thread), importance = coalesce($4, importance),
+         day = coalesce($5, day), at = coalesce($6, at), updated_at = $7 where id = $1`,
+      [
+        id,
+        patch.keys?.trim().slice(0, 500) ?? null,
+        patch.thread?.trim().slice(0, 80) ?? null,
+        patch.importance == null ? null : clampImportance(patch.importance),
+        patch.day ?? null,
+        patch.at ?? null,
+        ts,
+      ],
+    );
   }
   memoryCache = null;
+}
+
+/**
+ * Rosie's complaints about how 清然 behaved, found by the night pass: kept in the back (qr_feedback) for tuning the
+ * app, never shown to him and never recalled — most of them came from prompts that have since been fixed.
+ */
+export async function addFeedback(rows: Array<{ day: string; at: number; body: string }>, ts = now()): Promise<void> {
+  if (!rows.length) return;
+  const db = await sql();
+  for (const r of rows) {
+    await db.query(`insert into qr_feedback (day, at, body, source, created_at) values ($1, $2, $3, 'night', $4)`, [
+      r.day,
+      r.at,
+      r.body.slice(0, 2000),
+      ts,
+    ]);
+  }
 }
 
 export async function deleteMemory(id: number): Promise<void> {
@@ -378,7 +419,10 @@ export function recallText(memories: Memory[]): string {
 /** Recent memories with ids, for the night pass to see what it might have to mark as changed. */
 export function memoriesWithIds(memories: Memory[]): string {
   return memories
-    .map((m) => `[${m.id}]（${m.source === "story" ? "以前" : dayLabel(m.day)}）${m.body.trim()}${m.changed.trim() ? `（后来：${m.changed.trim()}）` : ""}`)
+    .map(
+      (m) =>
+        `[${m.id}]（${m.source === "story" ? "以前" : dayLabel(m.day)}${m.kind === "insight" ? "，看懂的" : ""}${m.thread ? `，${m.thread}` : ""}）${m.body.trim()}${m.changed.trim() ? `（后来：${m.changed.trim()}）` : ""}`,
+    )
     .join("\n");
 }
 

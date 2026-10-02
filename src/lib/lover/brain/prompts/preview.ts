@@ -79,7 +79,7 @@ async function editorSlots(): Promise<Record<string, string>> {
     system_prompt: charter,
     identity_block: identityBlock(profile.identity) ? `${identityBlock(profile.identity)}\n` : "",
     us: us || "（还没有）",
-    memories: memoriesWithIds(memories.slice(-20)) || "（没有）",
+    memories: memoriesWithIds(memories.filter((m) => m.source === "night" || m.source === "rosie").slice(-200)) || "（没有）",
     day: localDay(at, tz),
     conversation: "（要等这次整理才有：这一天没被清空的对话）",
     max_chars: String(profile.dossierMaxChars),
@@ -88,7 +88,7 @@ async function editorSlots(): Promise<Record<string, string>> {
 
 async function slotsFor(key: PromptKey): Promise<{ slots: Record<string, string>; note: string }> {
   if (key === "editor") {
-    return { slots: await editorSlots(), note: "整理时带上这一天的对话，和以前回忆里跟这一天最相关的 20 条（这里先放最近的 20 条）。" };
+    return { slots: await editorSlots(), note: "整理时带上这一天的对话，和以前所有的事、看懂的（同一件事接着聊就合并进去）。" };
   }
   if (key === "report") {
     return {

@@ -13,20 +13,24 @@ import { readIdentity } from "./life-store.ts";
 import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
 import { dayClockMs, dayWindow, saveDayTimeline } from "./heart.ts";
-import { addMemories, embedMissing, getMark, memoriesWithIds, recall, setMark, syncStory, updateMemory, type NewMemory } from "./memory.ts";
+import { addFeedback, addMemories, embedMissing, getMark, listMemories, memoriesWithIds, setMark, syncStory, updateMemory, type NewMemory } from "./memory.ts";
 
 /**
  * The night pass (docs/brain.md v6): once for each day that has ended, fold it into his memory.
- * One call writes the day's moments (added, never rewritten), what he newly understood about Rosie, which older
- * moments are no longer so, a fresh 「清然和 Rosie 现在」 and the day's timeline (for the monthly report).
- * Days are done oldest first, one at a time, so a backlog (the days before this design, or a missed night) catches up
- * in order and each day sees the 「现在」 the day before left.
+ * Memory is a handful of events and understandings that change how 清然 acts later — not a diary. One call:
+ * - events: what happened that matters later; a topic that continues (林泽搬家, 口腔溃疡, 找实习) is merged into its
+ *   existing event (the whole event rewritten, by id) instead of added again;
+ * - insights: what he understood about Rosie (likes, limits, what comforts her), also updated by id;
+ * - feedback: Rosie's complaints about how 清然 behaved — kept in the back (qr_feedback) to tune the app, never shown to him;
+ * - a fresh 「清然和 Rosie 现在」 and the day's timeline (for the monthly report).
+ * Days are done oldest first, one at a time, so a backlog catches up in order.
  */
 const ITEM = {
   type: "object",
   additionalProperties: false,
-  required: ["time", "body", "keys", "thread", "importance"] as string[],
+  required: ["id", "time", "body", "keys", "thread", "importance"] as string[],
   properties: {
+    id: { type: "integer" },
     time: { type: "string" },
     body: { type: "string" },
     keys: { type: "string" },
@@ -40,25 +44,17 @@ export const NIGHT_SCHEMA = {
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["moments", "insights", "changed", "us", "timeline", "changes"] as string[],
+    required: ["events", "insights", "feedback", "us", "timeline", "changes"] as string[],
     properties: {
-      moments: { type: "array", items: ITEM },
-      insights: {
+      events: { type: "array", items: ITEM },
+      insights: { type: "array", items: ITEM },
+      feedback: {
         type: "array",
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["body", "keys", "importance"] as string[],
-          properties: { body: { type: "string" }, keys: { type: "string" }, importance: { type: "integer" } },
-        },
-      },
-      changed: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["id", "note"] as string[],
-          properties: { id: { type: "integer" }, note: { type: "string" } },
+          required: ["time", "body"] as string[],
+          properties: { time: { type: "string" }, body: { type: "string" } },
         },
       },
       us: { type: "string" },
@@ -70,8 +66,8 @@ export const NIGHT_SCHEMA = {
 
 /** Cap on the day's conversation sent at night. Past this, his lines keep only what he said aloud. */
 const NIGHT_CONVERSATION_MAX = 60_000;
-/** How many older moments the night pass sees, to tell which of them the day changed. */
-const NIGHT_RELATED = 20;
+/** The night pass sees every event and understanding so far (they are few), to merge into the right one. */
+const NIGHT_MEMORIES = 200;
 
 type Row = { id: string; role: string; body: string; created_at: number };
 
@@ -124,15 +120,14 @@ export async function runNight(day: string, jobId?: string, complete: typeof cal
   const profile = lockedProfile(profileData);
   await syncStory(profile.storyline);
   const conversation = nightConversation(rows, tz);
-  // The older moments this day is most about: the night pass may mark some of them as no longer so.
-  const herLines = rows.filter((r) => r.role === "user").map((r) => modelFacingText(r.body)).join("\n");
-  const related = (await recall(herLines.slice(-6000), window.to, { top: NIGHT_RELATED, minFit: 4, keepShare: 0, withThread: 0, minCos: 0.35 })).memories;
+  // Every event and understanding so far (not the storyline, not his ｛｝ notes): the day may continue one of them.
+  const known = (await listMemories()).filter((m) => m.source === "night" || m.source === "rosie").slice(-NIGHT_MEMORIES);
   const loaded = await loadPrompt("editor");
   const messages = renderVariant(parsePromptBody("editor", loaded.body), "main", {
     system_prompt: charter,
     identity_block: identityBlock(ident.identity) ? `${identityBlock(ident.identity)}\n` : "",
     us: us.trim() || "（还没有）",
-    memories: memoriesWithIds(related) || "（没有）",
+    memories: memoriesWithIds(known) || "（没有）",
     day,
     conversation: conversation || "（没有）",
     max_chars: String(profile.dossierMaxChars),
@@ -155,36 +150,27 @@ export async function runNight(day: string, jobId?: string, complete: typeof cal
     throw new Error(`night:${result.failKind ?? "failed"}`);
   }
   const json = result.json as Record<string, unknown>;
+  // A known id rewrites that event or understanding whole (the topic continued today); anything else is new.
+  const knownIds = new Set(known.map((m) => m.id));
   const fresh: NewMemory[] = [];
-  for (const raw of Array.isArray(json.moments) ? json.moments : []) {
+  const keep = async (raw: unknown, kind: "moment" | "insight") => {
     const item = (raw ?? {}) as Record<string, unknown>;
     const body = str(item.body);
-    if (!body) continue;
-    fresh.push({
-      kind: "moment",
-      source: "night",
-      day,
-      at: dayClockMs(day, str(item.time), tz) ?? window.from,
-      body,
-      keys: str(item.keys),
-      thread: str(item.thread),
-      importance: Number(item.importance),
-    });
-  }
-  for (const raw of Array.isArray(json.insights) ? json.insights : []) {
-    const item = (raw ?? {}) as Record<string, unknown>;
-    const body = str(item.body);
-    if (!body) continue;
-    fresh.push({ kind: "insight", source: "night", day, at: window.to - 1, body, keys: str(item.keys), importance: Number(item.importance) });
-  }
-  await addMemories(fresh);
-  const relatedIds = new Set(related.map((m) => m.id));
-  for (const raw of Array.isArray(json.changed) ? json.changed : []) {
-    const item = (raw ?? {}) as Record<string, unknown>;
+    if (!body) return;
     const id = Number(item.id);
-    const note = str(item.note);
-    if (relatedIds.has(id) && note) await updateMemory(id, { changed: note });
-  }
+    const atMs = dayClockMs(day, str(item.time), tz) ?? (kind === "insight" ? window.to - 1 : window.from);
+    const fields = { body, keys: str(item.keys), thread: str(item.thread), importance: Number(item.importance) };
+    if (knownIds.has(id)) await updateMemory(id, { ...fields, day, at: atMs });
+    else fresh.push({ kind, source: "night", day, at: atMs, ...fields });
+  };
+  for (const raw of Array.isArray(json.events) ? json.events : []) await keep(raw, "moment");
+  for (const raw of Array.isArray(json.insights) ? json.insights : []) await keep(raw, "insight");
+  await addMemories(fresh);
+  const complaints = (Array.isArray(json.feedback) ? json.feedback : [])
+    .map((raw) => (raw ?? {}) as Record<string, unknown>)
+    .filter((item) => str(item.body))
+    .map((item) => ({ day, at: dayClockMs(day, str(item.time), tz) ?? window.from, body: str(item.body) }));
+  await addFeedback(complaints, at);
   const nextUs = str(json.us);
   if (nextUs) await publishMemory(nextUs, "night", Math.min(window.to, at), { day, changes: str(json.changes).slice(0, 1000) });
   await saveDayTimeline(day, str(json.timeline), at);
