@@ -242,6 +242,16 @@ export async function getMessage(id: string): Promise<StoredMessage | null> {
   return rows[0] ? rowMessage(rows[0]) : null;
 }
 
+/** Whether she has a message after this time (a later line of the same round on the phone). */
+export async function hasUserAfter(at: number): Promise<boolean> {
+  const db = await getSql();
+  const rows = await db.query<Record<string, unknown>>(
+    `select 1 from qingran_messages where role = 'user' and created_at > $1 limit 1`,
+    [at],
+  );
+  return rows.length > 0;
+}
+
 export async function lastMessage(): Promise<StoredMessage | null> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
@@ -277,6 +287,7 @@ export async function upsertMessage(msg: {
      on conflict (id) do update set
        body = excluded.body,
        kind = excluded.kind,
+       created_at = excluded.created_at,
        session_id = coalesce(qingran_messages.session_id, excluded.session_id),
        local_day = coalesce(qingran_messages.local_day, excluded.local_day)`,
     [msg.id, msg.role, msg.text, msg.createdAt, kind, sess, day],

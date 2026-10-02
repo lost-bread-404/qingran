@@ -45,8 +45,6 @@ final class NativePipeline {
   private var lineSaysDone = false
   /// When Apple last heard new words in this line (Apple on) or nil (Apple off for this line).
   private var lineWordsAt: Date?
-  /// What her held words are being heard as (still finishing when she goes on quickly), for joining.
-  private var heldHeard: Task<LineHeard, Never>?
   private var ticket: StreamTicket?
   private var ticketLoading = false
   /// The stream failed twice in a row: lines go to the server whole for a while, then it is tried again.
@@ -57,11 +55,13 @@ final class NativePipeline {
   private var backstopMs = NativeVad.backstopMs
 
   // Turn and playback
-  /// Her words already sent but not yet answered aloud, and the ids they were sent under. If she goes on before his
-  /// voice starts, they are joined to what she says next and sent again as one line under the same ids, so a pause in
-  /// the middle of a sentence cuts nothing off.
-  private var held: [Int16] = []
-  private var heldTurn: (user: String, reply: String, at: Int, start: Int)?
+  /// This round: her short messages (lines she said, lines she typed or tapped) not yet answered aloud, each its own
+  /// bubble, and the one reply they will get. Until his voice starts, each new one stops his thinking and he thinks
+  /// again with all of them; once he speaks the round is closed and what comes next starts the next round.
+  private var round: [Piece] = []
+  private var roundReply: String?
+  /// Tapped while she is saying a line: goes on the end of that line.
+  private var suffix = ""
   private var busy = false
   private var turnGen = 0
   private var talkTask: Task<Void, Never>?
@@ -141,6 +141,7 @@ final class NativePipeline {
       self.dropLine()
       self.speech.removeAll()
       self.preroll.removeAll()
+      if let open = self.roundReply, !self.replyStarted { self.emit?(["type": "retract", "id": open]) }
       self.release()
       self.dropPlayback()
       if self.engine.isRunning { self.player.play() }
@@ -186,15 +187,36 @@ final class NativePipeline {
   func interrupt() {
     queue.async { [weak self] in
       guard let self, self.running else { return }
+      let wasSpeaking = self.replyStarted
       self.turnGen += 1
       self.talkTask?.cancel()
       self.talkTask = nil
       self.busy = false
-      // If she is in the middle of going on with a line, that line stays one line.
-      if !self.inSpeech { self.release() }
+      // Stopped while thinking: her lines stay unanswered in the round and go with whatever she says next.
       self.dropPlayback()
       if self.engine.isRunning { self.player.play() }
       self.emit?(["type": "phase", "phase": "listening"])
+      // Stopped while speaking: what she typed or tapped meanwhile goes now.
+      if wasSpeaking { self.kick() }
+    }
+  }
+
+  /**
+   * She typed a line, or tapped one of the two phrases beside the hang-up button. Tapped while she is saying a line,
+   * it goes on the end of that line; otherwise it is a message of its own in this round, like a line she said.
+   */
+  func addFromPage(_ text: String, attach: Bool) {
+    queue.async { [weak self] in
+      guard let self, self.running, !text.isEmpty else { return }
+      if attach && self.inSpeech {
+        self.suffix += text
+        return
+      }
+      let id = UUID().uuidString.lowercased()
+      let at = Int(Date().timeIntervalSince1970 * 1000)
+      self.emit?(["type": "heard", "id": id, "text": text, "at": at])
+      self.round.append(Piece(id: id, at: at, text: Task { text }))
+      self.kick()
     }
   }
 
@@ -332,6 +354,7 @@ final class NativePipeline {
     inSpeech = false
     dropLine()
     riseMs = 0
+    for piece in round { piece.text.cancel() }
     release()
     dropPlayback()
     preroll.removeAll()
@@ -394,8 +417,7 @@ final class NativePipeline {
     // While his voice is in the room (playing, or a moment after) the mic is not listening, and nothing from then is
     // kept for the next turn's pre-roll — without echo cancelling, his voice from the speaker would be sent as hers.
     // While he is only thinking about her last words, it still listens: if she goes on, those words were not the end.
-    let canGoOn = busy && !replyStarted && heldTurn != nil
-      && Float(held.count) * 1000 / Float(NativeVad.sampleRate) < params.maxUtteranceMs
+    let canGoOn = busy && !replyStarted && roundReply != nil
     if !afterPlayback || (busy && !canGoOn) {
       riseMs = 0
       preroll.removeAll(keepingCapacity: true)
@@ -414,8 +436,8 @@ final class NativePipeline {
         inSpeech = true
         riseMs = 0
         quietMs = 0
-        if canGoOn, let turn = heldTurn {
-          // She went on: the answer being prepared is dropped and the same line keeps recording.
+        if canGoOn {
+          // She went on: the answer being prepared is dropped; this line joins the round as a new message.
           turnGen += 1
           talkTask?.cancel()
           talkTask = nil
@@ -424,19 +446,15 @@ final class NativePipeline {
           waitingFrames = 0
           playConverter = nil
           pcmCarry = Data()
-          // The start of his answer to the unfinished line may already be on the page; it goes.
-          emit?(["type": "retract", "id": turn.reply])
-          speech = held + preroll
-          speechMs = Float(speech.count) * 1000 / Float(NativeVad.sampleRate)
-          speechStartAt = turn.start
+          // The start of his answer may already be on the page; it goes.
+          if let open = roundReply { emit?(["type": "retract", "id": open]) }
           mark("she went on")
-        } else {
-          speech = preroll
-          speechMs = 0
-          triggerFloor = floor
-          speechStartAt = Int(Date().timeIntervalSince1970 * 1000)
         }
-        // Only what is new goes to the ears: the held part was already heard.
+        speech = preroll
+        speechMs = 0
+        triggerFloor = floor
+        speechStartAt = Int(Date().timeIntervalSince1970 * 1000)
+        suffix = ""
         startLine()
         line?.push(preroll)
         voicedRaw.removeAll(keepingCapacity: true)
@@ -484,36 +502,68 @@ final class NativePipeline {
       preroll.removeAll(keepingCapacity: true)
       speechMs = 0
       quietMs = 0
-      busy = true
-      turnGen += 1
-      let gen = turnGen
       let start = speechStartAt
       let vadFloor = triggerFloor
-      // What this part is heard as, joined (when she went on with held words) to what those were heard as. Kept as
-      // a task: she may go on again before it is finished.
-      let going = heldTurn != nil
-      let before = heldHeard
-      let heard = Task { () -> LineHeard in
-        let part = await hearing?.finish() ?? LineHeard.empty
-        if part.stream != nil { self.queue.async { self.streamTroubles = 0 } }
-        guard going else { return part }
-        return (await before?.value ?? LineHeard.empty).then(part)
+      let tail = suffix
+      suffix = ""
+      let id = UUID().uuidString.lowercased()
+      // Heard on its own, whatever else happens to the round: it becomes her bubble as soon as it has words.
+      let text = Task { () -> String in
+        await self.hear(said, id: id, at: start, tail: tail, hearing: hearing, silenceWaitMs: silenceWait,
+                        vadFloor: vadFloor, endedBy: endedBy, voice: voice)
       }
-      heldHeard = heard
       prefetchTicket()
-      let turn = heldTurn ?? (
-        user: UUID().uuidString.lowercased(),
-        reply: UUID().uuidString.lowercased(),
-        at: Int(Date().timeIntervalSince1970 * 1000),
-        start: start
-      )
-      held = said
-      heldTurn = turn
-      // The last reply is over; this one has not started, so she can still go on until it does.
-      replyStarted = false
-      talkTask = Task {
-        await self.utter(said, gen: gen, speechStart: start, silenceWaitMs: silenceWait, vadFloor: vadFloor, turn: turn,
-                         heard: heard, endedBy: endedBy, voice: voice)
+      round.append(Piece(id: id, at: start, text: text))
+      kick()
+    }
+  }
+
+  /**
+   * Answer the round as it is now. Whatever he was thinking for it is dropped and he thinks again with all of her
+   * messages in it. While his voice is playing, she waits for him to finish; while she is saying a line, the end of
+   * that line calls this again.
+   */
+  private func kick() {
+    guard running, !inSpeech, !round.isEmpty else { return }
+    if replyStarted && (busy || playing) { return }
+    turnGen += 1
+    let gen = turnGen
+    talkTask?.cancel()
+    if let open = roundReply { emit?(["type": "retract", "id": open]) }
+    let reply = roundReply ?? UUID().uuidString.lowercased()
+    roundReply = reply
+    let pieces = round
+    busy = true
+    replyStarted = false
+    waiting.removeAll()
+    waitingFrames = 0
+    playConverter = nil
+    pcmCarry = Data()
+    emit?(["type": "phase", "phase": "transcribing"])
+    talkTask = Task {
+      var said: [[String: Any]] = []
+      for piece in pieces {
+        let text = await piece.text.value
+        if !text.isEmpty { said.append(["id": piece.id, "text": text, "at": piece.at]) }
+      }
+      // In the order she said them (a typed line can come in while she is still saying one), as the server keeps them.
+      said.sort { ($0["at"] as? Int ?? 0) < ($1["at"] as? Int ?? 0) }
+      if let last = said.last, self.current(gen) {
+        self.queue.async {
+          guard self.turnGen == gen else { return }
+          self.emit?(["type": "phase", "phase": "thinking"])
+        }
+        let now = Int(Date().timeIntervalSince1970 * 1000)
+        await self.talk(text: last["text"] as? String ?? "", userId: last["id"] as? String ?? "", replyId: reply, now: now,
+                        gen: gen, userAt: last["at"] as? Int, earlier: Array(said.dropLast()))
+      }
+      self.queue.async {
+        guard self.turnGen == gen else { return }
+        self.busy = false
+        self.talkTask = nil
+        if self.running && !self.playing { self.emit?(["type": "phase", "phase": "listening"]) }
+        // He answered: anything she typed or tapped while he spoke is the next round.
+        if self.replyStarted { self.kick() }
       }
     }
   }
@@ -530,11 +580,10 @@ final class NativePipeline {
     return min(NativeVad.floorMax, max(NativeVad.floorMin, next))
   }
 
-  /// Her line is settled (his voice started, the turn ended, or it was stopped): nothing more is joined to it.
+  /// The round is closed (his voice started, or the call or a page turn took over): what she says next is a new round.
   private func release() {
-    held.removeAll()
-    heldTurn = nil
-    heldHeard = nil
+    round.removeAll()
+    roundReply = nil
   }
 
   /// Soft ceiling for the lifted voice: untouched up to 0.7, then bent toward 1, never clipped.
@@ -676,38 +725,23 @@ final class NativePipeline {
     queue.sync { self.running && self.turnGen == gen }
   }
 
-  private func utter(_ samples: [Int16], gen: Int, speechStart: Int, silenceWaitMs: Int, vadFloor: Float,
-                     turn: (user: String, reply: String, at: Int, start: Int),
-                     heard: Task<LineHeard, Never>, endedBy: String, voice: (median: Float, peak: Float)?) async {
-    emit?(["type": "phase", "phase": "transcribing"])
-    defer {
-      queue.async {
-        guard self.turnGen == gen else { return }
-        self.busy = false
-        self.talkTask = nil
-        self.release()
-        if self.running && !self.playing { self.emit?(["type": "phase", "phase": "listening"]) }
-      }
-    }
+  /// One line she said, heard on its own (both ears, then the server's hearing). Its words, with anything she tapped
+  /// while saying it, become her bubble; empty when nothing was heard.
+  private func hear(_ samples: [Int16], id: String, at: Int, tail: String, hearing: LineHearing?, silenceWaitMs: Int,
+                    vadFloor: Float, endedBy: String, voice: (median: Float, peak: Float)?) async -> String {
     let wav = wavData(samples)
     let endpointFired = Int(Date().timeIntervalSince1970 * 1000)
-    let both = await heard.value
-    guard let text = await transcribe(wav, speechStart: speechStart, endpointFired: endpointFired, silenceWaitMs: silenceWaitMs,
-                                      vadFloor: vadFloor, heard: both, endedBy: endedBy) else {
-      if current(gen) { softFail("stt") }
-      return
-    }
+    let both = await hearing?.finish() ?? LineHeard.empty
+    if both.stream != nil { queue.async { self.streamTroubles = 0 } }
+    let heard = await transcribe(wav, speechStart: at, endpointFired: endpointFired, silenceWaitMs: silenceWaitMs,
+                                 vadFloor: vadFloor, heard: both, endedBy: endedBy)
+    if Task.isCancelled { return "" }
+    if heard == nil { softFail("stt") }
     // A line the server took as her speech teaches the lift how loud she is; a rustle does not.
-    if !text.isEmpty, let voice { queue.async { self.learnGain(voice) } }
-    if text.isEmpty || !current(gen) { return }
-    queue.async {
-      guard self.turnGen == gen else { return }
-      self.emit?(["type": "phase", "phase": "thinking"])
-    }
-    // A line she went on with keeps its ids: the page and the server update the same message instead of adding one.
-    let now = Int(Date().timeIntervalSince1970 * 1000)
-    emit?(["type": "heard", "id": turn.user, "text": text, "at": turn.at])
-    await talk(text: text, userId: turn.user, replyId: turn.reply, now: now, gen: gen, userAt: turn.at)
+    if let heard, !heard.isEmpty, let voice { queue.async { self.learnGain(voice) } }
+    let text = (heard ?? "") + tail
+    if !text.isEmpty { emit?(["type": "heard", "id": id, "text": text, "at": at]) }
+    return text
   }
 
   private func transcribe(_ wav: Data, speechStart: Int, endpointFired: Int, silenceWaitMs: Int, vadFloor: Float,
@@ -769,7 +803,8 @@ final class NativePipeline {
     }
   }
 
-  private func talk(text: String, userId: String, replyId: String, now: Int, gen: Int, userAt: Int? = nil, replyAt: Int? = nil) async {
+  private func talk(text: String, userId: String, replyId: String, now: Int, gen: Int, userAt: Int? = nil, replyAt: Int? = nil,
+                    earlier: [[String: Any]]? = nil) async {
     queue.async {
       guard self.turnGen == gen else { return }
       self.replyEnded = false
@@ -803,6 +838,8 @@ final class NativePipeline {
       "nowMs": now,
     ]
     if let replyAt { body["replyCreatedAt"] = replyAt }
+    // Her earlier messages in this round (the server keeps them, in order, before this one).
+    if let earlier { body["earlier"] = earlier }
     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
     do {
       let (bytes, res) = try await Self.stream(req)
@@ -886,6 +923,7 @@ final class NativePipeline {
         if self.pendingBuffers == 0 {
           self.playIdleAt = Date()
           if self.running && !self.busy { self.emit?(["type": "phase", "phase": "listening"]) }
+          if self.replyStarted { self.kick() }
         }
       }
     })
@@ -1106,4 +1144,11 @@ final class NativePipeline {
     samples.withUnsafeBytes { data.append(contentsOf: $0) }
     return data
   }
+}
+
+/// One of her short messages in a round; its text is what she said (empty: nothing heard).
+struct Piece {
+  let id: String
+  let at: Int
+  let text: Task<String, Never>
 }

@@ -41,9 +41,16 @@ const TODAY_MAX = 200;
  * The talk the reply sees: everything since 04:00 today, and at least `min` messages (so a new morning still has
  * last night). Context is his brain; the day's talk is short enough to give whole.
  */
-export async function replyHistory(excludeId: string | null, min: number, nowMs: number, timeZone: string): Promise<StoredMessage[]> {
+export async function replyHistory(
+  excludeId: string | null,
+  min: number,
+  nowMs: number,
+  timeZone: string,
+  replyId?: string,
+): Promise<StoredMessage[]> {
   const from = dayWindow(localDay(nowMs, timeZone), timeZone).from;
-  const rows = await listHistoryWindow(excludeId, TODAY_MAX);
+  // An answer to an earlier part of her round that she never heard (she went on) is not part of the talk.
+  const rows = (await listHistoryWindow(excludeId, TODAY_MAX)).filter((m) => m.id !== replyId);
   const firstToday = rows.findIndex((m) => m.createdAt >= from);
   const start = Math.min(firstToday < 0 ? rows.length : firstToday, Math.max(0, rows.length - min));
   return rows.slice(start);
@@ -63,6 +70,7 @@ export async function loadHotContext(input: {
   profile: Profile;
   nowMs: number;
   timeZone: string;
+  replyId?: string;
 }): Promise<HotContext> {
   const t0 = Date.now();
   const userExisting = await getMessage(input.userMsgId);
@@ -79,7 +87,7 @@ export async function loadHotContext(input: {
   // Memory off → persona + context only.
   const inject = voiceInjectFromProfile(input.profile);
   const [history, us, clockText, voicePrompt] = await Promise.all([
-    replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone),
+    replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone, input.replyId),
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
     loadPrompt("voice"),

@@ -920,6 +920,23 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               />
               <span className="text-sm">静音</span>
             </label>
+            <p className="text-xs text-subtle">
+              打电话时点挂断键左边 / 右边的空白，把这句加进你说的话：正在说就接在这句末尾，没在说就单独发一条。空着就不加。
+            </p>
+            {(["tapLeft", "tapRight"] as const).map((key) => (
+              <label key={key} className="flex flex-col gap-1">
+                <span className="text-xs text-subtle">{key === "tapLeft" ? "左边" : "右边"}</span>
+                <Textarea
+                  key={profile[key]}
+                  defaultValue={profile[key]}
+                  className="min-h-11"
+                  onBlur={(e) => {
+                    const next = e.target.value.trim();
+                    if (next !== profile[key]) persistProfile({ [key]: next });
+                  }}
+                />
+              </label>
+            ))}
             <LabelModeSwitch
               checked={debugHearing}
               onChange={(next) => {

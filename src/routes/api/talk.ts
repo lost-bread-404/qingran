@@ -3,7 +3,7 @@ import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } f
 import { enqueueReportIfDue } from "@/lib/lover/brain/diary/report";
 import { drainJobs } from "@/lib/lover/brain/jobs";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
-import { upsertMessage, appendBrainLog, getMessage, getProfileData } from "@/lib/lover/brain/store";
+import { upsertMessage, appendBrainLog, getMessage, getProfileData, hasUserAfter } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
 import { loadHotContext } from "@/lib/lover/brain/voice/pack";
 import { runVoiceWithFallback, formatVoiceLogNote } from "@/lib/lover/brain/voice/voice-fallback";
@@ -29,6 +29,8 @@ type TalkBody = {
   profile?: Profile;
   nowMs?: number;
   timeZone?: string;
+  /** The phone's round: her earlier short messages before this one, each kept as its own message. */
+  earlier?: { id?: string; text?: string; at?: number }[];
 };
 
 export const Route = createFileRoute("/api/talk")({
@@ -95,6 +97,13 @@ export const Route = createFileRoute("/api/talk")({
               userMsgId = String(body.userMsgId || newId());
               userCreatedAt = Number(body.userCreatedAt) || nowMs;
               replyId = String(body.replyId || "").trim() || newId();
+              const round = Array.isArray(body.earlier);
+              for (const item of round ? body.earlier! : []) {
+                const id = String(item?.id || "");
+                const said = String(item?.text || "").trim();
+                if (!id || !said || (await getMessage(id))) continue;
+                await upsertMessage({ id, role: "user", text: said, createdAt: Number(item.at) || userCreatedAt - 1, timeZone });
+              }
 
               packed = await loadHotContext({
                 text,
@@ -103,6 +112,7 @@ export const Route = createFileRoute("/api/talk")({
                 profile,
                 nowMs,
                 timeZone,
+                replyId,
               });
               const ctx = packed;
               send({ t: "timing", k: "pack_ms", ms: ctx.packMs });
@@ -154,7 +164,10 @@ export const Route = createFileRoute("/api/talk")({
               // Her line changed while this answer was being written (the phone heard her go on and sent the whole
               // sentence again, or she edited it): this answer is to words she has not finished, so it is not kept.
               const now = await getMessage(userMsgId);
-              const superseded = Boolean(now) && !String(now?.text ?? "").endsWith(text.trim());
+              // On the phone she may also have gone on with a new line of the same round: this answer is not hers to hear.
+              const superseded =
+                (Boolean(now) && !String(now?.text ?? "").endsWith(text.trim())) ||
+                (round && (await hasUserAfter(userCreatedAt)));
               if (superseded) {
                 await appendBrainLog({ step: "talk-superseded", ok: true, route: "voice", note: "她的这一句后来变了（接着说了或改了），这条回复不保存" }).catch(() => undefined);
               }
