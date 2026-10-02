@@ -200,7 +200,8 @@ export async function runNight(
  * again from `keepFrom` (the last few messages). A day whose night pass already ran is not folded again.
  */
 export async function foldTalk(day: string, upto: number, keepFrom: number, jobId?: string): Promise<void> {
-  if ((await getMark(`day:${day}`)) !== "done") await runNight(day, jobId, callModel, { upto });
+  // A day already in his memory (night pass done, imported, empty) is not folded again.
+  if (!(await getMark(`day:${day}`))) await runNight(day, jobId, callModel, { upto });
   if (Number.isFinite(keepFrom) && keepFrom > 0) await patchMeta({ contextFrom: keepFrom });
 }
 
@@ -213,6 +214,9 @@ export async function nextNightDay(at = now()): Promise<string | null> {
     `select distinct local_day as day from qingran_messages
      where local_day is not null and local_day < $1 and forgotten_at is null and kind is distinct from 'system_notice'
        and not exists (select 1 from qr_memory_marks m where m.key = 'day:' || qingran_messages.local_day)
+       -- a fold of that day still waiting or running goes first, so the two never read the same stretch
+       and not exists (select 1 from brain_jobs j where j.dedupe_key like 'fold:' || qingran_messages.local_day || ':%'
+                        and j.status in ('pending', 'running'))
      order by local_day asc limit 1`,
     [today],
   );
