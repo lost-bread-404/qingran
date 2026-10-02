@@ -13,6 +13,8 @@ export type NativeBridge = {
   talkNativeCall?: (turn: NativeTalkTurn) => void;
   /** Speak one of his lines again (she pressed play) inside the shell's call. Shells built before 2026-10-01 do not have it. */
   playNativeCall?: (clip: NativeClip) => void;
+  /** Add a line she typed or tapped to the round of the shell's call. Shells built before 2026-10-02 do not have it. */
+  addNativeCall?: (text: string, attach: boolean) => void;
   keepAwake?: (on: boolean) => void;
 };
 
@@ -123,6 +125,24 @@ export function nativePlayClip(clip: NativeClip | null): boolean {
   if (!clip) return true;
   try {
     bridge.playNativeCall(clip);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * During the shell's call, a line she typed (attach false) or a phrase she tapped (attach true: it goes on the end
+ * of the line she is saying, if she is saying one) joins the round like a line she said. With null text, only says
+ * whether the shell can. False when there is no shell call (or an old shell).
+ */
+export function nativeAddToCall(text: string | null, attach = false): boolean {
+  if (nativeCallPlan().callStart !== "startNativeCall") return false;
+  const bridge = typeof window === "undefined" ? undefined : window.QingranNative;
+  if (!bridge?.addNativeCall) return false;
+  if (text == null) return true;
+  try {
+    bridge.addNativeCall(text, attach);
     return true;
   } catch {
     return false;

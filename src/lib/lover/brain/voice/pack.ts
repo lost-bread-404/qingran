@@ -51,11 +51,13 @@ export async function replyHistory(
   min: number,
   nowMs: number,
   timeZone: string,
-  opts: { fold?: boolean } = {},
+  opts: { fold?: boolean; replyId?: string } = {},
 ): Promise<StoredMessage[]> {
   const day = localDay(nowMs, timeZone);
   const from = dayWindow(day, timeZone).from;
-  const [rows, meta] = await Promise.all([listHistoryWindow(excludeId, TODAY_MAX + 1), getMeta()]);
+  const [all, meta] = await Promise.all([listHistoryWindow(excludeId, TODAY_MAX + 1), getMeta()]);
+  // An answer to an earlier part of her round that she never heard (she went on) is not part of the talk.
+  const rows = opts.replyId ? all.filter((m) => m.id !== opts.replyId) : all;
   const cut = Number(meta.contextFrom) || 0;
   let start: number;
   if (cut > from) {
@@ -92,6 +94,7 @@ export async function loadHotContext(input: {
   timeZone: string;
   /** Photos she sent with this line (also in the stored body; sent along so a slow save does not lose them). */
   images?: string[];
+  replyId?: string;
 }): Promise<HotContext> {
   const t0 = Date.now();
   const userExisting = await getMessage(input.userMsgId);
@@ -111,7 +114,7 @@ export async function loadHotContext(input: {
   // Memory off → persona + context only.
   const inject = voiceInjectFromProfile(input.profile);
   const [history, us, clockText, voicePrompt] = await Promise.all([
-    replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone, { fold: inject.memory }),
+    replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone, { fold: inject.memory, replyId: input.replyId }),
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
     loadPrompt("voice"),

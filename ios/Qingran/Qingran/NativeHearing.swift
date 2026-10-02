@@ -30,15 +30,6 @@ struct LineHeard {
   var stream: (text: String, words: [[String: Any]])?
   var apple: String?
 
-  /// She went on after a pause: the two parts are one line, and each ear's text is whole only if it heard both.
-  /// The word timings of each part start at its own zero, so a joined line keeps only the text.
-  func then(_ next: LineHeard) -> LineHeard {
-    LineHeard(
-      stream: stream.flatMap { a in next.stream.map { b in (text: a.text + b.text, words: [[String: Any]]()) } },
-      apple: apple.flatMap { a in next.apple.map { a + $0 } }
-    )
-  }
-
   static let empty = LineHeard(stream: nil, apple: nil)
 }
 

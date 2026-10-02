@@ -54,6 +54,8 @@ const PATCH_KEYS = [
   "brainOn",
   "personaPlacement",
   "personaAck",
+  "tapLeft",
+  "tapRight",
 ] as const satisfies readonly (keyof Profile)[];
 
 const PATCH_KEY_SET = new Set<string>(PATCH_KEYS);

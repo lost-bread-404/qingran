@@ -37,7 +37,7 @@ import {
   uploadPhoto,
 } from "@/lib/lover/room";
 import { registerNativePush } from "@/lib/lover/push-client";
-import { nativeCallPlan, nativeInterruptCall, nativePlayClip, nativeTalkTurn } from "@/lib/lover/native-shell";
+import { nativeAddToCall, nativeCallPlan, nativeInterruptCall, nativePlayClip, nativeTalkTurn } from "@/lib/lover/native-shell";
 import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { buildHearingContext, extractContextKeyterms, lastDialogueTurns, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
@@ -276,14 +276,14 @@ export function VoiceRoom() {
         const id = detail.id;
         const text = detail.text;
         const at = detail.at || Date.now();
-        // The same id again means she went on with that line and the phone heard it whole: the text is replaced.
+        // Each line of her round is its own message; the same id again only replaces its text.
         setMessages((prev) =>
           prev.some((m) => m.id === id)
             ? prev.map((m) => (m.id === id ? { ...m, text } : m))
             : [...prev, { id, role: "user", text, createdAt: at }],
         );
       } else if (detail.type === "retract") {
-        // The phone dropped an answer to a line she went on with; it is asked again under the same id.
+        // She went on before his voice started: the answer is dropped and asked again, with all of her round, under the same id.
         const id = detail.id;
         setMessages((prev) => prev.filter((m) => m.id !== id));
       } else if (detail.type === "reply" && detail.text) {
@@ -638,6 +638,10 @@ export function VoiceRoom() {
         setStatus("idle");
         return;
       }
+      // In the shell's call only the shell may make a sound: a voice played by the page goes into the shell's mic and
+      // comes back as her line. An old shell that cannot run this turn gets the words, without his voice.
+      const pageQuiet = callActiveRef.current && nativeCallPlan().callStart === "startNativeCall";
+      if (pageQuiet) setBanner("电话里改过的话，回复只有文字：要用 Xcode 重新装一次 App 才有声音。");
       try {
         const ac = new AbortController();
         abortRef.current = ac;
@@ -698,7 +702,7 @@ export function VoiceRoom() {
                 });
               } else {
                 spokenCacheRef.current.delete(reply.id);
-                if (display && shouldAutoSpeakReply({
+                if (display && !pageQuiet && shouldAutoSpeakReply({
                   muted: profileRef.current.muted,
                   skipAutoPlay: skipAutoPlayRef.current,
                 })) {
@@ -709,7 +713,7 @@ export function VoiceRoom() {
             }
             if (turn !== turnRef.current) return;
             if (event.t === "audio") {
-              if (!shouldAutoSpeakReply({
+              if (pageQuiet || !shouldAutoSpeakReply({
                 muted: profileRef.current.muted,
                 skipAutoPlay: skipAutoPlayRef.current,
               })) return;
@@ -987,6 +991,13 @@ export function VoiceRoom() {
   async function submitComposer() {
     const say = draft.trim();
     if (!say && !photos.length) return;
+    // In the shell's call a typed line joins her round, like a line she said; it waits while he is speaking.
+    // (Photos are not sent during a call: the photo button is hidden then.)
+    if (call.active && say && nativeAddToCall(say)) {
+      setDraft("");
+      setComposerOpen(false);
+      return;
+    }
     if (status === "thinking" || status === "speaking") return;
     if (photos.some((p) => !p.id)) {
       setBanner("照片还在传，等一下。");
@@ -1314,7 +1325,9 @@ export function VoiceRoom() {
 
   const recording = voice.status === "recording";
   const transcribing = voice.status === "transcribing";
-  const composing = composerOpen && !recording && !call.active;
+  // In the shell's call she can type, and tap a phrase on either side of the hang-up button (shells from 2026-10-02).
+  const callAdds = call.active && nativeAddToCall(null);
+  const composing = composerOpen && !recording && (!call.active || callAdds);
   // In the iPhone shell's call the shell does everything, so its phase alone says where the call is.
   const shellCall = call.active && nativeCallPlan().callStart === "startNativeCall";
   const statusLine = call.active
@@ -1490,6 +1503,7 @@ export function VoiceRoom() {
                 >
                   收起
                 </button>
+                {call.active ? null : (
                 <button
                   type="button"
                   aria-label="发照片"
@@ -1499,6 +1513,7 @@ export function VoiceRoom() {
                 >
                   <ImagePlus className="size-5" />
                 </button>
+                )}
               </div>
               <Button type="button" size="pill" onClick={() => void submitComposer()}>
                 送出
@@ -1589,7 +1604,11 @@ export function VoiceRoom() {
               ) : null}
               <div className="flex flex-col items-center gap-3">
                 {call.active ? (
-                  <CallButton active onClick={() => void toggleCall()} />
+                  <div className="flex w-full items-center justify-center">
+                    {callAdds ? <TapPhrase text={profile.tapLeft} /> : null}
+                    <CallButton active onClick={() => void toggleCall()} />
+                    {callAdds ? <TapPhrase text={profile.tapRight} /> : null}
+                  </div>
                 ) : (
                   <div className="flex items-end gap-7">
                     <MicButton
@@ -1620,7 +1639,7 @@ export function VoiceRoom() {
                         ? "听你说的话"
                         : "按住说话，或者打电话"}
                 </p>
-                {call.active ? null : (
+                {call.active && !callAdds ? null : (
                   <button
                     type="button"
                     className="text-xs text-muted underline-offset-4 hover:underline"
@@ -1731,4 +1750,16 @@ function VolumeMeter({ level, threshold }: { level: number; threshold: number })
   );
 }
 
-
+/** The space beside the hang-up button: a tap adds her phrase to what she is saying (or sends it on its own). */
+function TapPhrase({ text }: { text: string }) {
+  return (
+    <button
+      type="button"
+      disabled={!text}
+      className="flex h-24 min-w-0 flex-1 items-center justify-center rounded-2xl px-2 text-sm text-subtle select-none active:bg-surface-2"
+      onClick={() => nativeAddToCall(text, true)}
+    >
+      <span className="truncate">{text}</span>
+    </button>
+  );
+}

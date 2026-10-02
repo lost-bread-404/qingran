@@ -72,6 +72,9 @@ export type Profile = {
   personaPlacement: "system" | "first_user";
   /** With the persona as the first message: his line right after it (a fixed line, no model call). */
   personaAck: string;
+  /** In a call, what tapping the space left / right of the hang-up button adds to what she says (empty: nothing). */
+  tapLeft: string;
+  tapRight: string;
 };
 
 export type ChatRole = "user" | "assistant";
@@ -144,6 +147,8 @@ export const DEFAULT_PROFILE: Profile = {
   brainOn: true,
   personaPlacement: "system",
   personaAck: "嗯。",
+  tapLeft: "嗯～",
+  tapRight: "哼",
 };
 
 type LooseProfile = Partial<Profile> & {
@@ -183,6 +188,8 @@ type LooseProfile = Partial<Profile> & {
   brainOn?: boolean;
   personaPlacement?: string;
   personaAck?: string;
+  tapLeft?: string;
+  tapRight?: string;
 };
 
 export function lockedProfile(input?: unknown): Profile {
@@ -221,6 +228,8 @@ export function lockedProfile(input?: unknown): Profile {
     brainOn: raw.brainOn !== false,
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
     personaAck: typeof raw.personaAck === "string" && raw.personaAck.trim() ? raw.personaAck.trim().slice(0, 200) : "嗯。",
+    tapLeft: typeof raw.tapLeft === "string" ? raw.tapLeft.trim().slice(0, 200) : "嗯～",
+    tapRight: typeof raw.tapRight === "string" ? raw.tapRight.trim().slice(0, 200) : "哼",
   };
 }
 
