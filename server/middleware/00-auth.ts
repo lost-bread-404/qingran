@@ -1,6 +1,6 @@
 /**
  * Production (Nitro) password gate. vite dev does not load this directory.
- * Filename `00-` so it runs before grok-pwa.ts (Nitro middleware is alphabetical).
+ * Filename `00-` so it runs before any other middleware (Nitro middleware is alphabetical).
  */
 import {
   classifyRequest,

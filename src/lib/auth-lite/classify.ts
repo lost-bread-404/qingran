@@ -1,18 +1,6 @@
 export type AuthDecision = "next" | "redirect" | "unauthorized";
 
-const PUBLIC_EXACT = new Set([
-  "/__grok/manifest.webmanifest",
-  "/__grok/manifest.json",
-  "/__grok/icon-180.png",
-  "/og.jpg",
-  "/x-banner.jpg",
-]);
-
-const PUBLIC_PREFIX = [
-  "/assets/",
-  "/icons/",
-  "/__grok/install/",
-];
+const PUBLIC_PREFIX = ["/assets/", "/icons/"];
 
 const PUBLIC_STARTS = ["/favicon", "/apple-touch-icon"];
 
@@ -24,7 +12,6 @@ export function isPublicPath(method: string, path: string): boolean {
   if (m === "POST" && p === "/api/logout") return true;
   if (p === "/api/cron/brain" || p.startsWith("/api/cron/brain/")) return true;
   if (p === "/api/cron/wake" || p.startsWith("/api/cron/wake/")) return true;
-  if (PUBLIC_EXACT.has(p)) return true;
   if (p === "/assets" || p === "/icons") return true;
   for (const prefix of PUBLIC_PREFIX) {
     if (p.startsWith(prefix)) return true;
