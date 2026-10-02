@@ -1,19 +1,18 @@
 import { getSql } from "../../db.ts";
-import { isActiveConfusion, type ConfusionRule } from "./confusions.ts";
 import { mergeKeyterms } from "./context.ts";
-import { lexiconKeyterms, listHearingConfusions, maybeRebuildLexicon, type Sql } from "./persist.ts";
+import { lexiconKeyterms, maybeRebuildLexicon, type Sql } from "./persist.ts";
 
 export const STT_CACHE_TTL_MS = 10 * 60 * 1000;
 
 export type HearingSttSnapshot = {
   keyterms: string[];
-  rules: ConfusionRule[];
   fetchedAt: number;
 };
 
 export type HotPathHearingStt = {
   keyterms: string[];
-  rules: ConfusionRule[];
+  /** Nothing cached yet on this server. */
+  cold: boolean;
   needsRefresh: boolean;
   stale: boolean;
 };
@@ -27,7 +26,7 @@ export function hotPathHearingStt(extra: string[] = []): HotPathHearingStt {
   const stale = snap == null || ageMs == null || ageMs >= STT_CACHE_TTL_MS;
   return {
     keyterms: mergeKeyterms(snap?.keyterms ?? [], extra),
-    rules: snap?.rules ?? [],
+    cold: snap == null,
     needsRefresh: stale,
     stale,
   };
@@ -36,12 +35,8 @@ export function hotPathHearingStt(extra: string[] = []): HotPathHearingStt {
 export async function refreshHearingSttCache(sql: Sql): Promise<HearingSttSnapshot> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
-    const rules = await listHearingConfusions(sql);
-    const lexicon = await lexiconKeyterms(sql);
-    const corrections = rules.filter(isActiveConfusion).map((rule) => rule.correct);
     const snap: HearingSttSnapshot = {
-      keyterms: mergeKeyterms(corrections, lexicon),
-      rules,
+      keyterms: await lexiconKeyterms(sql),
       fetchedAt: Date.now(),
     };
     cache = snap;

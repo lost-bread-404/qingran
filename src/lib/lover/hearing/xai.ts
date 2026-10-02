@@ -3,7 +3,7 @@ import { isQuotaHint, readXaiFail } from "../xai-error.ts";
 import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./config.ts";
 import { xaiFetch } from "../xai-auth.ts";
 
-type SttWord = { text?: string; start?: number; end?: number };
+export type SttWord = { text?: string; start?: number; end?: number };
 
 export type XaiStt = {
   ok: true;
@@ -19,6 +19,27 @@ export type XaiSttFail = {
   latency_ms: number;
   quota?: boolean;
 };
+
+/** Her list (or the built-in one) first, then the context's: at most 100, each at most 50 characters, as xAI takes them. */
+export function keytermList(keyterms?: readonly string[], extra?: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const term of [...(keyterms ?? STT_KEYTERMS), ...(extra ?? [])]) {
+    const next = term.trim().slice(0, 50);
+    if (!next || seen.has(next)) continue;
+    seen.add(next);
+    terms.push(next);
+    if (terms.length >= 100) break;
+  }
+  return terms;
+}
+
+/** xAI's words as text, the same way whether they came back from one clip or streamed while she spoke. */
+export function xaiResult(raw: string, words: SttWord[], latency_ms: number): XaiStt {
+  let text = restoreSpeechText(raw, words);
+  if (!text) text = restoreSpeechText(words.map((w) => w.text ?? "").join("").trim());
+  return { ok: true, text, words, latency_ms, raw };
+}
 
 export async function transcribeWithXai(input: {
   audioBase64: string;
@@ -39,16 +60,7 @@ export async function transcribeWithXai(input: {
   form.append("model", HEARING.xai.model);
   form.append("filler_words", "true");
   form.append("vad_threshold", String(xaiVadThreshold()));
-  const seen = new Set<string>();
-  const terms: string[] = [];
-  for (const term of [...(input.keyterms ?? STT_KEYTERMS), ...(input.extraKeyterms ?? [])]) {
-    const next = term.trim().slice(0, 50);
-    if (!next || seen.has(next)) continue;
-    seen.add(next);
-    terms.push(next);
-    if (terms.length >= 100) break;
-  }
-  for (const term of terms) {
+  for (const term of keytermList(input.keyterms, input.extraKeyterms)) {
     form.append("keyterm", term);
   }
   const blob = new Blob([new Uint8Array(bytes)], { type: mime });
@@ -77,13 +89,7 @@ export async function transcribeWithXai(input: {
       transcript?: string;
       words?: SttWord[];
     };
-    const raw = body.text || body.transcript || "";
-    let text = restoreSpeechText(raw, body.words);
-    if (!text) {
-      const fallback = (body.words ?? []).map((w) => w.text ?? "").join("").trim();
-      text = restoreSpeechText(fallback);
-    }
-    return { ok: true, text, words: body.words ?? [], latency_ms, raw };
+    return xaiResult(body.text || body.transcript || "", body.words ?? [], latency_ms);
   } catch (err) {
     return {
       ok: false,

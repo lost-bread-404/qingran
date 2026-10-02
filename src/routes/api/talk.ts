@@ -1,8 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { effectiveMode } from "@/lib/lover/brain/mode";
 import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } from "@/lib/lover/brain/config";
 import { enqueueReportIfDue } from "@/lib/lover/brain/diary/report";
-import { drainJobs, enqueueReflect } from "@/lib/lover/brain/jobs";
+import { drainJobs } from "@/lib/lover/brain/jobs";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
 import { upsertMessage, appendBrainLog, getMessage, getProfileData } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
@@ -13,7 +12,7 @@ import { syncTalkTimeZone } from "@/lib/lover/brain/log-refs";
 import { talkRateHit } from "@/lib/lover/brain/spend/rate";
 import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
-import { formatVoiceInjectLine, lockedProfile, type Profile } from "@/lib/lover/types";
+import { formatVoiceInjectLine, type Profile } from "@/lib/lover/types";
 import { resolveTalkProfile } from "@/lib/lover/talk-profile";
 import { type TalkStreamEvent } from "@/lib/lover/stream-talk";
 import { logTalkTurn, talkFailFromResult } from "@/lib/lover/talk-fail";
@@ -81,18 +80,7 @@ export const Route = createFileRoute("/api/talk")({
             try {
               const text = String(body.text ?? "");
               const savedProfile = await getProfileData();
-              // Brain on: reflect decides the mode. Brain off: her own toggle in the chat header.
-              const saved = lockedProfile(savedProfile);
-              const clientMode = (body.profile as { mode?: unknown } | undefined)?.mode;
-              const modeIds = saved.modes.map((m) => m.id);
-              const talkMode = saved.brainOn
-                ? await effectiveMode(Number(body.nowMs) || Date.now(), timeZone, modeIds)
-                : typeof clientMode === "string" && modeIds.includes(clientMode)
-                  ? clientMode
-                  : modeIds.includes(saved.mode)
-                    ? saved.mode
-                    : modeIds[0]!;
-              const resolved = resolveTalkProfile(body.profile, savedProfile, talkMode);
+              const resolved = resolveTalkProfile(body.profile, savedProfile);
               const profile = resolved.profile;
               if (resolved.personaMissing) {
                 await appendBrainLog({
@@ -126,8 +114,6 @@ export const Route = createFileRoute("/api/talk")({
               tVoice = Date.now();
               const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
               const safety = voiceSafetyPick();
-              // Each mode may set its own temperature (e.g. a high one for intimate scenes).
-              const modeTemperature = profile.modes.find((m) => m.id === profile.mode)?.temperature ?? undefined;
               let sentDone = false;
               const fallback = await runVoiceWithFallback(
                 {
@@ -137,7 +123,6 @@ export const Route = createFileRoute("/api/talk")({
                   voiceSpeed: profile.voiceSpeed,
                   primary,
                   safety,
-                  temperature: modeTemperature,
                 },
                 (event) => {
                   if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;
@@ -227,20 +212,24 @@ export const Route = createFileRoute("/api/talk")({
                 turnId: replyId,
                 userMsgId,
                 turnSeq: userCreatedAt,
+                retrieve: {
+                  by: ctx.recallBy,
+                  selected: ctx.recalled.map((m) => String(m.id)),
+                  scores: ctx.refs.queryScores,
+                  texts: ctx.recalled.map((m) => m.body.slice(0, 200)),
+                },
                 live: {
                   historyCount: ctx.historyIds.length,
                   promptHash: ctx.charterHash,
                   model: streamResult.model,
                   ms: totalMs,
-                  injectMoment: ctx.inject.moment,
-                  injectDossier: ctx.inject.dossier,
+                  injectMemory: ctx.inject.memory,
                   historyWindow: ctx.inject.history,
                   injectLine: formatVoiceInjectLine(ctx.inject),
                   intimateInjected: ctx.intimateInjected,
                   personaPlacement: ctx.personaPlacement,
                   unexpected_state_block: streamResult.innerCut === true,
                   persona_missing: resolved.personaMissing,
-                  inner: ctx.injected,
                 },
                 reply: {
                   text: display,
@@ -249,9 +238,27 @@ export const Route = createFileRoute("/api/talk")({
                 },
               });
 
-              if (profile.brainOn && !failed && display && !superseded) await enqueueReflect(userCreatedAt);
+              if (!failed && !superseded && streamResult.innerNotes) {
+                const { keepInner } = await import("@/lib/lover/brain/memory");
+                await keepInner(streamResult.innerNotes, nowMs, timeZone);
+              }
+              if (profile.brainOn && !failed && display && !superseded) {
+                const recalledIds = ctx.recalled.map((m) => m.id);
+                await runInBackground(async () => {
+                  const [{ markRecalled }, { judgeScene }, { enqueueMemoryWork }] = await Promise.all([
+                    import("@/lib/lover/brain/memory"),
+                    import("@/lib/lover/brain/scene"),
+                    import("@/lib/lover/brain/night"),
+                  ]);
+                  await markRecalled(recalledIds).catch((err) => console.error(err));
+                  await judgeScene(userCreatedAt).catch((err) => console.error(err));
+                  await enqueueMemoryWork(nowMs).catch((err) => console.error(err));
+                  await drainJobs(LONG_DRAIN_MS);
+                });
+              } else {
+                await runInBackground(() => drainJobs(LONG_DRAIN_MS));
+              }
               await enqueueReportIfDue(nowMs, timeZone);
-              await runInBackground(() => drainJobs(LONG_DRAIN_MS));
             } catch (err) {
               const outcome = talkFailFromResult({
                 kind: "exception",

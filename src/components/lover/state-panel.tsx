@@ -79,7 +79,7 @@ export function StatePanel() {
     <div className="rounded-md bg-surface-2 px-3 py-3">
       <p className="text-sm">清然的状态</p>
       <p className="mt-1 text-xs text-subtle">
-        导出和导入是同一种文件：设置、记得的、心里、打算、每天的时间线、今天的记录、指令和全部消息。导入就是初始化：文件里有的部分整块换掉，没有的部分不动；消息只会加上或按 id 更新，不会删。
+        导出和导入是同一种文件：设置（含故事线）、现在的你们、回忆、每天的时间线、指令和全部消息。导入就是初始化：文件里有的部分整块换掉，没有的部分不动；消息只会加上或按 id 更新，不会删。
       </p>
       <div className="mt-3 flex gap-2">
         <Button type="button" size="sm" variant="outline" onClick={() => void exportAll()}>

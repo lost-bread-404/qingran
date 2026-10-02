@@ -15,6 +15,7 @@ import {
 import { recordTtsSpend } from "./brain/spend/check";
 import { xaiCreds, xaiFetch, type XaiCred } from "./xai-auth";
 import { InnerCutBuffer, replyBodyMissing } from "./brain/voice/inner-cut";
+import { BraceCut } from "./brain/voice/brace-cut";
 import { VoiceLeveler, levelClip } from "./voice-level";
 
 const MAX_INPUT = 2000;
@@ -81,6 +82,8 @@ export type TalkStreamResult = {
   otherEvents: string;
   /** Text after ⟦心⟧. null when the model never wrote the mark. */
   innerTail?: string | null;
+  /** What he wrote inside ｛｝: kept to himself, never shown or spoken. */
+  innerNotes?: string;
   innerCut?: boolean;
   /** Who paid: her SuperGrok subscription or the API key. */
   paidBy?: "sub" | "api";
@@ -248,6 +251,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   let pending = "";
   let firstSpoken = true;
   const cut = new InnerCutBuffer();
+  const braces = new BraceCut();
   let released = false;
   let releaseWait: Promise<void> | null = null;
   const reader = res.body.getReader();
@@ -305,7 +309,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   const ingestToken = (token: string) => {
     if (!token) return;
-    emitVisible(cut.push(token));
+    emitVisible(cut.push(braces.push(token)));
     releaseSpoken();
   };
 
@@ -363,12 +367,14 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   }
   buf += decoder.decode();
   drainBuf(true);
+  braces.finish();
   emitVisible(cut.finish());
   releaseSpoken();
   if (releaseWait) await releaseWait;
   const speech = cut.speech.trim();
   const innerTail = cut.seen ? cut.tail : null;
   const innerCut = cut.seen;
+  const innerNotes = braces.text();
 
 
   if (replyBodyMissing(cut.speech, cut.seen)) live.tts?.abort();
@@ -397,6 +403,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       otherEvents,
       innerTail,
       innerCut,
+      innerNotes,
     };
   }
   if (outcome.message) {
@@ -417,6 +424,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
         otherEvents,
         innerTail,
         innerCut,
+        innerNotes,
       };
     }
     emit({ t: "text_end", speech });
@@ -436,6 +444,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       otherEvents,
       innerTail,
       innerCut,
+      innerNotes,
     };
   }
   emit({ t: "text_end", speech });
@@ -479,6 +488,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     otherEvents,
     innerTail,
     innerCut,
+    innerNotes,
   };
 }
 

@@ -5,47 +5,20 @@ import { getMeta, patchMeta } from "./store.ts";
 import { clipLogJson } from "./log-clip.ts";
 import { resolveTz } from "./tz.ts";
 
+/** What one reply was given, for the log. */
 export type VoiceRefs = {
   charterHash: string;
   longtermHash: string;
   historyIds: string[];
-  mindTurnSeq: number;
-  mindStale: boolean;
+  /** The moments that came back to him (ids), and how well the best ones fit. */
   pickedIds: string[];
-  fallbackIds: string[];
-  queryIds: string[];
-  queryScores: number[];
-  jump: boolean;
-  jumpScore: number;
-  careHint: boolean;
+  queryScores: Array<{ id: number; score: number }>;
   clockText: string;
   userMsgId: string;
   timeZone: string;
-  mindAgeMs: number;
-  injectMemories?: boolean;
-  injectLongterm?: boolean;
-  injectMoment?: boolean;
-  momentFeel?: string;
-  momentWant?: string;
-  momentNow?: string;
-  momentLonging?: string;
+  injectMemory?: boolean;
+  intimate?: boolean;
   historyWindow?: number;
-};
-
-export type ReflectRefs = {
-  charterHash: string;
-  blockBHash: string;
-  relatedIds: string[];
-  oldMindTurnSeq: number;
-  oldInnerText?: string;
-  recentMessageIds: string[];
-  clockText: string;
-  timeZone: string;
-};
-
-export type ArchiveRefs = {
-  batchMessageIds: string[];
-  candidateNoteIds: string[];
 };
 
 export function codeVersion(): string {
@@ -85,7 +58,7 @@ export async function rememberCharter(text: string): Promise<string> {
   return hash;
 }
 
-export async function rememberBlock(kind: "voice_longterm" | "reflect_b", text: string): Promise<string> {
+export async function rememberBlock(kind: "voice_longterm", text: string): Promise<string> {
   const hash = sha256Text(text);
   const prev = blockCache.get(kind);
   if (prev?.hash === hash) return hash;

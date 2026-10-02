@@ -2,36 +2,19 @@ import { getSql } from "../../db.ts";
 import { gitCommitSha } from "../hearing/eval-meta.ts";
 import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
 import { fromPgArray, pgTextArray } from "./store.ts";
-import type { Inner } from "./heart.ts";
 
 export const TRACE_FIELD_LIMIT = 100 * 1024;
-
-export type RetrieveReason = "mind" | "keyword" | "fallback";
-
-export type TraceRetrieveItem = {
-  id: string;
-  title: string;
-  score: number | null;
-  reason: RetrieveReason;
-};
 
 export type TurnTraceInput = {
   turnId: string;
   userMsgId?: string;
   turnSeq?: number;
+  /** The moments that came back to him for this line, and how well they fit. */
   retrieve?: {
+    by?: string;
     selected?: string[];
-    fallback?: string[];
-    queryIds?: string[];
-    queryScores?: number[];
-    jump?: boolean;
-    reasons?: RetrieveReason[];
-    notes?: TraceRetrieveItem[];
-  };
-  reflector?: {
-    mind?: unknown;
-    model?: string | null;
-    ms?: number | null;
+    scores?: Array<{ id: number; score: number }>;
+    texts?: string[];
   };
   live?: {
     notes?: string;
@@ -39,15 +22,13 @@ export type TurnTraceInput = {
     promptHash?: string | null;
     model?: string | null;
     ms?: number | null;
-    injectMoment?: boolean;
-    injectDossier?: boolean;
+    injectMemory?: boolean;
     historyWindow?: number;
     injectLine?: string;
     intimateInjected?: boolean;
     personaPlacement?: "system" | "first_user";
     unexpected_state_block?: boolean;
     persona_missing?: boolean;
-    inner?: { now: string; today: string };
   };
   reply?: {
     text?: string;
@@ -97,7 +78,7 @@ export async function recordTurnTrace(input: TurnTraceInput): Promise<void> {
     const retrieve = input.retrieve ?? null;
     const packed = {
       retrieve: clipTraceValue(retrieve),
-      reflector: clipTraceValue(input.reflector ?? null),
+      reflector: clipTraceValue(null),
       live: clipTraceValue(input.live ?? null),
       reply: clipTraceValue(input.reply ?? null),
     };
@@ -144,51 +125,6 @@ export async function recordTurnTrace(input: TurnTraceInput): Promise<void> {
     );
   } catch (err) {
     console.error("[turn-trace] record failed", err);
-  }
-}
-
-export async function patchTurnTraceReflector(opts: {
-  turnSeq: number;
-  inner: Inner | null;
-  model?: string | null;
-  ms?: number | null;
-}): Promise<void> {
-  try {
-    const db = await getSql();
-    const packed = clipTraceValue({
-      inner: opts.inner,
-      model: opts.model ?? null,
-      ms: opts.ms ?? null,
-    });
-    const rows = await db.query<{ turn_id: string }>(
-      `select turn_id from turn_traces where turn_seq = $1 order by created_at desc limit 1`,
-      [opts.turnSeq],
-    );
-    if (rows[0]) {
-      await db.query(
-        `update turn_traces
-         set reflector = $2::jsonb, truncated = truncated or $3
-         where turn_id = $1`,
-        [rows[0].turn_id, JSON.stringify(packed.value), packed.truncated],
-      );
-      return;
-    }
-    await db.query(
-      `insert into turn_traces (turn_id, turn_seq, reflector, commit_sha, truncated)
-       values ($1,$2,$3::jsonb,$4,$5)
-       on conflict (turn_id) do update set
-         reflector = excluded.reflector,
-         truncated = turn_traces.truncated or excluded.truncated`,
-      [
-        `seq:${opts.turnSeq}`,
-        opts.turnSeq,
-        JSON.stringify(packed.value),
-        gitCommitSha() || null,
-        packed.truncated,
-      ],
-    );
-  } catch (err) {
-    console.error("[turn-trace] reflector patch failed", err);
   }
 }
 

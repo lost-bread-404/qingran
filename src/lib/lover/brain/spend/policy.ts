@@ -1,9 +1,9 @@
 import { zonedParts } from "../time.ts";
 
-/** Chart bands on the spend page: 0 = talking, 1 = the mind, 2 = memory, 3 = the monthly report. */
+/** Chart bands on the spend page: 0 = talking, 1 = around a turn (the old mind, the scene check), 2 = memory, 3 = the monthly report. */
 export function routePriority(route: string): 0 | 1 | 2 | 3 {
   if (["voice", "tts", "stt", "replay"].includes(route)) return 0;
-  if (route === "reflect" || route === "reach" || route === "wake") return 1;
+  if (route === "reflect" || route === "scene" || route === "reach" || route === "wake") return 1;
   if (route === "editor") return 2;
   return 3;
 }

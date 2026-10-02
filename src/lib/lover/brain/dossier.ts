@@ -3,7 +3,7 @@ import { sql } from "./store.ts";
 import type { JsonValue } from "./turn-trace.ts";
 
 /**
- * 他记得的: one document with a size cap (docs/brain.md). The night pass rewrites it whole;
+ * 清然和 Rosie 现在: one short document with a size cap (docs/brain.md). The night pass rewrites it whole;
  * she can edit it or roll it back in 他的心. Every change keeps a version.
  */
 export type DossierRow = {

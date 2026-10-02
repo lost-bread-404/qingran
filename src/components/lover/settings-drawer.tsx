@@ -2,8 +2,6 @@ import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
-import { HomophoneEdits } from "@/components/lover/homophone-edits";
-import { ModesEditor } from "@/components/lover/modes-editor";
 import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD, lockSttKeyterms } from "@/lib/lover/hearing/config";
@@ -38,13 +36,13 @@ import { HearingSensePanel } from "@/components/lover/hearing-sense-panel";
 import { StatePanel } from "@/components/lover/state-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
 import { DossierPanel } from "@/components/lover/dossier-panel";
+import { MemoryPanel } from "@/components/lover/memory-panel";
 import { BrainSpendPage } from "@/components/lover/brain-spend-page";
 import { ReplayPanel } from "@/components/lover/replay-panel";
 import { ProfileHistory, VersionConflict } from "@/components/lover/profile-history";
 import { saveProfilePatch } from "@/lib/lover/room";
 import type { FieldRevs, VersionedField } from "@/lib/lover/profile-patch";
 import {
-  HeartEditor,
   IdentityField,
   ManualEdits,
   ReachPanel,
@@ -182,7 +180,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
   const [promptModels, setPromptModels] = useState(profile.promptModels);
   const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
-  const [injectMind, setInjectMind] = useState(profile.injectMind);
   const [brainOn, setBrainOn] = useState(profile.brainOn);
   useEffect(() => {
     setBrainOn(profile.brainOn);
@@ -225,7 +222,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     setVoiceEffort(profile.voiceEffort);
     setPromptModels(profile.promptModels);
     setSense(profile.hearingSense);
-    setInjectMind(profile.injectMind);
     setInjectLongterm(profile.injectLongterm);
     setHistoryWindow(profile.historyWindow);
     if (!intimateDirty.current) setIntimateDraft(profile.intimateNotes);
@@ -630,7 +626,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <SettingsLink label="清然是谁" hint="身份、人设" onClick={() => setPage("who")} />
-            <SettingsLink label="他的心" hint="打算、模式、今天、记得的" onClick={() => setPage("heart")} />
+            <SettingsLink label="他的心" hint="现在的你们、回忆" onClick={() => setPage("heart")} />
             <SettingsLink label="主动消息" hint="开关、下一次、记录" onClick={() => setPage("reach")} />
             <SettingsLink label="声音和听力" hint="语速、静音、灵敏度" onClick={() => setPage("sound")} />
             <SettingsLink label="数据" hint="导出、导入、清空、退出" onClick={() => setPage("data")} />
@@ -641,7 +637,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <p className="text-xs text-subtle">调试用，平时不用进。</p>
-            <SettingsLink label="指令" hint="心思开关、上下文、每一步的 prompt 和模型" onClick={() => setPage("prompts")} />
+            <SettingsLink label="指令" hint="记忆开关、上下文、每一步的 prompt 和模型" onClick={() => setPage("prompts")} />
             <SettingsLink label="记录" hint="调用记录、改动记录、重放对比" onClick={() => setPage("log")} />
             <SettingsLink label="费用" onClick={() => setPage("spend")} />
             <SettingsLink label="听力参数" onClick={() => setPage("hearing")} />
@@ -710,7 +706,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               onKeepMine={() => persistProfile({ systemPrompt: draft.trim() })}
             />
           ) : null}
-          <p className="mt-2 text-xs text-subtle">「故事线」会另外附上，不用写进这段。其他步骤的指令在「指令」页。</p>
+          <p className="mt-2 text-xs text-subtle">你们之间发生过的事写在「故事线」里，不用写进这段。其他步骤的指令在「指令」页。</p>
             </label>
             <label className="flex flex-col gap-2">
               <span className="text-sm">亲密设定</span>
@@ -731,9 +727,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 }}
                 maxLength={8000}
                 className="min-h-36 resize-none leading-relaxed"
-                placeholder="只在勾了「给他看亲密设定」的模式里给他看"
+                placeholder="只在你们正在亲热时给他看"
               />
-              <p className="text-xs text-subtle">只在勾了「这个模式里给他看亲密设定」的模式里给他看（模式在下面）。平时他只知道自己有这一面。</p>
+              <p className="text-xs text-subtle">每轮回复之后判断一次你们是不是正在床上亲热，是的话下一轮才给他看。平时躺着、调情、哄睡都不给，他就不会把每次靠近都往床上带。</p>
               {conflict?.field === "intimateNotes" ? (
                 <VersionConflict
                   latest={conflict.latest}
@@ -746,13 +742,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
               ) : null}
             </label>
-            <ModesEditor
-              modes={profile.modes}
-              models={voiceModels == null ? null : withSelectedVoiceModel(voiceModels, voiceStats, voiceModel)}
-              model={voiceModel}
-              onModes={(next) => persistProfile({ modes: next })}
-              onModel={(id, effort) => persistPromptModel("voice", id, effort)}
-            />
             <label className="flex flex-col gap-2">
               <span className="text-sm">故事线</span>
               <Textarea
@@ -766,7 +755,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 className="min-h-64 resize-none leading-relaxed"
                 placeholder="你们之前发生过的事"
               />
-              <p className="text-xs text-subtle">回复、心思和记忆整理都看得到。他从这里知道自己是谁、你们之间有过什么。</p>
+              <p className="text-xs text-subtle">这是他最早的回忆：按空行切成一件一件，你说话时想起相关的那几件。之后每天发生的事，凌晨整理时自动接在后面（在「他的心 → 回忆」里），不用你来写。想补以前的事，写在这里就行。</p>
             </label>
           </div>
         </div>
@@ -784,22 +773,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                     persistProfile({ brainOn: next });
                   }}
                 />
-                <span className="text-sm">运行心思和记忆整理{brainOn ? "" : "（已暂停：只用人设 + 上下文）"}</span>
+                <span className="text-sm">运行记忆{brainOn ? "" : "（已暂停：只用人设 + 上下文，不整理、不主动找你）"}</span>
               </label>
               <p className="px-1 pt-1 text-sm">这一轮带上什么</p>
             <p className="text-xs text-subtle">只影响开口那一句。</p>
-              <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
-                <input
-                  type="checkbox"
-                  checked={injectMind}
-                  onChange={(e) => {
-                    const next = e.target.checked;
-                    setInjectMind(next);
-                    persistProfile({ injectMind: next });
-                  }}
-                />
-                <span className="text-sm">他现在要做成的事和今天</span>
-              </label>
               <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
                 <input
                   type="checkbox"
@@ -810,11 +787,11 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                     persistProfile({ injectLongterm: next });
                   }}
                 />
-                <span className="text-sm">故事线</span>
+                <span className="text-sm">现在的你们和想起来的回忆</span>
               </label>
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
-                  <p className="text-sm">上下文长度</p>
+                  <p className="text-sm">上下文至少几条（今天的对话总会全带上）</p>
                   <p className="text-sm tabular-nums">{historyWindow}</p>
                 </div>
                 <input
@@ -829,7 +806,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
                 <p className="text-xs text-subtle">
                   {formatVoiceInjectLine(
-                    voiceInjectFromProfile({ injectMind, injectLongterm, historyWindow }),
+                    voiceInjectFromProfile({ injectLongterm, brainOn, historyWindow }),
                   )}
                 </p>
               </div>
@@ -871,7 +848,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
               [
-                ["清然", ["voice", "reflect", "editor"]],
+                ["清然", ["voice", "scene", "editor"]],
                 ["日记", ["report"]],
               ].map(([title, keys]) => (
                 <div key={String(title)} className="flex flex-col gap-2">
@@ -914,9 +891,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "heart" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-6">
-            <p className="text-xs text-subtle">这些都是他自己写的。你改的会记下来。</p>
-            <HeartEditor />
+            <p className="text-xs text-subtle">这些都是他自己记下的。你改的会记下来。</p>
             <DossierPanel maxChars={profile.dossierMaxChars} onMaxChars={(n) => persistProfile({ dossierMaxChars: n })} />
+            <MemoryPanel />
           </div>
         </div>
       ) : page === "reach" ? (
@@ -989,7 +966,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             ) : (
               <div className="flex flex-col gap-2">
                 <p className="text-sm text-subtle">
-                  清掉屏幕上的聊天和今天还没整理进记忆的对话，放下他接下来要做的事，适合他轴在一个话题上的时候用。定了时间的打算（叫你吃饭、睡觉）、你加的打算和他记得的都还在。
+                  清掉屏幕上的聊天和今天还没整理进记忆的对话，适合他轴在一个话题上的时候用。回忆和「现在的你们」都还在。
                 </p>
                 <div className="flex gap-2">
                   <Button
@@ -1072,14 +1049,6 @@ vad_threshold: ${DEFAULT_XAI_VAD_THRESHOLD}`}
                   恢复默认词
                 </button>
               </div>
-              <HomophoneEdits
-                keyterms={profile.sttKeyterms}
-                onAdd={(term) => {
-                  const next = lockSttKeyterms([...profile.sttKeyterms, term]);
-                  setKeytermDraft(next.join("\n"));
-                  persistProfile({ sttKeyterms: next });
-                }}
-              />
               <div className="rounded-md bg-surface-2 px-3 py-3">
                 <p className="text-sm">发给 Apple 的</p>
                 <p className="mt-1 text-xs text-subtle">
@@ -1115,7 +1084,7 @@ maxAlternatives: 3`}
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <StatusPanel
               voiceModel={voiceModel}
-              injectLine={formatVoiceInjectLine(voiceInjectFromProfile({ injectMind, injectLongterm, historyWindow }))}
+              injectLine={formatVoiceInjectLine(voiceInjectFromProfile({ injectLongterm, brainOn, historyWindow }))}
               phase={callPhase ? `通话 phase ${callPhase}${callDeaf ? " · 麦关" : ""}` : "当前不在通话"}
             />
             <p className="text-xs text-subtle">

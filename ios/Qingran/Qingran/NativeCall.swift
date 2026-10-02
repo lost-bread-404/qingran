@@ -4,9 +4,10 @@ import UIKit
 import UserNotifications
 import WebKit
 
-/// Owns every call inside the shell, like WeChat: mic, the same VAD as the web
-/// (src/lib/lover/vad.ts), hearing through /api/stt (the web's hearing pipeline on
-/// the server), /api/talk, and playback. Keeps going with the app in the background.
+/// Owns every call inside the shell, like WeChat: mic (lifted to the browser's level), the same VAD as the web
+/// (src/lib/lover/vad.ts), each line heard while she says it (streamed to xAI, and Apple's recognizer on the phone;
+/// NativeHearing.swift), finished through /api/stt (the web's hearing pipeline on the server), /api/talk, and
+/// playback. Keeps going with the app in the background.
 final class NativePipeline {
   static let shared = NativePipeline()
 
@@ -31,6 +32,28 @@ final class NativePipeline {
   private var quietMs: Float = 0
   private var speechStartAt = 0
   private var triggerFloor: Float = 0
+  /// How much her voice is lifted, and how loud (before the lift) her voiced moments in this line were.
+  private var gain: Float = NativeVad.gainStart
+  private var voicedRaw: [Float] = []
+  private var peaksRaw: [Float] = []
+
+  // Hearing the line while she says it
+  private var line: LineHearing?
+  /// xAI accepted this line's stream, so its turn model may end the line.
+  private var lineLive = false
+  /// xAI's turn model said the sentence is finished, and she has not made a sound since.
+  private var lineSaysDone = false
+  /// What her held words are being heard as (still finishing when she goes on quickly), for joining.
+  private var heldHeard: Task<LineHeard, Never>?
+  private var ticket: StreamTicket?
+  private var ticketLoading = false
+  /// The stream failed twice in a row: lines go to the server whole for a while, then it is tried again.
+  private var streamPausedUntil = Date.distantPast
+  private var streamTroubles = 0
+  private var streamPauses = 0
+  private var streamOff: Bool { Date() < streamPausedUntil }
+  private var smartQuietMs = NativeVad.smartQuietMs
+  private var backstopMs = NativeVad.backstopMs
 
   // Turn and playback
   /// Her words already sent but not yet answered aloud, and the ids they were sent under. If she goes on before his
@@ -71,7 +94,15 @@ final class NativePipeline {
 
   func prepare(params raw: [String: Any]?, emit: @escaping ([String: Any]) -> Void) {
     let next = NativeVadParams(raw)
-    queue.sync { self.params = next }
+    let saved = UserDefaults.standard.float(forKey: NativeVad.gainKey)
+    queue.sync {
+      self.params = next
+      self.gain = saved > 0 ? min(NativeVad.gainMax, max(NativeVad.gainMin, saved)) : NativeVad.gainStart
+      self.streamPausedUntil = .distantPast
+      self.streamTroubles = 0
+      self.streamPauses = 0
+    }
+    LineHearing.askApple()
     self.emit = emit
     failures = 0
     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -106,6 +137,7 @@ final class NativePipeline {
       let gen = self.turnGen
       self.talkTask?.cancel()
       self.inSpeech = false
+      self.dropLine()
       self.speech.removeAll()
       self.preroll.removeAll()
       self.release()
@@ -201,6 +233,7 @@ final class NativePipeline {
       playIdleAt = Date()
       running = true
       mark("engine on")
+      prefetchTicket()
       emit?(["type": "phase", "phase": busy ? "thinking" : "listening"])
     } catch {
       note(ok: false, error: "engine \(error.localizedDescription)")
@@ -296,6 +329,7 @@ final class NativePipeline {
     talkTask = nil
     busy = false
     inSpeech = false
+    dropLine()
     riseMs = 0
     release()
     dropPlayback()
@@ -332,9 +366,16 @@ final class NativePipeline {
     }
   }
 
-  /// Same steps as the tick in src/hooks/use-call.ts.
-  private func feed(_ samples: [Int16]) {
-    guard running, !samples.isEmpty else { return }
+  /// Same steps as the tick in src/hooks/use-call.ts, on her voice lifted to the browser's level.
+  private func feed(_ heard: [Int16]) {
+    guard running, !heard.isEmpty else { return }
+    var samples = heard
+    var peak: Float = 0
+    for i in samples.indices {
+      let x = Float(samples[i]) / 32768
+      peak = max(peak, abs(x))
+      samples[i] = Int16((Self.limit(x * gain) * 32767).rounded())
+    }
     var sum: Float = 0
     for s in samples {
       let x = Float(s) / 32768
@@ -394,6 +435,11 @@ final class NativePipeline {
           triggerFloor = floor
           speechStartAt = Int(Date().timeIntervalSince1970 * 1000)
         }
+        // Only what is new goes to the ears: the held part was already heard.
+        startLine()
+        line?.push(preroll)
+        voicedRaw.removeAll(keepingCapacity: true)
+        peaksRaw.removeAll(keepingCapacity: true)
         emit?(["type": "phase", "phase": "speaking-you"])
       } else {
         riseMs = 0
@@ -402,17 +448,34 @@ final class NativePipeline {
     }
 
     speech.append(contentsOf: samples)
+    line?.push(samples)
     speechMs += chunkMs
     if level >= max(params.holdMin, floor * params.holdMult) {
       quietMs = 0
+      lineSaysDone = false
+      if voicedRaw.count < 30_000 {
+        voicedRaw.append(level / gain)
+        peaksRaw.append(peak)
+      }
     } else {
       quietMs += chunkMs
     }
+    // While xAI hears the line it says when the sentence is finished, so a pause inside one is waited out; without
+    // it, her own pause setting ends the line.
+    let streaming = lineLive
+    let smart = streaming && lineSaysDone && quietMs >= smartQuietMs
+    let wait = streaming ? max(params.endWaitMs, backstopMs) : params.endWaitMs
     let capped = speechMs >= params.maxUtteranceMs
-    let ended = speechMs >= NativeVad.minSpeechMs && quietMs >= params.endWaitMs
+    let ended = speechMs >= NativeVad.minSpeechMs && (smart || quietMs >= wait)
     if capped || ended {
       let said = speech
       let silenceWait = Int(quietMs)
+      let endedBy = capped ? "cap" : smart ? "smart" : "quiet"
+      let hearing = line
+      line = nil
+      lineLive = false
+      lineSaysDone = false
+      let voice = voiceOf(voicedRaw, peaks: peaksRaw)
       inSpeech = false
       speech.removeAll(keepingCapacity: true)
       preroll.removeAll(keepingCapacity: true)
@@ -423,6 +486,18 @@ final class NativePipeline {
       let gen = turnGen
       let start = speechStartAt
       let vadFloor = triggerFloor
+      // What this part is heard as, joined (when she went on with held words) to what those were heard as. Kept as
+      // a task: she may go on again before it is finished.
+      let going = heldTurn != nil
+      let before = heldHeard
+      let heard = Task { () -> LineHeard in
+        let part = await hearing?.finish() ?? LineHeard.empty
+        if part.stream != nil { self.queue.async { self.streamTroubles = 0 } }
+        guard going else { return part }
+        return (await before?.value ?? LineHeard.empty).then(part)
+      }
+      heldHeard = heard
+      prefetchTicket()
       let turn = heldTurn ?? (
         user: UUID().uuidString.lowercased(),
         reply: UUID().uuidString.lowercased(),
@@ -433,7 +508,10 @@ final class NativePipeline {
       heldTurn = turn
       // The last reply is over; this one has not started, so she can still go on until it does.
       replyStarted = false
-      talkTask = Task { await self.utter(said, gen: gen, speechStart: start, silenceWaitMs: silenceWait, vadFloor: vadFloor, turn: turn) }
+      talkTask = Task {
+        await self.utter(said, gen: gen, speechStart: start, silenceWaitMs: silenceWait, vadFloor: vadFloor, turn: turn,
+                         heard: heard, endedBy: endedBy, voice: voice)
+      }
     }
   }
 
@@ -453,6 +531,123 @@ final class NativePipeline {
   private func release() {
     held.removeAll()
     heldTurn = nil
+    heldHeard = nil
+  }
+
+  /// Soft ceiling for the lifted voice: untouched up to 0.7, then bent toward 1, never clipped.
+  private static func limit(_ x: Float) -> Float {
+    let a = abs(x)
+    if a <= 0.7 { return x }
+    return (x < 0 ? -1 : 1) * (0.7 + 0.3 * tanh((a - 0.7) / 0.3))
+  }
+
+  /// How loud her voiced moments in a line were (median) and how loud her loud moments peaked (one click or tap
+  /// does not count), both before the lift.
+  private func voiceOf(_ voiced: [Float], peaks: [Float]) -> (median: Float, peak: Float)? {
+    guard voiced.count >= 10 else { return nil }
+    let sorted = voiced.sorted()
+    let loud = peaks.sorted()
+    return (sorted[sorted.count / 2], loud[min(loud.count - 1, loud.count * 95 / 100)])
+  }
+
+  /// After a line the server took as her speech (not a rustle), the lift moves toward what brings her voice to the
+  /// browser's level, without lifting her loudest moment past the ceiling.
+  private func learnGain(_ voice: (median: Float, peak: Float)) {
+    guard voice.median > 0 else { return }
+    var want = NativeVad.voiceTarget / voice.median
+    if voice.peak > 0 { want = min(want, 0.9 / voice.peak) }
+    want = min(NativeVad.gainMax, max(NativeVad.gainMin, want))
+    gain = gain * 0.6 + want * 0.4
+    UserDefaults.standard.set(gain, forKey: NativeVad.gainKey)
+  }
+
+  /// A new line starts: both ears open on it. The ticket fetched after the last line is used; without one, the line
+  /// fetches its own (her first words are kept until it connects).
+  private func startLine() {
+    line?.cancel()
+    let fresh = ticket?.fresh == true ? ticket : nil
+    ticket = nil
+    var fetch: (() async -> StreamTicket?)?
+    if !streamOff && fresh == nil { fetch = { [weak self] in await self?.fetchTicket() } }
+    weak var made: LineHearing?
+    let hooks = LineHooks(
+      onLive: { [weak self] in
+        guard let this = made else { return }
+        self?.queue.async {
+          guard let self, self.line === this else { return }
+          self.lineLive = true
+        }
+      },
+      onFinished: { [weak self] in
+        guard let this = made else { return }
+        self?.queue.async {
+          // Only if she is still quiet: a "finished" that arrives after she went on is about an earlier pause.
+          guard let self, self.line === this, self.inSpeech, self.quietMs >= 300 else { return }
+          self.lineSaysDone = true
+        }
+      },
+      onDead: { [weak self] why in
+        let this = made
+        self?.queue.async {
+          guard let self else { return }
+          if let this, self.line === this {
+            self.lineLive = false
+            self.lineSaysDone = false
+          }
+          self.note(ok: false, error: why)
+          self.streamTroubles += 1
+          if self.streamTroubles >= 2 && !self.streamOff {
+            // 2 minutes, then twice as long each time it fails again in this call (at most 32).
+            let minutes = min(32, 2 << min(self.streamPauses, 4))
+            self.streamPauses += 1
+            self.streamPausedUntil = Date().addingTimeInterval(Double(minutes) * 60)
+            self.streamTroubles = 0
+            self.mark("stream paused \(minutes) min")
+          }
+        }
+      }
+    )
+    let next = LineHearing(ticket: streamOff ? nil : fresh, fetch: fetch, hooks: hooks)
+    made = next
+    line = next
+    lineLive = false
+    lineSaysDone = false
+  }
+
+  private func dropLine() {
+    line?.cancel()
+    line = nil
+    lineLive = false
+    lineSaysDone = false
+  }
+
+  private func prefetchTicket() {
+    guard running, !streamOff, !ticketLoading, ticket?.fresh != true else { return }
+    ticketLoading = true
+    Task {
+      let got = await self.fetchTicket()
+      self.queue.async {
+        self.ticketLoading = false
+        guard self.running else { return }
+        // No ticket now: the next line asks for its own.
+        guard let got else { return }
+        self.ticket = got
+        self.smartQuietMs = got.quietMs
+        self.backstopMs = got.backstopMs
+      }
+    }
+  }
+
+  private func fetchTicket() async -> StreamTicket? {
+    guard let url = endpoint("api/stt-stream") else { return nil }
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.timeoutInterval = 10
+    req.setValue(await cookieHeader(), forHTTPHeaderField: "Cookie")
+    guard let sent = try? await Self.send(req),
+          (sent.1 as? HTTPURLResponse)?.statusCode == 200,
+          let json = try? JSONSerialization.jsonObject(with: sent.0) as? [String: Any] else { return nil }
+    return StreamTicket(json)
   }
 
   private func dropPlayback() {
@@ -471,7 +666,9 @@ final class NativePipeline {
     queue.sync { self.running && self.turnGen == gen }
   }
 
-  private func utter(_ samples: [Int16], gen: Int, speechStart: Int, silenceWaitMs: Int, vadFloor: Float, turn: (user: String, reply: String, at: Int, start: Int)) async {
+  private func utter(_ samples: [Int16], gen: Int, speechStart: Int, silenceWaitMs: Int, vadFloor: Float,
+                     turn: (user: String, reply: String, at: Int, start: Int),
+                     heard: Task<LineHeard, Never>, endedBy: String, voice: (median: Float, peak: Float)?) async {
     emit?(["type": "phase", "phase": "transcribing"])
     defer {
       queue.async {
@@ -484,10 +681,14 @@ final class NativePipeline {
     }
     let wav = wavData(samples)
     let endpointFired = Int(Date().timeIntervalSince1970 * 1000)
-    guard let text = await transcribe(wav, speechStart: speechStart, endpointFired: endpointFired, silenceWaitMs: silenceWaitMs, vadFloor: vadFloor) else {
+    let both = await heard.value
+    guard let text = await transcribe(wav, speechStart: speechStart, endpointFired: endpointFired, silenceWaitMs: silenceWaitMs,
+                                      vadFloor: vadFloor, heard: both, endedBy: endedBy) else {
       if current(gen) { softFail("stt") }
       return
     }
+    // A line the server took as her speech teaches the lift how loud she is; a rustle does not.
+    if !text.isEmpty, let voice { queue.async { self.learnGain(voice) } }
     if text.isEmpty || !current(gen) { return }
     queue.async {
       guard self.turnGen == gen else { return }
@@ -499,20 +700,27 @@ final class NativePipeline {
     await talk(text: text, userId: turn.user, replyId: turn.reply, now: now, gen: gen, userAt: turn.at)
   }
 
-  private func transcribe(_ wav: Data, speechStart: Int, endpointFired: Int, silenceWaitMs: Int, vadFloor: Float) async -> String? {
+  private func transcribe(_ wav: Data, speechStart: Int, endpointFired: Int, silenceWaitMs: Int, vadFloor: Float,
+                          heard: LineHeard, endedBy: String) async -> String? {
     guard let url = endpoint("api/stt") else { return nil }
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.setValue(await cookieHeader(), forHTTPHeaderField: "Cookie")
-    let body: [String: Any] = [
+    var body: [String: Any] = [
       "audioBase64": wav.base64EncodedString(),
       "mimeType": "audio/wav",
       "speechStart": speechStart,
       "endpointFired": endpointFired,
       "silenceWaitMs": silenceWaitMs,
       "vadFloor": vadFloor,
+      "endedBy": endedBy,
     ]
+    if let stream = heard.stream {
+      body["streamText"] = stream.text
+      body["streamWords"] = stream.words
+    }
+    if let apple = heard.apple { body["liveText"] = apple }
     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
     do {
       let (data, res) = try await Self.send(req)

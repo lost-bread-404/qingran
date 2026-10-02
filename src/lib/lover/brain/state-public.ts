@@ -4,11 +4,21 @@
  * Client-safe: no database imports here.
  */
 export const STATE_KIND = "qingran-state";
-export const STATE_VERSION = 4;
+export const STATE_VERSION = 5;
 
-export type StatePlan = { text: string; at?: string | null; setBy?: string };
 export type StateDay = { day: string; timeline: string };
-export type StateNote = { at: string | number; text: string };
+/** One moment of his memory (or something he came to understand about Rosie). */
+export type StateMemory = {
+  kind?: "moment" | "insight";
+  source?: "story" | "night" | "rosie" | "inner";
+  day?: string;
+  at?: string | null;
+  body: string;
+  keys?: string;
+  thread?: string;
+  importance?: number;
+  changed?: string;
+};
 export type StateMessage = {
   id?: string;
   role: "user" | "assistant";
@@ -24,18 +34,15 @@ export type StateFile = {
   exportedAt?: number;
   /** IANA zone every "YYYY-MM-DD HH:MM" in this file is written in. */
   timeZone?: string;
-  /** Any saved setting (persona, identity, story, modes, intimate notes, …). Keys left out keep their current value. */
+  /** Any saved setting (persona, identity, storyline, intimate notes, …). Keys left out keep their current value. */
   profile?: Record<string, unknown>;
-  /** 我记得的: the whole memory document. */
+  /** 清然和 Rosie 现在: the short text the night pass rewrites. */
   memory?: string;
-  /** Current mode id. */
-  mode?: string;
-  plans?: StatePlan[];
-  /** One text per day (04:00–04:00): today's running text, and each past day's timeline. */
+  /** His moments, except the ones cut from the storyline (those come from profile.storyline). */
+  memories?: StateMemory[];
+  /** Each past day's timeline (04:00–04:00). */
   days?: StateDay[];
-  /** Older files (version ≤ 3): a list of notes; imported as lines in that day's text. */
-  dayNotes?: StateNote[];
-  /** Custom prompt bodies by key (voice, reflect, editor, report). Keys left out keep their current text. */
+  /** Custom prompt bodies by key (voice, scene, editor, report). Keys left out keep their current text. */
   prompts?: Record<string, string>;
   messages?: StateMessage[];
 };

@@ -2,13 +2,6 @@ import { goldTierFor, isGoldSource, type GoldSource } from "./gold.ts";
 import { hearingCueSchema, EMOTIONS, type CueEmotion, type HearingCue } from "./schema.ts";
 import { aggregateEngineUse, type EngineUseStats } from "./select.ts";
 import {
-  confusionId,
-  extractConfusionPairs,
-  parseExamples,
-  type ConfusionExample,
-  type ConfusionRule,
-} from "./confusions.ts";
-import {
   buildPersonalLexicon,
   LEXICON_PHRASE_CAP,
   LEXICON_STALE_MS,
@@ -238,13 +231,6 @@ export async function confirmClipByTurn(
           stt_text = coalesce(stt_text, hearing_text, xai_text)
       where id = ${clip.id}
     `;
-  }
-  if (input.goldSource === "edited") {
-    try {
-      await rebuildHearingConfusions(sql);
-    } catch {
-      // additive table may not exist yet on old deploys
-    }
   }
   return { ok: true, clipId: clip.id, goldTier: nextTier };
 }
@@ -702,88 +688,8 @@ function visibleMessageBody(body: string | null): string {
   return text;
 }
 
-export async function listHearingConfusions(sql: Sql): Promise<ConfusionRule[]> {
-  const rows = await sql.query<{
-    id: string;
-    wrong: string;
-    correct: string;
-    count: number;
-    examples: unknown;
-    enabled: boolean;
-  }>(
-    `select id, wrong, correct, count, examples, enabled
-     from qingran_hearing_confusions
-     order by count desc, wrong, correct`,
-  );
-  return rows.map((row) => ({
-    id: row.id,
-    wrong: row.wrong,
-    correct: row.correct,
-    count: Number(row.count) || 0,
-    examples: parseExamples(row.examples),
-    enabled: row.enabled !== false,
-  }));
-}
 
-export async function setConfusionEnabled(sql: Sql, id: string, enabled: boolean): Promise<void> {
-  await sql`update qingran_hearing_confusions set enabled = ${enabled}, updated_at = now() where id = ${id}`;
-}
 
-export async function rebuildHearingConfusions(sql: Sql): Promise<ConfusionRule[]> {
-  const clips = await sql.query<{
-    id: string;
-    xai_text: string | null;
-    stt_text: string | null;
-    gold_text: string | null;
-  }>(
-    `select id, xai_text, stt_text, gold_text
-     from qingran_hearing_clips
-     where gold_source = 'edited'`,
-  );
-  const counts = new Map<string, { wrong: string; correct: string; count: number; examples: ConfusionExample[] }>();
-  for (const clip of clips) {
-    const hyp = clip.xai_text || clip.stt_text || "";
-    const gold = clip.gold_text ?? "";
-    const pairs = extractConfusionPairs(hyp, gold);
-    for (const pair of pairs) {
-      const id = confusionId(pair.wrong, pair.correct);
-      const cur = counts.get(id) ?? { wrong: pair.wrong, correct: pair.correct, count: 0, examples: [] };
-      cur.count += 1;
-      if (cur.examples.length < 5) {
-        cur.examples.push({ hyp, gold, clipId: clip.id });
-      }
-      counts.set(id, cur);
-    }
-  }
-  const existing = await sql.query<{ id: string; enabled: boolean }>(
-    `select id, enabled from qingran_hearing_confusions`,
-  );
-  const enabledById = new Map(existing.map((row) => [row.id, row.enabled !== false]));
-  for (const [id, row] of counts) {
-    const enabled = enabledById.has(id) ? Boolean(enabledById.get(id)) : true;
-    await sql`
-      insert into qingran_hearing_confusions (id, wrong, correct, count, examples, enabled, updated_at)
-      values (
-        ${id},
-        ${row.wrong},
-        ${row.correct},
-        ${row.count},
-        ${JSON.stringify(row.examples)}::jsonb,
-        ${enabled},
-        now()
-      )
-      on conflict (wrong, correct) do update set
-        count = excluded.count,
-        examples = excluded.examples,
-        updated_at = now()
-    `;
-  }
-  for (const row of existing) {
-    if (counts.has(row.id)) continue;
-    await sql`update qingran_hearing_confusions set count = 0, updated_at = now() where id = ${row.id}`;
-  }
-  return listHearingConfusions(sql);
-}
 
 export async function maybeRebuildLexicon(sql: Sql): Promise<void> {
   const rows = await sql<{ t: string | null }>`select max(updated_at)::text as t from qingran_personal_lexicon`;

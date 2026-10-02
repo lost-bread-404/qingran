@@ -1,30 +1,35 @@
 import { callModel } from "./llm.ts";
 import { appendBrainLog, getProfileData, upsertMessage } from "./store.ts";
 import { now } from "./clock.ts";
-import { localDay, shiftDay } from "./time.ts";
-import { zonedWallMs } from "./spend/policy.ts";
 import { REACH_LLM_DAY_MAX, REACH_RETRY_MS, REACH_SENT_DAY_MAX } from "./life.ts";
 import { sendApns } from "../push/apns.ts";
 import { newId } from "../storage.ts";
 import { getSql } from "../../db.ts";
 import { lockedProfile } from "../types.ts";
-import {
-  delayReachPlans,
-  getReach,
-  insertReachLog,
-  profileClockZone,
-  reachCountsToday,
-  saveReach,
-  silenceSnapshot,
-} from "./life-store.ts";
-import { ACTIVE_MS, formatLocal, getInner, lastUserAt, listPlans, markSilenceSeen, SILENCE_THINK_MS } from "./heart.ts";
+import { getReach, insertReachLog, profileClockZone, reachCountsToday, saveReach } from "./life-store.ts";
+import { getInner, lastUserAt, setReachStage } from "./heart.ts";
 
 export type WakeResult = {
   ok: boolean;
   sent: boolean;
   brain: string[];
-  decision: { action: "call"; trigger: "planned" | "manual" } | { action: "return"; reason: string };
+  decision: { action: "call"; trigger: "silence" | "manual" } | { action: "return"; reason: string };
 };
+
+/**
+ * How long she has been quiet when he thinks of her (requirements 第 5 节): once at each step, never on a timetable.
+ * After the last step he thinks of her once a day. Each time, the voice that answers her decides whether to write.
+ */
+const SILENCE_STEPS_MS = [45 * 60_000, 3 * 3600_000, 8 * 3600_000, 20 * 3600_000];
+const DAY_MS = 24 * 3600_000;
+
+export function silenceStep(quietMs: number): number {
+  let step = 0;
+  for (const t of SILENCE_STEPS_MS) if (quietMs >= t) step += 1;
+  const last = SILENCE_STEPS_MS[SILENCE_STEPS_MS.length - 1]!;
+  if (quietMs >= last + DAY_MS) step += Math.floor((quietMs - last) / DAY_MS);
+  return step;
+}
 
 const WAKE_LOCK = "wake:lock";
 
@@ -57,182 +62,84 @@ export async function releaseWakeLock(at = now()): Promise<void> {
   );
 }
 
-function failReasonZh(kind: string | null | undefined): string {
-  const k = kind ?? "";
-  if (k.startsWith("timeout")) return "xAI 超时";
-  if (k.startsWith("parse")) return "回复没法读";
-  if (k.startsWith("http_error")) return "xAI 报错";
-  return "没连上";
-}
-
-function ago(ms: number): string {
-  const min = Math.max(1, Math.round(ms / 60_000));
-  if (min < 60) return `${min} 分钟`;
-  const h = Math.round(min / 60);
-  if (h < 48) return `${h} 小时`;
-  return `${Math.round(h / 24)} 天`;
-}
-
 /**
- * A time only says when to think of it. Once it has come (whether he wrote to her or not), the plan stays
- * on the list without a time, as the next thing to bring about; only the mind takes it off, when it is done
- * or she really said no.
+ * Every 5 minutes (cron-job.org → /api/cron/wake), only while memory is on:
+ * 1. one ended day that is not in his memory yet gets its night pass (queued; it runs after the response);
+ * 2. if she has been quiet long enough for the next step, he thinks of her once and may write to her.
  */
-async function untimeDuePlans(at: number): Promise<void> {
-  const db = await getSql();
-  await db.query(`update qr_reach_plans set at = null where done_at is null and at is not null and at <= $1`, [at]);
-}
-
-/**
- * Every 5 minutes (cron-job.org → /api/cron/wake), only while the brain is on:
- * 1. after 04:00 the day that ended gets its night pass; a silence of 45 minutes gets one thought;
- * 2. plans whose time has come: she is in the chat → they stay for the mind, which may make one the reply's focus;
- *    she is away → the mind thinks again (「到时间了」) and decides whether to send her one message.
- */
-export async function runWake(opts: {
-  manual?: boolean;
-  at?: number;
-  complete?: typeof callModel;
-  llmMax?: number;
-  sentMax?: number;
-} = {}): Promise<WakeResult> {
+export async function runWake(opts: { manual?: boolean; at?: number; complete?: typeof callModel } = {}): Promise<WakeResult> {
   const at = opts.at ?? now();
   const zone = await profileClockZone();
   const profile = lockedProfile(await getProfileData());
-  const complete = opts.complete ?? callModel;
   const brain: string[] = [];
   const skip = (reason: string): WakeResult => ({ ok: true, sent: false, brain, decision: { action: "return", reason } });
   if (!profile.brainOn) return skip("brain_off");
 
   if (!opts.manual) {
-    const { enqueueNightIfDue } = await import("./night.ts");
-    const night = await enqueueNightIfDue(at);
+    const { enqueueMemoryWork } = await import("./night.ts");
+    const night = await enqueueMemoryWork(at);
     if (night) brain.push(`night:${night}`);
-    const [last, inner] = await Promise.all([lastUserAt(at + 1), getInner()]);
-    if (last && at - last >= SILENCE_THINK_MS && inner.silenceSeen < last) {
-      // One thought per silence, even if the call fails.
-      await markSilenceSeen(last);
-      const { runReflector } = await import("./voice/reflector.ts");
-      await runReflector(0, undefined, complete, { kind: "silence", silentSince: last, since: inner.silenceSeen });
-      brain.push("silence");
-    }
   }
 
-  const [reach, plans, lastUser, silence, counts] = await Promise.all([
-    getReach(),
-    listPlans(),
-    lastUserAt(at + 1),
-    silenceSnapshot(at),
-    reachCountsToday(zone, at),
-  ]);
-  const due = plans.filter((plan) => plan.at != null && plan.at <= at);
-  const later = plans.filter((plan) => plan.at != null && plan.at > at).sort((x, y) => x.at! - y.at!);
-  const dueIds = due.map((plan) => plan.id);
-  const dueIntent = due.map((plan) => plan.text).filter(Boolean).join("；");
-  const trigger: "planned" | "manual" = opts.manual ? "manual" : "planned";
+  const [reach, last, inner, counts] = await Promise.all([getReach(), lastUserAt(at + 1), getInner(), reachCountsToday(zone, at)]);
+  const trigger: "silence" | "manual" = opts.manual ? "manual" : "silence";
+  let step = 0;
   if (!opts.manual) {
-    if (!due.length) return skip("not_due");
-    // She is in the chat: the plans stay, and the mind sees them as 到时间了 after her next turn.
-    if (lastUser != null && at - lastUser < ACTIVE_MS) return skip("chatting");
-  }
-  if (!reach.enabled) {
-    await untimeDuePlans(at);
-    await insertReachLog({ at, trigger: "skip:disabled", intent: dueIntent, calledLlm: false, sent: false, nextAt: later[0]?.at ?? null });
-    return skip("disabled");
-  }
-  const llmMax = opts.llmMax ?? REACH_LLM_DAY_MAX;
-  const sentMax = opts.sentMax ?? REACH_SENT_DAY_MAX;
-  if (counts.llm >= llmMax || counts.sent >= sentMax) {
-    const tomorrow = zonedWallMs(shiftDay(localDay(at, zone), 1), 8, 0, zone);
-    await delayReachPlans(dueIds, tomorrow);
-    await appendBrainLog({
-      step: "reach-breaker",
-      ok: false,
-      route: "reflect",
-      note: `当天想起她 ${counts.llm}/${llmMax} 次，发出 ${counts.sent}/${sentMax} 条`,
-    });
-    await insertReachLog({ at, trigger: "skip:breaker", intent: dueIntent, calledLlm: false, sent: false, nextAt: tomorrow });
-    return skip("breaker");
+    if (!last) return skip("never_talked");
+    step = silenceStep(at - last);
+    const seen = inner.silenceSeen === last ? inner.reachStage : 0;
+    if (step <= seen) return skip(step ? "thought_already" : "chatting");
+    if (!reach.enabled) {
+      await setReachStage(last, step);
+      return skip("disabled");
+    }
+    if (counts.llm >= REACH_LLM_DAY_MAX || counts.sent >= REACH_SENT_DAY_MAX) {
+      await setReachStage(last, step);
+      await appendBrainLog({ step: "reach-breaker", ok: false, route: "voice", note: `当天想起她 ${counts.llm} 次，发出 ${counts.sent} 条` });
+      await insertReachLog({ at, trigger: "skip:breaker", calledLlm: false, sent: false });
+      return skip("breaker");
+    }
+    // One thought per step, even if the call fails (a failure gets one retry below).
+    await setReachStage(last, step);
   }
 
-  const dueLines =
-    trigger === "manual"
-      ? "Rosie 叫清然现在就去找 Rosie。"
-      : `到时间的事：\n${due.map((plan) => `- ${plan.text || "（没写）"}${plan.setAt ? `（${ago(at - plan.setAt)}前定的）` : ""}`).join("\n")}`;
-  const quiet = silence.lastUserAt
-    ? `Rosie 最后一次说话是 ${ago(at - silence.lastUserAt)} 前。之后清然已经发了 ${silence.unanswered} 条，Rosie 还没回${silence.lines.length ? `：\n${silence.lines.join("\n")}` : "。"}`
-    : "Rosie 还没有说过话。";
-  const laterText = later.length ? `\n之后还打算：\n${later.map((plan) => `- ${formatLocal(plan.at!, zone)} ${plan.text}`).join("\n")}` : "";
-
-  const { runReflector } = await import("./voice/reflector.ts");
-  const result = await runReflector(0, undefined, complete, { kind: "due", dueText: `${dueLines}\n${quiet}${laterText}` });
-  if (!result.ok) {
-    const reason = failReasonZh(result.failKind);
-    if (reach.retry >= 1) {
-      const id = newId();
-      await upsertMessage({
-        id,
-        role: "assistant",
-        text: `清然尝试给你发信息，但是因为${reason}没发成功。`,
-        createdAt: at,
-        kind: "system_notice",
-        timeZone: zone,
-      });
-      await untimeDuePlans(at);
-      await saveReach({ retry: 0 });
-      await insertReachLog({ at, trigger: `skip:llm_fail:${reason}`, intent: dueIntent, calledLlm: true, sent: false, messageId: id, model: result.model, ms: result.ms, nextAt: null });
+  const { speakFirst } = await import("./voice/first-word.ts");
+  const spoken = await speakFirst({ nowMs: at, timeZone: zone, lastUserAt: last ?? null });
+  if (!spoken.text && !spoken.passed) {
+    const reason = spoken.reason ?? "出错";
+    if (!opts.manual && reach.retry < 1 && last) {
+      // Try this step once more on a later wake.
+      await saveReach({ retry: 1 });
+      await setReachStage(last, step - 1);
+      await insertReachLog({ at, trigger: `skip:llm_fail:${reason}`, calledLlm: true, sent: false, model: spoken.model, ms: spoken.ms, nextAt: at + REACH_RETRY_MS });
       return { ok: false, sent: false, brain, decision: { action: "call", trigger } };
     }
-    const nextAt = at + REACH_RETRY_MS;
-    await delayReachPlans(dueIds, nextAt);
-    await saveReach({ retry: 1 });
-    await insertReachLog({ at, trigger: `skip:llm_fail:${reason}`, intent: dueIntent, calledLlm: true, sent: false, model: result.model, ms: result.ms, nextAt });
+    const id = newId();
+    await upsertMessage({ id, role: "assistant", text: `清然尝试给你发信息，但是因为${reason}没发成功。`, createdAt: at, kind: "system_notice", timeZone: zone });
+    await saveReach({ retry: 0 });
+    await insertReachLog({ at, trigger: `skip:llm_fail:${reason}`, calledLlm: true, sent: false, messageId: id, model: spoken.model, ms: spoken.ms });
     return { ok: false, sent: false, brain, decision: { action: "call", trigger } };
   }
-
-  await untimeDuePlans(at);
   if (reach.retry) await saveReach({ retry: 0 });
-  // The mind decided whether to reach her and what for; the words come from the voice that answers her.
-  const intent = result.message;
-  let text = "";
   let messageId: string | null = null;
   let pushResult: string | null = null;
-  if (intent) {
-    const { speakFirst } = await import("./voice/first-word.ts");
-    const spoken = await speakFirst({ intent, nowMs: at, timeZone: zone, lastUserAt: silence.lastUserAt ?? null });
-    text = spoken.text;
-    if (!text) {
-      await upsertMessage({
-        id: newId(),
-        role: "assistant",
-        text: `清然尝试给你发信息，但是因为${spoken.reason ?? "出错"}没发成功。`,
-        createdAt: at,
-        kind: "system_notice",
-        timeZone: zone,
-      });
-    }
-  }
-  if (text) {
+  if (spoken.text) {
     messageId = newId();
-    await upsertMessage({ id: messageId, role: "assistant", text, createdAt: at, kind: "proactive", timeZone: zone });
-    pushResult = await sendApns({ body: text, messageId });
+    await upsertMessage({ id: messageId, role: "assistant", text: spoken.text, createdAt: at, kind: "proactive", timeZone: zone });
+    pushResult = await sendApns({ body: spoken.text, messageId });
   }
-  const next = (await listPlans()).filter((plan) => plan.at != null && plan.at > at).sort((x, y) => x.at! - y.at!)[0];
   await insertReachLog({
     at,
-    trigger,
-    intent: intent ? `${dueIntent} → ${intent}` : dueIntent,
+    trigger: spoken.passed ? `${trigger}:不找` : trigger,
     calledLlm: true,
-    sent: Boolean(text),
+    sent: Boolean(spoken.text),
     messageId,
-    text,
+    text: spoken.text,
     pushResult,
-    nextAt: next?.at ?? null,
-    nextIntent: next?.text ?? "",
-    model: result.model,
-    ms: result.ms,
+    model: spoken.model,
+    ms: spoken.ms,
   });
-  return { ok: true, sent: Boolean(text), brain, decision: { action: "call", trigger } };
+  return { ok: true, sent: Boolean(spoken.text), brain, decision: { action: "call", trigger } };
 }
 
 export async function wakeOnce(opts: Parameters<typeof runWake>[0] = {}): Promise<Awaited<ReturnType<typeof runWake>> | { ok: true; skipped: "locked" }> {

@@ -1,11 +1,15 @@
-import { getInner, mindForReply, timeFacts, todayText } from "../heart.ts";
-import { mergeEditedUserBody } from "../../message-markup.ts";
+import { timeFacts, dayWindow } from "../heart.ts";
+import { mergeEditedUserBody, modelFacingText } from "../../message-markup.ts";
 import { NEUTRAL_PERSONA, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getMessage, listHistoryWindow, upsertMessage } from "../store.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { identityBlock } from "../life.ts";
+import { localDay } from "../time.ts";
+import { dossierTextForModel } from "../dossier.ts";
+import { recall, recallText, recentInner, type Memory } from "../memory.ts";
+import { inIntimateScene } from "../scene.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
 
 export type HotContext = {
@@ -14,8 +18,6 @@ export type HotContext = {
   dbFirstMs: number;
   sessionId: string | null;
   user: StoredMessage;
-  mindTurnSeq: number;
-  mindAgeMs: number;
   charterHash: string;
   longtermHash: string;
   historyIds: string[];
@@ -27,11 +29,33 @@ export type HotContext = {
   promptKey: string;
   promptHash: string;
   inject: VoiceInjectFlags;
-  /** What only he knows, as given to this reply. */
-  injected: { now: string; today: string };
+  /** The moments that came back to him for this line, and whether they were found by meaning or by words. */
+  recalled: Memory[];
+  recallBy: string;
   intimateInjected: boolean;
   personaPlacement: "system" | "first_user";
 };
+
+/** The most the reply is given of today's talk, however long the day has been. */
+const TODAY_MAX = 200;
+
+/**
+ * The talk the reply sees: everything since 04:00 today, and at least `min` messages (so a new morning still has
+ * last night). Context is his brain; the day's talk is short enough to give whole.
+ */
+export async function replyHistory(excludeId: string | null, min: number, nowMs: number, timeZone: string): Promise<StoredMessage[]> {
+  const from = dayWindow(localDay(nowMs, timeZone), timeZone).from;
+  const rows = await listHistoryWindow(excludeId, TODAY_MAX);
+  const firstToday = rows.findIndex((m) => m.createdAt >= from);
+  const start = Math.min(firstToday < 0 ? rows.length : firstToday, Math.max(0, rows.length - min));
+  return rows.slice(start);
+}
+
+/** What she is talking about now: her line (weighted), and the few lines before it. */
+export function recallQuery(text: string, history: StoredMessage[]): string {
+  const before = history.slice(-3).map((m) => modelFacingText(m.text));
+  return [text, text, ...before].filter((line) => line.trim()).join("\n");
+}
 
 /** Everything the reply needs, read before the model is called (no model call here). */
 export async function loadHotContext(input: {
@@ -54,35 +78,28 @@ export async function loadHotContext(input: {
     timeZone: input.timeZone,
   });
 
-  // Brain off → persona + mode + context only.
-  const brainOn = input.profile.brainOn;
+  // Memory off → persona + context only.
   const inject = voiceInjectFromProfile(input.profile);
-  inject.moment = inject.moment && brainOn;
-  inject.dossier = inject.dossier && brainOn;
-  // What he remembers of the two of them is the story she wrote, as she wrote it.
-  const story = inject.dossier ? input.profile.storyline.trim() : "";
-  const [history, inner, mind, today, clockText, voicePrompt] = await Promise.all([
-    listHistoryWindow(input.userMsgId, inject.history),
-    getInner(),
-    inject.moment ? mindForReply(input.nowMs) : Promise.resolve(""),
-    inject.moment ? todayText(input.nowMs, input.timeZone) : Promise.resolve(""),
+  const [history, us, clockText, voicePrompt, intimateScene] = await Promise.all([
+    replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone),
+    inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
     loadPrompt("voice"),
+    inject.memory ? inIntimateScene(input.nowMs) : Promise.resolve(false),
   ]);
+  const recalled = inject.memory ? await recall(recallQuery(input.text, history), input.nowMs) : { memories: [], scores: [], by: "none" as const };
+  const clockWithInner = withInner(clockText, await recentInner(input.nowMs));
   const charter = input.profile.systemPrompt;
-  // Intimate notes follow the mode: shown while the current mode is marked intimate.
-  const modeDef = input.profile.modes.find((m) => m.id === input.profile.mode);
-  const intimate = modeDef?.intimate ? input.profile.intimateNotes.trim() : "";
+  const intimate = intimateScene ? input.profile.intimateNotes.trim() : "";
   const parts: VoicePackParts = {
     charter,
     identity: identityBlock(input.profile.identity),
-    story,
-    mind,
-    today,
+    us,
+    recall: recallText(recalled.memories),
     intimate,
-    clock: clockText,
+    clock: clockWithInner,
     history,
-    historyWindow: inject.history,
+    historyWindow: history.length,
     userText: input.text,
     voiceTemplate: voicePrompt.body,
     personaPlacement: input.profile.personaPlacement,
@@ -90,30 +107,20 @@ export async function loadHotContext(input: {
   };
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(charter.trim() || NEUTRAL_PERSONA),
-    rememberBlock("voice_longterm", story),
+    rememberBlock("voice_longterm", us),
   ]);
   const historyIds = history.map((m) => m.id);
-  const mindAgeMs = inner.updatedAt ? input.nowMs - inner.updatedAt : 0;
   const refs: VoiceRefs = {
     charterHash,
     longtermHash,
     historyIds,
-    mindTurnSeq: inner.turnSeq,
-    mindStale: false,
-    pickedIds: [],
-    fallbackIds: [],
-    queryIds: [],
-    queryScores: [],
-    jump: false,
-    jumpScore: 0,
-    careHint: false,
+    pickedIds: recalled.memories.map((m) => String(m.id)),
+    queryScores: recalled.scores,
     clockText,
     userMsgId: input.userMsgId,
     timeZone: input.timeZone,
-    mindAgeMs,
-    injectLongterm: inject.dossier,
-    injectMoment: inject.moment,
-    momentNow: mind,
+    injectMemory: inject.memory,
+    intimate: Boolean(intimate),
     historyWindow: inject.history,
   };
 
@@ -123,8 +130,6 @@ export async function loadHotContext(input: {
     dbFirstMs,
     sessionId: user.sessionId,
     user,
-    mindTurnSeq: inner.turnSeq,
-    mindAgeMs,
     charterHash,
     longtermHash,
     historyIds,
@@ -136,8 +141,14 @@ export async function loadHotContext(input: {
     promptKey: voicePrompt.key,
     promptHash: voicePrompt.hash,
     inject,
-    injected: { now: mind, today },
+    recalled: recalled.memories,
+    recallBy: recalled.by,
     intimateInjected: Boolean(intimate),
     personaPlacement: input.profile.personaPlacement,
   };
+}
+
+/** His own ｛｝ notes from the last 16 hours sit right under the clock, so he answers by what he decided. */
+export function withInner(clockText: string, inner: string): string {
+  return inner ? `${clockText}\n你心里记着、Rosie 看不到的：\n${inner}` : clockText;
 }

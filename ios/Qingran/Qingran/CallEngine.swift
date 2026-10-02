@@ -30,13 +30,17 @@ final class CallEngine: NSObject, ObservableObject {
     prepareHoldPlayer()
   }
 
+  /// Ordinary playback, not a phone line: in voice-chat mode iOS runs both directions through telephone processing
+  /// (and Bluetooth drops to call quality), which made him sound behind a veil. She talks with the phone by the
+  /// pillow, so his voice comes from the speaker at full quality; the mic is the phone's own. There is no echo
+  /// cancelling in this mode, so the mic stays deaf while he speaks (NativeCall.swift), as before.
   func prepareAudioSession() {
     let session = AVAudioSession.sharedInstance()
     do {
       try session.setCategory(
         .playAndRecord,
-        mode: .voiceChat,
-        options: [.allowBluetoothHFP, .defaultToSpeaker]
+        mode: .default,
+        options: [.defaultToSpeaker, .allowBluetoothA2DP]
       )
       try session.setActive(true, options: [])
     } catch {

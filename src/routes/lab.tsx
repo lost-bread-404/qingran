@@ -11,15 +11,11 @@ import {
   exportReplyFlags,
   getHearingClipAudio,
   hearingLabScore,
-  listHearingConfusionRules,
   listLabeledHearingClips,
   listReplyFlags,
-  rebuildHearingConfusionRules,
-  setHearingConfusionEnabled,
   tuneHearingTone,
   unlabelHearingClip,
   unlockHearingLab,
-  type ConfusionRule,
   type LabeledClipRow,
   type ReplyFlagRow,
 } from "@/lib/lover/hearing/store";
@@ -28,7 +24,6 @@ import {
   listTurnFeedbackFn,
 } from "@/lib/lover/brain/turn-trace-fn";
 import type { TurnFeedbackRow } from "@/lib/lover/brain/turn-trace";
-import { CONFUSION_MIN_COUNT } from "@/lib/lover/hearing/confusions";
 import { formatClipVoiceLine } from "@/lib/lover/hearing/night-voice";
 import { formatToneReadingLine } from "@/lib/lover/hearing/sense";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
@@ -116,7 +111,6 @@ function HearingLabPage() {
   const [labeledPage, setLabeledPage] = useState(1);
   const labeledPageSize = 30;
   const [flags, setFlags] = useState<ReplyFlagRow[]>([]);
-  const [confusions, setConfusions] = useState<ConfusionRule[]>([]);
   const [prosodyStatus, setProsodyStatus] = useState<string | null>(null);
   const [tuneStatus, setTuneStatus] = useState<string | null>(null);
   const [labTab, setLabTab] = useState<"hearing" | "feedback">("hearing");
@@ -156,19 +150,6 @@ function HearingLabPage() {
     }
   }
 
-  async function loadConfusions(secret = password) {
-    try {
-      const next = await listHearingConfusionRules({ data: { password: secret } });
-      if (!next.ok) {
-        setStatus(next.error);
-        return;
-      }
-      setConfusions(next.rules);
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   async function loadFeedback(secret = password) {
     try {
       const next = await listTurnFeedbackFn({ data: { password: secret } });
@@ -194,7 +175,6 @@ function HearingLabPage() {
       setScore(next);
       await loadLabeled(secret, page);
       await loadFlags(secret);
-      await loadConfusions(secret);
       await loadFeedback(secret);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -568,76 +548,6 @@ function HearingLabPage() {
           </section>
 
           <section>
-            <p className="mb-2 font-display text-lg">同音词</p>
-            <p className="mb-3 text-xs text-subtle">
-              从 ✎ edited 标注自动抽「错→对」。出现 ≥ {CONFUSION_MIN_COUNT} 次且未关闭的会在 STT 后替换。
-            </p>
-            <div className="mb-3">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={async () => {
-                  try {
-                    const next = await rebuildHearingConfusionRules({ data: { password } });
-                    setConfusions(next.rules);
-                    setStatus(`已重算同音词 ${next.rules.length} 条。`);
-                  } catch (err) {
-                    setStatus(err instanceof Error ? err.message : String(err));
-                  }
-                }}
-              >
-                重算同音词
-              </Button>
-            </div>
-            {confusions.length ? (
-              <ul className="flex flex-col gap-2">
-                {confusions.map((rule) => {
-                  const active = rule.enabled && rule.count >= CONFUSION_MIN_COUNT;
-                  return (
-                    <li key={rule.id} className="rounded-md bg-surface-2 px-3 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm">
-                            {rule.wrong} → {rule.correct}
-                            <span className="ml-2 text-xs text-subtle">
-                              {rule.count} 次{active ? " · 生效" : " · 未生效"}
-                            </span>
-                          </p>
-                          {rule.examples[0] ? (
-                            <p className="mt-1 text-xs text-subtle">
-                              例 {rule.examples[0].hyp} → {rule.examples[0].gold}
-                            </p>
-                          ) : null}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              const next = await setHearingConfusionEnabled({
-                                data: { password, id: rule.id, enabled: !rule.enabled },
-                              });
-                              setConfusions(next.rules);
-                            } catch (err) {
-                              setStatus(err instanceof Error ? err.message : String(err));
-                            }
-                          }}
-                        >
-                          {rule.enabled ? "关闭" : "打开"}
-                        </Button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="text-sm text-subtle">还没有从 edited 标注抽出的词对。</p>
-            )}
-          </section>
-
-          <section>
             <p className="mb-2 font-display text-lg">👎 列表</p>
             <p className="mb-3 text-xs text-subtle">
               {flags.length ? `${flags.length} 条不好的回复，用作 prompt eval。` : "还没有标记不好的回复。"}
@@ -712,7 +622,7 @@ function HearingLabPage() {
                 <p className="mb-2 font-display text-lg">反馈</p>
                 <p className="mb-3 text-xs text-subtle">
                   {feedbackRows.length
-                    ? "按标签筛选。点开看这一轮检索、内心和回复。"
+                    ? "按标签筛选。点开看这一轮想起来的回忆和回复。"
                     : "还没有反馈。"}
                 </p>
                 {feedbackRows.length ? (
@@ -752,17 +662,12 @@ function HearingLabPage() {
                         row.trace && row.trace.reply && typeof row.trace.reply === "object"
                           ? String((row.trace.reply as { text?: string }).text ?? "")
                           : "";
-                      const retrieve = Array.isArray(
-                        row.trace && typeof row.trace.retrieve === "object"
-                          ? (row.trace.retrieve as { items?: unknown }).items
-                          : null,
-                      )
-                        ? ((row.trace!.retrieve as { items: Array<{ id: string; title: string; reason: string; score: number | null }> }).items)
-                        : [];
-                      const mind =
-                        row.trace && row.trace.reflector && typeof row.trace.reflector === "object"
-                          ? (row.trace.reflector as { mind?: unknown; model?: string; ms?: number })
+                      // The moments that came back to him for that line.
+                      const retrieve =
+                        row.trace && row.trace.retrieve && typeof row.trace.retrieve === "object" && !Array.isArray(row.trace.retrieve)
+                          ? (row.trace.retrieve as { texts?: unknown }).texts
                           : null;
+                      const recalled = Array.isArray(retrieve) ? retrieve.map(String) : [];
                       return (
                         <li key={row.id} className="rounded-md bg-surface-2 px-3 py-3">
                           <button
@@ -786,23 +691,16 @@ function HearingLabPage() {
                           </button>
                           {open ? (
                             <div className="mt-3 flex flex-col gap-2 border-t border-bg pt-3 text-sm">
-                              <p className="text-xs text-subtle">检索</p>
-                              {retrieve.length ? (
-                                retrieve.map((item) => (
-                                  <p key={item.id} className="text-xs">
-                                    {item.reason} · {item.title}
-                                    {item.score != null ? ` · ${item.score}` : ""}
+                              <p className="text-xs text-subtle">想起来的</p>
+                              {recalled.length ? (
+                                recalled.map((text, i) => (
+                                  <p key={i} className="text-xs">
+                                    {text}
                                   </p>
                                 ))
                               ) : (
-                                <p className="text-xs text-subtle">没有检索记录。</p>
+                                <p className="text-xs text-subtle">这一句没有想起什么。</p>
                               )}
-                              <p className="mt-2 text-xs text-subtle">
-                                内心 {mind?.model ?? ""} {mind?.ms != null ? `· ${mind.ms}ms` : ""}
-                              </p>
-                              <pre className="whitespace-pre-wrap break-words text-xs text-muted">
-                                {mind?.mind ? JSON.stringify(mind.mind, null, 2) : "还没有 Reflector 输出。"}
-                              </pre>
                               <p className="mt-2 text-xs text-subtle">回复</p>
                               <p className="whitespace-pre-wrap text-sm">{replyText || "（空）"}</p>
                             </div>

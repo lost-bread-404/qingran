@@ -1,4 +1,4 @@
-export type JobType = "reflect" | "report" | "wake" | "night";
+export type JobType = "report" | "wake" | "night";
 export type JobStatus = "pending" | "running" | "done" | "failed";
 
 export type BrainMeta = {

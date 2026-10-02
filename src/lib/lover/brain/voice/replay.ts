@@ -7,7 +7,10 @@ import { now } from "../clock.ts";
 import type { Effort } from "../config.ts";
 import { resolveTz } from "../tz.ts";
 import { identityBlock } from "../life.ts";
-import { mindForReply, timeFacts, todayText } from "../heart.ts";
+import { timeFacts } from "../heart.ts";
+import { dossierTextForModel } from "../dossier.ts";
+import { recall, recallText, recentInner } from "../memory.ts";
+import { recallQuery, withInner } from "./pack.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import {
   getMessage,
@@ -18,6 +21,7 @@ import {
   listRecentMessages,
 } from "../store.ts";
 import { InnerCutBuffer } from "./inner-cut.ts";
+import { BraceCut } from "./brace-cut.ts";
 import { applyProfilePatch } from "../../profile-patch.ts";
 import { buildVoiceMessages } from "./pack-build.ts";
 
@@ -51,25 +55,22 @@ export async function replayMessages(opts: {
   if (!user || user.role !== "user") throw new Error("找不到这句");
   const nowMs = opts.nowMs ?? now();
   const inject = voiceInjectFromProfile(opts.profile);
-  const brainOn = opts.profile.brainOn;
   const meta = await getMeta();
   const tz = resolveTz(meta.timeZone);
-  const story = inject.dossier && brainOn ? opts.profile.storyline.trim() : "";
-  const [history, voicePrompt, mind, today, clockText] = await Promise.all([
+  const [history, voicePrompt, us, clockText] = await Promise.all([
     listHistoryWindow(user.id, inject.history, user.createdAt),
     loadPrompt("voice"),
-    inject.moment && brainOn ? mindForReply(nowMs) : Promise.resolve(""),
-    inject.moment && brainOn ? todayText(nowMs, tz) : Promise.resolve(""),
+    inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(nowMs, tz, user.createdAt),
   ]);
+  const recalled = inject.memory ? await recall(recallQuery(user.text, history), user.createdAt) : { memories: [] };
   const messages = buildVoiceMessages({
     charter: opts.charter,
     identity: identityBlock(opts.profile.identity),
-    story,
-    mind,
-    today,
-    intimate: opts.profile.modes.find((m) => m.id === opts.profile.mode)?.intimate ? opts.profile.intimateNotes : "",
-    clock: clockText,
+    us,
+    recall: recallText(recalled.memories),
+    intimate: "",
+    clock: withInner(clockText, await recentInner(user.createdAt)),
     history: collapseReplyVariants(history),
     historyWindow: inject.history,
     userText: user.text,
@@ -81,10 +82,12 @@ export async function replayMessages(opts: {
 }
 
 function sideFrom(result: CallModelResult, placement: Profile["personaPlacement"]): ReplaySide {
+  const braces = new BraceCut();
   const cut = new InnerCutBuffer();
-  cut.push(result.text || "");
+  cut.push(braces.push(result.text || ""));
+  braces.finish();
   cut.finish();
-  const tail = cut.seen ? cut.tail.trim() : "";
+  const tail = [cut.seen ? cut.tail.trim() : "", braces.text().trim()].filter(Boolean).join("\n");
   return {
     speech: cut.speech.trim(),
     innerJson: tail || null,

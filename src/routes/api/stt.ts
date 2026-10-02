@@ -1,22 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { appendBrainLog, getProfileData, listHistoryWindow } from "@/lib/lover/brain/store";
-import {
-  buildHearingContext,
-  extractContextKeyterms,
-  lastDialogueTurns,
-  mergeKeyterms,
-  stripHearingMarkup,
-  type ContextTurn,
-} from "@/lib/lover/hearing/context";
+import { appendBrainLog } from "@/lib/lover/brain/store";
+import { lastDialogueTurns, stripHearingMarkup } from "@/lib/lover/hearing/context";
 import { cutTrace } from "@/lib/lover/hearing/cut-trace";
 import { finishHearing } from "@/lib/lover/hearing/finish";
-import { extractTfIdfTerms } from "@/lib/lover/hearing/keyterms";
+import { phoneHearingInputs } from "@/lib/lover/hearing/phone";
 import { formatSenseLine, toneFromSense } from "@/lib/lover/hearing/sense";
 import { hearClip } from "@/lib/lover/hearing/store";
 import { liftQuietWav, prosodyFromWav, wavDurationMs } from "@/lib/lover/hearing/wav";
+import type { SttWord } from "@/lib/lover/hearing/xai";
 import { downsampleProsody, framesFromStored, readTone } from "@/lib/lover/prosody";
 import { newId } from "@/lib/lover/storage";
-import { lockedProfile } from "@/lib/lover/types";
 import { QUOTA_HINT } from "@/lib/lover/xai-error";
 
 type SttBody = {
@@ -26,14 +19,24 @@ type SttBody = {
   endpointFired?: number;
   silenceWaitMs?: number;
   vadFloor?: number;
+  /** What xAI heard while she spoke (absent when the stream did not work for this line: the clip goes to xAI here). */
+  streamText?: string;
+  streamWords?: SttWord[];
+  /** Apple's recognizer on the phone (absent when it was not available). */
+  liveText?: string;
+  /** How the phone decided she was done: xAI's turn model, a long pause, or the length cap. */
+  endedBy?: string;
 };
+
+const ENDED: Record<string, string> = { smart: "说完了", quiet: "停顿", cap: "太长" };
 
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 
 /**
- * The iPhone shell's call hears here: the same xAI transcription, keyterms, context,
- * sound-based 嗯 / 喘 / 笑 recovery, tone marks and voice-or-noise gate as the web call,
- * with her saved settings. Returns the text to send to /api/talk, or empty for noise.
+ * The iPhone shell's call hears here: what xAI heard while she spoke (or xAI on the clip, when the stream did not
+ * work), Apple's text from the phone, keyterms, context, sound-based 嗯 / 喘 / 笑 recovery, tone marks and the
+ * voice-or-noise gate, the same as the web call, with her saved settings. Returns the text to send to /api/talk,
+ * or empty for noise.
  */
 export const Route = createFileRoute("/api/stt")({
   server: {
@@ -51,17 +54,15 @@ export const Route = createFileRoute("/api/stt")({
         const audioBase64 = liftQuietWav(sent);
         const mimeType = typeof body.mimeType === "string" && body.mimeType ? body.mimeType : "audio/wav";
 
-        const [savedProfile, recent] = await Promise.all([getProfileData(), listHistoryWindow(null, 24)]);
-        const profile = lockedProfile(savedProfile);
+        const { profile, turns, context, extraKeyterms } = await phoneHearingInputs();
         const sense = profile.hearingSense;
-        const turns: ContextTurn[] = recent
-          .filter((m) => m.kind === "say" || m.kind === "proactive")
-          .map((m) => ({ role: m.role, text: m.text.replace(/^⟦回:[^⟧]*⟧/, "") }));
-        const context = buildHearingContext(turns);
-        const extraKeyterms = mergeKeyterms(
-          extractTfIdfTerms([{ text: profile.systemPrompt }], 50),
-          extractContextKeyterms(context, 50),
-        );
+        // An empty stream is not trusted as "nothing said": the clip goes to xAI once more.
+        const streamed =
+          typeof body.streamText === "string" && body.streamText.trim()
+            ? { text: body.streamText, words: Array.isArray(body.streamWords) ? body.streamWords : [] }
+            : undefined;
+        const liveText = typeof body.liveText === "string" ? body.liveText.trim() : "";
+        const apple = typeof body.liveText === "string";
         const frames = framesFromStored(prosodyFromWav(audioBase64, sense.voicedClarity));
         const tone = toneFromSense(sense);
         const toneReading = readTone(frames, tone);
@@ -72,7 +73,8 @@ export const Route = createFileRoute("/api/stt")({
         const result = await hearClip({
           audioBase64,
           mimeType,
-          liveText: "",
+          liveText,
+          streamed,
           prompt: profile.systemPrompt,
           provider: "xai",
           capture: profile.debugHearing,
@@ -89,7 +91,7 @@ export const Route = createFileRoute("/api/stt")({
           mode: "call",
           audioRoute: "unknown",
           vadFloor: num(body.vadFloor),
-          liveTextSource: "none",
+          liveTextSource: apple ? "apple" : "none",
           contextBefore: lastDialogueTurns(turns),
           systemPrompt: profile.systemPrompt,
           holdToTalk: false,
@@ -111,7 +113,7 @@ export const Route = createFileRoute("/api/stt")({
           debugHearing: profile.debugHearing,
           turnId,
           provider: "xai",
-          liveText: "",
+          liveText,
           frames,
           tone,
           endpointFired,
@@ -130,7 +132,13 @@ export const Route = createFileRoute("/api/stt")({
           ok: true,
           ms,
           route: "voice",
-          note: [skip ? "native · noise" : "native", cutTrace(sent, sense, num(body.vadFloor), num(body.silenceWaitMs) ?? sense.endWaitMs)]
+          note: [
+            skip ? "native · noise" : "native",
+            streamed ? "边说边听" : "整段",
+            apple ? (liveText ? "苹果" : "苹果没听到") : "",
+            ENDED[String(body.endedBy)] ?? "",
+            cutTrace(sent, sense, num(body.vadFloor), num(body.silenceWaitMs) ?? sense.endWaitMs),
+          ]
             .filter(Boolean)
             .join(" · "),
           outputText: (text || result.xaiText || "").slice(0, 500),
