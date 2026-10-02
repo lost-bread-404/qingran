@@ -129,7 +129,7 @@ export const brainGetSpendOverview = createServerFn({ method: "GET" }).handler(a
   }));
   const perTurn = await db.query<{ turn_seq: number; usd: number }>(
     `select turn_seq, sum(usd)::real as usd from spend_events
-     where month = $1 and turn_seq is not null and route in ('voice','tts','stt','reflect')
+     where month = $1 and turn_seq is not null and route in ('voice','tts','stt')
      group by turn_seq`,
     [totals.month],
   );

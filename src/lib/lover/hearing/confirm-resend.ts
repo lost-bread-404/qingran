@@ -5,7 +5,7 @@ export function lastUserMessage<T extends { id: string; role?: string; kind?: st
 ): T | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
-    if (msg?.role === "user" && msg.kind !== "steer" && msg.kind !== "setting") return msg;
+    if (msg?.role === "user") return msg;
   }
   return null;
 }

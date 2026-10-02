@@ -148,7 +148,7 @@ export function ReplayPanel({ profile }: { profile: Profile }) {
       ) : null}
       {a && b ? (
         <button type="button" className="text-left text-sm text-muted" onClick={() => setOpenInner((v) => !v)}>
-          {openInner ? "收起心思" : "展开心思"}
+          {openInner ? "收起｛｝心里话" : "展开｛｝心里话"}
         </button>
       ) : null}
       <Button type="button" variant="outline" disabled={busy || !persona.trim()} onClick={() => void adopt(persona)}>

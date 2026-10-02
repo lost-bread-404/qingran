@@ -58,7 +58,7 @@ export type StoredMessage = {
   role: "user" | "assistant";
   text: string;
   createdAt: number;
-  kind: "say" | "steer" | "setting" | "proactive" | "system_notice";
+  kind: "say" | "proactive" | "system_notice";
   archivedAt: number | null;
   sessionId: string | null;
   localDay: string | null;

@@ -20,7 +20,6 @@ import {
   listHistoryWindow,
   listRecentMessages,
 } from "../store.ts";
-import { InnerCutBuffer } from "./inner-cut.ts";
 import { BraceCut } from "./brace-cut.ts";
 import { applyProfilePatch } from "../../profile-patch.ts";
 import { buildVoiceMessages } from "./pack-build.ts";
@@ -82,14 +81,11 @@ export async function replayMessages(opts: {
 
 function sideFrom(result: CallModelResult, placement: Profile["personaPlacement"]): ReplaySide {
   const braces = new BraceCut();
-  const cut = new InnerCutBuffer();
-  cut.push(braces.push(result.text || ""));
+  const speech = braces.push(result.text || "").trim();
   braces.finish();
-  cut.finish();
-  const tail = [cut.seen ? cut.tail.trim() : "", braces.text().trim()].filter(Boolean).join("\n");
   return {
-    speech: cut.speech.trim(),
-    innerJson: tail || null,
+    speech,
+    innerJson: braces.text().trim() || null,
     error: result.ok ? null : result.failKind || "error",
     model: result.model,
     placement,

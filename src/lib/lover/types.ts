@@ -12,7 +12,7 @@ export type { HearingSense };
 
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
-export type MessageKind = "say" | "steer" | "setting" | "unheard" | "proactive" | "system_notice";
+export type MessageKind = "say" | "unheard" | "proactive" | "system_notice";
 export type VoiceEffort = "low" | "medium" | "high" | null;
 
 export const DEFAULT_VOICE_MODEL = "grok-4.20-0309-non-reasoning";
@@ -243,12 +243,7 @@ export function formatVoiceInjectLine(flags: VoiceInjectFlags): string {
 
 export function parseVoiceInjectLine(note: string | null | undefined): string | null {
   const text = note ?? "";
-  const v6 = text.match(/回忆：[开关] · 历史：至少 \d{1,2}/);
-  if (v6) return v6[0];
-  const next = text.match(/我此刻：[开关] · 我记得的：[开关] · 历史：\d{1,2}/);
-  if (next) return next[0];
-  const old = text.match(/记忆：[开关] · 长期：[开关] · 历史：\d{1,2}/);
-  return old?.[0] ?? null;
+  return text.match(/回忆：[开关] · 历史：至少 \d{1,2}/)?.[0] ?? null;
 }
 
 export function applyMemoryCursor(messages: ChatMessage[], cursor: string): ChatMessage[] {

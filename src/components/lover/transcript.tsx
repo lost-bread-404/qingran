@@ -166,13 +166,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
             className="flex flex-col gap-3"
           >
             {pair.note ? (
-              pair.note.kind === "system_notice" ? (
-                <p className="self-center px-6 text-center text-xs text-subtle">{pair.note.text}</p>
-              ) : (
-              <p className="self-end whitespace-pre-wrap text-xs text-subtle">
-                {pair.note.kind === "steer" ? "走向" : "设定"} · {pair.note.text}
-              </p>
-              )
+              <p className="self-center px-6 text-center text-xs text-subtle">{pair.note.text}</p>
             ) : null}
             {pair.user ? (
               editingId === pair.user.id ? (

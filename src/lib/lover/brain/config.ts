@@ -209,7 +209,7 @@ export const VOICE_MODELS_TTL_MS = 60 * 60 * 1000;
 export const VOICE_MODEL_BLURBS: Record<string, string> = {
   "grok-4.20-0309-non-reasoning": "不思考、首字最快、便宜；理解最浅",
   "grok-4.20-0309-reasoning": "同价，先想再答；上一代",
-  "grok-4.3": "同价，思考强度可调；Reflector 在用",
+  "grok-4.3": "同价，思考强度可调",
   "grok-4.5": "更聪明，价格约 1.6–2.4 倍，默认思考强度高、较慢",
   "grok-4.6": "官方称最聪明也最快，价格同 4.5",
   "grok-4.7": "最新旗舰，价格同 4.5",

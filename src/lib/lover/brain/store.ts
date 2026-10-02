@@ -182,7 +182,7 @@ function rowMessage(r: Record<string, unknown>): StoredMessage {
     text: String(r.body ?? ""),
     createdAt: asInt(r.created_at),
     kind:
-      r.kind === "steer" || r.kind === "setting" || r.kind === "proactive" || r.kind === "system_notice"
+      r.kind === "proactive" || r.kind === "system_notice"
         ? r.kind
         : "say",
     archivedAt: asIntOrNull(r.archived_at),

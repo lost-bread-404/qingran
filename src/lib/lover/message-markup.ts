@@ -4,9 +4,7 @@ import type { ChatMessage, MessageKind } from "./types";
 export function encodeStoredMessage(msg: ChatMessage): string {
   let text = msg.text;
   if (msg.images?.length) text = `⟦图:${msg.images.join(",")}⟧${text}`;
-  if (msg.kind === "steer") text = `⟦走向⟧${text}`;
-  else if (msg.kind === "setting") text = `⟦设定⟧${text}`;
-  else if (msg.kind === "unheard") text = `⟦未听⟧${text}`;
+  if (msg.kind === "unheard") text = `⟦未听⟧${text}`;
   if (msg.replyTo) text = `⟦回:${msg.replyTo}⟧${text}`;
   if (msg.predictedTags) {
     const events = msg.predictedTags.events?.join("+") ?? "";
@@ -41,8 +39,6 @@ export function decodeStoredBody(body: string, kindCol?: string): {
   let text = body;
   let scanned = false;
   let kind: MessageKind | undefined =
-    kindCol === "steer" ||
-    kindCol === "setting" ||
     kindCol === "say" ||
     kindCol === "unheard" ||
     kindCol === "proactive" ||
@@ -96,13 +92,7 @@ export function decodeStoredBody(body: string, kindCol?: string): {
     replyTo = reply[1];
     text = text.slice(reply[0].length);
   }
-  if (text.startsWith("⟦走向⟧")) {
-    kind = "steer";
-    text = text.slice(4);
-  } else if (text.startsWith("⟦设定⟧")) {
-    kind = "setting";
-    text = text.slice(4);
-  } else if (text.startsWith("⟦未听⟧")) {
+  if (text.startsWith("⟦未听⟧")) {
     kind = "unheard";
     text = text.slice(4);
   }

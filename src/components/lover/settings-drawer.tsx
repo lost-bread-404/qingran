@@ -27,7 +27,6 @@ import {
   LOG_RANGE_FILTERS,
   LOG_ROUTE_FILTERS,
   logRangeMs,
-  splitMindHighlight,
   type CallLogMessage,
   type LogRangeId,
 } from "@/lib/lover/call-log-view";
@@ -1222,18 +1221,7 @@ maxAlternatives: 3`}
                                   {msg.label} · {msg.role}
                                 </summary>
                                 <pre className="mt-1 whitespace-pre-wrap break-all text-muted">
-                                  {(row.route === "voice" || row.step.startsWith("voice")
-                                    ? splitMindHighlight(msg.content)
-                                    : [{ text: msg.content, mind: false }]
-                                  ).map((part, j) =>
-                                    part.mind ? (
-                                      <mark key={j} className="bg-accent/30 text-fg">
-                                        {part.text}
-                                      </mark>
-                                    ) : (
-                                      <span key={j}>{part.text}</span>
-                                    ),
-                                  )}
+                                  {msg.content}
                                   {msg.content ? "" : "（空）"}
                                 </pre>
                               </details>

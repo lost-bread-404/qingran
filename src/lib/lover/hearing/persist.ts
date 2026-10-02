@@ -16,6 +16,7 @@ import {
 } from "./tags.ts";
 import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
 import { fromPgArray, pgTextArray } from "../brain/store.ts";
+import { decodeStoredBody } from "../message-markup.ts";
 
 export type Sql = {
   <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
@@ -671,21 +672,7 @@ export async function clipLabelByTurn(sql: Sql, turnId: string): Promise<ClipLab
 }
 
 function visibleMessageBody(body: string | null): string {
-  if (!body) return "";
-  let text = body;
-  const picked = text.match(/^⟦选:[^⟧]+⟧/);
-  if (picked) text = text.slice(picked[0].length);
-  if (text.startsWith("⟦已扫⟧")) text = text.slice(4);
-  const hear = text.match(/^⟦听:[^⟧]+⟧/);
-  if (hear) text = text.slice(hear[0].length);
-  const gas = text.match(/^⟦气:[^⟧]+⟧/);
-  if (gas) text = text.slice(gas[0].length);
-  const reply = text.match(/^⟦回:[^⟧]+⟧/);
-  if (reply) text = text.slice(reply[0].length);
-  if (text.startsWith("⟦走向⟧") || text.startsWith("⟦设定⟧") || text.startsWith("⟦未听⟧")) {
-    text = text.slice(4);
-  }
-  return text;
+  return body ? decodeStoredBody(body).text : "";
 }
 
 

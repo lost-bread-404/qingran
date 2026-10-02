@@ -73,23 +73,6 @@ export function labelCallMessages(messages: Array<{ role: string; content: strin
   });
 }
 
-export type MindSpan = { text: string; mind: boolean };
-
-/** The 【我此刻】 block, through the line before the next section. */
-export function splitMindHighlight(content: string): MindSpan[] {
-  const marker = "【我此刻】";
-  const start = content.indexOf(marker);
-  if (start < 0) return [{ text: content, mind: false }];
-  const after = content.slice(start + marker.length);
-  const next = after.search(/\n【/);
-  const end = next < 0 ? content.length : start + marker.length + next;
-  const parts: MindSpan[] = [];
-  if (start > 0) parts.push({ text: content.slice(0, start), mind: false });
-  parts.push({ text: content.slice(start, end), mind: true });
-  if (end < content.length) parts.push({ text: content.slice(end), mind: false });
-  return parts;
-}
-
 export function formatCallLogPlain(opts: {
   step: string;
   model?: string | null;

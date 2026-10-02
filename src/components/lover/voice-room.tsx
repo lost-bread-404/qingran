@@ -89,7 +89,7 @@ const MAX_PHOTOS = 4;
 function lastUserSay(messages: ChatMessage[]): ChatMessage | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
-    if (msg?.role === "user" && msg.kind !== "steer" && msg.kind !== "setting") {
+    if (msg?.role === "user") {
       return msg;
     }
   }
@@ -173,7 +173,7 @@ export function VoiceRoom() {
   useEffect(() => {
     profileRef.current = profile;
     const contextTurns = collapseReplyVariants(messages)
-      .filter((m) => m.kind !== "steer" && m.kind !== "setting" && !skipsQingran(m))
+      .filter((m) => m.kind !== "system_notice" && !skipsQingran(m))
       .map((m) => ({ role: m.role, text: m.text }));
     const context = buildHearingContext(contextTurns);
     const extraKeyterms = mergeKeyterms(

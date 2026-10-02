@@ -117,13 +117,12 @@ export const appendRoomMessage = createServerFn({ method: "POST" })
   .validator((input: ChatMessage) => input)
   .handler(async ({ data }) => {
     const sql = await getSql();
-    const kind = data.kind === "steer" || data.kind === "setting" ? data.kind : "say";
     const body = encodeStoredMessage(data);
     await sql`
       insert into qingran_messages (id, role, body, created_at, kind)
-      values (${data.id}, ${data.role}, ${body}, ${data.createdAt}, ${kind})
+      values (${data.id}, ${data.role}, ${body}, ${data.createdAt}, 'say')
       on conflict (id) do update
-        set body = excluded.body, kind = excluded.kind
+        set body = excluded.body
     `;
     return { ok: true as const };
   });
@@ -147,9 +146,9 @@ export const clearRoomMessages = createServerFn({ method: "POST" }).handler(
 export const updateRoomMessage = createServerFn({ method: "POST" })
   .validator((input: ChatMessage) => input)
   .handler(async ({ data }) => {
-    const kind = data.kind === "steer" || data.kind === "setting" ? data.kind : "say";
     const { updateMessageText } = await import("./brain/store");
-    await updateMessageText(data.id, encodeStoredMessage(data), kind);
+    // The kind stays as it was (a message he wrote first stays his).
+    await updateMessageText(data.id, encodeStoredMessage(data));
     return { ok: true as const };
   });
 

@@ -14,7 +14,6 @@ import {
 } from "./talk-fail.ts";
 import { recordTtsSpend } from "./brain/spend/check";
 import { xaiCreds, xaiFetch, type XaiCred } from "./xai-auth";
-import { InnerCutBuffer, replyBodyMissing } from "./brain/voice/inner-cut";
 import { BraceCut } from "./brain/voice/brace-cut";
 import { VoiceLeveler, levelClip } from "./voice-level";
 import { withPhotos } from "./photos";
@@ -81,11 +80,8 @@ export type TalkStreamResult = {
   ms: number;
   chars: number;
   otherEvents: string;
-  /** Text after ⟦心⟧. null when the model never wrote the mark. */
-  innerTail?: string | null;
   /** What he wrote inside ｛｝: kept to himself, never shown or spoken. */
   innerNotes?: string;
-  innerCut?: boolean;
   /** Who paid: her SuperGrok subscription or the API key. */
   paidBy?: "sub" | "api";
 };
@@ -252,16 +248,16 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   let pending = "";
   let firstSpoken = true;
-  const cut = new InnerCutBuffer();
+  /** Everything shown and spoken (his ｛｝ notes are taken out by `braces`). */
+  let spoken = "";
   const braces = new BraceCut();
-  let released = false;
-  let releaseWait: Promise<void> | null = null;
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
 
   const emitVisible = (token: string) => {
     if (!token) return;
+    spoken += token;
     if (!ttftSent) {
       ttftMs = Date.now() - t0;
       emit({ t: "timing", k: "ttft_ms", ms: ttftMs });
@@ -276,43 +272,9 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     }
   };
 
-  const releaseSpoken = () => {
-    if (released || !cut.seen || replyBodyMissing(cut.speech, cut.seen)) return;
-    released = true;
-    if (pending.trim()) {
-      ensureTts().push(pending);
-      pending = "";
-      firstSpoken = false;
-    }
-    const speech = cut.speech.trim();
-    releaseWait = (async () => {
-      if (live.tts) await live.tts.finish();
-      if (!live.tts?.complete) {
-        const clip = await speakRest(speech, speed);
-        if (clip?.b) {
-          timedEmit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
-        } else {
-          fail(TALK_FAIL.tts, { status, finishReason, ms: Date.now() - t0, chars: speech.length }, true);
-        }
-      }
-      emit({ t: "text_end", speech });
-      emit({
-        t: "done",
-        speech,
-        replyId: data.replyId,
-        status,
-        finishReason,
-        ms: Date.now() - t0,
-        chars: speech.length,
-        ttftMs: ttftMs ?? undefined,
-      });
-    })();
-  };
-
   const ingestToken = (token: string) => {
     if (!token) return;
-    emitVisible(cut.push(braces.push(token)));
-    releaseSpoken();
+    emitVisible(braces.push(token));
   };
 
   const handleJson = (json: unknown) => {
@@ -370,17 +332,10 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   buf += decoder.decode();
   drainBuf(true);
   braces.finish();
-  emitVisible(cut.finish());
-  releaseSpoken();
-  if (releaseWait) await releaseWait;
-  const speech = cut.speech.trim();
-  const innerTail = cut.seen ? cut.tail : null;
-  const innerCut = cut.seen;
+  const speech = spoken.trim();
   const innerNotes = braces.text();
 
-
-  if (replyBodyMissing(cut.speech, cut.seen)) live.tts?.abort();
-  if (!released && pending.trim()) ensureTts().push(pending);
+  if (pending.trim()) ensureTts().push(pending);
   const outcome = talkFailFromResult({
     kind: "ok",
     status: status ?? 200,
@@ -389,25 +344,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     ms: Date.now() - t0,
   });
   const otherEvents = takeOtherEvents();
-  if (released) {
-    return {
-      usage,
-      ttftMs,
-      firstAudioMs,
-      model: route.model,
-      effort: route.effort,
-      ttsChars: live.tts?.chars ?? spokenForTts(speech).length,
-      paidBy: cred.kind,
-      status,
-      finishReason,
-      ms: Date.now() - t0,
-      chars: speech.length,
-      otherEvents,
-      innerTail,
-      innerCut,
-      innerNotes,
-    };
-  }
   if (outcome.message) {
     if (data.failOnEmpty && isRetryableEmptyTalk({ status: status ?? 200, finishReason, speech })) {
       live.tts?.abort();
@@ -424,8 +360,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
         ms: Date.now() - t0,
         chars: 0,
         otherEvents,
-        innerTail,
-        innerCut,
         innerNotes,
       };
     }
@@ -444,8 +378,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       ms: Date.now() - t0,
       chars: speech.length,
       otherEvents,
-      innerTail,
-      innerCut,
       innerNotes,
     };
   }
@@ -488,8 +420,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     ms: Date.now() - t0,
     chars: speech.length,
     otherEvents,
-    innerTail,
-    innerCut,
     innerNotes,
   };
 }
