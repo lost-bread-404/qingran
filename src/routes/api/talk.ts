@@ -13,6 +13,7 @@ import { talkRateHit } from "@/lib/lover/brain/spend/rate";
 import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
 import { formatVoiceInjectLine, type Profile } from "@/lib/lover/types";
+import { parseCast } from "@/lib/lover/cast";
 import { resolveTalkProfile } from "@/lib/lover/talk-profile";
 import { type TalkStreamEvent } from "@/lib/lover/stream-talk";
 import { logTalkTurn, talkFailFromResult } from "@/lib/lover/talk-fail";
@@ -137,6 +138,7 @@ export const Route = createFileRoute("/api/talk")({
                   primary,
                   safety,
                   temperature: profile.voiceTemperature,
+                  cast: parseCast(profile.voiceCast),
                 },
                 (event) => {
                   if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;

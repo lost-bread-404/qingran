@@ -34,10 +34,10 @@ export function ttsSpeed(speed: number) {
   return snapVoiceRate(speed).speed;
 }
 
-export function ttsRequestBody(text: string, language = VOICE_IO.language, speed = TTS_SPEED_NORMAL) {
+export function ttsRequestBody(text: string, language = VOICE_IO.language, speed = TTS_SPEED_NORMAL, voice = VOICE_IO.voice) {
   return {
     text,
-    voice_id: VOICE_IO.voice,
+    voice_id: voice,
     language,
     speed: clampSpeed(speed),
     text_normalization: true,

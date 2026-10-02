@@ -53,6 +53,7 @@ const PATCH_KEYS = [
   "storyline",
   "brainOn",
   "personaPlacement",
+  "voiceCast",
   "personaAck",
   "tapLeft",
   "tapRight",
