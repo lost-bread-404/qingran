@@ -2,7 +2,6 @@ import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
-import { HomophoneEdits } from "@/components/lover/homophone-edits";
 import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD, lockSttKeyterms } from "@/lib/lover/hearing/config";
@@ -1050,14 +1049,6 @@ vad_threshold: ${DEFAULT_XAI_VAD_THRESHOLD}`}
                   恢复默认词
                 </button>
               </div>
-              <HomophoneEdits
-                keyterms={profile.sttKeyterms}
-                onAdd={(term) => {
-                  const next = lockSttKeyterms([...profile.sttKeyterms, term]);
-                  setKeytermDraft(next.join("\n"));
-                  persistProfile({ sttKeyterms: next });
-                }}
-              />
               <div className="rounded-md bg-surface-2 px-3 py-3">
                 <p className="text-sm">发给 Apple 的</p>
                 <p className="mt-1 text-xs text-subtle">

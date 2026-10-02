@@ -5,13 +5,13 @@ import { callModel } from "../llm.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { getProfileData } from "../store.ts";
 import { dossierTextForModel } from "../dossier.ts";
-import { recall, recallText } from "../memory.ts";
+import { keepInner, recall, recallText, recentInner } from "../memory.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
 import { voiceInjectFromProfile } from "../../types.ts";
 import { InnerCutBuffer } from "./inner-cut.ts";
 import { BraceCut } from "./brace-cut.ts";
 import { buildVoiceMessages, type VoicePackParts } from "./pack-build.ts";
-import { recallQuery, replyHistory } from "./pack.ts";
+import { recallQuery, replyHistory, withInner } from "./pack.ts";
 
 function quietText(ms: number): string {
   const m = Math.max(1, Math.round(ms / 60_000));
@@ -35,12 +35,14 @@ export async function speakFirst(input: {
 }): Promise<{ text: string; passed: boolean; model: string; ms: number; reason: string | null }> {
   const { profile } = resolveTalkProfile(undefined, await getProfileData());
   const inject = voiceInjectFromProfile(profile);
-  const [history, us, clock, voicePrompt] = await Promise.all([
+  const [history, us, clockText, inner, voicePrompt] = await Promise.all([
     replyHistory(null, inject.history, input.nowMs, input.timeZone),
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.nowMs),
+    recentInner(input.nowMs),
     loadPrompt("voice"),
   ]);
+  const clock = withInner(clockText, inner);
   const recalled = inject.memory ? await recall(recallQuery("", history), input.nowMs) : { memories: [] };
   const parts: VoicePackParts = {
     charter: profile.systemPrompt,
@@ -77,11 +79,14 @@ export async function speakFirst(input: {
     });
     last = { model: result.model, ms: result.ms };
     if (!result.ok) continue;
+    const braces = new BraceCut();
     const cut = new InnerCutBuffer();
-    cut.push(new BraceCut().push(result.text));
+    cut.push(braces.push(result.text));
+    braces.finish();
     cut.finish();
     const text = cut.speech.trim();
     if (PASS.test(text)) return { text: "", passed: true, model: result.model, ms: result.ms, reason: null };
+    if (text) await keepInner(braces.text(), input.nowMs, input.timeZone);
     if (text) return { text: text.slice(0, 2000), passed: false, model: result.model, ms: result.ms, reason: null };
   }
   return { text: "", passed: false, model: last.model, ms: last.ms, reason: "模型没有回话" };

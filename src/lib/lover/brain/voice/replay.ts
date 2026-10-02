@@ -9,8 +9,8 @@ import { resolveTz } from "../tz.ts";
 import { identityBlock } from "../life.ts";
 import { timeFacts } from "../heart.ts";
 import { dossierTextForModel } from "../dossier.ts";
-import { recall, recallText } from "../memory.ts";
-import { recallQuery } from "./pack.ts";
+import { recall, recallText, recentInner } from "../memory.ts";
+import { recallQuery, withInner } from "./pack.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import {
   getMessage,
@@ -21,6 +21,7 @@ import {
   listRecentMessages,
 } from "../store.ts";
 import { InnerCutBuffer } from "./inner-cut.ts";
+import { BraceCut } from "./brace-cut.ts";
 import { applyProfilePatch } from "../../profile-patch.ts";
 import { buildVoiceMessages } from "./pack-build.ts";
 
@@ -69,7 +70,7 @@ export async function replayMessages(opts: {
     us,
     recall: recallText(recalled.memories),
     intimate: "",
-    clock: clockText,
+    clock: withInner(clockText, await recentInner(user.createdAt)),
     history: collapseReplyVariants(history),
     historyWindow: inject.history,
     userText: user.text,
@@ -81,10 +82,12 @@ export async function replayMessages(opts: {
 }
 
 function sideFrom(result: CallModelResult, placement: Profile["personaPlacement"]): ReplaySide {
+  const braces = new BraceCut();
   const cut = new InnerCutBuffer();
-  cut.push(result.text || "");
+  cut.push(braces.push(result.text || ""));
+  braces.finish();
   cut.finish();
-  const tail = cut.seen ? cut.tail.trim() : "";
+  const tail = [cut.seen ? cut.tail.trim() : "", braces.text().trim()].filter(Boolean).join("\n");
   return {
     speech: cut.speech.trim(),
     innerJson: tail || null,

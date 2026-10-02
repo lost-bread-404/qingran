@@ -113,7 +113,7 @@ export async function streamTicket(): Promise<StreamTicket | null> {
   let hot = hotPathHearingStt(extraKeyterms);
   if (hot.needsRefresh) {
     const refresh = backgroundRefreshHearingStt();
-    if (!hot.rules.length) {
+    if (hot.cold) {
       await Promise.race([refresh, new Promise((resolve) => setTimeout(resolve, 1500))]);
       hot = hotPathHearingStt(extraKeyterms);
     }

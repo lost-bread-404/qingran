@@ -6,7 +6,7 @@ import { brainEditMemory, brainGetMemories, brainRunNightNow } from "@/lib/lover
 type MemoryRow = {
   id: number;
   kind: "moment" | "insight";
-  source: "story" | "night" | "rosie";
+  source: "story" | "night" | "rosie" | "inner";
   day: string;
   body: string;
   thread: string;
@@ -23,7 +23,7 @@ type Loaded = {
 
 function label(m: MemoryRow): string {
   const when = m.source === "story" ? "故事线" : m.day;
-  const what = m.kind === "insight" ? "看懂的" : "";
+  const what = m.kind === "insight" ? "看懂的" : m.source === "inner" ? "心里话" : "";
   return [when, what, m.thread, `重要 ${m.importance}`, m.recalled ? `想起过 ${m.recalled} 次` : ""].filter(Boolean).join(" · ");
 }
 

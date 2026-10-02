@@ -11,15 +11,11 @@ import {
   exportReplyFlags,
   getHearingClipAudio,
   hearingLabScore,
-  listHearingConfusionRules,
   listLabeledHearingClips,
   listReplyFlags,
-  rebuildHearingConfusionRules,
-  setHearingConfusionEnabled,
   tuneHearingTone,
   unlabelHearingClip,
   unlockHearingLab,
-  type ConfusionRule,
   type LabeledClipRow,
   type ReplyFlagRow,
 } from "@/lib/lover/hearing/store";
@@ -28,7 +24,6 @@ import {
   listTurnFeedbackFn,
 } from "@/lib/lover/brain/turn-trace-fn";
 import type { TurnFeedbackRow } from "@/lib/lover/brain/turn-trace";
-import { CONFUSION_MIN_COUNT } from "@/lib/lover/hearing/confusions";
 import { formatClipVoiceLine } from "@/lib/lover/hearing/night-voice";
 import { formatToneReadingLine } from "@/lib/lover/hearing/sense";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
@@ -116,7 +111,6 @@ function HearingLabPage() {
   const [labeledPage, setLabeledPage] = useState(1);
   const labeledPageSize = 30;
   const [flags, setFlags] = useState<ReplyFlagRow[]>([]);
-  const [confusions, setConfusions] = useState<ConfusionRule[]>([]);
   const [prosodyStatus, setProsodyStatus] = useState<string | null>(null);
   const [tuneStatus, setTuneStatus] = useState<string | null>(null);
   const [labTab, setLabTab] = useState<"hearing" | "feedback">("hearing");
@@ -156,19 +150,6 @@ function HearingLabPage() {
     }
   }
 
-  async function loadConfusions(secret = password) {
-    try {
-      const next = await listHearingConfusionRules({ data: { password: secret } });
-      if (!next.ok) {
-        setStatus(next.error);
-        return;
-      }
-      setConfusions(next.rules);
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   async function loadFeedback(secret = password) {
     try {
       const next = await listTurnFeedbackFn({ data: { password: secret } });
@@ -194,7 +175,6 @@ function HearingLabPage() {
       setScore(next);
       await loadLabeled(secret, page);
       await loadFlags(secret);
-      await loadConfusions(secret);
       await loadFeedback(secret);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -565,76 +545,6 @@ function HearingLabPage() {
                 </Button>
               </div>
             ) : null}
-          </section>
-
-          <section>
-            <p className="mb-2 font-display text-lg">同音词</p>
-            <p className="mb-3 text-xs text-subtle">
-              从 ✎ edited 标注自动抽「错→对」。出现 ≥ {CONFUSION_MIN_COUNT} 次且未关闭的会在 STT 后替换。
-            </p>
-            <div className="mb-3">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={async () => {
-                  try {
-                    const next = await rebuildHearingConfusionRules({ data: { password } });
-                    setConfusions(next.rules);
-                    setStatus(`已重算同音词 ${next.rules.length} 条。`);
-                  } catch (err) {
-                    setStatus(err instanceof Error ? err.message : String(err));
-                  }
-                }}
-              >
-                重算同音词
-              </Button>
-            </div>
-            {confusions.length ? (
-              <ul className="flex flex-col gap-2">
-                {confusions.map((rule) => {
-                  const active = rule.enabled && rule.count >= CONFUSION_MIN_COUNT;
-                  return (
-                    <li key={rule.id} className="rounded-md bg-surface-2 px-3 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm">
-                            {rule.wrong} → {rule.correct}
-                            <span className="ml-2 text-xs text-subtle">
-                              {rule.count} 次{active ? " · 生效" : " · 未生效"}
-                            </span>
-                          </p>
-                          {rule.examples[0] ? (
-                            <p className="mt-1 text-xs text-subtle">
-                              例 {rule.examples[0].hyp} → {rule.examples[0].gold}
-                            </p>
-                          ) : null}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              const next = await setHearingConfusionEnabled({
-                                data: { password, id: rule.id, enabled: !rule.enabled },
-                              });
-                              setConfusions(next.rules);
-                            } catch (err) {
-                              setStatus(err instanceof Error ? err.message : String(err));
-                            }
-                          }}
-                        >
-                          {rule.enabled ? "关闭" : "打开"}
-                        </Button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="text-sm text-subtle">还没有从 edited 标注抽出的词对。</p>
-            )}
           </section>
 
           <section>

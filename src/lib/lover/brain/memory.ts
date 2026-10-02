@@ -1,4 +1,5 @@
 import { now } from "./clock.ts";
+import { localDay } from "./time.ts";
 import { sql } from "./store.ts";
 import { backgroundOf, buildIndex, fitScores, rankDocs, type Background, type SearchIndex } from "./memory-search.ts";
 import { cosine, embedConfig, embedTexts } from "./embed.ts";
@@ -400,11 +401,22 @@ export async function memoryCounts(): Promise<{ story: number; moments: number; 
 /** What he wrote inside ｛｝ lately (a game answer, his hand): shown back to him every turn, not left to recall. */
 const INNER_KEEP_MS = 16 * 3_600_000;
 
+/** What he wrote in ｛｝ this turn: kept as his own memory, never shown or spoken. */
+export async function keepInner(notes: string, atMs: number, timeZone: string): Promise<void> {
+  const body = notes.trim();
+  if (!body) return;
+  await addMemories([{ kind: "moment", source: "inner", day: localDay(atMs, timeZone), at: atMs, body, importance: 3 }]).catch(
+    (err) => console.error(err),
+  );
+}
+
 export async function recentInner(nowMs = now()): Promise<string> {
   const db = await sql();
   const rows = await db.query<{ body: string }>(
-    `select body from qr_memories where source = 'inner' and at > $1 order by at asc, id asc limit 8`,
-    [nowMs - INNER_KEEP_MS],
+    `select body from (
+       select body, at, id from qr_memories where source = 'inner' and at > $1 and at <= $2 order by at desc, id desc limit 8
+     ) t order by at asc, id asc`,
+    [nowMs - INNER_KEEP_MS, nowMs],
   );
   return rows.map((r) => String(r.body).trim()).filter(Boolean).join("\n");
 }

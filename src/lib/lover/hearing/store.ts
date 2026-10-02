@@ -31,7 +31,6 @@ import {
   dropOldHearingClipFiles,
   insertReplyFlag,
   listClipsMissingProsody,
-  listHearingConfusions,
   listLabeledClipRows,
   listReplyFlagRows,
   listScoreClipRows,
@@ -39,13 +38,10 @@ import {
   parseCues,
   patchFinalTextByTurn,
   patchReplyMessageId,
-  rebuildHearingConfusions,
-  setConfusionEnabled,
   unlabelClip,
   updateClipProsody,
   countProsodyClips,
   } from "./persist.ts";
-import { applyConfusions } from "./confusions.ts";
 import { parseTuneClips, tuneToneThresholds } from "./tone-tune.ts";
 import { lockHearingSense, previewToneReplay } from "./sense.ts";
 import { wavDurationMs, wavPeakRms, prosodyFromWav } from "./wav.ts";
@@ -65,7 +61,6 @@ import {
 } from "./tags.ts";
 
 export type { LabClipFilter, LabeledClipRow, ReplyFlagRow } from "./persist.ts";
-export type { ConfusionRule } from "./confusions.ts";
 
 export type HearingTurnPatch = {
   id: string;
@@ -234,7 +229,6 @@ export async function hearClip(data: RunHearingInput): Promise<RunHearingOutput>
   const upload_start = data.upload_start || Date.now();
   const hot = hotPathHearingStt(data.extraKeyterms ?? []);
   const extraKeyterms = hot.keyterms;
-  const confusionRules = hot.rules;
   const sttStart = Date.now();
   // xAI only (audio LLMs refuse intimate audio; requirements 第 7 节). No second engine to wait for.
   const xai = data.streamed
@@ -304,9 +298,8 @@ export async function hearClip(data: RunHearingInput): Promise<RunHearingOutput>
   let fallback = picked.fallback;
   let fallbackReason: string | undefined = picked.fallback_reason;
   const originalXai = picked.xaiText;
-  const correctStart = Date.now();
-  const corrected = applyConfusions(originalXai, confusionRules);
-  const correctMs = Date.now() - correctStart;
+  const corrected = { text: originalXai, replacements: [] as Array<{ wrong: string; correct: string }> };
+  const correctMs = 0;
   let xaiText = corrected.text;
   const durationSec = wavDurationMs(data.audioBase64) / 1000;
   const peakRms = wavPeakRms(data.audioBase64);
@@ -668,36 +661,6 @@ export const listLabeledHearingClips = createServerFn({ method: "POST" })
         pageSize: 30,
       };
     }
-  });
-
-export const listHearingConfusionRules = createServerFn({ method: "POST" })
-  .validator((input: { password: string }) => input)
-  .handler(async ({ data }) => {
-    assertLab(data.password);
-    try {
-      const sql = await getSql();
-      return { ok: true as const, rules: await listHearingConfusions(sql) };
-    } catch (err) {
-      return { ok: false as const, error: errorText(err), rules: [] };
-    }
-  });
-
-export const setHearingConfusionEnabled = createServerFn({ method: "POST" })
-  .validator((input: { password: string; id: string; enabled: boolean }) => input)
-  .handler(async ({ data }) => {
-    assertLab(data.password);
-    const sql = await getSql();
-    await setConfusionEnabled(sql, data.id, data.enabled);
-    return { ok: true as const, rules: await listHearingConfusions(sql) };
-  });
-
-export const rebuildHearingConfusionRules = createServerFn({ method: "POST" })
-  .validator((input: { password: string }) => input)
-  .handler(async ({ data }) => {
-    assertLab(data.password);
-    const sql = await getSql();
-    const rules = await rebuildHearingConfusions(sql);
-    return { ok: true as const, rules };
   });
 
 export const backfillHearingProsody = createServerFn({ method: "POST" })

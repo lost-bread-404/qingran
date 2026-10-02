@@ -88,8 +88,7 @@ export async function loadHotContext(input: {
     inject.memory ? inIntimateScene(input.nowMs) : Promise.resolve(false),
   ]);
   const recalled = inject.memory ? await recall(recallQuery(input.text, history), input.nowMs) : { memories: [], scores: [], by: "none" as const };
-  const inner = await recentInner(input.nowMs);
-  const clockWithInner = inner ? `${clockText}\n你心里记着、Rosie 看不到的：\n${inner}` : clockText;
+  const clockWithInner = withInner(clockText, await recentInner(input.nowMs));
   const charter = input.profile.systemPrompt;
   const intimate = intimateScene ? input.profile.intimateNotes.trim() : "";
   const parts: VoicePackParts = {
@@ -147,4 +146,9 @@ export async function loadHotContext(input: {
     intimateInjected: Boolean(intimate),
     personaPlacement: input.profile.personaPlacement,
   };
+}
+
+/** His own ｛｝ notes from the last 16 hours sit right under the clock, so he answers by what he decided. */
+export function withInner(clockText: string, inner: string): string {
+  return inner ? `${clockText}\n你心里记着、Rosie 看不到的：\n${inner}` : clockText;
 }
