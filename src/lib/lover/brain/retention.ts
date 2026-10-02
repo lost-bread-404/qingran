@@ -5,7 +5,7 @@ import { logRawHours } from "./log-refs.ts";
 
 const BATCH = 500;
 
-/** turn_traces / turn_feedback are kept at least 90 days and are not trimmed here. */
+/** turn_feedback (her thumbs-up) is kept and not trimmed here. */
 
 async function updateBatch(sql: string, params: unknown[]): Promise<number> {
   const db = await getSql();
@@ -30,19 +30,6 @@ async function trimLogText(nowMs: number): Promise<number> {
      )
      returning id`,
     [cutoff, BATCH],
-  );
-}
-
-async function clearTurnTails(): Promise<number> {
-  return updateBatch(
-    `update brain_turns set tail = null
-     where turn_seq in (
-       select turn_seq from brain_turns
-       where tail is not null and length(tail) > 0
-       order by turn_seq limit $1
-     )
-     returning turn_seq`,
-    [BATCH],
   );
 }
 
@@ -133,8 +120,6 @@ async function tryVacuum(): Promise<boolean> {
 
 export type RetentionResult = {
   logText: number;
-  legacyHighFreq: number;
-  tails: number;
   snapshots: number;
   spendEvents: number;
   rawLogs: number;
@@ -145,8 +130,6 @@ export type RetentionResult = {
 export async function runRetention(nowMs = now()): Promise<RetentionResult> {
   const result: RetentionResult = {
     logText: 0,
-    legacyHighFreq: 0,
-    tails: 0,
     snapshots: 0,
     spendEvents: 0,
     rawLogs: 0,
@@ -159,16 +142,11 @@ export async function runRetention(nowMs = now()): Promise<RetentionResult> {
       result.logText += n;
       if (n < BATCH) break;
     }
-    for (let i = 0; i < 40; i++) {
-      const n = await clearTurnTails();
-      result.tails += n;
-      if (n < BATCH) break;
-    }
     result.snapshots = await trimSnapshots(nowMs);
     result.spendEvents = await rollupAndTrimSpend(nowMs);
     result.rawLogs = await trimRawLogs(nowMs);
     result.spendRate = await trimSpendRate(nowMs);
-    if (result.legacyHighFreq || result.tails || result.logText) {
+    if (result.logText) {
       result.vacuum = await tryVacuum();
     }
   } catch (err) {

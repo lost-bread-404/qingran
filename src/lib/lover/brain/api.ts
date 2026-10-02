@@ -106,15 +106,11 @@ export const brainGetTurnTrace = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { getSql } = await import("../../db.ts");
     const db = await getSql();
-    const turns = await db.query<Record<string, unknown>>(
-      "select * from brain_turns where turn_seq = $1",
-      [data.turnSeq],
-    );
     const logs = await db.query<Record<string, unknown>>(
       "select * from brain_log where turn_seq = $1 order by id",
       [data.turnSeq],
     );
-    return { turn: asJson(turns[0] ?? null), logs: asJson(logs) };
+    return { logs: asJson(logs) };
   });
 
 /** One logged model call with exactly the messages it was sent (brain_log_raw) and what came back. */

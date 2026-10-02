@@ -65,7 +65,6 @@ import {
   patchHearingTurn,
   unlabelHearingByTurn,
 } from "@/lib/lover/hearing/store";
-import { markTurnInterruptedFn } from "@/lib/lover/brain/turn-trace-fn";
 import { clipSaveBanner, UNRECOGNIZED_TEXT, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
 import { nightNoiseReplyText } from "@/lib/lover/hearing/night-voice";
 import { micActionForConfirmPanel, planOpenConfirmPanel, shouldAutoSpeakReply } from "@/lib/lover/hearing/confirm-call";
@@ -1307,7 +1306,6 @@ export function VoiceRoom() {
       chatRef.current = chatRef.current.map((m) => (m.id === updated.id ? updated : m));
       setMessages(chatRef.current);
       void updateRoomMessage({ data: updated });
-      void markTurnInterruptedFn({ data: { turnId: target.id } });
     }
     inflightRef.current = null;
     speakingIdRef.current = null;

@@ -529,7 +529,7 @@ export const flagQingranReply = createServerFn({ method: "POST" })
         turnId: data.messageId,
         tags,
       });
-      const { insertTurnFeedback } = await import("../brain/turn-trace.ts");
+      const { insertTurnFeedback } = await import("../brain/turn-feedback.ts");
       await insertTurnFeedback({
         id,
         turnId: data.messageId,

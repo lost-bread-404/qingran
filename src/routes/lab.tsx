@@ -22,8 +22,8 @@ import {
 import {
   exportTurnFeedbackFn,
   listTurnFeedbackFn,
-} from "@/lib/lover/brain/turn-trace-fn";
-import type { TurnFeedbackRow } from "@/lib/lover/brain/turn-trace";
+} from "@/lib/lover/brain/turn-feedback-fn";
+import type { TurnFeedbackRow } from "@/lib/lover/brain/turn-feedback";
 import { formatClipVoiceLine } from "@/lib/lover/hearing/night-voice";
 import { formatToneReadingLine } from "@/lib/lover/hearing/sense";
 import { EMOTIONS, type CueEmotion } from "@/lib/lover/hearing/schema";
@@ -658,16 +658,9 @@ function HearingLabPage() {
                   <ul className="flex flex-col gap-3">
                     {shownFeedback.map((row) => {
                       const open = feedbackOpen === row.id;
-                      const replyText =
-                        row.trace && row.trace.reply && typeof row.trace.reply === "object"
-                          ? String((row.trace.reply as { text?: string }).text ?? "")
-                          : "";
+                      const replyText = row.reply;
                       // The moments that came back to him for that line.
-                      const retrieve =
-                        row.trace && row.trace.retrieve && typeof row.trace.retrieve === "object" && !Array.isArray(row.trace.retrieve)
-                          ? (row.trace.retrieve as { texts?: unknown }).texts
-                          : null;
-                      const recalled = Array.isArray(retrieve) ? retrieve.map(String) : [];
+                      const recalled = row.recalled;
                       return (
                         <li key={row.id} className="rounded-md bg-surface-2 px-3 py-3">
                           <button
@@ -682,7 +675,6 @@ function HearingLabPage() {
                                   ? row.tags.join(" · ")
                                   : "差"}{" "}
                               · {row.createdAt}
-                              {row.turnId ? ` · ${row.turnId.slice(0, 8)}` : ""}
                             </p>
                             {row.note ? <p className="mt-1 text-sm">{row.note}</p> : null}
                             {replyText ? (

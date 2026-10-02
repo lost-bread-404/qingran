@@ -16,7 +16,6 @@ import { formatVoiceInjectLine, type Profile } from "@/lib/lover/types";
 import { resolveTalkProfile } from "@/lib/lover/talk-profile";
 import { type TalkStreamEvent } from "@/lib/lover/stream-talk";
 import { logTalkTurn, talkFailFromResult } from "@/lib/lover/talk-fail";
-import { recordTurnTrace } from "@/lib/lover/brain/turn-trace";
 
 const SSE_PAD = 2048;
 
@@ -115,7 +114,6 @@ export const Route = createFileRoute("/api/talk")({
 
               let ttftMs: number | null = null;
               let firstAudioMs: number | null = null;
-              const interrupted = false;
               tVoice = Date.now();
               const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
               const safety = voiceSafetyPick();
@@ -206,6 +204,7 @@ export const Route = createFileRoute("/api/talk")({
                 paidBy: streamResult.paidBy,
                 finishReason: streamResult.finishReason,
                 effort: streamResult.effort == null ? null : String(streamResult.effort),
+                personaMissing: resolved.personaMissing,
                 note: formatVoiceLogNote({
                   attempts: fallback.attempts,
                   usedStrip: fallback.usedStrip,
@@ -216,35 +215,6 @@ export const Route = createFileRoute("/api/talk")({
                   injectLine: formatVoiceInjectLine(ctx.inject),
                 }),
               });
-              await recordTurnTrace({
-                turnId: replyId,
-                userMsgId,
-                turnSeq: userCreatedAt,
-                retrieve: {
-                  by: ctx.recallBy,
-                  selected: ctx.recalled.map((m) => String(m.id)),
-                  scores: ctx.refs.queryScores,
-                  texts: ctx.recalled.map((m) => m.body.slice(0, 200)),
-                },
-                live: {
-                  historyCount: ctx.historyIds.length,
-                  promptHash: ctx.charterHash,
-                  model: streamResult.model,
-                  ms: totalMs,
-                  injectMemory: ctx.inject.memory,
-                  historyWindow: ctx.inject.history,
-                  injectLine: formatVoiceInjectLine(ctx.inject),
-                  personaPlacement: ctx.personaPlacement,
-                  unexpected_state_block: streamResult.innerCut === true,
-                  persona_missing: resolved.personaMissing,
-                },
-                reply: {
-                  text: display,
-                  finishReason: streamResult.finishReason,
-                  interrupted,
-                },
-              });
-
               if (!failed && !superseded && streamResult.innerNotes) {
                 const { keepInner } = await import("@/lib/lover/brain/memory");
                 await keepInner(streamResult.innerNotes, nowMs, timeZone);

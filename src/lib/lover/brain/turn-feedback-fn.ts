@@ -11,20 +11,12 @@ function assertLab(password: string) {
   if (!secret || password !== secret) throw new Error("lab-locked");
 }
 
-export const markTurnInterruptedFn = createServerFn({ method: "POST" })
-  .validator((input: { turnId: string }) => input)
-  .handler(async ({ data }) => {
-    const { markTurnInterrupted } = await import("./turn-trace.ts");
-    await markTurnInterrupted(data.turnId);
-    return { ok: true as const };
-  });
-
 export const listTurnFeedbackFn = createServerFn({ method: "POST" })
   .validator((input: { password: string }) => input)
   .handler(async ({ data }) => {
     try {
       assertLab(data.password);
-      const { listTurnFeedback } = await import("./turn-trace.ts");
+      const { listTurnFeedback } = await import("./turn-feedback.ts");
       return { ok: true as const, rows: await listTurnFeedback() };
     } catch (err) {
       return {
@@ -39,7 +31,7 @@ export const exportTurnFeedbackFn = createServerFn({ method: "POST" })
   .validator((input: { password: string }) => input)
   .handler(async ({ data }) => {
     assertLab(data.password);
-    const { listTurnFeedback } = await import("./turn-trace.ts");
+    const { listTurnFeedback } = await import("./turn-feedback.ts");
     const rows = await listTurnFeedback(1000);
     return { kind: "qingran-turn-feedback" as const, exportedAt: new Date().toISOString(), rows };
   });

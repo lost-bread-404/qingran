@@ -1,6 +1,7 @@
 import { now } from "./clock.ts";
 import { sql } from "./store.ts";
-import type { JsonValue } from "./turn-trace.ts";
+
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 /**
  * 清然和 Rosie 现在: one short document with a size cap (docs/brain.md). The night pass rewrites it whole;

@@ -1,5 +1,4 @@
 import { appendBrainLog } from "./store.ts";
-import { insertBrainTurn } from "./observability.ts";
 import { recordLlmSpend, recordTtsSpend } from "./spend/check.ts";
 import { parseUsage, settleLlmCost, type TokenUsage } from "./usage.ts";
 import { codeVersion, maybeWriteRawLog } from "./log-refs.ts";
@@ -25,6 +24,7 @@ export async function recordVoiceTurn(opts: {
   finishReason?: string | null;
   note?: string | null;
   effort?: string | null;
+  personaMissing?: boolean;
 }): Promise<number | null> {
   const usage: TokenUsage =
     opts.usage && typeof opts.usage === "object" && "tokensIn" in (opts.usage as object)
@@ -62,7 +62,16 @@ export async function recordVoiceTurn(opts: {
     costUsdEst: settled.usdEst,
     error: opts.failed ? firstLine(note) || "stream-error" : null,
     codeVersion: codeVersion(),
-    refs: opts.ctx.refs,
+    // One record per turn: what he was given (refs) and how the turn went.
+    refs: {
+      ...opts.ctx.refs,
+      localDay: opts.localDay,
+      packMs: opts.ctx.packMs,
+      dbFirstMs: opts.ctx.dbFirstMs,
+      ttftMs: opts.ttftMs,
+      firstAudioMs: opts.firstAudioMs,
+      ...(opts.personaMissing ? { personaMissing: true } : {}),
+    },
     outputRef,
     promptKey: opts.ctx.promptKey,
     promptHash: opts.ctx.promptHash,
@@ -79,24 +88,5 @@ export async function recordVoiceTurn(opts: {
     paidBy: opts.paidBy,
   });
   if (opts.ttsChars) await recordTtsSpend(opts.ttsChars, opts.userCreatedAt, opts.paidBy);
-  await insertBrainTurn({
-    turnSeq: opts.userCreatedAt,
-    userMsgId: opts.userMsgId,
-    replyMsgId: opts.display ? opts.replyId : null,
-    localDay: opts.localDay,
-    sessionId: opts.ctx.sessionId,
-    replyChars: opts.display.length,
-    packMs: opts.ctx.packMs,
-    dbFirstMs: opts.ctx.dbFirstMs,
-    ttftMs: opts.ttftMs,
-    firstAudioMs: opts.firstAudioMs,
-    totalMs: opts.totalMs,
-    voiceModel: opts.model,
-    codeVersion: codeVersion(),
-    charterHash: opts.ctx.charterHash,
-    longtermHash: opts.ctx.longtermHash,
-    historyIds: opts.ctx.historyIds,
-    clockText: opts.ctx.clockText,
-  });
   return logId;
 }

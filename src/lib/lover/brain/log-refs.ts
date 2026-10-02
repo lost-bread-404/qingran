@@ -18,6 +18,18 @@ export type VoiceRefs = {
   timeZone: string;
   injectMemory?: boolean;
   historyWindow?: number;
+  /** Found by meaning or by words ("none" with memory off). */
+  recallBy?: string;
+  /** The moments that came back to him, first 200 characters each (for looking back at a turn she liked). */
+  recalled?: string[];
+  personaPlacement?: "system" | "first_user";
+  /** Filled in when the turn is logged: how the turn went. */
+  localDay?: string;
+  packMs?: number;
+  dbFirstMs?: number;
+  ttftMs?: number | null;
+  firstAudioMs?: number | null;
+  personaMissing?: boolean;
 };
 
 export function codeVersion(): string {
