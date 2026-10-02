@@ -792,7 +792,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               </label>
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
-                  <p className="text-sm">上下文至少几条（今天的对话总会全带上）</p>
+                  <p className="text-sm">上下文至少几条（今天的对话都带上；超过 200 条就先整理进回忆，再从最近 20 条接着带）</p>
                   <p className="text-sm tabular-nums">{historyWindow}</p>
                 </div>
                 <input

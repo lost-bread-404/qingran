@@ -4,11 +4,17 @@ export type JobStatus = "pending" | "running" | "done" | "failed";
 export type BrainMeta = {
   lastReportMonth: string;
   timeZone: string;
+  /**
+   * When today's talk grew past what the reply is given, it was folded into his memory and the reply starts again
+   * from here (the last few messages before the fold). 0 = never; a cut before today's 04:00 no longer applies.
+   */
+  contextFrom: number;
 };
 
 export const EMPTY_META: BrainMeta = {
   lastReportMonth: "",
   timeZone: "America/New_York",
+  contextFrom: 0,
 };
 
 export type BrainJob = {

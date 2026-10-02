@@ -1,6 +1,6 @@
 import { callModel, type CallModelResult } from "./llm.ts";
 import { now } from "./clock.ts";
-import { appendInnerLog, getMeta, getProfileData, getProfilePrompt, patchBrainLog, sql } from "./store.ts";
+import { appendInnerLog, getMeta, getProfileData, getProfilePrompt, patchBrainLog, patchMeta, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
 import { clockOf, localDay } from "./time.ts";
 import { lockedProfile } from "../types.ts";
@@ -12,7 +12,7 @@ import { identityBlock } from "./life.ts";
 import { readIdentity } from "./life-store.ts";
 import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
-import { dayClockMs, dayWindow, saveDayTimeline } from "./heart.ts";
+import { appendDayTimeline, dayClockMs, dayWindow, saveDayTimeline } from "./heart.ts";
 import { addFeedback, addMemories, embedMissing, getMark, listMemories, memoriesWithIds, setMark, syncStory, updateMemory, type NewMemory } from "./memory.ts";
 
 /**
@@ -102,19 +102,32 @@ function str(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export async function runNight(day: string, jobId?: string, complete: typeof callModel = callModel): Promise<{ ok: boolean; skipped?: string }> {
+/**
+ * One day (or, with `upto`, the day so far: a fold). A day folded earlier is only read from where the fold stopped,
+ * so nothing is put into his memory twice.
+ */
+export async function runNight(
+  day: string,
+  jobId?: string,
+  complete: typeof callModel = callModel,
+  opts: { upto?: number } = {},
+): Promise<{ ok: boolean; skipped?: string }> {
   const at = now();
   const tz = resolveTz((await getMeta()).timeZone);
   const window = dayWindow(day, tz);
+  const folded = Number(await getMark(`day:${day}:upto`)) || 0;
+  const from = Math.max(window.from, folded);
+  const to = opts.upto ? Math.min(opts.upto, window.to) : window.to;
   const [rows, profileData, charter, us, ident] = await Promise.all([
-    dayMessages(window.from, window.to),
+    dayMessages(from, to),
     getProfileData(),
     getProfilePrompt(),
     dossierTextForModel(),
     readIdentity(),
   ]);
   if (!rows.length) {
-    await setMark(`day:${day}`, "empty", at);
+    if (opts.upto) return { ok: true, skipped: "empty" };
+    await setMark(`day:${day}`, folded ? "done" : "empty", at);
     return { ok: true, skipped: "empty" };
   }
   const profile = lockedProfile(profileData);
@@ -173,11 +186,22 @@ export async function runNight(day: string, jobId?: string, complete: typeof cal
   await addFeedback(complaints, at);
   const nextUs = str(json.us);
   if (nextUs) await publishMemory(nextUs, "night", Math.min(window.to, at), { day, changes: str(json.changes).slice(0, 1000) });
-  await saveDayTimeline(day, str(json.timeline), at);
-  await setMark(`day:${day}`, "done", at);
+  if (from > window.from) await appendDayTimeline(day, str(json.timeline), at);
+  else await saveDayTimeline(day, str(json.timeline), at);
+  if (opts.upto) await setMark(`day:${day}:upto`, String(to), at);
+  else await setMark(`day:${day}`, "done", at);
   await embedMissing().catch(() => 0);
   await appendInnerLog({ turnSeq: 0, data: { kind: "night", day, output: result.json }, model: result.model, ms: result.ms });
   return { ok: true };
+}
+
+/**
+ * Today's talk grew past what the reply is given: fold the day so far into his memory now, then the reply starts
+ * again from `keepFrom` (the last few messages). A day whose night pass already ran is not folded again.
+ */
+export async function foldTalk(day: string, upto: number, keepFrom: number, jobId?: string): Promise<void> {
+  if ((await getMark(`day:${day}`)) !== "done") await runNight(day, jobId, callModel, { upto });
+  if (Number.isFinite(keepFrom) && keepFrom > 0) await patchMeta({ contextFrom: keepFrom });
 }
 
 /** The oldest day that has ended (04:00 local) and has messages, but is not in his memory yet. */

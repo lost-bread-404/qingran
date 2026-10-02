@@ -2,7 +2,8 @@ import { timeFacts, dayWindow } from "../heart.ts";
 import { decodeStoredBody, mergeEditedUserBody, modelFacingText, photoNote } from "../../message-markup.ts";
 import { NEUTRAL_PERSONA, personaText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
-import { getMessage, listHistoryWindow, upsertMessage } from "../store.ts";
+import { getMessage, getMeta, listHistoryWindow, upsertMessage } from "../store.ts";
+import { enqueue } from "../jobs.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import { identityBlock } from "../life.ts";
@@ -34,19 +35,45 @@ export type HotContext = {
   personaPlacement: "system" | "first_user";
 };
 
-/** The most the reply is given of today's talk, however long the day has been. */
-const TODAY_MAX = 200;
+/** The most the reply is given of today's talk. Past this, the talk so far is folded into his memory. */
+export const TODAY_MAX = 200;
+/** After a fold, the reply starts again from this many of the last messages, and grows from there. */
+export const KEEP_AFTER_FOLD = 20;
 
 /**
  * The talk the reply sees: everything since 04:00 today, and at least `min` messages (so a new morning still has
- * last night). Context is his brain; the day's talk is short enough to give whole.
+ * last night). Context is his brain. When today's talk grows past TODAY_MAX (`fold`: the reply, with memory on),
+ * everything so far is folded into his memory right away (a night pass on the day so far); until that is done he
+ * still gets the last TODAY_MAX, after it he gets the last KEEP_AFTER_FOLD from the fold on (requirements 第 4 节).
  */
-export async function replyHistory(excludeId: string | null, min: number, nowMs: number, timeZone: string): Promise<StoredMessage[]> {
-  const from = dayWindow(localDay(nowMs, timeZone), timeZone).from;
-  const rows = await listHistoryWindow(excludeId, TODAY_MAX);
-  const firstToday = rows.findIndex((m) => m.createdAt >= from);
-  const start = Math.min(firstToday < 0 ? rows.length : firstToday, Math.max(0, rows.length - min));
-  return rows.slice(start);
+export async function replyHistory(
+  excludeId: string | null,
+  min: number,
+  nowMs: number,
+  timeZone: string,
+  opts: { fold?: boolean } = {},
+): Promise<StoredMessage[]> {
+  const day = localDay(nowMs, timeZone);
+  const from = dayWindow(day, timeZone).from;
+  const [rows, meta] = await Promise.all([listHistoryWindow(excludeId, TODAY_MAX + 1), getMeta()]);
+  const cut = Number(meta.contextFrom) || 0;
+  let start: number;
+  if (cut > from) {
+    const at = rows.findIndex((m) => m.createdAt >= cut);
+    start = at < 0 ? rows.length : at;
+  } else {
+    const firstToday = rows.findIndex((m) => m.createdAt >= from);
+    start = Math.min(firstToday < 0 ? rows.length : firstToday, Math.max(0, rows.length - min));
+  }
+  const talk = rows.slice(start);
+  if (talk.length <= TODAY_MAX) return talk;
+  const shown = talk.slice(-TODAY_MAX);
+  if (opts.fold) {
+    const keepFrom = shown[shown.length - KEEP_AFTER_FOLD]?.createdAt ?? nowMs;
+    // One fold per stretch of talk (keyed by where this stretch began).
+    await enqueue("night", `fold:${day}:${cut}`, { day, upto: nowMs, keepFrom }).catch((err) => console.error(err));
+  }
+  return shown;
 }
 
 /** What she is talking about now: her line (weighted), and the few lines before it. */
@@ -84,7 +111,7 @@ export async function loadHotContext(input: {
   // Memory off → persona + context only.
   const inject = voiceInjectFromProfile(input.profile);
   const [history, us, clockText, voicePrompt] = await Promise.all([
-    replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone),
+    replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone, { fold: inject.memory }),
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
     loadPrompt("voice"),

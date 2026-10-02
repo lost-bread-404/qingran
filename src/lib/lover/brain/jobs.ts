@@ -54,8 +54,10 @@ async function runOne(job: BrainJob): Promise<void> {
     return;
   }
   if (job.type === "night") {
-    const { runNight } = await import("./night");
-    await runNight(String(job.payload.day ?? ""), job.id);
+    const { runNight, foldTalk } = await import("./night");
+    const day = String(job.payload.day ?? "");
+    if (job.payload.upto) await foldTalk(day, Number(job.payload.upto), Number(job.payload.keepFrom), job.id);
+    else await runNight(day, job.id);
     await finishJob(job.id, "done");
     return;
   }
@@ -98,7 +100,8 @@ export async function drainJobs(budgetMs = DRAIN_BUDGET_MS): Promise<number> {
       } else {
         await finishJob(job.id, "failed", { error: message });
         // A day that keeps failing is set aside, so the days after it still get their night pass.
-        if (job.type === "night" && job.payload.day) {
+        // (A fold that keeps failing just leaves the reply on the last 200 messages; the night pass still comes.)
+        if (job.type === "night" && job.payload.day && !job.payload.upto) {
           const { setMark } = await import("./memory.ts");
           await setMark(`day:${String(job.payload.day)}`, "failed").catch(() => undefined);
         }

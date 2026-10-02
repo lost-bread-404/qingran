@@ -102,6 +102,20 @@ export async function timeFacts(
 
 // ---------- days ----------
 
+/** A later part of a day that was folded in earlier: its timeline goes after what is there. */
+export async function appendDayTimeline(day: string, timeline: string, at: number): Promise<void> {
+  if (!timeline.trim()) return;
+  const db = await sql();
+  await db.query(
+    `insert into qr_days (day, timeline, updated_at) values ($1, $2, $3)
+     on conflict (day) do update
+       set timeline = left(case when qr_days.timeline = '' then excluded.timeline
+                                else qr_days.timeline || E'\n' || excluded.timeline end, 6000),
+           updated_at = excluded.updated_at`,
+    [day, timeline.slice(0, 3000), at],
+  );
+}
+
 export async function saveDayTimeline(day: string, timeline: string, at: number): Promise<void> {
   const db = await sql();
   await db.query(
