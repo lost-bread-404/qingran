@@ -22,7 +22,7 @@ export type PromptPreview = {
 
 /** What the reply would be given right now, with 「在吗」 standing in for her line. */
 async function voicePreview(body: string | undefined, variantId: string): Promise<Omit<PromptPreview, "variantId">> {
-  const first = variantId === "first" ? { quiet: "45 分钟" } : undefined;
+  const first = variantId === "first" ? { quiet: "快一个小时" } : undefined;
   const userText = first ? "" : "在吗";
   const at = now();
   const [meta, profileData] = await Promise.all([getMeta(), getProfileData()]);
@@ -33,7 +33,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
   const [history, us, clock] = await Promise.all([
     replyHistory(null, inject.history, at, tz),
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
-    timeFacts(at, tz, at),
+    timeFacts(at, tz, at, { sinceLast: !first }),
   ]);
   const recalled = inject.memory ? await recall(recallQuery(userText, history), at) : { memories: [] };
   const recallBlock = recallText(recalled.memories);

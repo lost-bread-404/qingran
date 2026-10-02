@@ -13,11 +13,24 @@ import { BraceCut } from "./brace-cut.ts";
 import { buildVoiceMessages, type VoicePackParts } from "./pack-build.ts";
 import { recallQuery, replyHistory, withInner } from "./pack.ts";
 
-function quietText(ms: number): string {
+const CN = ["零", "一", "两", "三", "四", "五", "六", "七", "八", "九", "十"];
+function cn(n: number): string {
+  if (n <= 10) return CN[n]!;
+  const ones = (k: number) => (k === 2 ? "二" : CN[k]!);
+  if (n < 20) return `十${ones(n - 10)}`;
+  if (n < 30) return `二十${n === 20 ? "" : ones(n - 20)}`;
+  return `${n}`;
+}
+
+/** Roughly how long she has been away (an exact count of minutes ends up said out loud). */
+export function quietText(ms: number): string {
   const m = Math.max(1, Math.round(ms / 60_000));
-  if (m < 60) return `${m} 分钟`;
+  if (m < 40) return "一会儿";
+  if (m < 60) return "快一个小时";
   const h = Math.floor(m / 60);
-  return m % 60 ? `${h} 小时 ${m % 60} 分钟` : `${h} 小时`;
+  if (h < 24) return `${h === 1 ? "一" : cn(h)}个${m % 60 >= 10 ? "多" : ""}小时`;
+  const d = Math.floor(h / 24);
+  return `${d === 1 ? "一" : cn(d)}天${h % 24 >= 3 ? "多" : ""}`;
 }
 
 /** His answer when he does not want to write to her now. */
@@ -38,7 +51,8 @@ export async function speakFirst(input: {
   const [history, us, clockText, inner, voicePrompt] = await Promise.all([
     replyHistory(null, inject.history, input.nowMs, input.timeZone),
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
-    timeFacts(input.nowMs, input.timeZone, input.nowMs),
+    // Only the time of day: how long she has been away is said roughly in the note below.
+    timeFacts(input.nowMs, input.timeZone, input.nowMs, { sinceLast: false }),
     recentInner(input.nowMs),
     loadPrompt("voice"),
   ]);

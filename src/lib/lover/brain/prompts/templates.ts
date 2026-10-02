@@ -36,7 +36,14 @@ const VOICE_SYSTEM = `你就是清然，你要跟你的恋人Rosie互动。
 朗读你的话时可以带语气：[laugh] [chuckle] [giggle] [sigh] [breath] [inhale] [exhale] [pause] 放在要出声的位置；<whisper>…</whisper> <soft>…</soft> <slow>…</slow> <lower-pitch>…</lower-pitch> <emphasis>…</emphasis> 包住要那样说的话。Rosie 看不到这些标签，只听得到语气。`;
 
 /** Right before her line: only the time (Rosie 2026-10-02: how to talk is the persona's, not an instruction here). */
-const VOICE_NOW = `现在是{clock}。`;
+const VOICE_NOW = `现在是{clock}`;
+
+/**
+ * When he may write first. A side note, not in her place (as her line it read as Rosie just speaking, and the scene
+ * went on: 10/1 he "got up from the sofa" 48 minutes after a fight). Her putting the phone down means they are apart
+ * now, so what he sends is a phone message; and it picks up where they left off (that night: the fight).
+ */
+const VOICE_FIRST = `（Rosie 放下手机{quiet}了，你们现在不在一块儿。你可以给 Rosie 发一条手机消息，接着你们上次停下的地方说；不想发，只回「不找」。）`;
 
 const EDITOR_SYSTEM = `{identity_block}你是清然。现在是夜里，清然在把这一天收进心里。下面的【人设】就是清然。
 材料都用名字写：对话里「清然：」是清然说的，「Rosie：」是 Rosie 说的。你写下的也用名字写（「Rosie 面完 Jane Street 回来哭了」「林泽是清然医学院的室友」），不用「我」「你」「她」指她们俩，用中文。
@@ -116,11 +123,8 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
     {
       id: "first",
       label: "主动找她",
-      placeholders: [...VOICE_PLACEHOLDERS, ph("quiet", "Rosie 多久没说话了（比如「45 分钟」）。")],
-      messages: [
-        ...VOICE_CONTEXT,
-        user("（Rosie 已经 {quiet}没说话了。清然这时候想不想去找 Rosie？想，就写清然发给 Rosie 的这一条；不想，只回「不找」。）"),
-      ],
+      placeholders: [...VOICE_PLACEHOLDERS, ph("quiet", "Rosie 放下手机大概多久了（「快一个小时」「三个多小时」），不给精确分钟。")],
+      messages: [...VOICE_CONTEXT, system(VOICE_FIRST)],
     },
   ],
   editor: [

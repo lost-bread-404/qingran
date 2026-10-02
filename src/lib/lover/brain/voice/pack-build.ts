@@ -108,9 +108,11 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
     (message) => message.role !== "system" || message.content.trim(),
   ) as VoiceChatMessage[];
   if (strip === "thin") {
-    // Persona, recent talk, her line: the first system message and everything that is not a system message.
+    // Persona, recent talk, her line (or the note that he may write first): the first system message, everything
+    // that is not a system message, and the last message.
     const first = rendered.findIndex((message) => message.role === "system");
-    rendered = rendered.filter((message, i) => message.role !== "system" || i === first);
+    const last = rendered.length - 1;
+    rendered = rendered.filter((message, i) => message.role !== "system" || i === first || i === last);
   }
   if (parts.userImages?.length) {
     // Her photos go with her line, the last thing he is given.
@@ -132,7 +134,8 @@ export function placePersona<T extends { role: string; content: string }>(
   const persona = opts.charter.trim() || NEUTRAL_PERSONA;
   const ack = opts.ack.trim() || "嗯。";
   const at = messages.findIndex((message) => message.role !== "system");
-  const index = at < 0 ? messages.length : at;
+  // No talk at all (he writes first on an empty day): still before the last note.
+  const index = at < 0 ? Math.max(0, messages.length - 1) : at;
   const block = [
     { role: "user", content: persona },
     { role: "assistant", content: ack },
