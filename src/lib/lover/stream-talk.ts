@@ -1,7 +1,9 @@
 import WebSocket from "ws";
 import { applyAvailabilityFallback, checkModelAvailability, resolveRoute, VOICE_IO, type Effort } from "./brain/config";
 import { spokenForTts } from "./speech-tags";
-import { shouldFlushSpoken, ttsRequestBody, ttsSpeed } from "./tts";
+import { shouldFlushSpoken, ttsSpeed } from "./tts";
+import { SpeakerCut, type Cast } from "./cast";
+import { PCM_MIME, speakWhole } from "./speak";
 import type { VoiceChatMessage } from "./brain/types";
 import {
   TALK_FAIL,
@@ -15,11 +17,10 @@ import {
 import { recordTtsSpend } from "./brain/spend/check";
 import { xaiCreds, xaiFetch, type XaiCred } from "./xai-auth";
 import { BraceCut } from "./brain/voice/brace-cut";
-import { VoiceLeveler, levelClip } from "./voice-level";
+import { VoiceLeveler } from "./voice-level";
 import { withPhotos } from "./photos";
 
 const MAX_INPUT = 2000;
-const PCM_MIME = `audio/pcm;rate=${VOICE_IO.sampleRate}`;
 
 export type TalkStreamEvent =
   | { t: "text"; d: string }
@@ -58,6 +59,8 @@ export type TalkStreamInput = {
   timeoutMs?: number;
   /** Her setting (profile.voiceTemperature). Missing → 1.0. */
   temperature?: number;
+  /** Other people's voices (profile.voiceCast, parsed). */
+  cast?: Cast;
 };
 
 type Emit = (event: TalkStreamEvent) => void;
@@ -152,11 +155,12 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     }
     emit(event);
   };
-  const live: { tts: LiveTts | null } = { tts: null };
+  const live: { tts: VoiceChain | null } = { tts: null };
   const ensureTts = () => {
-    live.tts ??= new LiveTts(cred, timedEmit, speed);
+    live.tts ??= new VoiceChain(cred, timedEmit, speed);
     return live.tts;
   };
+  const cast = data.cast ?? {};
 
   const fail = (message: string, log: ReturnType<typeof talkFailFromResult>["log"], ttsOnly = false) => {
     logTalkTurn(log);
@@ -246,8 +250,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     return emptyResult({ model: route.model, effort: route.effort, status, ms: Date.now() - t0, otherEvents: "empty body" });
   }
 
-  let pending = "";
-  let firstSpoken = true;
+  const speakers = new SpeakerCut(cast);
   /** Everything shown and spoken (his ｛｝ notes are taken out by `braces`). */
   let spoken = "";
   const braces = new BraceCut();
@@ -263,13 +266,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       emit({ t: "timing", k: "ttft_ms", ms: ttftMs });
       ttftSent = true;
     }
-    pending += token;
     emit({ t: "text", d: token });
-    if (shouldFlushSpoken(pending, firstSpoken)) {
-      ensureTts().push(pending);
-      pending = "";
-      firstSpoken = false;
-    }
+    for (const part of speakers.push(token)) ensureTts().say(part.voice, part.text);
   };
 
   const ingestToken = (token: string) => {
@@ -335,7 +333,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   const speech = spoken.trim();
   const innerNotes = braces.text();
 
-  if (pending.trim()) ensureTts().push(pending);
+  for (const part of speakers.finish()) ensureTts().say(part.voice, part.text);
+  live.tts?.flush();
   const outcome = talkFailFromResult({
     kind: "ok",
     status: status ?? 200,
@@ -388,10 +387,10 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   let ttsChars = live.tts?.chars ?? 0;
   if (!live.tts?.complete) {
-    const clip = await speakRest(speech, speed);
-    if (clip?.b) {
-      timedEmit({ t: "audio", i: 0, b: clip.b, m: clip.m, replace: true });
-      ttsChars = spokenForTts(speech).length;
+    const clip = await speakWhole(speech, cast, speed);
+    if (clip.ok) {
+      timedEmit({ t: "audio", i: 0, b: clip.audio.toString("base64"), m: clip.mime, replace: true });
+      ttsChars = clip.chars;
     } else {
       fail(TALK_FAIL.tts, { ...outcome.log, chars: speech.length }, true);
     }
@@ -424,6 +423,102 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   };
 }
 
+/**
+ * The live voice of one reply. Each stretch by one person is his own xAI stream in his voice (the voice is fixed
+ * when the stream opens); all of them are read at once, and their audio goes out in the order they were written.
+ */
+class VoiceChain {
+  private segments: Array<{ voice: string; tts: LiveTts; pending: string; first: boolean; held: Array<{ b: string; m: string }>; ended: boolean }> = [];
+  private head = 0;
+  private seq = 0;
+  private finishing: Promise<void>[] = [];
+  private aborted = false;
+
+  constructor(
+    private cred: XaiCred,
+    private emit: Emit,
+    private speed: number,
+  ) {}
+
+  /** Text for this voice; a new voice closes the stretch before it. */
+  say(voice: string, text: string) {
+    let seg = this.segments[this.segments.length - 1];
+    if (!seg || seg.voice !== voice) {
+      // Nothing to read yet (blank lines, bold marks, a lone quote): no stream of its own until there is.
+      if (this.aborted || !/[\p{L}\p{N}[<]/u.test(text)) return;
+      if (seg) this.close(seg);
+      const index = this.segments.length;
+      seg = { voice, tts: null as unknown as LiveTts, pending: "", first: index === 0, held: [], ended: false };
+      this.segments.push(seg);
+      seg.tts = new LiveTts(this.cred, voice, this.speed, {
+        audio: (b, m) => this.audio(index, b, m),
+        end: () => this.ended(index),
+      });
+    }
+    seg.pending += text;
+    if (shouldFlushSpoken(seg.pending, seg.first)) {
+      seg.tts.push(seg.pending);
+      seg.pending = "";
+      seg.first = false;
+    }
+  }
+
+  /** What is still waiting in the last stretch. */
+  flush() {
+    const seg = this.segments[this.segments.length - 1];
+    if (seg?.pending.trim()) seg.tts.push(seg.pending);
+    if (seg) seg.pending = "";
+  }
+
+  private close(seg: (typeof this.segments)[number]) {
+    if (seg.pending.trim()) seg.tts.push(seg.pending);
+    seg.pending = "";
+    this.finishing.push(seg.tts.finish());
+  }
+
+  private audio(index: number, b: string, m: string) {
+    if (this.aborted) return;
+    if (index === this.head) this.emit({ t: "audio", i: this.seq++, b, m });
+    else this.segments[index]?.held.push({ b, m });
+  }
+
+  private ended(index: number) {
+    if (this.aborted) return;
+    const seg = this.segments[index];
+    if (seg) seg.ended = true;
+    while (this.segments[this.head]?.ended) {
+      this.head += 1;
+      const next = this.segments[this.head];
+      if (!next) break;
+      for (const clip of next.held) this.emit({ t: "audio", i: this.seq++, b: clip.b, m: clip.m });
+      next.held = [];
+    }
+  }
+
+  async finish() {
+    const last = this.segments[this.segments.length - 1];
+    if (last) this.close(last);
+    await Promise.all(this.finishing);
+  }
+
+  abort() {
+    // Nothing held for later stretches goes out after this.
+    this.aborted = true;
+    for (const seg of this.segments) seg.tts.abort();
+  }
+
+  get chars() {
+    return this.segments.reduce((n, seg) => n + seg.tts.chars, 0);
+  }
+
+  /** Every stretch was read to the end. */
+  get complete() {
+    return this.segments.length > 0 && this.segments.every((seg) => seg.tts.complete);
+  }
+}
+
+type TtsSink = { audio: (b: string, m: string) => void; end: () => void };
+
 class LiveTts {
   gotAudio = false;
   private level = new VoiceLeveler();
@@ -433,20 +528,25 @@ class LiveTts {
   private opened = false;
   private failed = false;
   private closed = false;
-  private seq = 0;
   private queued: string[] = [];
   private waitDone: Promise<void>;
+  /** Settles when the socket opens or is given up. */
+  private opening: Promise<void>;
+  private resolveOpening = () => undefined as void;
   private resolveDone = () => undefined as void;
   private rejectDone = (_err: Error) => undefined as void;
 
   private cred: XaiCred;
-  private emit: Emit;
+  private sink: TtsSink;
   private speed: number;
 
-  constructor(cred: XaiCred, emit: Emit, speed = 1) {
+  constructor(cred: XaiCred, voice: string, speed: number, sink: TtsSink) {
     this.cred = cred;
-    this.emit = emit;
+    this.sink = sink;
     this.speed = speed;
+    this.opening = new Promise<void>((resolve) => {
+      this.resolveOpening = resolve;
+    });
     this.waitDone = new Promise<void>((resolve, reject) => {
       this.resolveDone = resolve;
       this.rejectDone = reject;
@@ -454,7 +554,7 @@ class LiveTts {
 
     const params = new URLSearchParams({
       language: VOICE_IO.language,
-      voice: VOICE_IO.voice,
+      voice,
       codec: VOICE_IO.codec,
       sample_rate: String(VOICE_IO.sampleRate),
       text_normalization: "true",
@@ -469,8 +569,10 @@ class LiveTts {
       this.socket = socket;
       socket.on("open", () => {
         this.opened = true;
-        for (const delta of this.queued) this.send(delta);
+        const queued = this.queued;
         this.queued = [];
+        for (const delta of queued) this.send(delta);
+        this.resolveOpening();
       });
       socket.on("message", (raw: WebSocket.RawData) => this.onMessage(raw));
       socket.on("error", () => {
@@ -488,12 +590,8 @@ class LiveTts {
       }, 8_000);
     } catch {
       this.failed = true;
-      this.resolveDone();
+      this.finishSocket();
     }
-  }
-
-  setEmit(emit: Emit) {
-    this.emit = emit;
   }
 
   push(text: string) {
@@ -508,6 +606,9 @@ class LiveTts {
   }
 
   async finish() {
+    if (this.closed) return;
+    // A short stretch can be done before its socket is open (another person's stream opens mid-reply): wait for it.
+    if (!this.opened && !this.failed && this.socket) await this.opening;
     if (this.closed) return;
     if (this.failed || !this.socket || !this.opened) {
       this.finishSocket();
@@ -552,8 +653,7 @@ class LiveTts {
     }
     if (event.type === "audio.delta" && event.delta) {
       this.gotAudio = true;
-      this.emit({ t: "audio", i: this.seq, b: this.level.base64(event.delta), m: PCM_MIME });
-      this.seq += 1;
+      this.sink.audio(this.level.base64(event.delta), PCM_MIME);
       return;
     }
     if (event.type === "audio.done") {
@@ -571,6 +671,8 @@ class LiveTts {
     if (this.closed) return;
     this.closed = true;
     this.resolveDone();
+    this.resolveOpening();
+    this.sink.end();
     if (this.chars) void recordTtsSpend(this.chars, null, this.cred.kind);
     try {
       this.socket?.close();
@@ -578,29 +680,5 @@ class LiveTts {
       /* ignore */
     }
     this.socket = null;
-  }
-}
-
-async function speakRest(text: string, speed: number): Promise<{ b: string; m: string } | null> {
-  const spoken = spokenForTts(text);
-  if (!spoken) return null;
-  try {
-    const sent = await xaiFetch(VOICE_IO.ttsUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ttsRequestBody(spoken, VOICE_IO.language, speed)),
-      signal: AbortSignal.timeout(40_000),
-    });
-    if (!sent?.res.ok) return null;
-    const res = sent.res;
-    void recordTtsSpend(spoken.length, null, sent.cred.kind);
-    const mime = res.headers.get("content-type") || PCM_MIME;
-    const buf = levelClip(Buffer.from(await res.arrayBuffer()), mime);
-    return {
-      b: buf.toString("base64"),
-      m: mime,
-    };
-  } catch {
-    return null;
   }
 }

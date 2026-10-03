@@ -70,6 +70,8 @@ export type Profile = {
   brainOn: boolean;
   /** Where the persona text sits: system prompt, or the first user message. */
   personaPlacement: "system" | "first_user";
+  /** Other people's voices, one per line 「林泽 lux」 (src/lib/lover/cast.ts). 清然 is Eve. */
+  voiceCast: string;
   /** With the persona as the first message: his line right after it (a fixed line, no model call). */
   personaAck: string;
   /** In a call, what tapping the space left / right of the hang-up button adds to what she says (empty: nothing). */
@@ -146,6 +148,7 @@ export const DEFAULT_PROFILE: Profile = {
   storyline: "",
   brainOn: true,
   personaPlacement: "system",
+  voiceCast: "",
   personaAck: "嗯。",
   tapLeft: "嗯～",
   tapRight: "哼",
@@ -187,6 +190,7 @@ type LooseProfile = Partial<Profile> & {
   storyline?: string;
   brainOn?: boolean;
   personaPlacement?: string;
+  voiceCast?: string;
   personaAck?: string;
   tapLeft?: string;
   tapRight?: string;
@@ -227,6 +231,7 @@ export function lockedProfile(input?: unknown): Profile {
     storyline: typeof raw.storyline === "string" ? raw.storyline.slice(0, 20000) : "",
     brainOn: raw.brainOn !== false,
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
+    voiceCast: typeof raw.voiceCast === "string" ? raw.voiceCast.slice(0, 1000) : "",
     personaAck: typeof raw.personaAck === "string" && raw.personaAck.trim() ? raw.personaAck.trim().slice(0, 200) : "嗯。",
     tapLeft: typeof raw.tapLeft === "string" ? raw.tapLeft.trim().slice(0, 200) : "嗯～",
     tapRight: typeof raw.tapRight === "string" ? raw.tapRight.trim().slice(0, 200) : "哼",

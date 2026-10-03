@@ -31,6 +31,7 @@ import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/s
 import type { AcousticTags } from "@/lib/lover/hearing/tags";
 import { countReplyDownTags, type ReplyDownTag } from "@/lib/lover/reply-feedback";
 import { cn } from "@/lib/utils";
+import { checkSpeechTags, type ToneResult } from "@/lib/lover/tone-check";
 
 export const Route = createFileRoute("/lab")({ component: HearingLabPage });
 
@@ -591,6 +592,8 @@ function HearingLabPage() {
             </div>
           </section>
 
+          <ToneCheck password={password} />
+
           <section>
             <Button
               type="button"
@@ -845,4 +848,57 @@ function fmtPct(n: number | null) {
 
 function isEmotion(value: string | null | undefined): value is CueEmotion {
   return typeof value === "string" && (EMOTIONS as readonly string[]).includes(value);
+}
+
+/** 语气标签有没有用：同一句话八种读法，听一听、看音量和 xAI 听到的字。 */
+function ToneCheck({ password }: { password: string }) {
+  const [rows, setRows] = useState<ToneResult[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <section className="rounded-md bg-surface-2 px-3 py-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-medium">Eve 语气标签</h2>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              setRows(await checkSpeechTags({ data: { password } }));
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "在读…" : "试一下"}
+        </Button>
+      </div>
+      {error ? <p className="text-sm text-live">{error}</p> : null}
+      {rows ? (
+        <ul className="flex flex-col gap-3">
+          {rows.map((r) => (
+            <li key={r.id} className="text-xs">
+              <p className="text-sm">{r.how}</p>
+              <p className="text-subtle">送出去：{r.sent}</p>
+              {r.error ? (
+                <p className="text-live">{r.error}</p>
+              ) : (
+                <>
+                  <p className="text-subtle">
+                    {r.sec} 秒（有声 {r.voicedSec} 秒）· 音量 {r.loudness} · 听到：{r.heard}
+                  </p>
+                  {r.wav ? <audio controls preload="none" src={`data:audio/wav;base64,${r.wav}`} className="mt-1 w-full" /> : null}
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
 }

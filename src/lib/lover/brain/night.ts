@@ -12,6 +12,7 @@ import { identityBlock } from "./life.ts";
 import { readIdentity } from "./life-store.ts";
 import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
+import { parseCast, splitSpeakers, type Cast } from "../cast.ts";
 import { appendDayTimeline, dayClockMs, dayWindow, saveDayTimeline } from "./heart.ts";
 import { addFeedback, addMemories, embedMissing, getMark, listMemories, memoriesWithIds, setMark, syncStory, updateMemory, type NewMemory } from "./memory.ts";
 
@@ -82,15 +83,19 @@ async function dayMessages(from: number, to: number): Promise<Row[]> {
   return rows.map((r) => ({ ...r, created_at: Number(r.created_at) }));
 }
 
-export function nightConversation(rows: Row[], timeZone: string): string {
+export function nightConversation(rows: Row[], timeZone: string, cast: Cast = {}): string {
   const render = (spoken: boolean) =>
     rows
       .map((r) => ({ ...r, ...fromStored(r.body, r.meta) }))
       .filter((r) => !r.meta.nightNoise)
       .map((r) => {
         const text = modelFacingText(r);
-        const body = r.role === "assistant" && spoken ? spokenOnly(text) : text;
-        return `[${clockOf(r.created_at, timeZone)}] ${r.role === "user" ? "Rosie" : "清然"}：${body}`;
+        const at = `[${clockOf(r.created_at, timeZone)}]`;
+        if (r.role === "user") return `${at} Rosie：${text}`;
+        // One reply can hold several people (「林泽：」 blocks): each keeps his own name.
+        return splitSpeakers(text, cast)
+          .map((p) => `${at} ${p.who}：${spoken ? spokenOnly(p.text) : p.text.trim()}`)
+          .join("\n");
       })
       .join("\n");
   let text = render(false);
@@ -133,7 +138,7 @@ export async function runNight(
   }
   const profile = lockedProfile(profileData);
   await syncStory(profile.storyline);
-  const conversation = nightConversation(rows, tz);
+  const conversation = nightConversation(rows, tz, parseCast(profile.voiceCast));
   // Every event and understanding so far (not the storyline, not his ｛｝ notes): the day may continue one of them.
   const known = (await listMemories()).filter((m) => m.source === "night" || m.source === "rosie").slice(-NIGHT_MEMORIES);
   const loaded = await loadPrompt("editor");

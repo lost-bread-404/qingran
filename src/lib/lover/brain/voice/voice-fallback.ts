@@ -1,4 +1,5 @@
 import { parseUsage, type TokenUsage } from "../usage.ts";
+import type { Cast } from "../../cast.ts";
 import { runTalkStream, type TalkStreamEvent, type TalkStreamInput, type TalkStreamResult } from "../../stream-talk.ts";
 import { classifyTalkException, isRetryableEmptyTalk, TALK_FAIL, talkExceptionHint } from "../../talk-fail.ts";
 import { buildVoiceMessages, VOICE_STRIPS, type VoicePackParts, type VoiceStrip } from "./pack-build.ts";
@@ -17,6 +18,7 @@ export type VoiceFallbackInput = {
   primary: VoiceModelPick;
   safety: VoiceModelPick;
   temperature?: number;
+  cast?: Cast;
 };
 
 export type VoiceStreamFn = (
@@ -137,6 +139,7 @@ function streamArgs(
     effort: pick.effort,
     timeoutMs: pick.timeoutMs,
     temperature: data.temperature,
+    cast: data.cast,
   };
 }
 

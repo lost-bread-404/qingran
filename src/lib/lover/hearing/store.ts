@@ -181,7 +181,7 @@ function labSecret(): string {
   return "";
 }
 
-function assertLab(password: string) {
+export function assertLab(password: string) {
   const secret = labSecret();
   if (!secret || password !== secret) throw new Error("lab-locked");
 }

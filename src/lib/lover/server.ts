@@ -1,13 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { spokenForTts } from "./speech-tags";
 import { restoreSpeechText } from "./stt-text";
-import { ttsRequestBody, ttsSpeed } from "./tts";
+import { ttsSpeed } from "./tts";
+import { parseCast } from "./cast";
+import { speakWhole } from "./speak";
 import { isQuotaHint, readXaiFail } from "./xai-error";
 import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./hearing/config";
-import { recordSttSpend, recordTtsSpend } from "./brain/spend/check";
+import { recordSttSpend } from "./brain/spend/check";
 import { xaiFetch } from "./xai-auth";
 import { VOICE_IO } from "./brain/config";
-import { levelClip } from "./voice-level";
 
 type TtsInput = {
   text: string;
@@ -23,29 +24,15 @@ type SttInput = {
 export const speakAsLover = createServerFn({ method: "POST" })
   .validator((input: TtsInput) => input)
   .handler(async ({ data }) => {
-    const text = spokenForTts(data.text.trim());
-    if (!text) return { ok: false as const, error: "empty" };
-
-    const sent = await xaiFetch(VOICE_IO.ttsUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ttsRequestBody(text, VOICE_IO.language, ttsSpeed(data.speed ?? 1))),
-      signal: AbortSignal.timeout(40_000),
-    });
-    if (!sent) return { ok: false as const, error: "voice-unavailable" };
-    const { res, cred } = sent;
-
-    if (!res.ok) {
-      return { ok: false as const, error: await readXaiFail(res) };
-    }
-
-    const mimeType = res.headers.get("content-type") || `audio/pcm;rate=${VOICE_IO.sampleRate}`;
-    const buf = levelClip(Buffer.from(await res.arrayBuffer()), mimeType);
-    void recordTtsSpend(text.length, null, cred.kind);
+    if (!spokenForTts(data.text.trim())) return { ok: false as const, error: "empty" };
+    const [{ getProfileData }, { lockedProfile }] = await Promise.all([import("./brain/store"), import("./types")]);
+    const cast = parseCast(lockedProfile(await getProfileData().catch(() => ({}))).voiceCast);
+    const spoken = await speakWhole(data.text, cast, ttsSpeed(data.speed ?? 1));
+    if (!spoken.ok) return { ok: false as const, error: spoken.error };
     return {
       ok: true as const,
-      mimeType,
-      audioBase64: buf.toString("base64"),
+      mimeType: spoken.mime,
+      audioBase64: spoken.audio.toString("base64"),
     };
   });
 
