@@ -8,7 +8,8 @@ import WebKit
 /// (src/lib/lover/vad.ts), each line heard while she says it (streamed to xAI, and Apple's recognizer on the phone;
 /// NativeHearing.swift), finished through /api/stt (the web's hearing pipeline on the server), /api/talk, and
 /// playback. Keeps going with the app in the background.
-final class NativePipeline {
+/// Its state is only touched on its serial `queue`, so it may be used from tasks and callbacks (`@unchecked Sendable`).
+final class NativePipeline: @unchecked Sendable {
   static let shared = NativePipeline()
 
   private let queue = DispatchQueue(label: "qingran.native-call")

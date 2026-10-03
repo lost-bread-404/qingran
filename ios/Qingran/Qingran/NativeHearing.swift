@@ -49,8 +49,9 @@ struct LineHooks {
  * One line of hers, heard two ways while she says it, like the web call: streamed to xAI (which also says when the
  * sentence sounds finished) and given to Apple's recognizer. When she is done, `finish` waits a moment for both last
  * words. Anything that fails just leaves that ear out; the clip still goes to the server whole.
+ * Its state is only touched on its serial `queue` (`@unchecked Sendable`).
  */
-final class LineHearing {
+final class LineHearing: @unchecked Sendable {
   private let queue = DispatchQueue(label: "qingran.line-hearing")
   private var socket: URLSessionWebSocketTask?
   private var waitingAudio: [Data] = []
