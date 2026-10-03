@@ -9,7 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 
 /** 试听声线: every xAI voice reads the same line; the recording is kept, so a new character can be given a voice by ear. */
-export function VoicePanel() {
+export function VoicePanel({ inCall = false }: { inCall?: boolean }) {
   const [open, setOpen] = useState(false);
   const [voices, setVoices] = useState<VoiceChoice[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -32,6 +32,11 @@ export function VoicePanel() {
       audio.current?.pause();
     };
   }, []);
+
+  // In a call the mic is on: a sample played here would be heard as her. Nothing plays until she hangs up.
+  useEffect(() => {
+    if (inCall) stop();
+  }, [inCall]);
 
   useEffect(() => {
     if (!open || voices || loadFailed) return;
@@ -85,6 +90,7 @@ export function VoicePanel() {
 
   async function play(id: string) {
     stop();
+    if (inCall) return;
     setError(null);
     const tap = ++lastTap.current;
     const wav = await sample(id);
@@ -136,6 +142,7 @@ export function VoicePanel() {
       <p className="text-xs text-subtle">
         每个声线念同一句：「{SAMPLE_LINE}」。录过一次就存着，再听不花钱。喜欢哪个，把它的名字写进上面的角色声线。
       </p>
+      {inCall ? <p className="text-xs text-live">通话里不能试听（会被当成你说的话），挂断后再听。</p> : null}
       {error ? <p className="text-xs text-live">{error}</p> : null}
       {!voices && !loadFailed ? <p className="text-xs text-subtle">在问 xAI 有哪些声线…</p> : null}
       {loadFailed ? (
@@ -152,6 +159,7 @@ export function VoicePanel() {
               <button
                 type="button"
                 aria-label={on ? `停 ${v.id}` : `听 ${v.id}`}
+                disabled={inCall && !on}
                 onClick={() => (on ? stop() : void play(v.id))}
                 className={cn(
                   "grid size-9 shrink-0 place-items-center rounded-full text-sm",

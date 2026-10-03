@@ -68,6 +68,8 @@ final class NativePipeline: @unchecked Sendable {
   private var askedPieces = 0
   /// A turn the page started is running: lines she adds meanwhile wait for it, then go as the next round.
   private var pageTurn = false
+  /// The reply the page's turn is writing.
+  private var pageReply: String?
   /// Replies she stopped after hearing (or reading) them, still finishing so they are saved. The next round waits for
   /// them, so his next answer knows what he just said.
   private var saving = Set<UUID>()
@@ -149,7 +151,7 @@ final class NativePipeline: @unchecked Sendable {
       self.dropLine()
       self.speech.removeAll()
       self.preroll.removeAll()
-      if let open = self.roundReply, !self.replyStarted { self.emit?(["type": "retract", "id": open]) }
+      self.retractUnheard()
       self.release()
       self.dropPlayback()
       if self.engine.isRunning { self.player.play() }
@@ -157,14 +159,17 @@ final class NativePipeline: @unchecked Sendable {
       self.replyStarted = false
       self.replyEnded = false
       self.pageTurn = true
+      self.pageReply = replyId
       self.emit?(["type": "phase", "phase": "thinking"])
       self.talkTask = Task {
         let now = Int(Date().timeIntervalSince1970 * 1000)
-        await self.talk(text: text, userId: userId, replyId: replyId, now: now, gen: gen, userAt: userAt, replyAt: replyAt)
+        // Sent like a round (with no earlier lines), so the server also drops it when the phone does.
+        await self.talk(text: text, userId: userId, replyId: replyId, now: now, gen: gen, userAt: userAt, replyAt: replyAt,
+                        earlier: [])
         self.queue.async {
           guard self.turnGen == gen else { return }
           self.busy = false
-          self.pageTurn = false
+          self.endPageTurn()
           self.talkTask = nil
           if self.running && !self.playing { self.emit?(["type": "phase", "phase": "listening"]) }
           // What she typed or tapped while it ran goes now (or after his voice, if it is still playing).
@@ -184,11 +189,11 @@ final class NativePipeline: @unchecked Sendable {
       guard let self, self.running else { return }
       // An answer he was still thinking for her round is taken back; the round stays open and is asked again after
       // the clip (the clip is not an answer, so it closes nothing).
-      if self.busy && !self.replyStarted, let open = self.roundReply { self.emit?(["type": "retract", "id": open]) }
+      self.retractUnheard()
       self.turnGen += 1
       self.stopTalk()
       self.busy = false
-      self.pageTurn = false
+      self.endPageTurn()
       self.dropPlayback()
       if self.engine.isRunning { self.player.play() }
       self.replyStarted = true
@@ -207,11 +212,11 @@ final class NativePipeline: @unchecked Sendable {
     queue.async { [weak self] in
       guard let self, self.running else { return }
       let wasSpeaking = self.replyStarted
-      if !wasSpeaking, self.busy, let open = self.roundReply { self.emit?(["type": "retract", "id": open]) }
+      self.retractUnheard()
       self.turnGen += 1
       self.stopTalk()
       self.busy = false
-      self.pageTurn = false
+      self.endPageTurn()
       // Stopped while thinking: her lines stay unanswered in the round and go with whatever she says next.
       self.dropPlayback()
       if self.engine.isRunning { self.player.play() }
@@ -353,8 +358,8 @@ final class NativePipeline: @unchecked Sendable {
     }
     running = false
     // Whatever was scheduled went with the stopped engine; the rest of his reply still plays after the restart.
+    // replyStarted stays: what she already heard of his reply is still heard (tapping him keeps it).
     dropPlayback()
-    replyStarted = false
     engine.inputNode.removeTap(onBus: 0)
     startEngineOnQueue()
     mark("\(why): engine restarted \(running ? "ok" : "failed")")
@@ -368,11 +373,11 @@ final class NativePipeline: @unchecked Sendable {
     watchdog?.cancel()
     watchdog = nil
     turnGen += 1
-    if busy, let open = roundReply, !replyStarted { emit?(["type": "retract", "id": open]) }
+    retractUnheard()
     stopTalk()
     saving.removeAll()
     busy = false
-    pageTurn = false
+    endPageTurn()
     inSpeech = false
     dropLine()
     riseMs = 0
@@ -547,7 +552,8 @@ final class NativePipeline: @unchecked Sendable {
    */
   private func kick() {
     guard running, !inSpeech, !pageTurn, saving.isEmpty, !round.isEmpty else { return }
-    if replyStarted && (busy || playing) { return }
+    // His voice is playing, or his answer is in (heard or read) and still being saved: the next round waits for it.
+    if (replyStarted || replyEnded) && (busy || playing) { return }
     turnGen += 1
     let gen = turnGen
     talkTask?.cancel()
@@ -622,6 +628,17 @@ final class NativePipeline: @unchecked Sendable {
       talkTask?.cancel()
     }
     talkTask = nil
+  }
+
+  /// Takes back a reply he was still thinking (she has neither heard nor read any of it).
+  private func retractUnheard() {
+    guard busy, !replyStarted, !replyEnded, let open = pageTurn ? pageReply : roundReply else { return }
+    emit?(["type": "retract", "id": open])
+  }
+
+  private func endPageTurn() {
+    pageTurn = false
+    pageReply = nil
   }
 
   /// His answer to the round has started (or came as words only): the lines it answers are done; any she added after

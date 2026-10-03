@@ -59,6 +59,9 @@ export const Route = createFileRoute("/api/talk")({
         // The phone dropped this request (she went on before his voice started): nothing more is sent, and writing
         // to the closed stream must not look like a model failure (that would retry the whole reply).
         let gone = false;
+        request.signal?.addEventListener("abort", () => {
+          gone = true;
+        });
         const stream = new ReadableStream({
           cancel() {
             gone = true;
