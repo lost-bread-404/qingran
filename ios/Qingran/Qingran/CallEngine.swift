@@ -88,7 +88,8 @@ final class CallEngine: NSObject, ObservableObject {
       if self.nativeSession {
         self.startHoldLoop(false)
         // The mic starts when iOS hands the call its audio. If that never comes, the call would sit there deaf.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        // iOS can take a few seconds to hand it over (seen: just over 2 s), so this waits longer than that.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
           guard let self, self.callGeneration == generation, self.nativeSession, !self.audioActivated else { return }
           NativePipeline.shared.report("callkit audio never came")
           self.startWithoutCallKit(generation)
