@@ -55,3 +55,4 @@
 - **从 Grok app builder 模板起的项目**：better-auth、预览桥、PWA 安装页、「Created with Grok」横幅脚本、几十个没用的 UI 依赖。2026-10-02 删了，登录只用 `auth-lite` 的密码。
 - **每轮记三份日志**（`brain_log`、`brain_turns`、`turn_traces`）：2026-10-02 合成一份，见 [observability.md](observability.md)。
 - 2026-10-03：重装外壳时只勾了 Audio 一项后台模式，去掉了 Voice over IP：系统电话（CallKit）报「没有权限」起不来，外壳等不到它就一直不开麦，电话完全听不到她。教训：Voice over IP 必须勾（已写进 Info.plist 和安装说明）；外壳不再只靠系统电话开麦。
+- 2026-10-03：试过丢掉 xAI 识别器写的「~」、改成按字的时长判断拖长音（≥ 平常字长 2.2 倍且 ≥ 0.45 秒）才标 ～。她当天就不要了：用回 xAI 自己的判断。
