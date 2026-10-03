@@ -863,6 +863,13 @@ final class NativePipeline: @unchecked Sendable {
     let endpointFired = Int(Date().timeIntervalSince1970 * 1000)
     let both = await hearing?.finish() ?? LineHeard.empty
     if both.stream != nil { queue.async { self.streamTroubles = 0 } }
+    // xAI listened to the whole line live and heard no word, and neither did Apple: a sound (the fan, the bed), not
+    // her. It goes nowhere: no second paid transcription on the server, no log line, and the round is untouched.
+    if let stream = both.stream, stream.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+       (both.apple ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      if !tail.isEmpty { emit?(["type": "heard", "id": id, "text": tail, "at": at]) }
+      return tail
+    }
     let heard = await transcribe(wav, speechStart: at, endpointFired: endpointFired, silenceWaitMs: silenceWaitMs,
                                  vadFloor: vadFloor, heard: both, endedBy: endedBy)
     if Task.isCancelled { return "" }
