@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { parseLegacyBody, readMeta } from "../message-meta.ts";
+import { fromStored, parseLegacyBody, readMeta } from "../message-meta.ts";
 import { createHash } from "node:crypto";
 import { now } from "./clock.ts";
 import { getMeta, getProfileData, patchMeta, sql } from "./store.ts";
@@ -28,11 +28,11 @@ export const brainExportState = createServerFn({ method: "POST" })
       [EXPORT_PAGE, data.offset],
     );
     const messages: StateMessage[] = rows.map((r) => {
-      const meta = readMeta(r.meta);
+      const { text, meta } = fromStored(r.body, r.meta);
       return {
         id: String(r.id),
         role: r.role === "assistant" ? "assistant" : "user",
-        text: String(r.body ?? ""),
+        text,
         at: formatLocal(Number(r.created_at), tz, true),
         kind: String(r.kind ?? "say"),
         ...(r.forgotten_at != null ? { forgotten: true } : {}),

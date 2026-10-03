@@ -68,6 +68,18 @@ function tagsOf(predicted: string | undefined): AcousticTags | undefined {
   return parseAcousticTags({ length, contour, voice, event }) ?? undefined;
 }
 
+/**
+ * A stored row's words and meta. A row written by old code (a phone or tab still on the version before 2026-10-02)
+ * can still have its facts as ⟦…⟧ marks in front of the words: they are read as meta here, the same as migration 0050.
+ */
+export function fromStored(body: unknown, rawMeta: unknown): { text: string; meta: MessageMeta } {
+  const text = String(body ?? "");
+  const meta = readMeta(rawMeta);
+  if (!text.startsWith("⟦")) return { text, meta };
+  const legacy = parseLegacyBody(text);
+  return { text: legacy.text, meta: { ...legacy.meta, ...meta } };
+}
+
 /** What the page knows about a message, as it is stored. */
 export function metaOfChat(msg: ChatMessage): MessageMeta {
   return readMeta({
@@ -93,17 +105,18 @@ export function chatFromRow(row: {
   kind?: string | null;
   meta?: unknown;
 }): ChatMessage {
-  const meta = readMeta(row.meta);
+  const { text, meta } = fromStored(row.body, row.meta);
   const kindCol = row.kind ?? undefined;
-  const kind: MessageKind | undefined = meta.unheard
-    ? "unheard"
-    : kindCol === "say" || kindCol === "proactive" || kindCol === "system_notice"
-      ? kindCol
-      : undefined;
+  const kind: MessageKind | undefined =
+    meta.unheard || kindCol === "unheard"
+      ? "unheard"
+      : kindCol === "say" || kindCol === "proactive" || kindCol === "system_notice"
+        ? kindCol
+        : undefined;
   return {
     id: String(row.id),
     role: row.role === "assistant" ? "assistant" : "user",
-    text: String(row.body ?? ""),
+    text,
     createdAt: Number(row.created_at),
     kind,
     scanned: meta.scanned,

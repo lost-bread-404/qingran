@@ -2,7 +2,7 @@ import { getSql, type Sql } from "../../db.ts";
 import { NEUTRAL_PERSONA, storedSystemPrompt } from "../types.ts";
 import { newId } from "../storage.ts";
 import { collapseReplyVariants } from "../pair-messages.ts";
-import { readMeta, type MessageMeta } from "../message-meta.ts";
+import { fromStored, type MessageMeta } from "../message-meta.ts";
 import { HISTORY_WINDOW, SESSION_GAP_MS } from "./config.ts";
 import { clipLogRecord } from "./log-clip.ts";
 import { now } from "./clock.ts";
@@ -177,11 +177,12 @@ export async function clearRecentConversation(): Promise<void> {
 
 
 function rowMessage(r: Record<string, unknown>): StoredMessage {
+  const { text, meta } = fromStored(r.body, r.meta);
   return {
     id: String(r.id),
     role: r.role === "assistant" ? "assistant" : "user",
-    text: String(r.body ?? ""),
-    meta: readMeta(r.meta),
+    text,
+    meta,
     createdAt: asInt(r.created_at),
     kind:
       r.kind === "proactive" || r.kind === "system_notice"

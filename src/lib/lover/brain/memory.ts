@@ -3,7 +3,7 @@ import { localDay } from "./time.ts";
 import { sql } from "./store.ts";
 import { backgroundOf, buildIndex, fitScores, rankDocs, type Background, type SearchIndex } from "./memory-search.ts";
 import { cosine, embedConfig, embedTexts } from "./embed.ts";
-import { modelFacingText, readMeta } from "../message-meta.ts";
+import { fromStored, modelFacingText } from "../message-meta.ts";
 
 /**
  * 清然's memory (docs/brain.md v6): only what changes how he acts or thinks later, a handful at a time.
@@ -286,7 +286,7 @@ async function background(): Promise<Background> {
   );
   const value = backgroundOf(
     rows
-      .map((r) => ({ text: String(r.body ?? ""), meta: readMeta(r.meta) }))
+      .map((r) => fromStored(r.body, r.meta))
       .filter((m) => !m.meta.nightNoise)
       .map(modelFacingText),
   );

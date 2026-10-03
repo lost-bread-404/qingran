@@ -4,7 +4,7 @@ import { appendInnerLog, getMeta, getProfileData, getProfilePrompt, patchBrainLo
 import { resolveTz } from "./tz.ts";
 import { clockOf, localDay } from "./time.ts";
 import { lockedProfile } from "../types.ts";
-import { modelFacingText, readMeta } from "../message-meta.ts";
+import { fromStored, modelFacingText } from "../message-meta.ts";
 import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
 import { loadPrompt } from "./prompts/store.ts";
 import { dossierTextForModel, publishMemory } from "./dossier.ts";
@@ -85,10 +85,10 @@ async function dayMessages(from: number, to: number): Promise<Row[]> {
 export function nightConversation(rows: Row[], timeZone: string): string {
   const render = (spoken: boolean) =>
     rows
-      .map((r) => ({ ...r, meta: readMeta(r.meta) }))
+      .map((r) => ({ ...r, ...fromStored(r.body, r.meta) }))
       .filter((r) => !r.meta.nightNoise)
       .map((r) => {
-        const text = modelFacingText({ text: r.body, meta: r.meta });
+        const text = modelFacingText(r);
         const body = r.role === "assistant" && spoken ? spokenOnly(text) : text;
         return `[${clockOf(r.created_at, timeZone)}] ${r.role === "user" ? "Rosie" : "清然"}：${body}`;
       })
