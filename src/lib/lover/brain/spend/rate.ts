@@ -1,7 +1,8 @@
 import { now } from "../clock.ts";
 import { bumpRate, writeAlert } from "./ledger.ts";
 
-export const TALK_RATE_MAX = 20;
+// Each time she goes on in a call round the phone asks again, so a round can be several requests.
+export const TALK_RATE_MAX = 60;
 export const JOB_RATE_MAX = 60;
 export const SPEND_RATE_ERR = "spend-rate";
 

@@ -141,7 +141,7 @@ final class NativePipeline: @unchecked Sendable {
       guard let self, self.running else { return }
       self.turnGen += 1
       let gen = self.turnGen
-      self.talkTask?.cancel()
+      self.stopTalk()
       self.inSpeech = false
       self.dropLine()
       self.speech.removeAll()
@@ -182,8 +182,7 @@ final class NativePipeline: @unchecked Sendable {
       // Already answered (as words only, no voice came): those lines are done.
       if !self.busy && !self.replyStarted { self.round.removeFirst(min(self.askedPieces, self.round.count)) }
       self.turnGen += 1
-      self.talkTask?.cancel()
-      self.talkTask = nil
+      self.stopTalk()
       self.busy = false
       self.pageTurn = false
       self.askedPieces = 0
@@ -206,8 +205,7 @@ final class NativePipeline: @unchecked Sendable {
       let wasSpeaking = self.replyStarted
       if !wasSpeaking, self.busy, let open = self.roundReply { self.emit?(["type": "retract", "id": open]) }
       self.turnGen += 1
-      self.talkTask?.cancel()
-      self.talkTask = nil
+      self.stopTalk()
       self.busy = false
       self.pageTurn = false
       // Stopped while thinking: her lines stay unanswered in the round and go with whatever she says next.
@@ -366,8 +364,7 @@ final class NativePipeline: @unchecked Sendable {
     watchdog?.cancel()
     watchdog = nil
     turnGen += 1
-    talkTask?.cancel()
-    talkTask = nil
+    stopTalk()
     busy = false
     pageTurn = false
     inSpeech = false
@@ -599,6 +596,13 @@ final class NativePipeline: @unchecked Sendable {
       next = min(level, f * exp(dtMs / rise))
     }
     return min(NativeVad.floorMax, max(NativeVad.floorMin, next))
+  }
+
+  /// Stop following his current reply. Once his voice has started she has heard some of it, so the request is left to
+  /// finish and be saved (what it still sends is ignored, by turnGen); before that it is dropped and not kept.
+  private func stopTalk() {
+    if !replyStarted { talkTask?.cancel() }
+    talkTask = nil
   }
 
   /// The round is closed (his voice started, or the call or a page turn took over): what she says next is a new round.
@@ -899,7 +903,8 @@ final class NativePipeline: @unchecked Sendable {
               self.playPCM(b64, mime: mime, replace: replace)
             }
           } else if kind == "err" {
-            softFail((event["m"] as? String) ?? "talk")
+            // A reply she already stopped (left running so it is saved) fails quietly.
+            if current(gen) { softFail((event["m"] as? String) ?? "talk") }
             return
           } else if kind == "done" {
             failures = 0
@@ -921,7 +926,7 @@ final class NativePipeline: @unchecked Sendable {
         last = byte
       }
     } catch {
-      if Task.isCancelled { return }
+      if Task.isCancelled || !current(gen) { return }
       softFail("talk \(error.localizedDescription)")
     }
   }

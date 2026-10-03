@@ -252,12 +252,12 @@ export async function messageForgotten(id: string): Promise<boolean> {
   return rows[0]?.forgotten_at != null;
 }
 
-/** Whether she has a message after this time (a later line of the same round on the phone). */
-export async function hasUserAfter(at: number): Promise<boolean> {
+/** A newer attempt of this phone round already wrote its reply (see upsertMessage attemptAt). */
+export async function newerAttempt(id: string, at: number): Promise<boolean> {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>(
-    `select 1 from qingran_messages where role = 'user' and created_at > $1 and forgotten_at is null limit 1`,
-    [at],
+    `select 1 from qingran_messages where id = $1 and attempt_at > $2`,
+    [id, at],
   );
   return rows.length > 0;
 }
@@ -283,6 +283,8 @@ export async function upsertMessage(msg: {
   createdAt: number;
   kind?: StoredMessage["kind"];
   timeZone: string;
+  /** A phone round's attempt (when the phone sent it): an older attempt never overwrites a newer one. */
+  attemptAt?: number;
 }): Promise<StoredMessage> {
   const db = await getSql();
   const prev = await lastMessage();
@@ -294,16 +296,19 @@ export async function upsertMessage(msg: {
   );
   const kind = msg.kind ?? "say";
   await db.query(
-    `insert into qingran_messages (id, role, body, created_at, kind, session_id, local_day, meta)
-     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+    `insert into qingran_messages (id, role, body, created_at, kind, session_id, local_day, meta, attempt_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
      on conflict (id) do update set
        body = excluded.body,
        meta = qingran_messages.meta || excluded.meta,
        kind = excluded.kind,
        created_at = excluded.created_at,
        session_id = coalesce(qingran_messages.session_id, excluded.session_id),
-       local_day = coalesce(qingran_messages.local_day, excluded.local_day)`,
-    [msg.id, msg.role, msg.text, msg.createdAt, kind, sess, day, JSON.stringify(msg.meta ?? {})],
+       local_day = coalesce(qingran_messages.local_day, excluded.local_day),
+       attempt_at = excluded.attempt_at
+     where excluded.attempt_at is null or qingran_messages.attempt_at is null
+       or qingran_messages.attempt_at <= excluded.attempt_at`,
+    [msg.id, msg.role, msg.text, msg.createdAt, kind, sess, day, JSON.stringify(msg.meta ?? {}), msg.attemptAt ?? null],
   );
   return {
     id: msg.id,

@@ -3,7 +3,7 @@ import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } f
 import { enqueueReportIfDue } from "@/lib/lover/brain/diary/report";
 import { drainJobs } from "@/lib/lover/brain/jobs";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
-import { upsertMessage, appendBrainLog, getMessage, getProfileData, hasUserAfter, messageForgotten } from "@/lib/lover/brain/store";
+import { upsertMessage, appendBrainLog, getMessage, getProfileData, newerAttempt, messageForgotten } from "@/lib/lover/brain/store";
 import { localDay } from "@/lib/lover/brain/time";
 import { loadHotContext } from "@/lib/lover/brain/voice/pack";
 import { runVoiceWithFallback, formatVoiceLogNote } from "@/lib/lover/brain/voice/voice-fallback";
@@ -56,15 +56,26 @@ export const Route = createFileRoute("/api/talk")({
         const timeZone = await syncTalkTimeZone(body.timeZone);
 
         const encoder = new TextEncoder();
+        // The phone dropped this request (she went on before his voice started): nothing more is sent, and writing
+        // to the closed stream must not look like a model failure (that would retry the whole reply).
+        let gone = false;
         const stream = new ReadableStream({
+          cancel() {
+            gone = true;
+          },
           async start(controller) {
             const send = (event: TalkStreamEvent) => {
+              if (gone) return;
               let frame = `data: ${JSON.stringify(event)}\n\n`;
               if (event.t === "text" || event.t === "text_end") {
                 const pad = Math.max(0, SSE_PAD - frame.length);
                 if (pad) frame += `:${" ".repeat(pad)}\n\n`;
               }
-              controller.enqueue(encoder.encode(frame));
+              try {
+                controller.enqueue(encoder.encode(frame));
+              } catch {
+                gone = true;
+              }
             };
             const started = Date.now();
             let packed: Awaited<ReturnType<typeof loadHotContext>> | null = null;
@@ -171,10 +182,11 @@ export const Route = createFileRoute("/api/talk")({
               // sentence again, or she edited it), or she went back to an earlier line and this one was taken back:
               // this answer is not kept.
               const now = await getMessage(userMsgId);
-              // On the phone she may also have gone on with a new line of the same round: this answer is not hers to hear.
+              // In a phone round: dropped before his voice started (she went on), or a newer attempt of the same round
+              // already wrote its answer. Either way she never hears this one.
               const superseded =
                 (Boolean(now) && !String(now?.text ?? "").endsWith(text.trim())) ||
-                (round && (await hasUserAfter(userCreatedAt))) ||
+                (round && (gone || (await newerAttempt(replyId, nowMs)))) ||
                 (await messageForgotten(userMsgId).catch(() => false));
               if (superseded) {
                 await appendBrainLog({ step: "talk-superseded", ok: true, route: "voice", note: "她的这一句后来变了（接着说了或改了），这条回复不保存" }).catch(() => undefined);
@@ -187,6 +199,7 @@ export const Route = createFileRoute("/api/talk")({
                   meta: { replyTo: userMsgId },
                   createdAt: Number.isFinite(replyAt) && replyAt > 0 ? replyAt : userCreatedAt + 1,
                   timeZone,
+                  attemptAt: round ? nowMs : undefined,
                 });
               }
               if (!failed && !sentDone) {
@@ -292,7 +305,11 @@ export const Route = createFileRoute("/api/talk")({
                 }).catch((logErr) => console.error(logErr));
               }
             } finally {
-              controller.close();
+              try {
+                controller.close();
+              } catch {
+                /* the phone already dropped it */
+              }
             }
           },
         });

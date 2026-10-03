@@ -76,7 +76,9 @@ export default defineConfig(({ command, isPreview }) => ({
             // 不要用 functionRules 给 cron 单独设：Nitro 会整包复制一份
             // （nitro#4233），而 Diary 的 waitUntil 也跑在同一条 function 上。
             vercel: {
-              functions: { maxDuration: 300 },
+              // supportsCancellation: when the phone drops /api/talk (she went on), the function is told, so an
+              // answer she never hears is not saved.
+              functions: { maxDuration: 300, supportsCancellation: true },
             },
           }),
         ]
