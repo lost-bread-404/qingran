@@ -6,9 +6,9 @@ import { clockOf, localDay } from "./time.ts";
 import { lockedProfile } from "../types.ts";
 import { fromStored, modelFacingText } from "../message-meta.ts";
 import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
-import { loadPrompt } from "./prompts/store.ts";
+import { loadFormats, loadPrompt } from "./prompts/store.ts";
+import { DEFAULT_FORMATS, fmt, type Formats } from "./prompts/formats.ts";
 import { dossierTextForModel, publishMemory } from "./dossier.ts";
-import { identityBlock } from "./life.ts";
 import { readIdentity } from "./life-store.ts";
 import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
@@ -99,16 +99,16 @@ function keepLabels(text: string): string {
     .join("\n");
 }
 
-export function nightConversation(rows: Row[], timeZone: string): string {
+export function nightConversation(rows: Row[], timeZone: string, f: Formats = DEFAULT_FORMATS): string {
   const render = (spoken: boolean) =>
     rows
       .map((r) => ({ ...r, ...fromStored(r.body, r.meta) }))
       .filter((r) => !r.meta.nightNoise)
       .map((r) => {
-        const text = modelFacingText(r);
-        const at = `[${clockOf(r.created_at, timeZone)}]`;
-        if (r.role === "user") return `${at} Rosie：${text}`;
-        return `${at} 清然：${spoken ? keepLabels(text) : text.trim()}`;
+        const text = modelFacingText(r, f);
+        const time = clockOf(r.created_at, timeZone);
+        if (r.role === "user") return fmt(f, "nightLine", { time, who: "Rosie", text });
+        return fmt(f, "nightLine", { time, who: "清然", text: spoken ? keepLabels(text) : text.trim() });
       })
       .join("\n");
   let text = render(false);
@@ -151,17 +151,18 @@ export async function runNight(
   }
   const profile = lockedProfile(profileData);
   await syncStory(profile.storyline);
-  const conversation = nightConversation(rows, tz);
+  const formats = await loadFormats();
+  const conversation = nightConversation(rows, tz, formats);
   // Every event and understanding so far (not the storyline, not his ｛｝ notes): the day may continue one of them.
   const known = (await listMemories()).filter((m) => m.source === "night" || m.source === "rosie").slice(-NIGHT_MEMORIES);
   const loaded = await loadPrompt("editor");
   const messages = renderVariant(parsePromptBody("editor", loaded.body), "main", {
     system_prompt: charter,
-    identity_block: identityBlock(ident.identity) ? `${identityBlock(ident.identity)}\n` : "",
-    us: us.trim() || "（还没有）",
-    memories: memoriesWithIds(known) || "（没有）",
+    identity: ident.identity.trim(),
+    us: us.trim(),
+    memories: memoriesWithIds(known, formats),
     day,
-    conversation: conversation || "（没有）",
+    conversation,
     max_chars: String(profile.dossierMaxChars),
   });
   const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");

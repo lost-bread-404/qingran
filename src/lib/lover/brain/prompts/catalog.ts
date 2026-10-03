@@ -5,7 +5,7 @@ import {
   type PromptVariantTemplate,
 } from "./templates.ts";
 
-export type PromptKey = "voice" | "editor" | "report";
+export type PromptKey = "voice" | "editor" | "report" | "formats";
 
 export type { PromptMessage, PromptPlaceholder };
 
@@ -35,6 +35,11 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
     key: "report",
     name: "月报",
     blurb: "读这个月每天的时间线和对话，写成一份月报。日记页打开开关后，每月 1 日自动写上个月；也可以在日记页手动写。",
+  },
+  {
+    key: "formats",
+    name: "材料的写法",
+    blurb: "上面几步里一条一条的材料怎么写：对话里的停顿和照片、想起来的事、夜里整理看到的每一句和每件回忆、月报的每一天。一行一种，「名字：写法」，{…} 换成实际内容；写法里的 {…} 都是空的那一行不写。",
   },
 ];
 

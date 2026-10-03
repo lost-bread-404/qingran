@@ -1,16 +1,12 @@
 import { resolveVoiceChat, voiceSafetyPick, type VoiceModelPick } from "../config.ts";
-import { timeFacts } from "../heart.ts";
-import { identityBlock } from "../life.ts";
 import { callModel } from "../llm.ts";
-import { loadPrompt } from "../prompts/store.ts";
 import { getProfileData } from "../store.ts";
-import { dossierTextForModel } from "../dossier.ts";
-import { keepInner, recall, recallText, recentInner } from "../memory.ts";
+import { keepInner } from "../memory.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
-import { personaText, voiceInjectFromProfile } from "../../types.ts";
+import { voiceInjectFromProfile } from "../../types.ts";
 import { BraceCut } from "./brace-cut.ts";
-import { buildVoiceMessages, type VoicePackParts } from "./pack-build.ts";
-import { recallQuery, replyHistory, scenePresent, withInner } from "./pack.ts";
+import { buildVoiceMessages } from "./pack-build.ts";
+import { gatherVoiceParts, replyHistory } from "./pack.ts";
 
 const CN = ["零", "一", "两", "三", "四", "五", "六", "七", "八", "九", "十"];
 function cn(n: number): string {
@@ -47,30 +43,15 @@ export async function speakFirst(input: {
 }): Promise<{ text: string; passed: boolean; model: string; ms: number; reason: string | null }> {
   const { profile } = resolveTalkProfile(undefined, await getProfileData());
   const inject = voiceInjectFromProfile(profile);
-  const [history, us, clockText, inner, voicePrompt] = await Promise.all([
-    replyHistory(null, inject.history, input.nowMs, input.timeZone),
-    inject.memory ? dossierTextForModel() : Promise.resolve(""),
-    // Only the time of day: how long she has been away is said roughly in the note below.
-    timeFacts(input.nowMs, input.timeZone, input.nowMs, { sinceLast: false }),
-    recentInner(input.nowMs),
-    loadPrompt("voice"),
-  ]);
-  const clock = withInner(clockText, inner);
-  const recalled = inject.memory ? await recall(recallQuery("", history), input.nowMs, { present: scenePresent(history, profile.voiceCast) }) : { memories: [] };
-  const parts: VoicePackParts = {
-    charter: personaText(profile),
-    identity: identityBlock(profile.identity),
-    us,
-    recall: recallText(recalled.memories),
-    clock,
-    history,
-    historyWindow: history.length,
+  const { parts, voicePrompt } = await gatherVoiceParts({
+    profile,
+    nowMs: input.nowMs,
+    timeZone: input.timeZone,
+    history: replyHistory(null, inject.history, input.nowMs, input.timeZone),
     userText: "",
+    // How long she has been away is said roughly in the note at the end, not as a time.
     first: { quiet: input.lastUserAt ? quietText(input.nowMs - input.lastUserAt) : "很久" },
-    voiceTemplate: voicePrompt.body,
-    personaPlacement: profile.personaPlacement,
-    personaAck: profile.personaAck,
-  };
+  });
   const messages = buildVoiceMessages(parts, "none");
   const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
   const picks: VoiceModelPick[] = [primary];

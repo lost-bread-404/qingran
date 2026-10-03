@@ -1696,7 +1696,6 @@ export function VoiceRoom() {
           profile={profile}
           revs={revs}
           callPhase={call.active ? call.phase : null}
-          callDeaf={call.deaf}
           onPatch={(patch) => {
             setProfile((prev) => {
               const next = lockedProfile({ ...prev, ...patch });

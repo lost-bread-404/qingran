@@ -1,12 +1,11 @@
 import { timeFacts, dayWindow } from "../heart.ts";
 import { modelFacingText, photoNote } from "../../message-meta.ts";
-import { NEUTRAL_PERSONA, personaText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
+import { NEUTRAL_PERSONA, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getMessage, getMeta, listHistoryWindow, upsertMessage } from "../store.ts";
 import { enqueue } from "../jobs.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
-import { loadPrompt } from "../prompts/store.ts";
-import { identityBlock } from "../life.ts";
+import { loadFormats, loadPrompt } from "../prompts/store.ts";
 import { localDay } from "../time.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { recall, recallText, recentInner, type Memory } from "../memory.ts";
@@ -79,7 +78,6 @@ export async function replyHistory(
   return shown;
 }
 
-/** What she is talking about now: her line (weighted), and the few lines before it. */
 /** How far back a 「名字：」 block still means that person is in the scene. */
 const SCENE_LOOKBACK = 8;
 
@@ -97,6 +95,7 @@ export function scenePresent(history: StoredMessage[], voiceCast: string): strin
   return [...names];
 }
 
+/** What she is talking about now: her line (weighted), and the few lines before it. */
 export function recallQuery(text: string, history: StoredMessage[]): string {
   const before = history.slice(-3).map((m) => modelFacingText(m));
   return [text, text, ...before].filter((line) => line.trim()).join("\n");
@@ -131,31 +130,24 @@ export async function loadHotContext(input: {
 
   // Memory off → persona + context only.
   const inject = voiceInjectFromProfile(input.profile);
-  const [history, us, clockText, voicePrompt] = await Promise.all([
-    replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone, { fold: inject.memory, replyId: input.replyId }),
-    inject.memory ? dossierTextForModel() : Promise.resolve(""),
-    timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
-    loadPrompt("voice"),
-  ]);
-  const recalled = inject.memory ? await recall(recallQuery(input.text, history), input.nowMs, { present: scenePresent(history, input.profile.voiceCast) }) : { memories: [], scores: [], by: "none" as const };
-  const clockWithInner = withInner(clockText, await recentInner(input.nowMs));
-  const charter = personaText(input.profile);
-  const parts: VoicePackParts = {
-    charter,
-    identity: identityBlock(input.profile.identity),
-    us,
-    recall: recallText(recalled.memories),
-    clock: clockWithInner,
-    history,
-    historyWindow: history.length,
-    userText: `${photoNote(images.length)}${input.text}`,
-    userImages: images,
-    voiceTemplate: voicePrompt.body,
-    personaPlacement: input.profile.personaPlacement,
-    personaAck: input.profile.personaAck,
-  };
+  const { parts, recalled, voicePrompt } = await gatherVoiceParts({
+    profile: input.profile,
+    nowMs: input.nowMs,
+    timeZone: input.timeZone,
+    history: replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone, {
+      fold: inject.memory,
+      replyId: input.replyId,
+    }),
+    userText: input.text,
+    images,
+    lastSaidBefore: input.userCreatedAt,
+  });
+  const history = parts.history;
+  const charter = input.profile.systemPrompt;
+  const us = parts.us;
+  const clockText = parts.time.clock;
   const [charterHash, longtermHash] = await Promise.all([
-    rememberCharter(charter.trim() || NEUTRAL_PERSONA),
+    rememberCharter([charter.trim() || NEUTRAL_PERSONA, input.profile.intimateNotes.trim()].filter(Boolean).join("\n\n")),
     rememberBlock("voice_longterm", us),
   ]);
   const historyIds = history.map((m) => m.id);
@@ -198,7 +190,59 @@ export async function loadHotContext(input: {
   };
 }
 
-/** His own ｛｝ notes from the last 16 hours sit right under the clock, so he answers by what he decided. */
-export function withInner(clockText: string, inner: string): string {
-  return inner ? `${clockText}\n你心里记着、Rosie 看不到的：\n${inner}` : clockText;
+/**
+ * Everything the voice template is filled with, the same for a reply, a message he starts himself, a replay and the
+ * preview: what she wrote (persona, 亲密设定, 身份), 现在的你们, what comes back to him, the time, his ｛｝ notes.
+ * Only data here; every word around it is in the template (指令 → 每轮回复) and 材料的写法.
+ */
+export async function gatherVoiceParts(input: {
+  profile: Profile;
+  nowMs: number;
+  timeZone: string;
+  /** The talk he is given (a promise is read alongside everything else). */
+  history: StoredMessage[] | Promise<StoredMessage[]>;
+  userText: string;
+  images?: string[];
+  /** Set when he may write first: no line of hers, and how long she has been quiet instead of when she last spoke. */
+  first?: { quiet: string };
+  /** Her line's time: 「上一次说话」 is the one before it. */
+  lastSaidBefore?: number;
+  /** Replay's other side: another persona. */
+  charter?: string;
+  placement?: Profile["personaPlacement"];
+}): Promise<{ parts: VoicePackParts; recalled: Awaited<ReturnType<typeof recall>>; voicePrompt: Awaited<ReturnType<typeof loadPrompt>> }> {
+  const inject = voiceInjectFromProfile(input.profile);
+  const [history, us, time, inner, voicePrompt, formats] = await Promise.all([
+    input.history,
+    inject.memory ? dossierTextForModel() : Promise.resolve(""),
+    timeFacts(input.nowMs, input.timeZone, input.lastSaidBefore ?? input.nowMs, { sinceLast: !input.first }),
+    recentInner(input.nowMs),
+    loadPrompt("voice"),
+    loadFormats(),
+  ]);
+  const recalled = inject.memory
+    ? await recall(recallQuery(input.userText, history), input.nowMs, {
+        present: scenePresent(history, input.profile.voiceCast),
+      })
+    : { memories: [], scores: [], by: "none" as const };
+  const images = input.images ?? [];
+  const parts: VoicePackParts = {
+    charter: input.charter ?? input.profile.systemPrompt,
+    intimate: input.profile.intimateNotes,
+    identity: input.profile.identity,
+    us,
+    recall: recallText(recalled.memories, formats),
+    time,
+    inner,
+    formats,
+    history,
+    historyWindow: history.length,
+    userText: `${photoNote(images.length, formats)}${input.userText}`,
+    userImages: images,
+    first: input.first,
+    voiceTemplate: voicePrompt.body,
+    personaPlacement: input.placement ?? input.profile.personaPlacement,
+    personaAck: input.profile.personaAck,
+  };
+  return { parts, recalled, voicePrompt };
 }

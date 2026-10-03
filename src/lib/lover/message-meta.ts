@@ -1,4 +1,5 @@
 import { parseAcousticTags, stripAcousticTags, type AcousticTags } from "./hearing/tags.ts";
+import { DEFAULT_FORMATS, fmt, type Formats } from "./brain/prompts/formats.ts";
 import type { ChatMessage, MessageKind } from "./types";
 
 /**
@@ -132,14 +133,14 @@ export function chatFromRow(row: {
 }
 
 /** What the words say about photos she sent with them (the model may also see the photos themselves). */
-export function photoNote(count: number): string {
-  if (!count) return "";
-  return count === 1 ? "（发来一张照片）" : `（发来 ${count} 张照片）`;
+/** The 「照片」 line of 材料的写法, when she sent photos. */
+export function photoNote(count: number, f: Formats = DEFAULT_FORMATS): string {
+  return count ? fmt(f, "photo", { count }) : "";
 }
 
 /** A message as the models read it: her words without hearing marks, with a note when she sent photos. */
-export function modelFacingText(msg: { text: string; meta?: MessageMeta }): string {
-  return `${photoNote(msg.meta?.images?.length ?? 0)}${stripAcousticTags(msg.text).trim()}`;
+export function modelFacingText(msg: { text: string; meta?: MessageMeta }, f: Formats = DEFAULT_FORMATS): string {
+  return `${photoNote(msg.meta?.images?.length ?? 0, f)}${stripAcousticTags(msg.text).trim()}`;
 }
 
 /**

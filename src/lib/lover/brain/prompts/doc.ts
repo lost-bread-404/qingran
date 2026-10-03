@@ -76,8 +76,45 @@ function normalizeDoc(key: PromptKey, doc: PromptDoc): PromptDoc {
   };
 }
 
+/**
+ * Saved before 2026-10-02 (her own saves and the old versions she can roll back to), the program added some words
+ * itself. Those words are put into the text now, the same as migrations/0055 did, so nothing goes missing and
+ * nothing is hidden.
+ */
+const LEGACY_WORDS: Array<[string, string]> = [
+  [
+    "{identity_block}{system_prompt}\n\n",
+    "【清然的身份】\n{identity}\n\n{system_prompt}\n\n清然在床上的样子：\n{intimate_notes}\n\n",
+  ],
+  ["{identity_block}", "【清然的身份】\n{identity}\n\n"],
+];
+
+function upgradeLegacy(key: PromptKey, doc: PromptDoc): PromptDoc {
+  return {
+    ...doc,
+    variants: doc.variants.map((variant) => ({
+      ...variant,
+      messages: variant.messages.map((message) => {
+        let content = message.content;
+        for (const [from, to] of LEGACY_WORDS) content = content.split(from).join(to);
+        if (key === "voice" && content.trim() === "现在是{clock}") {
+          content = "现在是{clock}。\n\nRosie 上一次说话是 {last_said}，距现在 {since_last}。\n\n你心里记着、Rosie 看不到的：\n{inner}";
+        }
+        if (key === "report" && variant.id === "main" && content.trim() === "{summaries}") {
+          content = "【每天的记录】（每天的时间线，带时间）\n{timelines}\n\n【对话摘要】\n{summaries}";
+        }
+        return content === message.content ? message : { ...message, content };
+      }),
+    })),
+  };
+}
+
 /** A saved prompt: the current two-variant JSON, or an old plain-text body (taken as the system message). */
 export function parsePromptBody(key: PromptKey, body: string | null | undefined): PromptDoc {
+  return upgradeLegacy(key, parseSaved(key, body));
+}
+
+function parseSaved(key: PromptKey, body: string | null | undefined): PromptDoc {
   const fallback = defaultDoc(key);
   const raw = (body ?? "").replace(/\r\n/g, "\n").trim();
   if (!raw) return fallback;
@@ -101,6 +138,23 @@ export function parsePromptBody(key: PromptKey, body: string | null | undefined)
   return next;
 }
 
+const TOKEN = /\{([a-z][a-z0-9_]*)\}/g;
+
+/**
+ * Fill a message. A paragraph (blank lines around it) whose {…} are all empty is left out whole, heading and all:
+ * that is how 「【清然的身份】\n{identity}」 disappears when there is no identity. Nothing else is added or removed.
+ */
+export function fillParagraphs(content: string, vars: Record<string, string>): string {
+  return content
+    .split(/\n{2,}/)
+    .filter((block) => {
+      const tokens = [...block.matchAll(TOKEN)].map((m) => m[1]!).filter((t) => Object.prototype.hasOwnProperty.call(vars, t));
+      return !tokens.length || tokens.some((t) => vars[t]!.trim());
+    })
+    .map((block) => fillTemplate(block, vars))
+    .join("\n\n");
+}
+
 export function renderPromptMessages(
   messages: PromptMessage[],
   vars: Record<string, string>,
@@ -112,7 +166,10 @@ export function renderPromptMessages(
       out.push(...history);
       continue;
     }
-    out.push({ role: message.role, content: fillTemplate(message.content, vars) });
+    const content = fillParagraphs(message.content, vars);
+    // A system message with nothing left in it is not sent.
+    if (message.role === "system" && !content.trim()) continue;
+    out.push({ role: message.role, content });
   }
   return out;
 }

@@ -86,18 +86,30 @@ export async function lastUserAt(before = Number.MAX_SAFE_INTEGER): Promise<numb
 
 /** Plain facts a person would just know: the time, and how long she has been quiet. */
 /** 「现在是{clock}」: the time (a full sentence), then when she last spoke. */
+export type TimeFacts = {
+  /** Date, weekday, time of day. */
+  clock: string;
+  /** When she last spoke ("" when not asked for, or never). */
+  lastSaid: string;
+  sinceLast: string;
+};
+
+/** The time facts the reply's template lays out (指令 → 每轮回复: {clock} {last_said} {since_last}). */
 export async function timeFacts(
   nowMs: number,
   timeZone: string,
   excludeAfter?: number,
   opts: { sinceLast?: boolean } = {},
-): Promise<string> {
-  const lines = [`${formatClock(nowMs, timeZone)}。`];
+): Promise<TimeFacts> {
+  const facts: TimeFacts = { clock: formatClock(nowMs, timeZone), lastSaid: "", sinceLast: "" };
   if (opts.sinceLast !== false) {
     const last = await lastUserAt(excludeAfter ?? nowMs - 5_000);
-    if (last) lines.push(`Rosie 上一次说话是 ${clockOf(last, timeZone)}，距现在 ${gap(nowMs - last)}。`);
+    if (last) {
+      facts.lastSaid = clockOf(last, timeZone);
+      facts.sinceLast = gap(nowMs - last);
+    }
   }
-  return lines.join("\n");
+  return facts;
 }
 
 // ---------- days ----------

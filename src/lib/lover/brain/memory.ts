@@ -4,6 +4,7 @@ import { sql } from "./store.ts";
 import { backgroundOf, buildIndex, fitScores, rankDocs, type Background, type SearchIndex } from "./memory-search.ts";
 import { cosine, embedConfig, embedTexts } from "./embed.ts";
 import { fromStored, modelFacingText } from "../message-meta.ts";
+import { DEFAULT_FORMATS, fmt, type Formats } from "./prompts/formats.ts";
 
 /**
  * 清然's memory (docs/brain.md v6): only what changes how he acts or thinks later, a handful at a time.
@@ -311,7 +312,7 @@ async function background(): Promise<Background> {
     rows
       .map((r) => fromStored(r.body, r.meta))
       .filter((m) => !m.meta.nightNoise)
-      .map(modelFacingText),
+      .map((m) => modelFacingText(m)),
   );
   backgroundCache = { at: Date.now(), value };
   return value;
@@ -442,25 +443,40 @@ function dayLabel(day: string): string {
   return m ? `${Number(m[2])}月${Number(m[3])}日` : day;
 }
 
-/** The recalled moments as he is given them. */
-export function recallText(memories: Memory[]): string {
+function whenOf(m: Memory, f: Formats): string {
+  return (m.source !== "story" && dayLabel(m.day)) || fmt(f, "undated", {});
+}
+
+function laterOf(m: Memory, f: Formats): string {
+  return fmt(f, "later", { changed: m.changed.trim() });
+}
+
+/** The recalled moments as he is given them (材料的写法: 想起来的事 / 想起来的看懂的 / 后来 / 只有别人知道). */
+export function recallText(memories: Memory[], f: Formats = DEFAULT_FORMATS): string {
   return memories
     .map((m) => {
-      const when = m.source === "story" ? "以前" : dayLabel(m.day) || "以前";
-      const who = m.knows ? `，只有${m.knows.split(" ").join("、")}知道，清然不知道` : "";
-      const what = m.kind === "insight" ? `（${when}，清然看懂的）` : `（${when}${who}）`;
-      const later = m.changed.trim() ? `（后来：${m.changed.trim()}）` : "";
-      return `${what}${m.body.trim()}${later}`;
+      const knows = fmt(f, "recallKnows", { names: (m.knows ?? "").split(" ").filter(Boolean).join("、") });
+      const line =
+        m.kind === "insight"
+          ? fmt(f, "recallInsight", { when: whenOf(m, f), body: m.body.trim() })
+          : fmt(f, "recall", { when: whenOf(m, f), knows, body: m.body.trim() });
+      return line + laterOf(m, f);
     })
     .join("\n");
 }
 
-/** Recent memories with ids, for the night pass to see what it might have to mark as changed. */
-export function memoriesWithIds(memories: Memory[]): string {
+/** Memories with ids, for the night pass to see what it may merge into (材料的写法: 以前的事 / 以前看懂的). */
+export function memoriesWithIds(memories: Memory[], f: Formats = DEFAULT_FORMATS): string {
   return memories
     .map(
       (m) =>
-        `[${m.id}]（${m.source === "story" ? "以前" : dayLabel(m.day)}${m.kind === "insight" ? "，看懂的" : ""}${m.thread ? `，${m.thread}` : ""}${m.knows ? `，只有${m.knows}知道` : ""}）${m.body.trim()}${m.changed.trim() ? `（后来：${m.changed.trim()}）` : ""}`,
+        fmt(f, m.kind === "insight" ? "memoryInsight" : "memory", {
+          id: m.id,
+          when: whenOf(m, f),
+          thread: fmt(f, "thread", { thread: m.thread.trim() }),
+          knows: fmt(f, "memoryKnows", { names: m.knows ?? "" }),
+          body: m.body.trim(),
+        }) + laterOf(m, f),
     )
     .join("\n");
 }

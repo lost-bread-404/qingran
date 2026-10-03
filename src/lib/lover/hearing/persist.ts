@@ -406,12 +406,6 @@ export async function patchFinalTextByTurn(sql: Sql, turnId: string, finalText: 
   }
 }
 
-export async function goldCount(sql: Sql): Promise<number> {
-  const rows = await sql<{ n: number }>`
-    select count(*)::int as n from qingran_hearing_clips where gold_source is not null
-  `;
-  return Number(rows[0]?.n) || 0;
-}
 
 export async function listScoreClipRows(sql: Sql) {
   return sql.query<{

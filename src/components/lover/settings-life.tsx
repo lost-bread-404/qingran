@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { brainGetLife, brainListManualEdits, brainSetReach, brainTestPush, brainWakeNow } from "@/lib/lover/brain/life-api";
-import { hearingLabeledCount } from "@/lib/lover/hearing/store";
 
 type ReachRow = {
   enabled: boolean;
@@ -156,33 +155,6 @@ export function ReachPanel() {
   );
 }
 
-export function StatusPanel({
-  voiceModel,
-  injectLine,
-  phase,
-}: {
-  voiceModel: string;
-  injectLine: string;
-  phase: string;
-}) {
-  const [labeledCount, setLabeledCount] = useState(0);
-  useEffect(() => {
-    void hearingLabeledCount({ data: {} }).then((result) => {
-      if (result.ok) setLabeledCount(result.count);
-    });
-  }, []);
-  return (
-    <div className="flex flex-col gap-2 text-sm">
-      <p className="text-xs text-subtle">平时不用看。</p>
-      <p>
-        已标 {labeledCount} / 200
-      </p>
-      <p>{injectLine}</p>
-      <p className="text-xs text-subtle">回复模型 {voiceModel}</p>
-      <p className="text-xs text-subtle">{phase}</p>
-    </div>
-  );
-}
 
 export function ManualEdits() {
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);

@@ -1,17 +1,12 @@
 import { createHash } from "node:crypto";
 import { getSql } from "../../../db.ts";
 import { collapseReplyVariants } from "../../pair-messages.ts";
-import { lockedProfile, personaText, voiceInjectFromProfile, type Profile } from "../../types.ts";
+import { lockedProfile, voiceInjectFromProfile, type Profile } from "../../types.ts";
 import { asModelInput, callModel, type CallModelResult } from "../llm.ts";
 import { now } from "../clock.ts";
 import type { Effort } from "../config.ts";
 import { resolveTz } from "../tz.ts";
-import { identityBlock } from "../life.ts";
-import { timeFacts } from "../heart.ts";
-import { dossierTextForModel } from "../dossier.ts";
-import { recall, recallText, recentInner } from "../memory.ts";
-import { recallQuery, scenePresent, withInner } from "./pack.ts";
-import { loadPrompt } from "../prompts/store.ts";
+import { gatherVoiceParts } from "./pack.ts";
 import {
   getMessage,
   getMeta,
@@ -56,26 +51,18 @@ export async function replayMessages(opts: {
   const inject = voiceInjectFromProfile(opts.profile);
   const meta = await getMeta();
   const tz = resolveTz(meta.timeZone);
-  const [history, voicePrompt, us, clockText] = await Promise.all([
-    listHistoryWindow(user.id, inject.history, user.createdAt),
-    loadPrompt("voice"),
-    inject.memory ? dossierTextForModel() : Promise.resolve(""),
-    timeFacts(nowMs, tz, user.createdAt),
-  ]);
-  const recalled = inject.memory ? await recall(recallQuery(user.text, history), user.createdAt, { present: scenePresent(history, opts.profile.voiceCast) }) : { memories: [] };
-  const messages = buildVoiceMessages({
-    charter: opts.charter,
-    identity: identityBlock(opts.profile.identity),
-    us,
-    recall: recallText(recalled.memories),
-    clock: withInner(clockText, await recentInner(user.createdAt)),
-    history: collapseReplyVariants(history),
-    historyWindow: inject.history,
+  // As it was when she said it: the talk before her line, the time then, his notes then.
+  const { parts } = await gatherVoiceParts({
+    profile: opts.profile,
+    nowMs: user.createdAt || nowMs,
+    timeZone: tz,
+    history: listHistoryWindow(user.id, inject.history, user.createdAt).then(collapseReplyVariants),
     userText: user.text,
-    voiceTemplate: voicePrompt.body,
-    personaPlacement: opts.placement,
-    personaAck: opts.profile.personaAck,
+    lastSaidBefore: user.createdAt,
+    charter: opts.charter,
+    placement: opts.placement,
   });
+  const messages = buildVoiceMessages({ ...parts, historyWindow: inject.history });
   return { messages, userText: user.text };
 }
 
@@ -102,7 +89,7 @@ export async function runReplay(opts: {
   complete?: Complete;
 }): Promise<{ a: ReplaySide; b: ReplaySide }> {
   const profile = lockedProfile(await getProfileData());
-  const charter = personaText(profile);
+  const charter = profile.systemPrompt;
   const complete = opts.complete ?? callModel;
   const [aPack, bPack] = await Promise.all([
     replayMessages({ userMsgId: opts.userMsgId, charter, placement: profile.personaPlacement, profile }),

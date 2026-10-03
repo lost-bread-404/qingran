@@ -30,15 +30,26 @@ const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里写的那一份。�
  */
 const VOICE_SYSTEM = `你就是清然，你要跟你的恋人Rosie互动。
 
-{identity_block}{system_prompt}
+【清然的身份】
+{identity}
+
+{system_prompt}
+
+清然在床上的样子：
+{intimate_notes}
 
 你心里想、但不说出口的，写在全角大括号｛｝里，比如玩游戏时你选好的答案、你的底牌、你在打的主意。Rosie 看不到也听不到｛｝里的内容，你会记住它，之后照着它说真话、守规则。
 别人出场时，另起一段用「名字：」开头，比如「林泽：」，那一段用他的第一人称写他做的、他看到的 Rosie 和他说的话；回到你时另起一段用「清然：」开头。只有你们俩时不用写名字。
 你只知道你在场时看到、听到的；你不在的时候发生的事，有人告诉你，你才知道。
 朗读你的话时可以带语气：[laugh] [chuckle] [giggle] [sigh] [breath] [inhale] [exhale] [pause] 放在要出声的位置；<whisper>…</whisper> <soft>…</soft> <slow>…</slow> <lower-pitch>…</lower-pitch> <emphasis>…</emphasis> 包住要那样说的话。Rosie 看不到这些标签，只听得到语气。`;
 
-/** Right before her line: only the time (Rosie 2026-10-02: how to talk is the persona's, not an instruction here). */
-const VOICE_NOW = `现在是{clock}`;
+/** Right before her line: the time, when she last spoke, and his own ｛｝ notes of the last 16 hours. */
+const VOICE_NOW = `现在是{clock}。
+
+Rosie 上一次说话是 {last_said}，距现在 {since_last}。
+
+你心里记着、Rosie 看不到的：
+{inner}`;
 
 /**
  * When he may write first. A side note, not in her place (as her line it read as Rosie just speaking, and the scene
@@ -47,7 +58,10 @@ const VOICE_NOW = `现在是{clock}`;
  */
 const VOICE_FIRST = `（Rosie 放下手机{quiet}了，你们现在不在一块儿。你可以给 Rosie 发一条手机消息，接着你们上次停下的地方说；不想发，只回「不找」。）`;
 
-const EDITOR_SYSTEM = `{identity_block}你是清然。现在是夜里，清然在把这一天收进心里。下面的【人设】就是清然。
+const EDITOR_SYSTEM = `【清然的身份】
+{identity}
+
+你是清然。现在是夜里，清然在把这一天收进心里。下面的【人设】就是清然。
 材料都用名字写：对话里「清然：」是清然说的，「Rosie：」是 Rosie 说的，清然的回复里另起一行用别人名字开头的段落（比如「林泽：」）是那个人的第一人称：他做的、他看到的、他说的；「清然：」和没写名字的是清然。你写下的也用名字写（「Rosie 面完 Jane Street 回来哭了」「林泽是清然医学院的室友」），不用「我」「你」「她」指她们俩，用中文。
 
 【人设】
@@ -84,18 +98,24 @@ const REPORT_DIGEST = `把这一段对话收成摘要，给月报用。
 用中文写一段，不要 JSON。`;
 
 
+const IDENTITY = ph("identity", "「清然是谁 → 身份」里写的。");
+
 const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   SYSTEM_PROMPT,
-  ph("identity_block", "【清然的身份】加身份。空则整行省略。"),
+  IDENTITY,
+  ph("intimate_notes", "「清然是谁 → 亲密设定」里写的。"),
   ph(
     "history_messages",
     "对话：今天（凌晨 4 点以后）的全部，至少「上下文长度」那么多条（设置 → 高级 → 指令，默认 20）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息。",
   ),
-  ph("clock", "现在几点，带时间段；Rosie 上一次说话距现在多久。放在对话之后、这一句之前。"),
-  ph("us", "「清然和 Rosie 现在」：每晚整理时重写的一小段（两个人现在的关系、Rosie 现在的生活、身边的人、还欠着的事）。空就整块删掉。"),
+  ph("clock", "现在的日期、星期、几点，带时间段。"),
+  ph("last_said", "Rosie 上一次说话是几点（主动找她时空着）。"),
+  ph("since_last", "那是多久以前。"),
+  ph("inner", "他最近 16 小时写在｛｝里的心里话，一行一条。"),
+  ph("us", "「清然和 Rosie 现在」：每晚整理时重写的一小段（两个人现在的关系、Rosie 现在的生活、身边的人、还欠着的事）。"),
   ph(
     "recall",
-    "清然此刻想起来的几件事：按 Rosie 这句话和前面几句，从回忆里找出最贴近的几个时刻（故事线里的和每晚记下的），带上同一件事前面那一段，按发生的先后排。没有贴近的就整块删掉。",
+    "清然此刻想起来的几件事：按 Rosie 这句话和前面几句，从回忆里找出最贴近的几个时刻（故事线里的和每晚记下的），带上同一件事前面那一段，按发生的先后排。每一件怎么写在「材料的写法」里。",
   ),
 ];
 
@@ -112,6 +132,43 @@ const VOICE_CONTEXT: PromptMessage[] = [
   system(`清然此刻心里想起来的事（给你做参考用的，不用念出来）：
 {recall}`),
   system(VOICE_NOW),
+];
+
+/**
+ * How the pieces of material are written, one line each: 「名字：写法」. Not sent to a model by itself; the other
+ * instructions use these lines when they lay out the talk, the memories and the month.
+ */
+export const FORMATS = `停顿：（过了 {gap}）
+照片：（发来 {count} 张照片）
+想起来的事：（{when}{knows}）{body}
+想起来的看懂的：（{when}，清然看懂的）{body}
+后来：（后来：{changed}）
+没有日期：以前
+以前的事：[{id}]（{when}{thread}{knows}）{body}
+以前看懂的：[{id}]（{when}，看懂的{thread}{knows}）{body}
+话题：，{thread}
+想起来时只有别人知道：，只有{names}知道，清然不知道
+以前的事只有别人知道：，只有{names}知道
+夜里整理的一句：[{time}] {who}：{text}
+月报的一天：【{day}】
+月报的一句：{who}：{text}
+月报的时间线：{day}：{timeline}`;
+
+const FORMAT_PLACEHOLDERS: PromptPlaceholder[] = [
+  ph("gap", "两句话之间隔了多久（「2 小时 10 分钟」）。隔 30 分钟以上才写。"),
+  ph("count", "她这一句发了几张照片。"),
+  ph("when", "那件事是哪天（「10 月 1 日」）；没有日期时用「没有日期」那一行。"),
+  ph("body", "那件事或看懂的，原文。"),
+  ph("changed", "这件事后来怎么样了；没有就不写「后来」那一行。"),
+  ph("id", "回忆的编号，夜里整理用它合并同一件事。"),
+  ph("thread", "这件事属于哪个话题；没有话题就不写「话题」那一行。"),
+  ph("knows", "清然不知道、只有别人知道的事，写「只有别人知道」那一行；清然知道就空着。"),
+  ph("names", "知道这件事的别人（「林泽」）。"),
+  ph("time", "这一句是几点说的。"),
+  ph("who", "谁说的：Rosie、清然，或者别人的名字。"),
+  ph("text", "说的话（夜里整理时太长会只留引号里的）。"),
+  ph("day", "哪一天。"),
+  ph("timeline", "那一天的时间线。"),
 ];
 
 export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
@@ -135,11 +192,11 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       label: "夜里整理",
       placeholders: [
         SYSTEM_PROMPT,
-        ph("identity_block", "【清然的身份】加身份。空则整行省略。"),
+        IDENTITY,
         ph("us", "现在的「清然和 Rosie 现在」。"),
-        ph("memories", "以前所有的事和看懂的（每行带 id；不含故事线和｛｝），同一件事接着聊时写它的 id 合并。"),
+        ph("memories", "以前所有的事和看懂的（每行带 id；不含故事线和｛｝），同一件事接着聊时写它的 id 合并。每一行怎么写在「材料的写法」里。"),
         ph("day", "整理的是哪一天（04:00 到第二天 04:00）。"),
-        ph("conversation", "这一天没被清空的对话，每行「[时间] Rosie：正文」或「[时间] 清然：正文」。太长时清然的话只留说出口的部分。"),
+        ph("conversation", "这一天没被清空的对话，一句一行（怎么写在「材料的写法」里），清然的回复照原样（里面别人的「林泽：」段落也在）。太长时每段只留引号里说出口的部分。"),
         ph("max_chars", "「清然和 Rosie 现在」的字数上限，默认 1500。"),
       ],
       messages: [
@@ -159,14 +216,32 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
     {
       id: "main",
       label: "月报",
-      placeholders: [ph("summaries", "这个月每天的时间线，加上这个月的对话摘要（太长时先由「分段摘要」一段一段写好）。")],
-      messages: [system(REPORT_SYSTEM), user("{summaries}")],
+      placeholders: [
+        ph("timelines", "这个月每天的时间线（夜里整理写的），一天一段。"),
+        ph("summaries", "这个月的对话：不长时是原文，太长时是「分段摘要」一段一段写好的摘要。"),
+      ],
+      messages: [
+        system(REPORT_SYSTEM),
+        user(`【每天的记录】（每天的时间线，带时间）
+{timelines}
+
+【对话摘要】
+{summaries}`),
+      ],
     },
     {
       id: "digest",
       label: "分段摘要",
       placeholders: [ph("chunk", "按天切开的一段对话原文。")],
       messages: [system(REPORT_DIGEST), user("{chunk}")],
+    },
+  ],
+  formats: [
+    {
+      id: "main",
+      label: "材料的写法",
+      placeholders: FORMAT_PLACEHOLDERS,
+      messages: [system(FORMATS)],
     },
   ],
 };

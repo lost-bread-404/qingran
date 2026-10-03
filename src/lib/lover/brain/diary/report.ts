@@ -3,7 +3,8 @@ import { now } from "../clock.ts";
 import { getSql } from "../../../db.ts";
 import { getMeta, patchMeta, upsertReport } from "../store.ts";
 import { localDay, monthRange } from "../time.ts";
-import { loadPrompt } from "../prompts/store.ts";
+import { loadFormats, loadPrompt } from "../prompts/store.ts";
+import { DEFAULT_FORMATS, fmt, type Formats } from "../prompts/formats.ts";
 import { parsePromptBody, renderVariant } from "../prompts/doc.ts";
 import { lockedProfile } from "../../types.ts";
 import { fromStored, modelFacingText } from "../../message-meta.ts";
@@ -18,7 +19,7 @@ const CHUNK_CHARS = 12_000;
 export type MonthLine = { day: string; role: "user" | "assistant"; text: string };
 
 /** This month's spoken turns. System notices and forgotten rows stay out. */
-export async function loadMonthDialogue(month: string): Promise<MonthLine[]> {
+export async function loadMonthDialogue(month: string, f: Formats = DEFAULT_FORMATS): Promise<MonthLine[]> {
   if (!/^\d{4}-\d{2}$/.test(month)) return [];
   const { start, end } = monthRange(month);
   const db = await getSql();
@@ -35,16 +36,16 @@ export async function loadMonthDialogue(month: string): Promise<MonthLine[]> {
     .map((row) => ({
       day: String(row.local_day ?? ""),
       role: row.role === "assistant" ? ("assistant" as const) : ("user" as const),
-      text: modelFacingText(fromStored(row.body, row.meta)).replace(/\s+/g, " ").trim(),
+      text: modelFacingText(fromStored(row.body, row.meta), f).replace(/\s+/g, " ").trim(),
     }))
     .filter((row) => row.day && row.text);
 }
 
-export function chunkByDay(lines: MonthLine[], maxChars = CHUNK_CHARS): string[] {
+export function chunkByDay(lines: MonthLine[], maxChars = CHUNK_CHARS, f: Formats = DEFAULT_FORMATS): string[] {
   const days: Array<{ day: string; text: string }> = [];
   for (const line of lines) {
     const who = line.role === "user" ? "Rosie" : "清然";
-    const row = `${who}：${line.text}`;
+    const row = fmt(f, "reportLine", { who, text: line.text });
     const last = days[days.length - 1];
     if (last?.day === line.day) last.text = `${last.text}\n${row}`;
     else days.push({ day: line.day, text: row });
@@ -55,7 +56,7 @@ export function chunkByDay(lines: MonthLine[], maxChars = CHUNK_CHARS): string[]
     for (let i = 0; i < block.length; i += maxChars) chunks.push(block.slice(i, i + maxChars));
   };
   for (const day of days) {
-    const block = `【${day.day}】\n${day.text}`;
+    const block = `${fmt(f, "reportDay", { day: day.day })}\n${day.text}`;
     if (buf && buf.length + block.length + 2 > maxChars) {
       push(buf);
       buf = "";
@@ -81,19 +82,20 @@ async function completeVariant(variantId: string, vars: Record<string, string>, 
   return result.text.trim();
 }
 
-async function monthTimelines(start: string, end: string): Promise<string> {
+async function monthTimelines(start: string, end: string, f: Formats): Promise<string> {
   const db = await getSql();
   const rows = await db.query<{ day: string; timeline: string }>(
     `select day, timeline from qr_days where day >= $1 and day <= $2 and timeline <> '' order by day asc`,
     [start, end],
   );
-  return rows.map((r) => `${r.day}\n${String(r.timeline).trim()}`).join("\n\n");
+  return rows.map((r) => fmt(f, "reportTimeline", { day: r.day, timeline: String(r.timeline).trim() })).join("\n\n");
 }
 
 export async function runReport(month: string, jobId?: string): Promise<void> {
   if (!/^\d{4}-\d{2}$/.test(month)) return;
   const { start, end } = monthRange(month);
-  const lines = await loadMonthDialogue(month);
+  const formats = await loadFormats();
+  const lines = await loadMonthDialogue(month, formats);
   if (!lines.length) {
     await upsertReport({
       id: month,
@@ -106,7 +108,7 @@ export async function runReport(month: string, jobId?: string): Promise<void> {
     await patchMeta({ lastReportMonth: month });
     return;
   }
-  const chunks = chunkByDay(lines);
+  const chunks = chunkByDay(lines, CHUNK_CHARS, formats);
   let summaries = chunks[0] ?? "";
   if (chunks.length > 1) {
     const parts: string[] = [];
@@ -116,9 +118,8 @@ export async function runReport(month: string, jobId?: string): Promise<void> {
     }
     summaries = parts.join("\n\n");
   }
-  const timelines = await monthTimelines(start, end);
-  const table = timelines ? `【每天的记录】（每天的时间线，带时间）\n${timelines}\n\n` : "";
-  const text = await completeVariant("main", { summaries: `${table}【对话摘要】\n${summaries}`.slice(0, 40_000) }, jobId);
+  const timelines = await monthTimelines(start, end, formats);
+  const text = await completeVariant("main", { timelines: timelines.slice(0, 15_000), summaries: summaries.slice(0, 25_000) }, jobId);
   await upsertReport({
     id: month,
     periodStart: start,

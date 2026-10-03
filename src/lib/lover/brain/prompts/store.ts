@@ -8,7 +8,8 @@ import {
   type PromptKey,
   type PromptSpec,
 } from "./catalog.ts";
-import { defaultDoc, parsePromptBody, serializeDoc, type PromptDoc } from "./doc.ts";
+import { defaultDoc, parsePromptBody, serializeDoc, variantMessages, type PromptDoc } from "./doc.ts";
+import { parseFormats, type Formats } from "./formats.ts";
 
 export type PromptVersionHit = {
   hash: string;
@@ -31,21 +32,8 @@ export function resetPromptCache() {
   cache = null;
 }
 
-function stripAcousticGuide(text: string): string {
-  return text
-    .replace(/Rosie 的话有时会带语气标记[\s\S]*?没有标记就按普通口语听。\s*/g, "")
-    .replace(/\n{3,}/g, "\n\n");
-}
-
 function materialize(key: PromptKey, raw: string | null): { body: string; doc: PromptDoc; custom: boolean; hash: string } {
   const doc = parsePromptBody(key, raw);
-  if (key === "voice") {
-    for (const variant of doc.variants) {
-      for (const message of variant.messages) {
-        message.content = stripAcousticGuide(message.content);
-      }
-    }
-  }
   const body = serializeDoc(doc);
   return {
     body,
@@ -184,4 +172,10 @@ export async function rollbackPrompt(key: PromptKey, hash: string): Promise<Load
   const body = rows[0]?.body;
   if (!body) throw new Error("missing-version");
   return savePrompt(key, body);
+}
+
+/** 「材料的写法」 as she has it now. */
+export async function loadFormats(): Promise<Formats> {
+  const loaded = await loadPrompt("formats");
+  return parseFormats(variantMessages(loaded.doc, "main").map((m) => m.content).join("\n"));
 }

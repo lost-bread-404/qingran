@@ -1,8 +1,9 @@
 import { HISTORY_WINDOW } from "../config.ts";
-import { parsePromptBody, renderPromptMessages, variantMessages } from "../prompts/doc.ts";
-import { fillTemplate } from "../prompts/fill.ts";
+import { fillParagraphs, parsePromptBody, renderPromptMessages, variantMessages } from "../prompts/doc.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { modelFacingText } from "../../message-meta.ts";
+import { DEFAULT_FORMATS, fmt, type Formats } from "../prompts/formats.ts";
+import type { TimeFacts } from "../heart.ts";
 import { NEUTRAL_PERSONA } from "../../types.ts";
 
 /**
@@ -12,13 +13,21 @@ import { NEUTRAL_PERSONA } from "../../types.ts";
  * A block whose value is empty is left out.
  */
 export type VoicePackParts = {
+  /** The persona as she wrote it. */
   charter: string;
+  /** 亲密设定 as she wrote it. */
+  intimate: string;
+  /** 身份 as she wrote it. */
   identity: string;
   /** 清然和 Rosie 现在: the short text the night pass rewrites ("" = not injected). */
   us: string;
   /** The moments that came back to him for this line, already written out ("" = none). */
   recall: string;
-  clock: string;
+  time: TimeFacts;
+  /** His ｛｝ notes of the last 16 hours, one per line. */
+  inner: string;
+  /** 材料的写法 (gaps and photos in the talk). */
+  formats: Formats;
   history: StoredMessage[];
   historyWindow: number;
   userText: string;
@@ -62,50 +71,52 @@ function gapText(ms: number): string {
   return m % 60 ? `${Math.floor(m / 60)} 小时 ${m % 60} 分钟` : `${Math.floor(m / 60)} 小时`;
 }
 
-export function voiceHistoryMessages(history: StoredMessage[], limit = HISTORY_WINDOW): VoiceChatMessage[] {
+export function voiceHistoryMessages(
+  history: StoredMessage[],
+  limit = HISTORY_WINDOW,
+  f: Formats = DEFAULT_FORMATS,
+): VoiceChatMessage[] {
   if (limit <= 0) return [];
   const rows = history.filter((message) => !message.meta.nightNoise).slice(-limit);
   const out: VoiceChatMessage[] = [];
   rows.forEach((message, i) => {
     const gap = i > 0 ? message.createdAt - rows[i - 1]!.createdAt : 0;
-    if (gap >= GAP_MARK_MS) out.push({ role: "system", content: `（过了 ${gapText(gap)}）` });
+    const mark = gap >= GAP_MARK_MS ? fmt(f, "gap", { gap: gapText(gap) }) : "";
+    if (mark.trim()) out.push({ role: "system", content: mark });
     const images = message.role === "user" ? message.meta.images : undefined;
     out.push({
       role: message.role === "assistant" ? "assistant" : "user",
-      content: modelFacingText(message),
+      content: modelFacingText(message, f),
       ...(images?.length ? { images } : {}),
     });
   });
   return out;
 }
 
-/** Tokens whose block disappears when their value is empty. */
-const OPTIONAL = ["us", "recall"] as const;
-
-function optionalTokens(content: string): string[] {
-  return OPTIONAL.filter((token) => content.includes(`{${token}}`));
-}
-
-export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "none"): VoiceChatMessage[] {
-  const charter = parts.charter.trim() || NEUTRAL_PERSONA;
-  const personaInSystem = parts.personaPlacement !== "first_user";
-  const vars: Record<string, string> = {
-    system_prompt: personaInSystem ? charter : "",
-    identity_block: parts.identity.trim() ? `${parts.identity.trim()}\n` : "",
+export function voiceVars(parts: VoicePackParts, strip: VoiceStrip = "none"): Record<string, string> {
+  return {
+    system_prompt: parts.charter.trim() || NEUTRAL_PERSONA,
+    intimate_notes: parts.intimate.trim(),
+    identity: parts.identity.trim(),
     us: strip === "none" ? parts.us.trim() : "",
     recall: strip === "none" ? parts.recall.trim() : "",
-    clock: parts.clock,
+    clock: parts.time.clock,
+    last_said: parts.time.lastSaid,
+    since_last: parts.time.sinceLast,
+    inner: parts.inner.trim(),
     user_text: parts.userText,
     quiet: parts.first?.quiet ?? "",
   };
+}
+
+export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "none"): VoiceChatMessage[] {
   const variant = parts.first ? "first" : "main";
-  const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant).filter((message) => {
-    const tokens = optionalTokens(message.content);
-    return !tokens.length || tokens.some((token) => vars[token]);
-  });
+  const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant);
   const historyLimit = strip === "thin" ? Math.min(VOICE_THIN_HISTORY, parts.historyWindow) : parts.historyWindow;
-  let rendered = renderPromptMessages(template, vars, voiceHistoryMessages(parts.history, historyLimit)).filter(
-    (message) => message.role !== "system" || message.content.trim(),
+  let rendered = renderPromptMessages(
+    template,
+    voiceVars(parts, strip),
+    voiceHistoryMessages(parts.history, historyLimit, parts.formats),
   ) as VoiceChatMessage[];
   if (strip === "thin") {
     // Persona, recent talk, her line (or the note that he may write first): the first system message, everything
@@ -119,36 +130,38 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
     const at = rendered.map((message) => message.role).lastIndexOf("user");
     if (at >= 0) rendered[at] = { ...rendered[at]!, images: parts.userImages };
   }
-  return placePersona(rendered, {
-    placement: parts.personaPlacement,
-    charter,
-    ack: parts.personaAck,
-  });
+  return placePersona(rendered, { placement: parts.personaPlacement, ack: parts.personaAck });
 }
 
+/**
+ * 「第一条消息」: the first system message of the template (persona, identity, intimate side, his rules) is sent as
+ * the first user message instead, and he answers it with her fixed line before the talk starts. Same words.
+ */
 export function placePersona<T extends { role: string; content: string }>(
   messages: T[],
-  opts: { placement: "system" | "first_user"; charter: string; ack: string },
+  opts: { placement: "system" | "first_user"; ack: string },
 ): T[] {
   if (opts.placement !== "first_user") return messages;
-  const persona = opts.charter.trim() || NEUTRAL_PERSONA;
-  const ack = opts.ack.trim() || "嗯。";
-  const at = messages.findIndex((message) => message.role !== "system");
+  const head = messages.findIndex((message) => message.role === "system");
+  if (head < 0) return messages;
+  const persona = messages[head]!;
+  const rest = messages.filter((_, i) => i !== head);
+  const at = rest.findIndex((message) => message.role !== "system");
   // No talk at all (he writes first on an empty day): still before the last note.
-  const index = at < 0 ? Math.max(0, messages.length - 1) : at;
+  const index = at < 0 ? Math.max(0, rest.length - 1) : at;
   const block = [
-    { role: "user", content: persona },
-    { role: "assistant", content: ack },
+    { ...persona, role: "user" },
+    { ...persona, role: "assistant", content: opts.ack.trim() || "嗯。" },
   ] as T[];
-  return [...messages.slice(0, index), ...block, ...messages.slice(index)];
+  return [...rest.slice(0, index), ...block, ...rest.slice(index)];
 }
 
-/** The system text alone (persona + identity), for previews and size notes. */
-export function systemCharter(charter: string, template?: string): string {
-  const first = variantMessages(parsePromptBody("voice", template), "main").find(
+/** The first system message as sent (persona and what comes with it), for size notes. */
+export function systemCharter(parts: VoicePackParts): string {
+  const first = variantMessages(parsePromptBody("voice", parts.voiceTemplate), "main").find(
     (message) => message.role === "system" && message.content.trim() !== "{history_messages}",
   );
-  return fillTemplate(first?.content ?? "", { system_prompt: charter.trim() || NEUTRAL_PERSONA, identity_block: "" }).trim();
+  return fillParagraphs(first?.content ?? "", voiceVars(parts)).trim();
 }
 
 export type VoiceInputChars = {
@@ -162,7 +175,7 @@ export type VoiceInputChars = {
 export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
   const history = voiceHistoryMessages(parts.history, parts.historyWindow);
   return {
-    system: systemCharter(parts.charter, parts.voiceTemplate).length,
+    system: systemCharter(parts).length,
     moment: parts.us.length,
     story: parts.recall.length,
     history: history.reduce((n, m) => n + m.content.length, 0),
@@ -174,14 +187,3 @@ export function formatVoiceInputCharsLine(c: VoiceInputChars): string {
   return `chars system=${c.system} moment=${c.moment} story=${c.story} history=${c.history} user=${c.user}`;
 }
 
-export function parseVoiceInputCharsLine(note: string | null | undefined): VoiceInputChars | null {
-  const next = (note ?? "").match(/chars system=(\d+) moment=(\d+) (?:story|dossier)=(\d+) history=(\d+) user=(\d+)/);
-  if (!next) return null;
-  return {
-    system: Number(next[1]),
-    moment: Number(next[2]),
-    story: Number(next[3]),
-    history: Number(next[4]),
-    user: Number(next[5]),
-  };
-}

@@ -6,7 +6,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
 import { HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD, lockSttKeyterms } from "@/lib/lover/hearing/config";
 import { RECENT_CLIP_KEEP } from "@/lib/lover/brain/config";
-import { formatHearingTimingSummary, parseHearingTimingLine } from "@/lib/lover/hearing/timing-format";
 import { formatCallAudioLogLines, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
 import {
   brainGetCallLog,
@@ -19,18 +18,8 @@ import {
   brainSavePrompt,
 } from "@/lib/lover/brain/api";
 import type { BrainLogRow } from "@/lib/lover/brain/types";
-import { parseVoiceInputCharsLine } from "@/lib/lover/brain/voice/pack-build";
-import {
-  formatCallLogPlain,
-  formatDbBytes,
-  labelCallMessages,
-  LOG_RANGE_FILTERS,
-  LOG_ROUTE_FILTERS,
-  logRangeMs,
-  type CallLogMessage,
-  type LogRangeId,
-} from "@/lib/lover/call-log-view";
-import { PromptStepEditor, type PromptEditorItem, type PromptModelChoice } from "@/components/lover/prompt-step-editor";
+import { formatDbBytes, LOG_ROUTE_FILTERS, messagesText } from "@/lib/lover/call-log-view";
+import { FullText, PromptStepEditor, type PromptEditorItem, type PromptModelChoice } from "@/components/lover/prompt-step-editor";
 import { HearingSensePanel } from "@/components/lover/hearing-sense-panel";
 import { StatePanel } from "@/components/lover/state-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
@@ -47,13 +36,11 @@ import {
   ManualEdits,
   ReachPanel,
   SettingsLink,
-  StatusPanel,
 } from "@/components/lover/settings-life";
 import { applyHearingTier, hearingTierOf, HEARING_TIER_BLURB } from "@/lib/lover/hearing/sense";
 import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
-import { clampHistoryWindow, clampVoiceTemperature, formatVoiceInjectLine, parseVoiceInjectLine, voiceInjectFromProfile, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
+import { clampHistoryWindow, clampVoiceTemperature, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
 import { defaultPromptModel } from "@/lib/lover/brain/prompts/models";
-import { parseSenseLine } from "@/lib/lover/hearing/sense";
 import { cn } from "@/lib/utils";
 
 type Page =
@@ -72,7 +59,7 @@ type Page =
 type PromptItem = PromptEditorItem;
 
 type CallDetail = {
-  messages: CallLogMessage[];
+  messages: Array<{ role: string; content: string }>;
   warnings: string[];
   output: string;
 };
@@ -133,8 +120,8 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   profile: Profile;
   revs: FieldRevs;
+  /** Set while a call is on: samples must not play into the mic. */
   callPhase?: string | null;
-  callDeaf?: boolean;
   onPatch: (patch: Partial<Profile>) => void;
   onApply: (profile: Profile, revs: FieldRevs) => void;
   onClearChat: () => void;
@@ -165,7 +152,7 @@ function LabelModeSwitch({
   );
 }
 
-export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = null, callDeaf = false, onPatch, onApply, onClearChat }: Props) {
+export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = null, onPatch, onApply, onClearChat }: Props) {
   const [draft, setDraft] = useState(profile.systemPrompt);
   const personaDirty = useRef(false);
   const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
@@ -207,8 +194,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [promptError, setPromptError] = useState<string | null>(null);
   const [callById, setCallById] = useState<Record<number, CallDetail | "loading">>({});
   const [logRoute, setLogRoute] = useState<string | null>(null);
-  const [logRange, setLogRange] = useState<LogRangeId>("7d");
-  const [logCopied, setLogCopied] = useState<number | null>(null);
   const [dbSize, setDbSize] = useState<{ totalBytes: number | null; limitMb: number; warn: boolean } | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -277,7 +262,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     let cancelled = false;
     if (page === "log" && logRoute !== "manual") {
       const to = Date.now();
-      const from = to - logRangeMs(logRange);
+      const from = to - 30 * 86_400_000;
       void brainListLogs({ data: { route: logRoute, from, to, limit: 200 } })
         .then((rows) => {
           if (!cancelled) setLog(rows as BrainLogRow[]);
@@ -295,7 +280,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     return () => {
       cancelled = true;
     };
-  }, [open, page, logRoute, logRange]);
+  }, [open, page, logRoute]);
 
   function flashSaved() {
     setSaveError(null);
@@ -474,7 +459,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         setCallById((m) => ({
           ...m,
           [row.id]: {
-            messages: labelCallMessages(assembled ?? []),
+            messages: assembled ?? [],
             warnings,
             output,
           },
@@ -488,32 +473,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       });
   }
 
-  async function copyCall(row: BrainLogRow, detail: CallDetail) {
-    const text = formatCallLogPlain({
-      step: row.step,
-      model: row.model,
-      effort: row.effort,
-      ms: row.ms,
-      tokensIn: row.tokensIn,
-      tokensOut: row.tokensOut,
-      tokensCached: row.tokensCached,
-      tokensReasoning: row.tokensReasoning,
-      costUsd: row.costUsd,
-      finishReason: logFinishReason(row),
-      error: row.error,
-      inputChars: row.inputChars,
-      trimmed: row.trimmed,
-      messages: detail.messages,
-      output: detail.output || row.outputText || "",
-    });
-    try {
-      await navigator.clipboard.writeText(text);
-      setLogCopied(row.id);
-      window.setTimeout(() => setLogCopied((cur) => (cur === row.id ? null : cur)), 1500);
-    } catch {
-      setLogCopied(null);
-    }
-  }
+
 
   const persistRef = useRef<(patch: Partial<Profile>) => void>(() => undefined);
   const draftRef = useRef(draft);
@@ -777,8 +737,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
                 <span className="text-sm">运行记忆{brainOn ? "" : "（已暂停：只用人设 + 上下文，不整理、不主动找你）"}</span>
               </label>
-              <p className="px-1 pt-1 text-sm">这一轮带上什么</p>
-            <p className="text-xs text-subtle">只影响开口那一句。</p>
+              <p className="px-1 pt-1 text-sm">回复带上什么</p>
               <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
                 <input
                   type="checkbox"
@@ -793,7 +752,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               </label>
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
-                  <p className="text-sm">上下文至少几条（今天的对话都带上；超过 200 条就先整理进回忆，再从最近 20 条接着带）</p>
+                  <p className="text-sm">上下文至少几条</p>
                   <p className="text-sm tabular-nums">{historyWindow}</p>
                 </div>
                 <input
@@ -806,11 +765,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   onChange={(e) => commitHistoryWindow(Number(e.target.value))}
                   className="h-11 w-full accent-accent"
                 />
-                <p className="text-xs text-subtle">
-                  {formatVoiceInjectLine(
-                    voiceInjectFromProfile({ injectLongterm, brainOn, historyWindow }),
-                  )}
-                </p>
+                <p className="text-xs text-subtle">今天的对话都带上；超过 200 条先整理进回忆，再从最近 20 条接着带。</p>
               </div>
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
@@ -831,11 +786,11 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   }}
                   className="h-11 w-full accent-accent"
                 />
-                <p className="text-xs text-subtle">每轮回复和主动找她都用这个。默认 1.0。</p>
+                <p className="text-xs text-subtle">默认 1.0。</p>
               </div>
               <div className="flex flex-col gap-1 px-1 pb-2">
                 <p className="text-sm">人设放在哪</p>
-                <p className="text-xs text-subtle">系统提示，或者聊天记录里的第一条消息。主动找她也照这个来。</p>
+                <p className="text-xs text-subtle">「每轮回复」的第一条消息作为系统提示发，或者作为聊天里你说的第一句发。</p>
                 {(["system", "first_user"] as const).map((id) => (
                   <label key={id} className="flex min-h-11 items-center gap-3">
                     <input
@@ -864,7 +819,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               </div>
             </div>
             <p className="text-xs text-subtle">
-              点开一步改消息。人设在「清然是谁」，这里用 {"{system_prompt}"} 引用。记下后下一轮生效。
+              发给模型的每一个字都在这里，除了 {"{…}"} 换进去的内容（人设、身份、亲密设定在「清然是谁」）。记下后下一轮生效。
             </p>
             {promptError ? <p className="text-sm text-live">{promptError}</p> : null}
             {promptItems.length === 0 ? (
@@ -873,6 +828,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               [
                 ["清然", ["voice", "editor"]],
                 ["日记", ["report"]],
+                ["材料", ["formats"]],
               ].map(([title, keys]) => (
                 <div key={String(title)} className="flex flex-col gap-2">
                   <p className="text-xs text-subtle">{title}</p>
@@ -1065,59 +1021,37 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               onChange={commitSense}
             />
             </details>
-            <section className="flex flex-col gap-3">
-              <div>
-                <p className="text-sm">识别时发出去的内容</p>
-                <p className="mt-1 text-xs text-subtle">xAI 和 Apple 只回你说的字，不收一段说明。</p>
-              </div>
-              <div className="rounded-md bg-surface-2 px-3 py-3">
-                <p className="text-sm">发给 xAI 的</p>
-                <p className="mt-1 text-xs text-subtle">
-                  模型、填充词和静音阈值是固定的。下面的词一行一个，会作为 keyterm 发出去。最近说过的词仍会另外带上。
-                </p>
-                <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-relaxed text-fg">
-{`model: ${HEARING.xai.model}
-filler_words: true
-vad_threshold: ${DEFAULT_XAI_VAD_THRESHOLD}`}
-                </pre>
-                <label className="mt-3 block text-xs text-subtle" htmlFor="stt-keyterms">
-                  keyterm
-                </label>
-                <Textarea
-                  id="stt-keyterms"
-                  value={keytermDraft}
-                  onChange={(e) => setKeytermDraft(e.target.value)}
-                  onBlur={() => {
-                    const next = lockSttKeyterms(keytermDraft.split("\n"));
-                    setKeytermDraft(next.join("\n"));
-                    persistProfile({ sttKeyterms: next });
-                  }}
-                  className="mt-1 min-h-40 font-mono text-sm leading-relaxed"
-                />
-                <button
-                  type="button"
-                  className="mt-2 h-11 text-sm text-muted"
-                  onClick={() => {
-                    const next = [...STT_KEYTERMS];
-                    setKeytermDraft(next.join("\n"));
-                    persistProfile({ sttKeyterms: next });
-                  }}
-                >
-                  恢复默认词
-                </button>
-              </div>
-              <div className="rounded-md bg-surface-2 px-3 py-3">
-                <p className="text-sm">发给 Apple 的</p>
-                <p className="mt-1 text-xs text-subtle">
-                  浏览器自带的中文识别，不收任何说明。只把听到的字拿回来，和 xAI 对一下，用来丢掉 xAI 胡说的句子。
-                </p>
-                <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-fg">
-{`lang: zh-CN
-continuous: true
-interimResults: true
-maxAlternatives: 3`}
-                </pre>
-              </div>
+            <section className="flex flex-col gap-2 rounded-md bg-surface-2 px-3 py-3">
+              <label className="text-sm" htmlFor="stt-keyterms">
+                发给 xAI 的 keyterm
+              </label>
+              <p className="text-xs text-subtle">一行一个，最近说过的词另外带上。识别只收这些词，不收说明。</p>
+              <Textarea
+                id="stt-keyterms"
+                value={keytermDraft}
+                onChange={(e) => setKeytermDraft(e.target.value)}
+                onBlur={() => {
+                  const next = lockSttKeyterms(keytermDraft.split("\n"));
+                  setKeytermDraft(next.join("\n"));
+                  persistProfile({ sttKeyterms: next });
+                }}
+                className="min-h-40 font-mono text-sm leading-relaxed"
+              />
+              <button
+                type="button"
+                className="h-11 self-start text-sm text-muted"
+                onClick={() => {
+                  const next = [...STT_KEYTERMS];
+                  setKeytermDraft(next.join("\n"));
+                  persistProfile({ sttKeyterms: next });
+                }}
+              >
+                恢复默认词
+              </button>
+              <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-subtle">
+{`xAI: model ${HEARING.xai.model} · filler_words true · vad_threshold ${DEFAULT_XAI_VAD_THRESHOLD}
+Apple: zh-CN · continuous · interimResults · maxAlternatives 3`}
+              </pre>
             </section>
             <LabelModeSwitch
               checked={debugHearing}
@@ -1139,93 +1073,30 @@ maxAlternatives: 3`}
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
-            <StatusPanel
-              voiceModel={voiceModel}
-              injectLine={formatVoiceInjectLine(voiceInjectFromProfile({ injectLongterm, brainOn, historyWindow }))}
-              phase={callPhase ? `通话 phase ${callPhase}${callDeaf ? " · 麦关" : ""}` : "当前不在通话"}
-            />
             <p className="text-xs text-subtle">
-              占用 {formatDbBytes(dbSize?.totalBytes ?? null)}
-              {dbSize?.limitMb ? ` / ${dbSize.limitMb} MB` : ""}
-              {" · "}记录保留 30 天
+              每一次调用模型都在这里，点开是发给它的全部原文和它回的。记录留 30 天，占用 {formatDbBytes(dbSize?.totalBytes ?? null)}
+              {dbSize?.limitMb ? ` / ${dbSize.limitMb} MB` : ""}。
             </p>
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                aria-pressed={logRoute == null}
-                onClick={() => setLogRoute(null)}
-                className={cn(
-                  "min-h-11 rounded-md px-3 text-sm",
-                  logRoute == null ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-                )}
-              >
-                全部
-              </button>
-              {LOG_ROUTE_FILTERS.map(([id, label]) => (
+              {([[null, "全部"], ...LOG_ROUTE_FILTERS] as Array<[string | null, string]>).map(([id, label]) => (
                 <button
-                  key={id}
+                  key={label}
                   type="button"
                   aria-pressed={logRoute === id}
-                  onClick={() => setLogRoute(logRoute === id ? null : id)}
-                  className={cn(
-                    "min-h-11 rounded-md px-3 text-sm",
-                    logRoute === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-                  )}
+                  onClick={() => setLogRoute(id)}
+                  className={cn("min-h-11 rounded-md px-3 text-sm", logRoute === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted")}
                 >
                   {label}
                 </button>
               ))}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {LOG_RANGE_FILTERS.map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  aria-pressed={logRange === id}
-                  onClick={() => setLogRange(id)}
-                  className={cn(
-                    "min-h-11 rounded-md px-3 text-sm",
-                    logRange === id ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {log.filter((row) => row.route === "hear" || row.step === "hearing").length ? (
-              <div className="mb-2 rounded-md bg-surface-2 px-3 py-2">
-                <p className="text-xs text-subtle">最近听力耗时</p>
-                <ul className="mt-1 flex flex-col gap-1">
-                  {log
-                    .filter((row) => row.route === "hear" || row.step === "hearing")
-                    .slice(0, 20)
-                    .map((row) => {
-                      const timing = parseHearingTimingLine(row.note);
-                      const senseLine = parseSenseLine(row.note);
-                      return (
-                        <li key={row.id} className="text-xs leading-relaxed text-fg">
-                          <span className="text-subtle">{logClock(row.at)} </span>
-                          {timing ? formatHearingTimingSummary(timing) : row.note || `${row.ms ?? "—"}ms`}
-                          {senseLine ? <span className="mt-0.5 block text-subtle">{senseLine}</span> : null}
-                        </li>
-                      );
-                    })}
-                </ul>
-              </div>
-            ) : null}
             {logRoute === "manual" ? (
               <ManualEdits />
             ) : log.length === 0 ? (
               <p className="text-sm text-subtle">还没有调用记录。</p>
             ) : (
               log.map((row) => {
-                const failLine = row.ok ? "" : logFailFirstLine(row);
-                const timing = parseHearingTimingLine(row.note);
-                const engineHint = slowEngineHintFromNote(row.note);
-                const injectLine = parseVoiceInjectLine(row.note);
-                const senseLine = parseSenseLine(row.note);
                 const detail = callById[row.id];
-                const loaded = detail && detail !== "loading" ? detail : null;
                 return (
                   <details
                     key={row.id}
@@ -1234,82 +1105,18 @@ maxAlternatives: 3`}
                       if (e.currentTarget.open) loadCall(row);
                     }}
                   >
-                    <summary className="cursor-pointer">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={row.ok ? "text-fg" : "text-live"}>{row.step}</span>
-                        <span className="text-subtle">{row.ms != null ? `${row.ms}ms` : ""}</span>
-                      </div>
-                      {engineHint ? <p className="mt-1 text-live">{engineHint}</p> : null}
-                      {timing ? (
-                        <p className="mt-1 text-subtle">{formatHearingTimingSummary(timing)}</p>
-                      ) : null}
-                      {senseLine ? <p className="mt-1 text-subtle">{senseLine}</p> : null}
-                      {injectLine ? <p className="mt-1 text-subtle">{injectLine}</p> : null}
-                      {row.note?.includes("状态卡住已恢复") ? (
-                        <p className="mt-1 text-live">{row.note}</p>
-                      ) : null}
-                      {failLine ? <p className="mt-1 text-live">{failLine}</p> : null}
+                    <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2">
+                      <span className={cn("min-w-0 truncate", row.ok ? "text-fg" : "text-live")}>
+                        {logClock(row.at)} · {row.step}
+                        {row.ok ? "" : ` · ${logFailFirstLine(row)}`}
+                      </span>
+                      <span className="shrink-0 text-subtle">{row.ms != null ? `${(row.ms / 1000).toFixed(1)}s` : ""}</span>
                     </summary>
-                    <div className="mt-3 flex flex-col gap-3">
-                      <section>
-                        <p className="text-xs text-subtle">参数与耗时</p>
-                        <dl className="mt-1 flex flex-col gap-1 text-subtle">
-                          <div>模型 {row.model || "—"}{row.effort ? ` · ${row.effort}` : ""}</div>
-                          <div>耗时 {row.ms != null ? `${row.ms}ms` : "—"}</div>
-                          <div>
-                            tokens in {row.tokensIn ?? "—"} · out {row.tokensOut ?? "—"} · cached {row.tokensCached ?? "—"}
-                            {row.tokensReasoning != null ? ` · reasoning ${row.tokensReasoning}` : ""}
-                          </div>
-                          <div>input_chars {logInputChars(row)}</div>
-                          <div>finish_reason {logFinishReason(row) || "—"}</div>
-                          {row.error ? <div className="text-live">{row.error}</div> : null}
-                          {row.trimmed ? <div>已截断到 200KB</div> : null}
-                          {row.note ? <div className="whitespace-pre-wrap break-all">{row.note}</div> : null}
-                        </dl>
-                      </section>
-                      <section>
-                        <p className="text-xs text-subtle">输入</p>
-                        {detail === "loading" || !detail ? (
-                          <p className="mt-1 text-subtle">{detail === "loading" ? "正在读这一次的全文…" : "点开后会去读。"}</p>
-                        ) : detail.messages.length ? (
-                          <div className="mt-1 flex flex-col gap-1">
-                            {detail.messages.map((msg, i) => (
-                              <details key={`${row.id}-${i}`} className="rounded-md bg-bg px-2 py-1">
-                                <summary className="cursor-pointer text-fg">
-                                  {msg.label} · {msg.role}
-                                </summary>
-                                <pre className="mt-1 whitespace-pre-wrap break-all text-muted">
-                                  {msg.content}
-                                  {msg.content ? "" : "（空）"}
-                                </pre>
-                              </details>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="mt-1 text-subtle">这一次没有存下完整输入。</p>
-                        )}
-                      </section>
-                      {loaded?.warnings.length ? (
-                        <p className="whitespace-pre-wrap break-all text-live">{loaded.warnings.join("\n")}</p>
-                      ) : null}
-                      <section>
-                        <p className="text-xs text-subtle">输出</p>
-                        <pre className="mt-1 whitespace-pre-wrap break-all text-fg">
-                          {loaded
-                            ? loaded.output || "（空）"
-                            : row.outputText || (row.raw ?? "").slice(0, 1000) || "—"}
-                        </pre>
-                      </section>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="min-h-11"
-                        disabled={!loaded}
-                        onClick={() => loaded && void copyCall(row, loaded)}
-                      >
-                        {logCopied === row.id ? "已复制" : "复制全部"}
-                      </Button>
-                    </div>
+                    {detail === "loading" || !detail ? (
+                      <p className="py-2 text-subtle">在读…</p>
+                    ) : (
+                      <FullText note={logMetaLine(row)} text={callText(row, detail)} />
+                    )}
                   </details>
                 );
               })
@@ -1351,10 +1158,6 @@ function logFailFirstLine(row: BrainLogRow): string {
   return src.split(/\r?\n/, 1)[0] ?? "";
 }
 
-function slowEngineHintFromNote(note: string | null | undefined): string {
-  const line = (note ?? "").split(/\r?\n/).find((part) => part.includes("会拖慢识别"));
-  return line?.trim() || "";
-}
 
 function logClock(at: number): string {
   try {
@@ -1364,14 +1167,21 @@ function logClock(at: number): string {
   }
 }
 
-function logInputChars(row: BrainLogRow): string {
-  const split = parseVoiceInputCharsLine(row.note);
-  const parts = split
-    ? `system ${split.system} · 心里 ${split.moment} · 故事 ${split.story} · 对话历史 ${split.history} · 用户消息 ${split.user}`
-    : "";
-  if (parts && row.inputChars != null) return `${row.inputChars}（${parts}）`;
-  if (parts) return parts;
-  return row.inputChars != null ? String(row.inputChars) : "—";
+/** Model, tokens and how it ended, one line. */
+function logMetaLine(row: BrainLogRow): string {
+  const tokens = row.tokensIn != null ? `in ${row.tokensIn} · out ${row.tokensOut ?? "—"}${row.tokensCached ? ` · cached ${row.tokensCached}` : ""}` : "";
+  return [row.model, row.effort, tokens, logFinishReason(row)].filter(Boolean).join(" · ");
+}
+
+/** The whole call as plain text: every message sent, what came back, and the note if there is one. */
+function callText(row: BrainLogRow, detail: CallDetail): string {
+  const parts = [];
+  if (detail.messages.length) parts.push(messagesText(detail.messages));
+  if (detail.warnings.length) parts.push(`══ 注意 ══\n${detail.warnings.join("\n")}`);
+  parts.push(`══ 模型回的 ══\n${detail.output || row.outputText || (row.raw ?? "").slice(0, 2000) || "（空）"}`);
+  if (row.error) parts.push(`══ 出错 ══\n${row.error}`);
+  if (row.note) parts.push(`══ 备注 ══\n${row.note}`);
+  return parts.join("\n\n");
 }
 
 function logFinishReason(row: BrainLogRow): string {

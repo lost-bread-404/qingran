@@ -1,16 +1,15 @@
-import { lockedProfile, personaText, voiceInjectFromProfile } from "../../types.ts";
+import { lockedProfile, voiceInjectFromProfile } from "../../types.ts";
 import { now } from "../clock.ts";
 import { getMeta, getProfileData, getProfilePrompt } from "../store.ts";
 import { localDay } from "../time.ts";
 import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
-import { buildVoiceMessages, voiceHistoryMessages } from "../voice/pack-build.ts";
-import { recallQuery, replyHistory, scenePresent } from "../voice/pack.ts";
-import { timeFacts } from "../heart.ts";
+import { buildVoiceMessages, voiceHistoryMessages, voiceVars } from "../voice/pack-build.ts";
+import { gatherVoiceParts, replyHistory } from "../voice/pack.ts";
+import { loadFormats } from "./store.ts";
 import { dossierTextForModel } from "../dossier.ts";
-import { listMemories, memoriesWithIds, recall, recallText } from "../memory.ts";
-import { identityBlock } from "../life.ts";
+import { listMemories, memoriesWithIds } from "../memory.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
 
 export type PromptPreview = {
@@ -28,44 +27,23 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
   const [meta, profileData] = await Promise.all([getMeta(), getProfileData()]);
   const tz = resolveTz(meta.timeZone);
   const profile = resolveTalkProfile(undefined, profileData).profile;
-  const charter = personaText(profile);
   const inject = voiceInjectFromProfile(profile);
-  const [history, us, clock] = await Promise.all([
-    replyHistory(null, inject.history, at, tz),
-    inject.memory ? dossierTextForModel() : Promise.resolve(""),
-    timeFacts(at, tz, at, { sinceLast: !first }),
-  ]);
-  const recalled = inject.memory ? await recall(recallQuery(userText, history), at, { present: scenePresent(history, profile.voiceCast) }) : { memories: [] };
-  const recallBlock = recallText(recalled.memories);
-  const messages = buildVoiceMessages({
-    charter,
-    identity: identityBlock(profile.identity),
-    us,
-    recall: recallBlock,
-    clock,
-    history,
-    historyWindow: history.length,
+  const { parts } = await gatherVoiceParts({
+    profile,
+    nowMs: at,
+    timeZone: tz,
+    history: replyHistory(null, inject.history, at, tz),
     userText,
     first,
-    voiceTemplate: body,
-    personaPlacement: profile.personaPlacement,
-    personaAck: profile.personaAck,
   });
+  const withDraft = { ...parts, voiceTemplate: body ?? parts.voiceTemplate };
   const historyText =
-    voiceHistoryMessages(history, history.length)
+    voiceHistoryMessages(parts.history, parts.history.length, parts.formats)
       .map((message) => `${message.role}：${message.content}`)
       .join("\n") || "（没有对话）";
   return {
-    slots: {
-      us,
-      recall: recallBlock,
-      system_prompt: charter,
-      clock,
-      user_text: userText,
-      quiet: first?.quiet ?? "",
-      history_messages: historyText,
-    },
-    messages,
+    slots: { ...voiceVars(withDraft), history_messages: historyText },
+    messages: buildVoiceMessages(withDraft),
     note: first ? "主动找她：多久没说话用占位。" : "没有正在说的这一句，用「在吗」占位；想起来的事按最近几句找。",
   };
 }
@@ -73,13 +51,19 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
 async function editorSlots(): Promise<Record<string, string>> {
   const tz = resolveTz((await getMeta()).timeZone);
   const at = now();
-  const [us, charter, profileData, memories] = await Promise.all([dossierTextForModel(), getProfilePrompt(), getProfileData(), listMemories()]);
+  const [us, charter, profileData, memories, formats] = await Promise.all([
+    dossierTextForModel(),
+    getProfilePrompt(),
+    getProfileData(),
+    listMemories(),
+    loadFormats(),
+  ]);
   const profile = lockedProfile(profileData);
   return {
     system_prompt: charter,
-    identity_block: identityBlock(profile.identity) ? `${identityBlock(profile.identity)}\n` : "",
-    us: us || "（还没有）",
-    memories: memoriesWithIds(memories.filter((m) => m.source === "night" || m.source === "rosie").slice(-200)) || "（没有）",
+    identity: profile.identity.trim(),
+    us: us.trim(),
+    memories: memoriesWithIds(memories.filter((m) => m.source === "night" || m.source === "rosie").slice(-200), formats),
     day: localDay(at, tz),
     conversation: "（要等这次整理才有：这一天没被清空的对话）",
     max_chars: String(profile.dossierMaxChars),
@@ -92,11 +76,15 @@ async function slotsFor(key: PromptKey): Promise<{ slots: Record<string, string>
   }
   if (key === "report") {
     return {
-      slots: { summaries: "（预览）生成时这里是这个月每天的时间线和对话摘要。", chunk: "（预览）一段按天切开的对话。" },
+      slots: {
+        timelines: "（预览）生成时这里是这个月每天的时间线。",
+        summaries: "（预览）生成时这里是这个月的对话或摘要。",
+        chunk: "（预览）一段按天切开的对话。",
+      },
       note: "月报读每天的时间线和对话原文。对话太长时先走分段摘要。",
     };
   }
-  return { slots: {}, note: "" };
+  return { slots: {}, note: "材料的写法不单独发给模型，其他几步用它写材料。" };
 }
 
 function render(key: PromptKey, variantId: string, body: string | undefined, slots: Record<string, string>): RenderedMessage[] {

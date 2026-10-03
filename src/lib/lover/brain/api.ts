@@ -143,21 +143,6 @@ export const brainGetCallLog = createServerFn({ method: "POST" })
   .validator((input: { id: number }) => input)
   .handler(async ({ data }) => callLogById(data.id));
 
-/** The last call a prompt actually made (every call is logged as `<route>:<model>`), for the instructions page. */
-export const brainLastPromptCall = createServerFn({ method: "POST" })
-  .validator((input: { key: string }) => input)
-  .handler(async ({ data }) => {
-    const { isPromptKey } = await import("./prompts/catalog.ts");
-    if (!isPromptKey(data.key)) throw new Error("unknown-prompt");
-    const { getSql } = await import("../../db.ts");
-    const db = await getSql();
-    const rows = await db.query<{ id: number }>(
-      "select id from brain_log where step like $1 order by id desc limit 1",
-      [`${data.key}:%`],
-    );
-    return rows[0] ? callLogById(Number(rows[0].id)) : null;
-  });
-
 export const brainGetDbSize = createServerFn({ method: "GET" }).handler(async () => {
   const { brainDbSize } = await import("./db-size.ts");
   return brainDbSize();

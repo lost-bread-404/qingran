@@ -24,7 +24,6 @@ import {
   clipLabelByTurn,
   confirmClipByTurn,
   exportReplyFlagDataset,
-  goldCount,
   hallucinationCountByReason,
   engineUseStats,
   insertClipRow,
@@ -440,17 +439,6 @@ export async function hearClip(data: RunHearingInput): Promise<RunHearingOutput>
     voice: voice.frameCount ? voice : null,
   };
 }
-
-export const hearingLabeledCount = createServerFn({ method: "POST" })
-  .validator((input: Record<string, never> = {}) => input)
-  .handler(async () => {
-    try {
-      const sql = await getSql();
-      return { ok: true as const, count: await goldCount(sql) };
-    } catch (err) {
-      return { ok: false as const, error: errorText(err), count: 0 };
-    }
-  });
 
 export const patchHearingTurn = createServerFn({ method: "POST" })
   .validator((input: HearingTurnPatch) => input)
