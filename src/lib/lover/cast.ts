@@ -4,7 +4,9 @@ import { VOICE_IO } from "./brain/config";
  * Other people in the scene. One model plays everyone; a block that starts with 「林泽：」 is 林泽 until another
  * name starts a block (「清然：」 goes back to him). Without a name it is 清然. Each person's block (his actions,
  * what he sees, what he says, in his own first person) is read in his voice; 清然 is Eve.
- * Only the names in her table (设置 → 声音和听力 → 角色声线) start a block, so 「我说：」 inside his line never does.
+ * Any short name at the start of a line followed by a colon starts a block (a waiter nobody named in advance too);
+ * 「我说：」「他说：」 never do. A name in her table (设置 → 声音和听力 → 角色声线) is read in that voice; anyone else in
+ * the voice of the line 「其他人 …」 if she wrote one, otherwise Eve.
  */
 export const LEAD = "清然";
 
@@ -23,9 +25,17 @@ export function parseCast(text: string | undefined | null): Cast {
   return cast;
 }
 
+/** The table line that gives everyone not named in it a voice: 「其他人 ara」. */
+export const OTHERS = "其他人";
+
 export function voiceOf(who: string, cast: Cast): string {
-  return cast[who] ?? VOICE_IO.voice;
+  if (who === LEAD) return cast[LEAD] ?? VOICE_IO.voice;
+  return cast[who] ?? cast[OTHERS] ?? VOICE_IO.voice;
 }
+
+/** A name nobody put in the table: 2–6 Han characters, or a Latin name; not a pronoun (「我说：」「她们：」). */
+const ANY_NAME = /^(?:[\p{Script=Han}]{2,6}|[A-Za-z][A-Za-z .'-]{0,15})/u;
+const PRONOUN = /^[我你您她他它咱]/;
 
 function namesOf(cast: Cast): string[] {
   return [...new Set([LEAD, ...Object.keys(cast)])].sort((a, b) => b.length - a.length);
@@ -34,7 +44,7 @@ function namesOf(cast: Cast): string[] {
 /** Leading spaces and markdown bold before a name. */
 const LINE_LEAD = /^[\s*]*/;
 
-/** The name a line starts with (and how long the label is), if it is one of hers. */
+/** The name a line starts with (and how long the label is): one in her table first, then any short name. */
 function labelOf(line: string, names: string[]): { who: string; length: number } | null {
   const lead = line.match(LINE_LEAD)?.[0].length ?? 0;
   const rest = line.slice(lead);
@@ -42,14 +52,21 @@ function labelOf(line: string, names: string[]): { who: string; length: number }
     const m = rest.match(new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\*{0,2}\\s*[：:][*\\s]*`));
     if (m) return { who: name, length: lead + m[0].length };
   }
-  return null;
+  const any = rest.match(ANY_NAME)?.[0];
+  if (!any || PRONOUN.test(any)) return null;
+  const m = rest.slice(any.length).match(/^\*{0,2}\s*[：:][*\s]*/);
+  return m ? { who: any.trim(), length: lead + any.length + m[0].length } : null;
 }
 
 /** Could this line start still turn into a label once more text comes? */
 function mayBeLabel(head: string, names: string[]): boolean {
   const rest = head.replace(LINE_LEAD, "");
   if (!rest) return true;
-  return names.some((name) => name.startsWith(rest) || (rest.startsWith(name) && /^\*{0,2}\s*$/.test(rest.slice(name.length))));
+  if (names.some((name) => name.startsWith(rest) || (rest.startsWith(name) && /^\*{0,2}\s*$/.test(rest.slice(name.length))))) {
+    return true;
+  }
+  // Up to six Han characters (or a short Latin name), maybe bold, with no colon yet.
+  return !PRONOUN.test(rest) && /^(?:[\p{Script=Han}]{1,6}|[A-Za-z][A-Za-z .'-]{0,15})\*{0,2}\s*$/u.test(rest);
 }
 
 function merge(parts: CastPart[]): CastPart[] {

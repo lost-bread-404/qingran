@@ -966,14 +966,14 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 key={profile.voiceCast}
                 defaultValue={profile.voiceCast}
                 className="min-h-20 font-mono"
-                placeholder="林泽 lux"
+                placeholder={"林泽 lux\n其他人 ara"}
                 onBlur={(e) => {
                   const next = e.target.value.trim();
                   if (next !== profile.voiceCast) persistProfile({ voiceCast: next });
                 }}
               />
               <span className="text-xs text-subtle">
-                一行一个人：名字、空格、xAI 的声线。他的回复里「林泽：」开头的那一段（林泽的动作、他看到的、他说的）用这个声音念，「清然：」回到清然；清然是 Eve。只有写在这里的名字会换声音。
+                一行一个人：名字、空格、xAI 的声线。他的回复里「林泽：」开头的那一段（林泽的动作、他看到的、他说的）用这个声音念，「清然：」回到清然；清然是 Eve。没写在这里的人（服务员、路人）用「其他人」那一行的声线，没有这一行就是 Eve。
               </span>
             </label>
             <VoicePanel />
