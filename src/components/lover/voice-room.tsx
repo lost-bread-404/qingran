@@ -261,7 +261,15 @@ export function VoiceRoom() {
       setMessages(room.messages);
     };
     const reload = () => {
-      void loadRoom().then(applyRoom).catch(() => undefined);
+      // Not while he is answering: the server does not have the reply yet, and replacing the screen with its copy
+      // dropped the reply being written and put the last one back (an edited line showed his old answer until reload).
+      if (busyRef.current || pendingIdsRef.current.size) return;
+      void loadRoom()
+        .then((room) => {
+          if (busyRef.current || pendingIdsRef.current.size) return;
+          applyRoom(room);
+        })
+        .catch(() => undefined);
     };
     const onToken = (event: Event) => {
       const detail = (event as CustomEvent).detail;
