@@ -14,10 +14,20 @@ export function stripMarks(text: string): string {
   return text.replace(/[，。！？、,.!?;；：:\s………~～"'“”‘’]+/g, "");
 }
 
+/**
+ * The recognizer's own "~" is its guess at a tone from the style of the text, not from her voice (xAI writes one
+ * after nearly every clause of a soft, affectionate line). It is dropped: a clause break inside the line, nothing at
+ * the end. ～ comes only from how long she actually held a sound (see stitchWords).
+ */
+function dropSttTilde(text: string): string {
+  return text.replace(/\s*[~～]+\s*(?=\S)/g, "，").replace(/\s*[~～]+\s*$/g, "");
+}
+
 export function restoreSpeechText(raw: string, words?: SttWord[]): string {
-  const fromWords = words?.length ? stitchWords(words) : "";
+  const cleanWords = words?.map((w) => ({ ...w, text: dropSttTilde(w.text ?? "") }));
+  const fromWords = cleanWords?.length ? stitchWords(cleanWords) : "";
   const a = collapseRepeats(punctuateSpeech(collapseRepeats(softenCue(fromWords))));
-  const b = collapseRepeats(punctuateSpeech(collapseRepeats(softenCue(raw))));
+  const b = collapseRepeats(punctuateSpeech(collapseRepeats(softenCue(dropSttTilde(raw)))));
   if (a && b) {
     const sa = stripMarks(a);
     const sb = stripMarks(b);
@@ -86,11 +96,56 @@ function mapOneLatinCue(s: string): string | null {
   return null;
 }
 
+/** A held sound: a clause's last syllable at least this many times her usual syllable in the line, and this long. */
+const HELD_RATIO = 2.2;
+const HELD_MIN_SEC = 0.45;
+/** After a held syllable there is a pause (or the line ends) before ～ is written: a long syllable mid-clause is not a drawl. */
+const HELD_PAUSE_SEC = 0.2;
+
+/** Seconds per syllable (Chinese character) of each word with times, for her pace in this line. */
+function syllableSecs(words: SttWord[]): number[] {
+  const out: number[] = [];
+  for (const w of words) {
+    const core = stripMarks(w.text ?? "");
+    const start = Number(w.start);
+    const end = Number(w.end);
+    if (!core || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    out.push((end - start) / [...core].length);
+  }
+  return out;
+}
+
+function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((x, y) => x - y);
+  return sorted[Math.floor(sorted.length / 2)] ?? null;
+}
+
+/**
+ * Whether this word ends in a drawn-out sound: its last syllable is far longer than her usual syllable in the same
+ * line (so a slow speaker is not marked everywhere), long in absolute terms, and followed by a pause. Phrase-final
+ * syllables are normally about 1.3–1.6× longer anyway; a drawl is well past that.
+ */
+function heldAtEnd(word: SttWord, next: SttWord | undefined, usual: number | null): boolean {
+  if (usual == null) return false;
+  const core = [...stripMarks(word.text ?? "")];
+  const start = Number(word.start);
+  const end = Number(word.end);
+  if (!core.length || !Number.isFinite(start) || !Number.isFinite(end)) return false;
+  const last = (end - start) / core.length;
+  if (last < HELD_MIN_SEC || last < usual * HELD_RATIO) return false;
+  const nextStart = Number(next?.start);
+  return !next || !Number.isFinite(nextStart) || nextStart - end >= HELD_PAUSE_SEC;
+}
+
 function stitchWords(words: SttWord[]): string {
   const parts: string[] = [];
   let prevEnd: number | null = null;
   let prevStart: number | null = null;
-  for (const word of words) {
+  // Her pace needs a few syllables to mean anything.
+  const secs = syllableSecs(words);
+  const usual = secs.length >= 4 ? median(secs) : null;
+  for (const [i, word] of words.entries()) {
     const token = (word.text ?? "").trim();
     if (!token) continue;
     const start = Number(word.start);
@@ -117,6 +172,7 @@ function stitchWords(words: SttWord[]): string {
       }
     }
     parts.push(token);
+    if (!isPunctToken(token) && heldAtEnd(word, words[i + 1], usual)) parts.push("～");
     const end = Number(word.end);
     if (Number.isFinite(end)) prevEnd = end;
     if (Number.isFinite(start)) prevStart = start;
@@ -206,7 +262,8 @@ export function keepFillers(text: string): string {
 function findRepeatUnit(s: string): string | null {
   const n = s.length;
   if (n < 6) return null;
-  for (let size = 2; size <= Math.min(24, Math.floor(n / 2)); size += 1) {
+  // Any length: a whole line said twice in one transcript is the recognizer repeating itself, not her.
+  for (let size = 2; size <= Math.floor(n / 2); size += 1) {
     if (n % size !== 0) continue;
     const unit = s.slice(0, size);
     if (isMostlyFiller(unit)) continue;
@@ -239,7 +296,17 @@ export function collapseRepeats(text: string): string {
   const unit = findRepeatUnit(stripped);
   if (unit && unit.length >= 3) {
     const end = t.match(/[。！？……]+$/)?.[0] ?? "";
-    return `${unit}${end}`;
+    // The first time it was said, with its own punctuation.
+    let seen = 0;
+    let cut = t.length;
+    for (const [i, ch] of [...t].entries()) {
+      if (stripMarks(ch)) seen += 1;
+      if (seen === unit.length) {
+        cut = [...t].slice(0, i + 1).join("").length;
+        break;
+      }
+    }
+    return `${t.slice(0, cut)}${end}`;
   }
   return t;
 }
