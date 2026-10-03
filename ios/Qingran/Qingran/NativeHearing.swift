@@ -62,6 +62,9 @@ final class LineHearing: @unchecked Sendable {
   private var words: [[String: Any]] = []
   private var doneText: String?
   private var doneWords: [[String: Any]] = []
+  /// xAI's last finished piece closed the sentence (speech_final) and nothing new came after: what it locked so far
+  /// is the whole line, so there is no need to wait for its final transcript (about a second) or for Apple.
+  private var saidFinished = false
 
   private var appleRequest: SFSpeechAudioBufferRecognitionRequest?
   private var appleTask: SFSpeechRecognitionTask?
@@ -181,7 +184,8 @@ final class LineHearing: @unchecked Sendable {
   }
 
   /// She is done: ask both ears for their last words, and wait for them a little. xAI's are waited for longer;
-  /// once they are in, Apple gets a short grace and then its latest words are used as they are.
+  /// once they are in, Apple gets a short grace and then its latest words are used as they are. When xAI already
+  /// closed the sentence (it is what ended the line), its locked words are the line and nothing is waited for.
   func finish(timeout: TimeInterval = 2.0) async -> LineHeard {
     await withCheckedContinuation { cont in
       queue.async {
@@ -243,10 +247,17 @@ final class LineHearing: @unchecked Sendable {
       hooks.onLive()
       if finishing != nil { socket?.send(.string("{\"type\":\"audio.done\"}")) { _ in } }
     case "transcript.partial":
-      guard event["is_final"] as? Bool == true else { return }
+      guard event["is_final"] as? Bool == true else {
+        saidFinished = false
+        return
+      }
       if let piece = event["text"] as? String { finals.append(piece) }
       words += event["words"] as? [[String: Any]] ?? []
-      if event["speech_final"] as? Bool == true { hooks.onFinished() }
+      saidFinished = event["speech_final"] as? Bool == true
+      if saidFinished {
+        hooks.onFinished()
+        settle()
+      }
     case "transcript.done":
       doneText = event["text"] as? String ?? ""
       doneWords = event["words"] as? [[String: Any]] ?? []
@@ -266,8 +277,8 @@ final class LineHearing: @unchecked Sendable {
   /// Hands the result over once both ears have answered (or the wait is up).
   private func settle(force: Bool = false) {
     guard let cont = finishing else { return }
-    let streamSettled = streamDone || streamFailed
-    guard force || (streamSettled && appleDone) else {
+    let streamSettled = streamDone || streamFailed || saidFinished
+    guard force || (streamSettled && (appleDone || saidFinished)) else {
       if streamSettled && !appleGrace {
         appleGrace = true
         queue.asyncAfter(deadline: .now() + 0.4) { self.settle(force: true) }
@@ -284,6 +295,8 @@ final class LineHearing: @unchecked Sendable {
       heard.stream = done.isEmpty
         ? (text: finals.joined(), words: words)
         : (text: done, words: doneWords.isEmpty ? words : doneWords)
+    } else if saidFinished {
+      heard.stream = (text: finals.joined(), words: words)
     }
     if !streamDone { socket?.cancel(with: .goingAway, reason: nil) }
     if !appleDone { appleTask?.cancel() }
