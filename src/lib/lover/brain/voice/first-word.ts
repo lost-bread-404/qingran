@@ -10,7 +10,7 @@ import { resolveTalkProfile } from "../../talk-profile.ts";
 import { personaText, voiceInjectFromProfile } from "../../types.ts";
 import { BraceCut } from "./brace-cut.ts";
 import { buildVoiceMessages, type VoicePackParts } from "./pack-build.ts";
-import { recallQuery, replyHistory, withInner } from "./pack.ts";
+import { recallQuery, replyHistory, scenePresent, withInner } from "./pack.ts";
 
 const CN = ["零", "一", "两", "三", "四", "五", "六", "七", "八", "九", "十"];
 function cn(n: number): string {
@@ -56,7 +56,7 @@ export async function speakFirst(input: {
     loadPrompt("voice"),
   ]);
   const clock = withInner(clockText, inner);
-  const recalled = inject.memory ? await recall(recallQuery("", history), input.nowMs) : { memories: [] };
+  const recalled = inject.memory ? await recall(recallQuery("", history), input.nowMs, { present: scenePresent(history, profile.voiceCast) }) : { memories: [] };
   const parts: VoicePackParts = {
     charter: personaText(profile),
     identity: identityBlock(profile.identity),

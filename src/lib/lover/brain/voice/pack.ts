@@ -10,6 +10,7 @@ import { identityBlock } from "../life.ts";
 import { localDay } from "../time.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { recall, recallText, recentInner, type Memory } from "../memory.ts";
+import { LEAD, parseCast, splitSpeakers } from "../../cast.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
 
 export type HotContext = {
@@ -79,6 +80,23 @@ export async function replyHistory(
 }
 
 /** What she is talking about now: her line (weighted), and the few lines before it. */
+/** How far back a 「名字：」 block still means that person is in the scene. */
+const SCENE_LOOKBACK = 8;
+
+/**
+ * Who else is in the scene now: anyone with his own 「名字：」 block in the last few replies. Their memories that
+ * 清然 does not share (`knows`) can come back while they are here; with 清然 alone they never do.
+ */
+export function scenePresent(history: StoredMessage[], voiceCast: string): string[] {
+  const cast = parseCast(voiceCast);
+  const names = new Set<string>();
+  for (const m of history.slice(-SCENE_LOOKBACK)) {
+    if (m.role !== "assistant") continue;
+    for (const part of splitSpeakers(modelFacingText(m), cast)) if (part.who !== LEAD) names.add(part.who);
+  }
+  return [...names];
+}
+
 export function recallQuery(text: string, history: StoredMessage[]): string {
   const before = history.slice(-3).map((m) => modelFacingText(m));
   return [text, text, ...before].filter((line) => line.trim()).join("\n");
@@ -119,7 +137,7 @@ export async function loadHotContext(input: {
     timeFacts(input.nowMs, input.timeZone, input.userCreatedAt),
     loadPrompt("voice"),
   ]);
-  const recalled = inject.memory ? await recall(recallQuery(input.text, history), input.nowMs) : { memories: [], scores: [], by: "none" as const };
+  const recalled = inject.memory ? await recall(recallQuery(input.text, history), input.nowMs, { present: scenePresent(history, input.profile.voiceCast) }) : { memories: [], scores: [], by: "none" as const };
   const clockWithInner = withInner(clockText, await recentInner(input.nowMs));
   const charter = personaText(input.profile);
   const parts: VoicePackParts = {

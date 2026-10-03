@@ -19,6 +19,8 @@ export type StateMemory = {
   thread?: string;
   importance?: number;
   changed?: string;
+  /** Only these people know it (清然 was not there). Missing: 清然 knows it. */
+  knows?: string;
 };
 export type StateMessage = {
   id?: string;

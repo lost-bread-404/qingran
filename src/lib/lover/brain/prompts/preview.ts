@@ -6,7 +6,7 @@ import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
 import { buildVoiceMessages, voiceHistoryMessages } from "../voice/pack-build.ts";
-import { recallQuery, replyHistory } from "../voice/pack.ts";
+import { recallQuery, replyHistory, scenePresent } from "../voice/pack.ts";
 import { timeFacts } from "../heart.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { listMemories, memoriesWithIds, recall, recallText } from "../memory.ts";
@@ -35,7 +35,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(at, tz, at, { sinceLast: !first }),
   ]);
-  const recalled = inject.memory ? await recall(recallQuery(userText, history), at) : { memories: [] };
+  const recalled = inject.memory ? await recall(recallQuery(userText, history), at, { present: scenePresent(history, profile.voiceCast) }) : { memories: [] };
   const recallBlock = recallText(recalled.memories);
   const messages = buildVoiceMessages({
     charter,

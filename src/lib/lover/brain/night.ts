@@ -12,7 +12,6 @@ import { identityBlock } from "./life.ts";
 import { readIdentity } from "./life-store.ts";
 import { enqueue } from "./jobs.ts";
 import { spokenOnly } from "./voice/pack-build.ts";
-import { parseCast, splitSpeakers, type Cast } from "../cast.ts";
 import { appendDayTimeline, dayClockMs, dayWindow, saveDayTimeline } from "./heart.ts";
 import { addFeedback, addMemories, embedMissing, getMark, listMemories, memoriesWithIds, setMark, syncStory, updateMemory, type NewMemory } from "./memory.ts";
 
@@ -29,9 +28,10 @@ import { addFeedback, addMemories, embedMissing, getMark, listMemories, memories
 const ITEM = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "time", "body", "keys", "thread", "importance"] as string[],
+  required: ["id", "time", "body", "keys", "thread", "importance", "knows"] as string[],
   properties: {
     id: { type: "integer" },
+    knows: { type: "string" },
     time: { type: "string" },
     body: { type: "string" },
     keys: { type: "string" },
@@ -83,7 +83,23 @@ async function dayMessages(from: number, to: number): Promise<Row[]> {
   return rows.map((r) => ({ ...r, created_at: Number(r.created_at) }));
 }
 
-export function nightConversation(rows: Row[], timeZone: string, cast: Cast = {}): string {
+/**
+ * A reply goes in as he wrote it: other people's blocks keep their own 「林泽：」 lines and the editor (a model)
+ * reads who is who, so nothing here has to guess whether 「小猫：」 is a name. Cut short, a line keeps its label.
+ */
+function keepLabels(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const label = line.match(/^[\s*]*[^\s：:“”「」（）()]{1,8}\**\s*[：:]/)?.[0] ?? "";
+      const said = spokenOnly(line.slice(label.length));
+      return label && said ? `${label.trim()}${said}` : label ? label.trim() : said;
+    })
+    .filter((line) => line.trim())
+    .join("\n");
+}
+
+export function nightConversation(rows: Row[], timeZone: string): string {
   const render = (spoken: boolean) =>
     rows
       .map((r) => ({ ...r, ...fromStored(r.body, r.meta) }))
@@ -92,10 +108,7 @@ export function nightConversation(rows: Row[], timeZone: string, cast: Cast = {}
         const text = modelFacingText(r);
         const at = `[${clockOf(r.created_at, timeZone)}]`;
         if (r.role === "user") return `${at} Rosie：${text}`;
-        // One reply can hold several people (「林泽：」 blocks): each keeps his own name.
-        return splitSpeakers(text, cast)
-          .map((p) => `${at} ${p.who}：${spoken ? spokenOnly(p.text) : p.text.trim()}`)
-          .join("\n");
+        return `${at} 清然：${spoken ? keepLabels(text) : text.trim()}`;
       })
       .join("\n");
   let text = render(false);
@@ -138,7 +151,7 @@ export async function runNight(
   }
   const profile = lockedProfile(profileData);
   await syncStory(profile.storyline);
-  const conversation = nightConversation(rows, tz, parseCast(profile.voiceCast));
+  const conversation = nightConversation(rows, tz);
   // Every event and understanding so far (not the storyline, not his ｛｝ notes): the day may continue one of them.
   const known = (await listMemories()).filter((m) => m.source === "night" || m.source === "rosie").slice(-NIGHT_MEMORIES);
   const loaded = await loadPrompt("editor");
@@ -178,7 +191,14 @@ export async function runNight(
     if (!body) return;
     const id = Number(item.id);
     const atMs = dayClockMs(day, str(item.time), tz) ?? (kind === "insight" ? window.to - 1 : window.from);
-    const fields = { body, keys: str(item.keys), thread: str(item.thread), importance: Number(item.importance) };
+    const fields = {
+      body,
+      keys: str(item.keys),
+      thread: str(item.thread),
+      importance: Number(item.importance),
+      // What 清然 understood is his; an event can be someone else's (he was not there and nobody told him).
+      knows: kind === "insight" ? "" : str(item.knows),
+    };
     if (knownIds.has(id)) await updateMemory(id, { ...fields, day, at: atMs });
     else fresh.push({ kind, source: "night", day, at: atMs, ...fields });
   };

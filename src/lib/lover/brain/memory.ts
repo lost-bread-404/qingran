@@ -12,6 +12,8 @@ import { fromStored, modelFacingText } from "../message-meta.ts";
  *   he understood about Rosie), written each night from that day's talk;
  * - inner: what he wrote in ｛｝, shown to him for 16 hours and never recalled.
  * Her complaints about him go to qr_feedback, not here.
+ * `knows`: empty when 清然 knows it; otherwise the others who were there without him (「林泽」). Such a memory comes
+ * back only while one of them is in the scene (recall's `present`), so 清然 alone never knows it.
  */
 export type Memory = {
   id: number;
@@ -26,6 +28,7 @@ export type Memory = {
   importance: number;
   changed: string;
   recalled: number;
+  knows: string;
 };
 
 export type NewMemory = {
@@ -38,6 +41,7 @@ export type NewMemory = {
   keys?: string;
   thread?: string;
   importance?: number;
+  knows?: string;
 };
 
 function rowOf(r: Record<string, unknown>): Memory {
@@ -54,7 +58,22 @@ function rowOf(r: Record<string, unknown>): Memory {
     importance: Number(r.importance ?? 5) || 5,
     changed: String(r.changed ?? ""),
     recalled: Number(r.recalled ?? 0) || 0,
+    knows: String(r.knows ?? "").trim(),
   };
+}
+
+/** Names separated by spaces; 清然 himself and Rosie are never listed (清然 in it means he knows: empty). */
+function knowsText(raw: unknown): string {
+  const names = String(raw ?? "")
+    .split(/[\s,，、]+/)
+    .map((n) => n.trim())
+    .filter((n) => n && n !== "Rosie");
+  return names.includes("清然") ? "" : [...new Set(names)].join(" ").slice(0, 80);
+}
+
+/** 清然 knows it, or someone who knows it is in the scene now. */
+export function knownHere(m: { knows: string }, present: readonly string[]): boolean {
+  return !m.knows || m.knows.split(" ").some((n) => present.includes(n));
 }
 
 function clampImportance(n: unknown): number {
@@ -66,7 +85,7 @@ function clampImportance(n: unknown): number {
 export async function listMemories(): Promise<Memory[]> {
   const db = await sql();
   const rows = await db.query<Record<string, unknown>>(
-    `select id, kind, source, day, at::float8 as at, seq, body, keys, thread, importance, changed, recalled
+    `select id, kind, source, day, at::float8 as at, seq, body, keys, thread, importance, changed, recalled, knows
      from qr_memories
      order by (source = 'story') desc, seq asc, coalesce(at, 0) asc, id asc`,
   );
@@ -77,7 +96,7 @@ export async function listMemories(): Promise<Memory[]> {
 async function listMemoriesWithVectors(model: string): Promise<Array<Memory & { vec: number[] | null }>> {
   const db = await sql();
   const rows = await db.query<Record<string, unknown>>(
-    `select id, kind, source, day, at::float8 as at, seq, body, keys, thread, importance, changed, recalled,
+    `select id, kind, source, day, at::float8 as at, seq, body, keys, thread, importance, changed, recalled, knows,
             case when vec_model = $1 then vec else null end as vec
      from qr_memories where source <> 'inner'
      order by (source = 'story') desc, seq asc, coalesce(at, 0) asc, id asc`,
@@ -128,8 +147,8 @@ export async function addMemories(rows: NewMemory[]): Promise<void> {
   for (const m of rows) {
     if (!m.body.trim()) continue;
     await db.query(
-      `insert into qr_memories (kind, source, day, at, seq, body, keys, thread, importance, created_at, updated_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)`,
+      `insert into qr_memories (kind, source, day, at, seq, body, keys, thread, importance, created_at, updated_at, knows)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11)`,
       [
         m.kind,
         m.source,
@@ -141,6 +160,7 @@ export async function addMemories(rows: NewMemory[]): Promise<void> {
         (m.thread ?? "").trim().slice(0, 40),
         clampImportance(m.importance),
         at,
+        knowsText(m.knows),
       ],
     );
   }
@@ -153,10 +173,13 @@ export async function addMemories(rows: NewMemory[]): Promise<void> {
  */
 export async function updateMemory(
   id: number,
-  patch: { body?: string; changed?: string; keys?: string; thread?: string; importance?: number; day?: string; at?: number },
+  patch: { body?: string; changed?: string; keys?: string; thread?: string; importance?: number; day?: string; at?: number; knows?: string },
 ): Promise<void> {
   const db = await sql();
   const ts = now();
+  if (patch.knows != null) {
+    await db.query(`update qr_memories set knows = $2, updated_at = $3 where id = $1`, [id, knowsText(patch.knows), ts]);
+  }
   if (patch.body != null) {
     await db.query(`update qr_memories set body = $2, vec = null, updated_at = $3 where id = $1`, [id, patch.body.trim().slice(0, 4000), ts]);
   }
@@ -329,7 +352,15 @@ const QUERY_EMBED_MS = 1500;
 
 export type Recall = { memories: Memory[]; scores: Array<{ id: number; score: number }>; by: "meaning" | "words" | "none" };
 
-type RecallOpts = { top?: number; minFit?: number; keepShare?: number; withThread?: number; minCos?: number };
+type RecallOpts = {
+  top?: number;
+  minFit?: number;
+  keepShare?: number;
+  withThread?: number;
+  minCos?: number;
+  /** Others in the scene now (「林泽」): their own memories can come back too. */
+  present?: readonly string[];
+};
 
 const DAY_MS = 86_400_000;
 
@@ -347,7 +378,9 @@ function lift(m: Memory, nowMs: number): number {
 export async function recall(query: string, nowMs = now(), opts: RecallOpts = {}): Promise<Recall> {
   if (!query.trim()) return { memories: [], scores: [], by: "none" };
   const indexed = await memoryIndex();
-  const { memories, index, vecs } = indexed;
+  const { index, vecs } = indexed;
+  const present = opts.present ?? [];
+  const memories = indexed.memories.filter((m) => knownHere(m, present));
   if (!memories.length) return { memories: [], scores: [], by: "none" };
   const top = opts.top ?? RECALL_TOP;
   const minFit = opts.minFit ?? RECALL_MIN_FIT;
@@ -414,7 +447,8 @@ export function recallText(memories: Memory[]): string {
   return memories
     .map((m) => {
       const when = m.source === "story" ? "以前" : dayLabel(m.day) || "以前";
-      const what = m.kind === "insight" ? `（${when}，清然看懂的）` : `（${when}）`;
+      const who = m.knows ? `，只有${m.knows.split(" ").join("、")}知道，清然不知道` : "";
+      const what = m.kind === "insight" ? `（${when}，清然看懂的）` : `（${when}${who}）`;
       const later = m.changed.trim() ? `（后来：${m.changed.trim()}）` : "";
       return `${what}${m.body.trim()}${later}`;
     })
@@ -426,7 +460,7 @@ export function memoriesWithIds(memories: Memory[]): string {
   return memories
     .map(
       (m) =>
-        `[${m.id}]（${m.source === "story" ? "以前" : dayLabel(m.day)}${m.kind === "insight" ? "，看懂的" : ""}${m.thread ? `，${m.thread}` : ""}）${m.body.trim()}${m.changed.trim() ? `（后来：${m.changed.trim()}）` : ""}`,
+        `[${m.id}]（${m.source === "story" ? "以前" : dayLabel(m.day)}${m.kind === "insight" ? "，看懂的" : ""}${m.thread ? `，${m.thread}` : ""}${m.knows ? `，只有${m.knows}知道` : ""}）${m.body.trim()}${m.changed.trim() ? `（后来：${m.changed.trim()}）` : ""}`,
     )
     .join("\n");
 }

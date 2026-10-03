@@ -10,7 +10,7 @@ import { identityBlock } from "../life.ts";
 import { timeFacts } from "../heart.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { recall, recallText, recentInner } from "../memory.ts";
-import { recallQuery, withInner } from "./pack.ts";
+import { recallQuery, scenePresent, withInner } from "./pack.ts";
 import { loadPrompt } from "../prompts/store.ts";
 import {
   getMessage,
@@ -62,7 +62,7 @@ export async function replayMessages(opts: {
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(nowMs, tz, user.createdAt),
   ]);
-  const recalled = inject.memory ? await recall(recallQuery(user.text, history), user.createdAt) : { memories: [] };
+  const recalled = inject.memory ? await recall(recallQuery(user.text, history), user.createdAt, { present: scenePresent(history, opts.profile.voiceCast) }) : { memories: [] };
   const messages = buildVoiceMessages({
     charter: opts.charter,
     identity: identityBlock(opts.profile.identity),

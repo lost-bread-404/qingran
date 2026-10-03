@@ -13,6 +13,8 @@ type MemoryRow = {
   importance: number;
   changed: string;
   recalled: number;
+  /** Empty: 清然 knows it. Otherwise only these people do (he was not there). */
+  knows?: string;
 };
 
 type Loaded = {
@@ -24,7 +26,8 @@ type Loaded = {
 function label(m: MemoryRow): string {
   const when = m.source === "story" ? "故事线" : m.day;
   const what = m.kind === "insight" ? "看懂的" : m.source === "inner" ? "心里话" : "";
-  return [when, what, m.thread, `重要 ${m.importance}`, m.recalled ? `想起过 ${m.recalled} 次` : ""].filter(Boolean).join(" · ");
+  const who = m.knows ? `只有${m.knows.split(" ").join("、")}知道` : "";
+  return [when, what, who, m.thread, `重要 ${m.importance}`, m.recalled ? `想起过 ${m.recalled} 次` : ""].filter(Boolean).join(" · ");
 }
 
 /** 他的心 → 回忆: every moment he keeps, newest first. Story moments change with the storyline itself. */

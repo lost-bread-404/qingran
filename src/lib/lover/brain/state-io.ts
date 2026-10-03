@@ -69,6 +69,7 @@ export const brainExportState = createServerFn({ method: "POST" })
           thread: m.thread,
           importance: m.importance,
           changed: m.changed,
+          ...(m.knows ? { knows: m.knows } : {}),
         })),
       days: days.map((d) => ({ day: String(d.day), timeline: String(d.timeline ?? "") })),
       prompts: Object.fromEntries(prompts.map((p) => [String(p.key), String(p.body)])),
@@ -119,6 +120,7 @@ export const brainImportState = createServerFn({ method: "POST" })
             keys: typeof m.keys === "string" ? m.keys : "",
             thread: typeof m.thread === "string" ? m.thread : "",
             importance: Number(m.importance),
+            knows: typeof m.knows === "string" ? m.knows : "",
           },
         ]);
       }
