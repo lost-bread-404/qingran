@@ -54,3 +54,4 @@
 - **先上 playground 再上正式版**：她每天直接用正式版测，两边来回同步反而出错。2026-10-02 起只有 `main`，playground 分支和它的数据库都删了。
 - **从 Grok app builder 模板起的项目**：better-auth、预览桥、PWA 安装页、「Created with Grok」横幅脚本、几十个没用的 UI 依赖。2026-10-02 删了，登录只用 `auth-lite` 的密码。
 - **每轮记三份日志**（`brain_log`、`brain_turns`、`turn_traces`）：2026-10-02 合成一份，见 [observability.md](observability.md)。
+- 2026-10-03：重装外壳时只勾了 Audio 一项后台模式，去掉了 Voice over IP：系统电话（CallKit）报「没有权限」起不来，外壳等不到它就一直不开麦，电话完全听不到她。教训：Voice over IP 必须勾（已写进 Info.plist 和安装说明）；外壳不再只靠系统电话开麦。
