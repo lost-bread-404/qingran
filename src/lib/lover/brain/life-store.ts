@@ -15,10 +15,6 @@ function asBool(value: unknown): boolean {
 }
 
 export type ReachRow = {
-  nextAt: number | null;
-  intent: string;
-  setBy: string;
-  setAt: number;
   enabled: boolean;
   retry: number;
 };
@@ -43,42 +39,22 @@ export async function readIdentity(): Promise<{ identity: string; updatedAt: num
 
 export async function getReach(): Promise<ReachRow> {
   const db = await getSql();
-  const rows = await db.query<Record<string, unknown>>(
-    `select next_at, intent, set_by, set_at, enabled, retry from qr_reach where id = 1`,
-  );
+  const rows = await db.query<Record<string, unknown>>(`select enabled, retry from qr_reach where id = 1`);
   const row = rows[0];
-  return {
-    nextAt: row?.next_at == null ? null : asInt(row.next_at),
-    intent: String(row?.intent ?? ""),
-    setBy: String(row?.set_by ?? ""),
-    setAt: asInt(row?.set_at),
-    enabled: row ? asBool(row.enabled) : true,
-    retry: asInt(row?.retry),
-  };
+  return { enabled: row ? asBool(row.enabled) : true, retry: asInt(row?.retry) };
 }
 
-export async function saveReach(next: Partial<ReachRow> & { at?: number }): Promise<ReachRow> {
+export async function saveReach(next: Partial<ReachRow>): Promise<ReachRow> {
   const prev = await getReach();
   const row: ReachRow = {
-    nextAt: next.nextAt === undefined ? prev.nextAt : next.nextAt,
-    intent: next.intent === undefined ? prev.intent : next.intent,
-    setBy: next.setBy === undefined ? prev.setBy : next.setBy,
-    setAt: next.setAt === undefined ? prev.setAt : next.setAt,
     enabled: next.enabled === undefined ? prev.enabled : next.enabled,
     retry: next.retry === undefined ? prev.retry : next.retry,
   };
   const db = await getSql();
   await db.query(
-    `insert into qr_reach (id, next_at, intent, set_by, set_at, enabled, retry)
-     values (1, $1, $2, $3, $4, $5, $6)
-     on conflict (id) do update set
-       next_at = excluded.next_at,
-       intent = excluded.intent,
-       set_by = excluded.set_by,
-       set_at = excluded.set_at,
-       enabled = excluded.enabled,
-       retry = excluded.retry`,
-    [row.nextAt, row.intent, row.setBy, row.setAt, row.enabled, row.retry],
+    `insert into qr_reach (id, enabled, retry) values (1, $1, $2)
+     on conflict (id) do update set enabled = excluded.enabled, retry = excluded.retry`,
+    [row.enabled, row.retry],
   );
   return row;
 }

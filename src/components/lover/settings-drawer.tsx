@@ -629,7 +629,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <SettingsLink label="清然是谁" hint="身份、人设" onClick={() => setPage("who")} />
             <SettingsLink label="他的心" hint="现在的你们、回忆" onClick={() => setPage("heart")} />
-            <SettingsLink label="主动消息" hint="开关、下一次、记录" onClick={() => setPage("reach")} />
+            <SettingsLink label="主动消息" hint="开关、记录" onClick={() => setPage("reach")} />
             <SettingsLink label="声音和听力" hint="语速、静音、灵敏度" onClick={() => setPage("sound")} />
             <SettingsLink label="数据" hint="导出、导入、清空、退出" onClick={() => setPage("data")} />
             <SettingsLink label="高级" hint="指令、记录、费用" onClick={() => setPage("advanced")} />
