@@ -38,6 +38,7 @@ import { DossierPanel } from "@/components/lover/dossier-panel";
 import { MemoryPanel } from "@/components/lover/memory-panel";
 import { BrainSpendPage } from "@/components/lover/brain-spend-page";
 import { ReplayPanel } from "@/components/lover/replay-panel";
+import { VoicePanel } from "@/components/lover/voice-panel";
 import { ProfileHistory, VersionConflict } from "@/components/lover/profile-history";
 import { saveProfilePatch } from "@/lib/lover/room";
 import type { FieldRevs, VersionedField } from "@/lib/lover/profile-patch";
@@ -975,6 +976,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 一行一个人：名字、空格、xAI 的声线。他的回复里「林泽：」开头的那一段（林泽的动作、他看到的、他说的）用这个声音念，「清然：」回到清然；清然是 Eve。只有写在这里的名字会换声音。
               </span>
             </label>
+            <VoicePanel />
             <LabelModeSwitch
               checked={debugHearing}
               onChange={(next) => {

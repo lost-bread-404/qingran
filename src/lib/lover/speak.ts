@@ -38,7 +38,8 @@ export async function speakWhole(text: string, cast: Cast, speed: number): Promi
   };
 }
 
-async function readOne(p: { voice: string; text: string }, speed: number): Promise<Spoken> {
+/** One text in one voice, over the one-shot HTTP voice. */
+export async function readOne(p: { voice: string; text: string }, speed: number): Promise<Spoken> {
   try {
     const sent = await xaiFetch(VOICE_IO.ttsUrl, {
       method: "POST",
