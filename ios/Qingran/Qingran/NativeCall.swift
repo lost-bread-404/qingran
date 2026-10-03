@@ -311,6 +311,8 @@ final class NativePipeline: @unchecked Sendable {
           self.dropPlayback()
           self.player.play()
           if !self.busy { self.emit?(["type": "phase", "phase": "listening"]) }
+          // Its end never came, so nothing else asks what she added meanwhile.
+          self.kick()
         }
       }
       timer.resume()
@@ -363,6 +365,8 @@ final class NativePipeline: @unchecked Sendable {
     engine.inputNode.removeTap(onBus: 0)
     startEngineOnQueue()
     mark("\(why): engine restarted \(running ? "ok" : "failed")")
+    // What was playing was dropped without its end, so what she added meanwhile is asked now.
+    kick()
   }
 
   private func haltLocked() {

@@ -83,6 +83,8 @@ export function VoicePanel({ inCall = false }: { inCall?: boolean }) {
   }
 
   function stop() {
+    // A sample still being recorded for an earlier tap does not start playing after this.
+    lastTap.current++;
     audio.current?.pause();
     audio.current = null;
     setPlaying(null);
