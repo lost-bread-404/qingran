@@ -8,7 +8,7 @@ const CUE_CHARS = "嗯唔呜啊哦噢喔额呃唉哎诶欸哼哈嘿哇呀哟呦�
 const FILLER = new RegExp(`[${CUE_CHARS}]`);
 const CUE_RUN = new RegExp(`[${CUE_CHARS}]+`, "g");
 
-type SttWord = { text?: string; start?: number; end?: number };
+type SttWord = { text?: string; start?: number; end?: number; tildeBreak?: boolean };
 
 export function stripMarks(text: string): string {
   return text.replace(/[，。！？、,.!?;；：:\s………~～"'“”‘’]+/g, "");
@@ -20,11 +20,18 @@ export function stripMarks(text: string): string {
  * the end. ～ comes only from how long she actually held a sound (see stitchWords).
  */
 function dropSttTilde(text: string): string {
-  return text.replace(/\s*[~～]+\s*(?=\S)/g, "，").replace(/\s*[~～]+\s*$/g, "");
+  return text
+    .replace(/\s*[~～]+\s*(?=[，。！？…,.!?])/g, "")
+    .replace(/\s*[~～]+\s*(?=\S)/g, "，")
+    .replace(/\s*[~～]+\s*$/g, "");
 }
 
 export function restoreSpeechText(raw: string, words?: SttWord[]): string {
-  const cleanWords = words?.map((w) => ({ ...w, text: dropSttTilde(w.text ?? "") }));
+  const cleanWords = words?.map((w) => ({
+    ...w,
+    text: dropSttTilde(w.text ?? ""),
+    tildeBreak: /[~～]\s*$/.test(w.text ?? ""),
+  }));
   const fromWords = cleanWords?.length ? stitchWords(cleanWords) : "";
   const a = collapseRepeats(punctuateSpeech(collapseRepeats(softenCue(fromWords))));
   const b = collapseRepeats(punctuateSpeech(collapseRepeats(softenCue(dropSttTilde(raw)))));
@@ -145,6 +152,8 @@ function stitchWords(words: SttWord[]): string {
   // Her pace needs a few syllables to mean anything.
   const secs = syllableSecs(words);
   const usual = secs.length >= 4 ? median(secs) : null;
+  // The next word that says something (a standalone "。" or an emptied "~" is not where her next sound starts).
+  const nextSpoken = (i: number) => words.slice(i + 1).find((w) => stripMarks(w.text ?? ""));
   for (const [i, word] of words.entries()) {
     const token = (word.text ?? "").trim();
     if (!token) continue;
@@ -172,7 +181,10 @@ function stitchWords(words: SttWord[]): string {
       }
     }
     parts.push(token);
-    if (!isPunctToken(token) && heldAtEnd(word, words[i + 1], usual)) parts.push("～");
+    const next = nextSpoken(i);
+    if (!isPunctToken(token) && heldAtEnd(word, next, usual)) parts.push("～");
+    // Where the recognizer wrote "~" inside the line there was a break: a comma, not a tone.
+    else if (word.tildeBreak && next) parts.push("，");
     const end = Number(word.end);
     if (Number.isFinite(end)) prevEnd = end;
     if (Number.isFinite(start)) prevStart = start;
@@ -210,7 +222,8 @@ export function punctuateSpeech(raw: string): string {
     .replace(/[，。]*([！？])+/g, "$1")
     .replace(/。{2,}/g, "。")
     .replace(/？。/g, "？")
-    .replace(/！。/g, "！");
+    .replace(/！。/g, "！")
+    .replace(/～[。，]/g, "～");
 }
 
 function keepCuePunct(text: string): string {

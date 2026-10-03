@@ -559,9 +559,22 @@ final class NativePipeline: @unchecked Sendable {
   private func resolveHeld(_ id: String, said: String) {
     guard running, heldBy.remove(id) != nil else { return }
     if !said.isEmpty {
-      // She went on: what he had for the round goes, and he answers again with this line in it.
+      // She went on: what he had for the round goes now (even if she is already saying something else and he cannot
+      // be asked yet), and he answers again with this line in it.
       heldBy.removeAll()
-      if !replyStarted { replyEnded = false }
+      if !replyStarted {
+        retractUnheard()
+        turnGen += 1
+        talkTask?.cancel()
+        talkTask = nil
+        busy = false
+        replyEnded = false
+        waiting.removeAll()
+        waitingFrames = 0
+        playConverter = nil
+        pcmCarry = Data()
+        roundReply = nil
+      }
       kick()
       return
     }
@@ -594,7 +607,8 @@ final class NativePipeline: @unchecked Sendable {
     talkTask?.cancel()
     heldBy.removeAll()
     if let open = roundReply { emit?(["type": "retract", "id": open]) }
-    let reply = roundReply ?? UUID().uuidString.lowercased()
+    // A new id for every ask: one taken back is forgotten on the server (the page asks), so it must not come back.
+    let reply = UUID().uuidString.lowercased()
     roundReply = reply
     let pieces = round
     askedPieces = pieces.count
@@ -650,7 +664,9 @@ final class NativePipeline: @unchecked Sendable {
   /// so the request is left to finish and be saved (what it still sends is ignored, by turnGen), and the next round
   /// waits for it; before that it is dropped and not kept.
   private func stopTalk() {
-    if let task = talkTask, busy, replyStarted || replyEnded {
+    // Heard (his voice started) or read (all words in and no voice held back for later): kept. Voice still held while
+    // she spoke was never heard: dropped.
+    if let task = talkTask, busy, replyStarted || (replyEnded && waiting.isEmpty) {
       let id = UUID()
       saving.insert(id)
       Task {
@@ -668,9 +684,15 @@ final class NativePipeline: @unchecked Sendable {
 
   /// Takes back a reply he was still thinking (she has neither heard nor read any of it).
   private func retractUnheard() {
-    guard busy, !replyStarted, !replyEnded, let open = pageTurn ? pageReply : roundReply else { return }
-    emit?(["type": "retract", "id": open])
+    guard !replyStarted else { return }
+    if pageTurn {
+      if busy && !replyEnded, let open = pageReply { emit?(["type": "retract", "id": open]) }
+      return
+    }
+    // Still thinking, or finished but held back while she spoke. (A words-only answer she read has no roundReply.)
+    if let open = roundReply, busy || !waiting.isEmpty { emit?(["type": "retract", "id": open]) }
   }
+
 
   private func endPageTurn() {
     pageTurn = false

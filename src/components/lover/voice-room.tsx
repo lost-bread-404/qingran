@@ -283,9 +283,11 @@ export function VoiceRoom() {
             : [...prev, { id, role: "user", text, createdAt: at }],
         );
       } else if (detail.type === "retract") {
-        // She went on before his voice started: the answer is dropped and asked again, with all of her round, under the same id.
+        // She went on before his voice started (or tapped him, hung up): the answer is dropped; the round is asked again under a new id.
         const id = detail.id;
         setMessages((prev) => prev.filter((m) => m.id !== id));
+        // It may already be saved (its request finished while held): she never heard it, so it is not kept.
+        void deleteRoomMessages({ data: { ids: [id] } }).catch(() => undefined);
       } else if (detail.type === "reply" && detail.text) {
         const id = detail.id;
         const text = detail.text;
