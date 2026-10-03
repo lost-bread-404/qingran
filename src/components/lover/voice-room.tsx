@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { CallButton } from "@/components/lover/call-button";
 import { ConfirmTurn } from "@/components/lover/confirm-turn";
+import { FlagReply } from "@/components/lover/flag-reply";
 import { MicButton } from "@/components/lover/mic-button";
 import { SettingsDrawer } from "@/components/lover/settings-drawer";
 import { Transcript, type TranscriptHandle } from "@/components/lover/transcript";
@@ -152,6 +153,10 @@ export function VoiceRoom() {
   const [confirmDraft, setConfirmDraft] = useState("");
   const [confirmStt, setConfirmStt] = useState("");
   const [praiseBusy, setPraiseBusy] = useState(false);
+  /** The reply her thumbs-down is on, while 差在哪 is open. */
+  const [faultTarget, setFaultTarget] = useState<{ messageId: string; replyTo?: string; trigger: string; reply: string } | null>(null);
+  const [faultBusy, setFaultBusy] = useState(false);
+  const [faultError, setFaultError] = useState<string | null>(null);
   const [praisedIds, setPraisedIds] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
@@ -1276,7 +1281,25 @@ export function VoiceRoom() {
     }
   }
 
-  /** Her thumbs-up: this reply was good (turn_feedback, rating up). Complaints she just says to him. */
+  /** Her thumbs-down with 差在哪 (turn_feedback, rating down). Complaints she says to him in the chat go to qr_feedback at night. */
+  async function faultReply(note: string, tags: string[]): Promise<void> {
+    if (!faultTarget) return;
+    setFaultBusy(true);
+    setFaultError(null);
+    try {
+      const result = await flagQingranReply({
+        data: { messageId: faultTarget.messageId, replyToMessageId: faultTarget.replyTo, note, rating: "down", tags },
+      });
+      if (result.ok) setFaultTarget(null);
+      else setFaultError(result.error);
+    } catch (err) {
+      setFaultError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFaultBusy(false);
+    }
+  }
+
+  /** Her thumbs-up: this reply was good (turn_feedback, rating up). */
   async function praiseReply(messageId: string, replyTo?: string): Promise<boolean> {
     setPraiseBusy(true);
     try {
@@ -1589,6 +1612,12 @@ export function VoiceRoom() {
                   });
                 });
               }}
+              onFaultReply={(assistantId, replyToId) => {
+                const reply = chatRef.current.find((m) => m.id === assistantId);
+                const trigger = replyToId ? chatRef.current.find((m) => m.id === replyToId) : undefined;
+                setFaultError(null);
+                setFaultTarget({ messageId: assistantId, replyTo: replyToId, trigger: trigger?.text ?? "", reply: reply?.text ?? "" });
+              }}
             />
 
             {editingId ? null : (
@@ -1675,6 +1704,19 @@ export function VoiceRoom() {
             setConfirmError(null);
           }}
           onConfirm={(input) => void saveConfirm(input)}
+        />
+
+        <FlagReply
+          open={Boolean(faultTarget)}
+          triggerText={faultTarget?.trigger}
+          replyText={faultTarget?.reply}
+          busy={faultBusy}
+          error={faultError}
+          onClose={() => {
+            setFaultTarget(null);
+            setFaultError(null);
+          }}
+          onSave={({ note, tags }) => faultReply(note, tags)}
         />
 
         <SettingsDrawer

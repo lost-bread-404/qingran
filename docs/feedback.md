@@ -28,7 +28,9 @@ where l.route = 'voice' and l.step like 'voice:%' and l.at between <毫秒> and 
 
 ## Rosie 怎么说好、怎么说不好（2026-10-02 起）
 
-- **不好**：没有按钮了（以前每条回复下面的「差在哪」已经删掉）。她不喜欢清然哪句回复，就直接在聊天里说他、骂他。夜里整理会把这些抱怨挑出来写进 `qr_feedback`（`at` 是她说那句话的时间）。
+- **不好，两种**（2026-10-03 起都有）：
+  - 每条回复下面的倒拇指 → 「差在哪」：几个标签（没懂我、太强势、空话、太长、太短、重复、出戏）和一行备注，存在 `turn_feedback`（`rating = 'down'`，`message_id` 是那条回复，`tags`、`note`）。针对的就是那一条，不用往前找。
+  - 她直接在聊天里说他、骂他：夜里整理把这些抱怨挑出来写进 `qr_feedback`（`at` 是她说那句话的时间）。（10/2–10/3 中间有一天没有倒拇指，只有这一种。）
 - **好**：每条回复下面只留一个大拇指。她觉得哪句回得好就点一下，不会再跟清然说什么。存在 `turn_feedback`（`rating = 'up'`，`message_id` 是那条回复）。
 - **复盘时必须做的**：每条抱怨都去看它**前面**清然的那几句回复（下面第二个查询，按 `at` 往前找），抱怨针对的是那些回复，光看抱怨本身看不出他哪里不对。点过大拇指的回复是好例子，改 prompt 或人设之后，拿它们对照一下有没有被改坏。
 
@@ -43,7 +45,13 @@ left join qingran_messages u on u.id = m.meta->>'replyTo'
 where f.rating = 'up' order by f.created_at desc limit 30;
 ```
 
-`turn_feedback` 里 2026-10-02 以前还有一些 `rating = 'down'` 的（「差在哪」时代的，带标签），可以一起参考。
+```sql
+-- 她点了倒拇指的回复、她写的、和她当时说的那句
+select f.created_at, f.tags, f.note, u.body as rosie, m.body as qingran
+from turn_feedback f join qingran_messages m on m.id = f.message_id
+left join qingran_messages u on u.id = m.meta->>'replyTo'
+where f.rating = 'down' order by f.created_at desc limit 30;
+```
 
 ## 什么算抱怨、什么不算
 

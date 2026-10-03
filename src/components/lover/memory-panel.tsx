@@ -57,26 +57,27 @@ export function MemoryPanel() {
       <p className="text-xs text-subtle">
         他记得的事，一个话题一件：以后会让他做得不一样的事，和看懂你的地方。你说话时，他会按你这句话想起最贴近的几件。故事线里的 {data.counts.story} 件跟着故事线变；每天凌晨整理时，接着以前话题的合并进原来那一件，新的事接在后面（现在 {data.counts.moments} 件，看懂你的 {data.counts.insights} 条）。
       </p>
-      {data.pendingDay ? (
-        <Button
-          type="button"
-          variant="outline"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            setNote(null);
-            void brainRunNightNow()
-              .then((res) => {
-                setNote(res.done.length ? `整理好了：${res.done.join("、")}` : "这次没整理完。");
-                load();
-              })
-              .catch(() => setError("这次没整理完。"))
-              .finally(() => setBusy(false));
-          }}
-        >
-          {busy ? "正在整理…（要一两分钟）" : `还有没整理的日子（从 ${data.pendingDay} 起），现在整理`}
-        </Button>
-      ) : null}
+      <Button
+        type="button"
+        variant="outline"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          setNote(null);
+          setError(null);
+          void brainRunNightNow()
+            .then((res) => {
+              if (!res.ok) setError(res.error ?? "这次没整理完。");
+              else setNote(res.done.length ? `整理好了：${res.done.join("、")}` : "没有新的对话要整理（或这次没整理完）。");
+              load();
+            })
+            .catch(() => setError("这次没整理完。"))
+            .finally(() => setBusy(false));
+        }}
+      >
+        {busy ? "正在整理…（要一两分钟）" : data.pendingDay ? `现在整理（从 ${data.pendingDay} 起，再到今天）` : "现在整理（今天到现在的对话）"}
+      </Button>
+      <p className="text-xs text-subtle">提前做一次夜里整理：把还没整理的对话收进回忆和「现在」。今天的对话他照样全都看得到；凌晨整理时只接着整理之后的。</p>
       {note ? <p className="text-xs text-subtle">{note}</p> : null}
       {error ? <p className="text-sm text-live">{error}</p> : null}
       {data.memories.length === 0 ? <p className="text-sm text-subtle">还没有回忆。</p> : null}

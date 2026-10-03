@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Pencil, ThumbsUp, Volume2 } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Pencil, ThumbsDown, ThumbsUp, Volume2 } from "lucide-react";
 import { photoSrc } from "@/lib/lover/photo-client";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,8 @@ type Props = {
   onUndoConfirm?: (id: string) => void;
   undoConfirmId?: string | null;
   onPraiseReply?: (assistantId: string, replyToId?: string) => void;
+  /** Her thumbs-down: opens 差在哪 (tags and a note) for this reply. */
+  onFaultReply?: (assistantId: string, replyToId?: string) => void;
   praisedIds?: ReadonlySet<string>;
   onSelectReply?: (userId: string, replyId: string) => void;
   onNoiseReply?: (id: string) => void;
@@ -67,6 +69,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     onUndoConfirm,
     undoConfirmId,
     onPraiseReply,
+    onFaultReply,
     praisedIds,
     onSelectReply,
     onNoiseReply,
@@ -276,6 +279,16 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                     >
                       <ThumbsUp className={praisedIds?.has(shown.id) ? "size-4 fill-current" : "size-4"} />
                     </button>
+                    {onFaultReply ? (
+                      <button
+                        type="button"
+                        aria-label="这条回复不好"
+                        onClick={() => onFaultReply(shown.id, pair.user?.id ?? shown.replyTo)}
+                        className="grid size-11 place-items-center text-subtle transition-colors duration-150 hover:text-fg [touch-action:manipulation]"
+                      >
+                        <ThumbsDown className="size-4" />
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
