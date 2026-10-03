@@ -68,6 +68,9 @@ final class NativePipeline: @unchecked Sendable {
   private var askedPieces = 0
   /// A turn the page started is running: lines she adds meanwhile wait for it, then go as the next round.
   private var pageTurn = false
+  /// Replies she stopped after hearing (or reading) them, still finishing so they are saved. The next round waits for
+  /// them, so his next answer knows what he just said.
+  private var saving = Set<UUID>()
   private var turnGen = 0
   private var talkTask: Task<Void, Never>?
   private var pendingBuffers = 0
@@ -151,6 +154,8 @@ final class NativePipeline: @unchecked Sendable {
       self.dropPlayback()
       if self.engine.isRunning { self.player.play() }
       self.busy = true
+      self.replyStarted = false
+      self.replyEnded = false
       self.pageTurn = true
       self.emit?(["type": "phase", "phase": "thinking"])
       self.talkTask = Task {
@@ -177,24 +182,23 @@ final class NativePipeline: @unchecked Sendable {
   func playFromPage(_ audio: String, mime: String) {
     queue.async { [weak self] in
       guard let self, self.running else { return }
-      // An answer he was still thinking for her round is taken back; the round is asked again after the clip.
+      // An answer he was still thinking for her round is taken back; the round stays open and is asked again after
+      // the clip (the clip is not an answer, so it closes nothing).
       if self.busy && !self.replyStarted, let open = self.roundReply { self.emit?(["type": "retract", "id": open]) }
-      // Already answered (as words only, no voice came): those lines are done.
-      if !self.busy && !self.replyStarted { self.round.removeFirst(min(self.askedPieces, self.round.count)) }
       self.turnGen += 1
       self.stopTalk()
       self.busy = false
       self.pageTurn = false
-      self.askedPieces = 0
       self.dropPlayback()
       if self.engine.isRunning { self.player.play() }
-      self.replyStarted = false
+      self.replyStarted = true
       self.replyEnded = true
       self.playPCM(audio, mime: mime, replace: false)
       self.drainPlayConverter()
       self.flushPlayback()
-      // Nothing to play: the round does not wait for a clip that never starts.
-      if !self.replyStarted { self.kick() }
+      self.emit?(["type": "phase", "phase": self.playing ? "speaking" : "listening"])
+      // Returns while the clip plays (its end calls it again); with nothing to play, the round goes now.
+      self.kick()
     }
   }
 
@@ -364,14 +368,15 @@ final class NativePipeline: @unchecked Sendable {
     watchdog?.cancel()
     watchdog = nil
     turnGen += 1
+    if busy, let open = roundReply, !replyStarted { emit?(["type": "retract", "id": open]) }
     stopTalk()
+    saving.removeAll()
     busy = false
     pageTurn = false
     inSpeech = false
     dropLine()
     riseMs = 0
     for piece in round { piece.text.cancel() }
-    if busy, let open = roundReply, !replyStarted { emit?(["type": "retract", "id": open]) }
     release()
     dropPlayback()
     preroll.removeAll()
@@ -541,7 +546,7 @@ final class NativePipeline: @unchecked Sendable {
    * that line calls this again.
    */
   private func kick() {
-    guard running, !inSpeech, !pageTurn, !round.isEmpty else { return }
+    guard running, !inSpeech, !pageTurn, saving.isEmpty, !round.isEmpty else { return }
     if replyStarted && (busy || playing) { return }
     turnGen += 1
     let gen = turnGen
@@ -553,6 +558,7 @@ final class NativePipeline: @unchecked Sendable {
     askedPieces = pieces.count
     busy = true
     replyStarted = false
+    replyEnded = false
     waiting.removeAll()
     waitingFrames = 0
     playConverter = nil
@@ -580,8 +586,8 @@ final class NativePipeline: @unchecked Sendable {
         self.busy = false
         self.talkTask = nil
         if self.running && !self.playing { self.emit?(["type": "phase", "phase": "listening"]) }
-        // He answered: anything she typed or tapped while he spoke is the next round.
-        if self.replyStarted { self.kick() }
+        // Answered (his voice, or words only): lines she added after it was asked go now. Failed: they wait for her.
+        if self.askedPieces == 0 { self.kick() }
       }
     }
   }
@@ -598,11 +604,33 @@ final class NativePipeline: @unchecked Sendable {
     return min(NativeVad.floorMax, max(NativeVad.floorMin, next))
   }
 
-  /// Stop following his current reply. Once his voice has started she has heard some of it, so the request is left to
-  /// finish and be saved (what it still sends is ignored, by turnGen); before that it is dropped and not kept.
+  /// Stop following his current reply. Once his voice has started (or his words are all in) she has heard or read it,
+  /// so the request is left to finish and be saved (what it still sends is ignored, by turnGen), and the next round
+  /// waits for it; before that it is dropped and not kept.
   private func stopTalk() {
-    if !replyStarted { talkTask?.cancel() }
+    if let task = talkTask, busy, replyStarted || replyEnded {
+      let id = UUID()
+      saving.insert(id)
+      Task {
+        await task.value
+        self.queue.async {
+          self.saving.remove(id)
+          self.kick()
+        }
+      }
+    } else {
+      talkTask?.cancel()
+    }
     talkTask = nil
+  }
+
+  /// His answer to the round has started (or came as words only): the lines it answers are done; any she added after
+  /// it was asked stay for the next round. Nothing to close for a page turn or a clip.
+  private func closeRound() {
+    guard askedPieces > 0 else { return }
+    round.removeFirst(min(askedPieces, round.count))
+    askedPieces = 0
+    roundReply = nil
   }
 
   /// The round is closed (his voice started, or the call or a page turn took over): what she says next is a new round.
@@ -918,6 +946,8 @@ final class NativePipeline: @unchecked Sendable {
               self.replyEnded = true
               self.drainPlayConverter()
               self.flushPlayback()
+              // Words only, no voice came: she has read his answer, so the lines it answers are done.
+              if !self.replyStarted { self.closeRound() }
             }
           }
           continue
@@ -1029,9 +1059,7 @@ final class NativePipeline: @unchecked Sendable {
     if !replyStarted {
       replyStarted = true
       // The lines this reply answers are done; any she added after it was asked stay for the next round.
-      round.removeFirst(min(askedPieces, round.count))
-      askedPieces = 0
-      roundReply = nil
+      closeRound()
       emit?(["type": "phase", "phase": "speaking"])
     }
     for buffer in waiting { schedule(buffer) }
