@@ -59,3 +59,22 @@ export const brainRunNightNow = createServerFn({ method: "POST" }).handler(async
   }
   return { ok: true as const, done, pendingDay: await nextNightDay(now()) };
 });
+
+/**
+ * 数据 → 故事线 「保存，放进记忆」: the storyline is saved and cut again right away; its old moments are replaced
+ * by the new cut, and everything the night pass wrote stays as it is.
+ */
+export const brainSaveStoryline = createServerFn({ method: "POST" })
+  .validator((input: { storyline: string }) => input)
+  .handler(async ({ data }) => {
+    const [{ applyProfilePatch }, { syncStory, embedMissing, memoryCounts }] = await Promise.all([
+      import("../profile-patch.ts"),
+      import("./memory.ts"),
+    ]);
+    const storyline = String(data.storyline ?? "").trim().slice(0, 20000);
+    const saved = await applyProfilePatch({ patch: { storyline }, source: "storyline", force: true });
+    if (!saved.ok) return { ok: false as const, error: "没存上，再试一次。" };
+    const changed = await syncStory(storyline);
+    await embedMissing().catch(() => 0);
+    return { ok: true as const, changed, story: (await memoryCounts()).story };
+  });

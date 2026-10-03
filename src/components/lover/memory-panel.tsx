@@ -55,7 +55,7 @@ export function MemoryPanel() {
     <div className="flex flex-col gap-3">
       <p className="text-sm">回忆</p>
       <p className="text-xs text-subtle">
-        他记得的事，一个话题一件：以后会让他做得不一样的事，和看懂你的地方。你说话时，他会按你这句话想起最贴近的几件。故事线里的 {data.counts.story} 件跟着故事线变；每天凌晨整理时，接着以前话题的合并进原来那一件，新的事接在后面（现在 {data.counts.moments} 件，看懂你的 {data.counts.insights} 条）。
+        他记得的事，一个话题一件：以后会让他做得不一样的事，和看懂你的地方。你说话时，他会按你这句话想起最贴近的几件。故事线切出来的 {data.counts.story} 件跟着故事线变（在「数据」里改）；每天凌晨整理时，接着以前话题的合并进原来那一件，新的事接在后面（现在 {data.counts.moments} 件，看懂你的 {data.counts.insights} 条）。
       </p>
       <Button
         type="button"
@@ -121,7 +121,7 @@ export function MemoryPanel() {
               </Button>
             </div>
           ) : null}
-          {openId === m.id && m.source === "story" ? <p className="mt-2 text-xs text-subtle">这件来自故事线，在上面的「故事线」里改。</p> : null}
+          {openId === m.id && m.source === "story" ? <p className="mt-2 text-xs text-subtle">这件来自故事线，在「数据 → 故事线」里改。</p> : null}
         </div>
       ))}
     </div>

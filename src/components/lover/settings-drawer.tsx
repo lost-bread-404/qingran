@@ -28,6 +28,7 @@ import { MemoryPanel } from "@/components/lover/memory-panel";
 import { BrainSpendPage } from "@/components/lover/brain-spend-page";
 import { ReplayPanel } from "@/components/lover/replay-panel";
 import { VoicePanel } from "@/components/lover/voice-panel";
+import { StorylinePanel } from "@/components/lover/storyline-panel";
 import { CharactersPanel, VoiceSelect, useVoiceChoices } from "@/components/lover/characters-panel";
 import { ProfileHistory, VersionConflict } from "@/components/lover/profile-history";
 import { saveProfilePatch } from "@/lib/lover/room";
@@ -178,10 +179,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
   const [voiceTemperature, setVoiceTemperature] = useState(profile.voiceTemperature);
   const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
-  const [storyDraft, setStoryDraft] = useState(profile.storyline);
-  useEffect(() => {
-    setStoryDraft(profile.storyline);
-  }, [profile.storyline]);
   const [identityDraft, setIdentityDraft] = useState(profile.identity);
   const identityDirty = useRef(false);
   const intimateDirty = useRef(false);
@@ -591,12 +588,12 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       {page === "home" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
-            <SettingsLink label="人设" hint="清然和其他角色是谁、用什么声音。每一轮回复都带着。" onClick={() => setPage("who")} />
-            <SettingsLink label="记忆" hint="故事线、现在的你们、回忆。他说话前会想起相关的那几件。" onClick={() => setPage("heart")} />
+            <SettingsLink label="人设" hint="清然和其他角色是谁、用什么声音（可以试听）。每一轮回复都带着。" onClick={() => setPage("who")} />
+            <SettingsLink label="记忆" hint="现在的你们、回忆。他说话前会想起相关的那几件。" onClick={() => setPage("heart")} />
             <SettingsLink label="回复" hint="每轮带多少对话、温度。" onClick={() => setPage("reply")} />
             <SettingsLink label="主动消息" hint="你不说话一阵后，他会不会来找你。" onClick={() => setPage("reach")} />
-            <SettingsLink label="声音和听力" hint="他说话的快慢、试听声线；打电话时怎么听你。" onClick={() => setPage("sound")} />
-            <SettingsLink label="数据" hint="导出、导入、清空聊天、退出。" onClick={() => setPage("data")} />
+            <SettingsLink label="声音和听力" hint="他说话的快慢、静音；打电话时怎么听你。" onClick={() => setPage("sound")} />
+            <SettingsLink label="数据" hint="故事线（记忆的起点）、导出、导入、清空聊天、退出。" onClick={() => setPage("data")} />
             <SettingsLink label="高级" hint="发给模型的每一个字、调用记录、费用、听力参数。调试用。" onClick={() => setPage("advanced")} />
           </div>
         </div>
@@ -615,7 +612,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
             <p className="text-xs text-subtle">一个模型演所有人。这一页的每个字每轮回复都带着：清然的身份、人设、亲密设定，再接着下面每个角色的人设。别人出场时，他那一段（「林泽：」开头）用他的声线念。</p>
             <p className="font-display text-lg">清然</p>
-            <VoiceSelect label="声线" value={profile.leadVoice} voices={voiceChoices} onChange={(voice) => persistProfile({ leadVoice: voice })} />
+            <VoiceSelect label="声线" inCall={callPhase != null} value={profile.leadVoice} voices={voiceChoices} onChange={(voice) => persistProfile({ leadVoice: voice })} />
             <IdentityField
               value={identityDraft}
               paused={conflict?.field === "identity"}
@@ -716,8 +713,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               characters={profile.characters}
               othersVoice={profile.othersVoice}
               voices={voiceChoices}
+              inCall={callPhase != null}
               onSave={(patch) => persistProfile(patch)}
             />
+            <VoicePanel inCall={callPhase != null} />
           </div>
         </div>
       ) : page === "prompts" ? (
@@ -802,21 +801,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               </label>
               <p className="px-1 pb-1 text-xs text-subtle">关掉「运行记忆」：他只靠人设和今天的对话说话，不整理、不主动找你。</p>
             </div>
-            <label className="flex flex-col gap-2">
-              <span className="text-sm">故事线</span>
-              <Textarea
-                value={storyDraft}
-                onChange={(e) => setStoryDraft(e.target.value)}
-                onBlur={() => {
-                  const next = storyDraft.trim();
-                  if (next !== profile.storyline.trim()) persistProfile({ storyline: next });
-                }}
-                maxLength={20000}
-                className="min-h-64 resize-none leading-relaxed"
-                placeholder="你们之前发生过的事"
-              />
-              <p className="text-xs text-subtle">他最早的回忆：按空行切成一件一件，放进下面的「回忆」。你说话时，他会想起和这句最相关的几件（不是每轮都带全文）。以后每天的事凌晨自动整理进回忆，不用写在这里；想补以前的事，写在这里。</p>
-            </label>
             <DossierPanel maxChars={profile.dossierMaxChars} onMaxChars={(n) => persistProfile({ dossierMaxChars: n })} />
             <MemoryPanel />
           </div>
@@ -904,7 +888,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "sound" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-            <p className="text-xs text-subtle">语速和静音跟主屏幕是同一个。谁用哪个声线在「人设」里选；下面可以先试听。</p>
+            <p className="text-xs text-subtle">语速和静音跟主屏幕是同一个。谁用哪个声线、试听，在「人设」里。</p>
             <div className="flex items-center justify-between rounded-md bg-surface-2 px-3 py-3">
               <span className="text-sm">语速 {snapVoiceRate(profile.voiceSpeed).label}</span>
               <Button type="button" variant="outline" onClick={() => persistProfile({ voiceSpeed: nextVoiceRate(profile.voiceSpeed).speed })}>
@@ -936,7 +920,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
               </label>
             ))}
-            <VoicePanel inCall={callPhase != null} />
             <LabelModeSwitch
               checked={debugHearing}
               onChange={(next) => {
@@ -974,6 +957,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "data" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
+            <StorylinePanel storyline={profile.storyline} onSaved={(storyline) => onPatch({ storyline })} />
             <StatePanel />
             <LogoutButton />
             {!clearArmed ? (
