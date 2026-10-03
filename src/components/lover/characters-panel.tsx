@@ -157,12 +157,17 @@ export function CharactersPanel({
   inCall?: boolean;
 }) {
   const [list, setList] = useState<Character[]>(characters);
-  useEffect(() => setList(characters), [characters]);
+  // What the server has, when it really changed (a reload hands over a new array with the same people). A card she
+  // has not named yet is not saved, so it stays here below the saved ones instead of vanishing with the reload.
+  const savedKey = JSON.stringify(characters);
+  useEffect(() => {
+    setList((cur) => [...characters, ...cur.filter((c) => !c.name.trim())]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedKey]);
 
   const save = (next: Character[]) => {
     setList(next);
-    // A card still without a name is kept here (and dropped when the profile is read back), so nothing typed is lost.
-    onSave({ characters: next });
+    onSave({ characters: next.filter((c) => c.name.trim()) });
   };
   const edit = (i: number, patch: Partial<Character>) => setList((cur) => cur.map((c, k) => (k === i ? { ...c, ...patch } : c)));
 
