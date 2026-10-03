@@ -178,6 +178,8 @@ final class NativePipeline {
       guard let self, self.running else { return }
       // An answer he was still thinking for her round is taken back; the round is asked again after the clip.
       if self.busy && !self.replyStarted, let open = self.roundReply { self.emit?(["type": "retract", "id": open]) }
+      // Already answered (as words only, no voice came): those lines are done.
+      if !self.busy && !self.replyStarted { self.round.removeFirst(min(self.askedPieces, self.round.count)) }
       self.turnGen += 1
       self.talkTask?.cancel()
       self.talkTask = nil
@@ -191,6 +193,8 @@ final class NativePipeline {
       self.playPCM(audio, mime: mime, replace: false)
       self.drainPlayConverter()
       self.flushPlayback()
+      // Nothing to play: the round does not wait for a clip that never starts.
+      if !self.replyStarted { self.kick() }
     }
   }
 
@@ -369,7 +373,7 @@ final class NativePipeline {
     dropLine()
     riseMs = 0
     for piece in round { piece.text.cancel() }
-    if let open = roundReply, !replyStarted { emit?(["type": "retract", "id": open]) }
+    if busy, let open = roundReply, !replyStarted { emit?(["type": "retract", "id": open]) }
     release()
     dropPlayback()
     preroll.removeAll()
