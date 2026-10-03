@@ -54,9 +54,11 @@ Rosie 上一次说话是 {last_said}，距现在 {since_last}。
 /**
  * When he may write first. A side note, not in her place (as her line it read as Rosie just speaking, and the scene
  * went on: 10/1 he "got up from the sofa" 48 minutes after a fight). Her putting the phone down means they are apart
- * now, so what he sends is a phone message; and it picks up where they left off (that night: the fight).
+ * now, so what he sends is a phone message. It has to carry something: 「pick up where you left off」 alone gave
+ * four 「小猫，我在呢，姐姐一直抱着你」 on 10/2–10/3 (where they left off was cuddling), one 15 minutes into the
+ * meeting she had said she was going to.
  */
-const VOICE_FIRST = `（Rosie 放下手机{quiet}了，你们现在不在一块儿。你可以给 Rosie 发一条手机消息，接着你们上次停下的地方说；不想发，只回「不找」。）`;
+const VOICE_FIRST = `（Rosie 放下手机{quiet}了，你们现在不在一块儿。你想她了，可以给她发一条手机消息，说一件具体的、新的事，像真的想一个人时会发的那样：问问她之前说要去做的事怎么样了，或者告诉她你这会儿在做什么、碰到了什么让你想到她，或者把你们没说完的事接着说下去。没有想说的事，只回「不找」。）`;
 
 const EDITOR_SYSTEM = `【清然的身份】
 {identity}
