@@ -59,16 +59,24 @@ export type CallPhase = "idle" | "listening" | "speaking-you" | "transcribing" |
 
 const FFT_SIZE = 2048;
 
+/**
+ * The shell has no noise suppression (since 10/1) and lifts everything it hears, the room with her, so a quiet room's
+ * breathing and rustling reached the start line of 中 (lifted ~0.005–0.008 over a ~0.002 floor; her softest real line
+ * at night ~0.016). In the shell a line starts at least like 低; the hold line inside a line stays hers.
+ */
+const SHELL_START_MIN = 0.01;
+const SHELL_START_HOLD_MS = 180;
+
 /** The iPhone shell runs the same VAD; it gets her numbers when the call starts. */
 function nativeCallParams(): NativeCallParams {
   const session = getHearingSession();
   const cuts = recordCuts(session.sense);
   return {
-    startMin: cuts.startMin,
+    startMin: Math.max(cuts.startMin, SHELL_START_MIN),
     startMult: cuts.startMult,
     holdMin: cuts.holdMin,
     holdMult: cuts.holdMult,
-    startHoldMs: startHoldMs(cuts),
+    startHoldMs: Math.max(startHoldMs(cuts), SHELL_START_HOLD_MS),
     endWaitMs: session.silenceMs,
     maxUtteranceMs: session.sense.maxUtteranceMs,
   };
