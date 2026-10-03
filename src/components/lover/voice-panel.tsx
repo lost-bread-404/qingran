@@ -142,7 +142,7 @@ export function VoicePanel({ inCall = false }: { inCall?: boolean }) {
         ) : null}
       </div>
       <p className="text-xs text-subtle">
-        每个声线念同一句：「{SAMPLE_LINE}」。录过一次就存着，再听不花钱。喜欢哪个，把它的名字写进上面的角色声线。
+        每个声线念同一句：「{SAMPLE_LINE}」。录过一次就存着，再听不花钱。喜欢哪个，去「人设」里给角色选上。
       </p>
       {inCall ? <p className="text-xs text-live">通话里不能试听（会被当成你说的话），挂断后再听。</p> : null}
       {error ? <p className="text-xs text-live">{error}</p> : null}

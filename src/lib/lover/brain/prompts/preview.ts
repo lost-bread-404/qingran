@@ -1,4 +1,4 @@
-import { lockedProfile, voiceInjectFromProfile } from "../../types.ts";
+import { charterText, lockedProfile, voiceInjectFromProfile } from "../../types.ts";
 import { now } from "../clock.ts";
 import { getMeta, getProfileData, getProfilePrompt } from "../store.ts";
 import { localDay } from "../time.ts";
@@ -60,7 +60,7 @@ async function editorSlots(): Promise<Record<string, string>> {
   ]);
   const profile = lockedProfile(profileData);
   return {
-    system_prompt: charter,
+    system_prompt: charterText(profile, charter),
     identity: profile.identity.trim(),
     us: us.trim(),
     memories: memoriesWithIds(memories.filter((m) => m.source === "night" || m.source === "rosie").slice(-200), formats),

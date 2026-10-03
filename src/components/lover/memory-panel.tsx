@@ -30,7 +30,7 @@ function label(m: MemoryRow): string {
   return [when, what, who, m.thread, `重要 ${m.importance}`, m.recalled ? `想起过 ${m.recalled} 次` : ""].filter(Boolean).join(" · ");
 }
 
-/** 他的心 → 回忆: every moment he keeps, newest first. Story moments change with the storyline itself. */
+/** 记忆 → 回忆: every moment he keeps, newest first. Story moments change with the storyline itself. */
 export function MemoryPanel() {
   const [data, setData] = useState<Loaded | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -121,7 +121,7 @@ export function MemoryPanel() {
               </Button>
             </div>
           ) : null}
-          {openId === m.id && m.source === "story" ? <p className="mt-2 text-xs text-subtle">这件来自故事线，在「清然是谁 → 故事线」里改。</p> : null}
+          {openId === m.id && m.source === "story" ? <p className="mt-2 text-xs text-subtle">这件来自故事线，在上面的「故事线」里改。</p> : null}
         </div>
       ))}
     </div>

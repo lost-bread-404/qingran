@@ -21,7 +21,7 @@ const system = (content: string): PromptMessage => ({ role: "system", content })
 const user = (content: string): PromptMessage => ({ role: "user", content });
 const ph = (token: string, meaning: string): PromptPlaceholder => ({ token, meaning });
 
-const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里写的那一份。人设只有这一个来源，这里只引用，不另写。");
+const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里清然的人设，后面接着其他角色的人设（「其他人物：【林泽】……」）。人设只有这一个来源，这里只引用，不另写。");
 
 /**
  * Who is who. Both 清然 and Rosie are 她, so a 我 / 你 / 她 in material nobody is saying out loud can mean either one.
@@ -102,12 +102,12 @@ const REPORT_DIGEST = `把这一段对话收成摘要，给月报用。
 用中文写一段，不要 JSON。`;
 
 
-const IDENTITY = ph("identity", "「清然是谁 → 身份」里写的。");
+const IDENTITY = ph("identity", "「人设 → 清然 → 身份」里写的。");
 
 const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   SYSTEM_PROMPT,
   IDENTITY,
-  ph("intimate_notes", "「清然是谁 → 亲密设定」里写的。"),
+  ph("intimate_notes", "「人设 → 清然 → 亲密设定」里写的。"),
   ph(
     "history_messages",
     "对话：今天（凌晨 4 点以后）的全部，至少「上下文长度」那么多条（设置 → 高级 → 指令，默认 20）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息。",

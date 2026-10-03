@@ -3,7 +3,7 @@ import { now } from "./clock.ts";
 import { insertManualEdit } from "./life-store.ts";
 import { deleteMemory, listMemories, memoryCounts, updateMemory } from "./memory.ts";
 
-/** Settings → 他的心: every moment he keeps, newest first. */
+/** Settings → 记忆: every moment he keeps, newest first. */
 export const brainGetMemories = createServerFn({ method: "GET" }).handler(async () => {
   const [memories, counts] = await Promise.all([listMemories(), memoryCounts()]);
   const { nextNightDay } = await import("./night.ts");

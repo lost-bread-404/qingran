@@ -5,7 +5,7 @@ type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string
 
 /**
  * 清然和 Rosie 现在: one short document with a size cap (docs/brain.md). The night pass rewrites it whole;
- * she can edit it or roll it back in 他的心. Every change keeps a version.
+ * she can edit it or roll it back in 记忆. Every change keeps a version.
  */
 export type DossierRow = {
   body: string;

@@ -28,6 +28,7 @@ import { MemoryPanel } from "@/components/lover/memory-panel";
 import { BrainSpendPage } from "@/components/lover/brain-spend-page";
 import { ReplayPanel } from "@/components/lover/replay-panel";
 import { VoicePanel } from "@/components/lover/voice-panel";
+import { CharactersPanel, VoiceSelect, useVoiceChoices } from "@/components/lover/characters-panel";
 import { ProfileHistory, VersionConflict } from "@/components/lover/profile-history";
 import { saveProfilePatch } from "@/lib/lover/room";
 import type { FieldRevs, VersionedField } from "@/lib/lover/profile-patch";
@@ -47,6 +48,7 @@ type Page =
   | "home"
   | "who"
   | "heart"
+  | "reply"
   | "reach"
   | "sound"
   | "data"
@@ -168,6 +170,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [promptModels, setPromptModels] = useState(profile.promptModels);
   const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
   const [brainOn, setBrainOn] = useState(profile.brainOn);
+  const voiceChoices = useVoiceChoices(open);
   useEffect(() => {
     setBrainOn(profile.brainOn);
   }, [profile.brainOn]);
@@ -538,8 +541,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
 
   const pageTitle: Record<Page, string> = {
     home: "设置",
-    who: "清然是谁",
-    heart: "他的心",
+    who: "人设",
+    heart: "记忆",
+    reply: "回复",
     reach: "主动消息",
     sound: "声音和听力",
     data: "数据",
@@ -587,19 +591,20 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       {page === "home" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
-            <SettingsLink label="清然是谁" hint="身份、人设" onClick={() => setPage("who")} />
-            <SettingsLink label="他的心" hint="现在的你们、回忆" onClick={() => setPage("heart")} />
-            <SettingsLink label="主动消息" hint="开关、记录" onClick={() => setPage("reach")} />
-            <SettingsLink label="声音和听力" hint="语速、静音、灵敏度" onClick={() => setPage("sound")} />
-            <SettingsLink label="数据" hint="导出、导入、清空、退出" onClick={() => setPage("data")} />
-            <SettingsLink label="高级" hint="指令、记录、费用" onClick={() => setPage("advanced")} />
+            <SettingsLink label="人设" hint="清然和其他角色是谁、用什么声音。每一轮回复都带着。" onClick={() => setPage("who")} />
+            <SettingsLink label="记忆" hint="故事线、现在的你们、回忆。他说话前会想起相关的那几件。" onClick={() => setPage("heart")} />
+            <SettingsLink label="回复" hint="每轮带多少对话、温度。" onClick={() => setPage("reply")} />
+            <SettingsLink label="主动消息" hint="你不说话一阵后，他会不会来找你。" onClick={() => setPage("reach")} />
+            <SettingsLink label="声音和听力" hint="他说话的快慢、试听声线；打电话时怎么听你。" onClick={() => setPage("sound")} />
+            <SettingsLink label="数据" hint="导出、导入、清空聊天、退出。" onClick={() => setPage("data")} />
+            <SettingsLink label="高级" hint="发给模型的每一个字、调用记录、费用、听力参数。调试用。" onClick={() => setPage("advanced")} />
           </div>
         </div>
       ) : page === "advanced" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <p className="text-xs text-subtle">调试用，平时不用进。</p>
-            <SettingsLink label="指令" hint="记忆开关、上下文、温度、每一步的 prompt 和模型" onClick={() => setPage("prompts")} />
+            <SettingsLink label="指令" hint="每一步发给模型的原文和用哪个模型" onClick={() => setPage("prompts")} />
             <SettingsLink label="记录" hint="调用记录、改动记录、重放对比" onClick={() => setPage("log")} />
             <SettingsLink label="费用" onClick={() => setPage("spend")} />
             <SettingsLink label="听力参数" onClick={() => setPage("hearing")} />
@@ -608,7 +613,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "who" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
-            <p className="text-xs text-subtle">身份是他在现实里是谁。人设是他怎么说话。</p>
+            <p className="text-xs text-subtle">一个模型演所有人。这一页的每个字每轮回复都带着：清然的身份、人设、亲密设定，再接着下面每个角色的人设。别人出场时，他那一段（「林泽：」开头）用他的声线念。</p>
+            <p className="font-display text-lg">清然</p>
+            <VoiceSelect label="声线" value={profile.leadVoice} voices={voiceChoices} onChange={(voice) => persistProfile({ leadVoice: voice })} />
             <IdentityField
               value={identityDraft}
               paused={conflict?.field === "identity"}
@@ -668,7 +675,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               onKeepMine={() => persistProfile({ systemPrompt: draft.trim() })}
             />
           ) : null}
-          <p className="mt-2 text-xs text-subtle">你们之间发生过的事写在「故事线」里，不用写进这段。其他步骤的指令在「指令」页。</p>
+          <p className="mt-2 text-xs text-subtle">他是谁、怎么说话。你们之间发生过的事写在「记忆 → 故事线」里。</p>
             </label>
             <label className="flex flex-col gap-2">
               <span className="text-sm">亲密设定</span>
@@ -704,26 +711,70 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
               ) : null}
             </label>
-            <label className="flex flex-col gap-2">
-              <span className="text-sm">故事线</span>
-              <Textarea
-                value={storyDraft}
-                onChange={(e) => setStoryDraft(e.target.value)}
-                onBlur={() => {
-                  const next = storyDraft.trim();
-                  if (next !== profile.storyline.trim()) persistProfile({ storyline: next });
-                }}
-                maxLength={20000}
-                className="min-h-64 resize-none leading-relaxed"
-                placeholder="你们之前发生过的事"
-              />
-              <p className="text-xs text-subtle">这是他最早的回忆：按空行切成一件一件，你说话时想起相关的那几件。之后每天发生的事，凌晨整理时自动接在后面（在「他的心 → 回忆」里），不用你来写。想补以前的事，写在这里就行。</p>
-            </label>
+            <p className="font-display text-lg">其他角色</p>
+            <CharactersPanel
+              characters={profile.characters}
+              othersVoice={profile.othersVoice}
+              voices={voiceChoices}
+              onSave={(patch) => persistProfile(patch)}
+            />
           </div>
         </div>
       ) : page === "prompts" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
+            <p className="text-xs text-subtle">
+              发给模型的每一个字都在这里，除了 {"{…}"} 换进去的内容（人设、身份、亲密设定、其他角色在「人设」）。记下后下一轮生效。
+            </p>
+            {promptError ? <p className="text-sm text-live">{promptError}</p> : null}
+            {promptItems.length === 0 ? (
+              <p className="text-sm text-subtle">正在读指令…</p>
+            ) : (
+              [
+                ["清然", ["voice", "editor"]],
+                ["日记", ["report"]],
+                ["材料", ["formats"]],
+              ].map(([title, keys]) => (
+                <div key={String(title)} className="flex flex-col gap-2">
+                  <p className="text-xs text-subtle">{title}</p>
+                  {(keys as string[])
+                    .map((key) => promptItems.find((item) => item.key === key))
+                    .filter((item): item is PromptItem => Boolean(item))
+                    .map((item) => {
+                const pick = promptPick(item.key);
+                return (
+                <PromptStepEditor
+                  key={item.key}
+                  item={item}
+                  draft={promptDrafts[item.key] ?? item.body}
+                  busy={promptBusy === item.key}
+                  open={openPrompt === item.key}
+                  onOpenChange={(next) =>
+                    setOpenPrompt((current) => (next ? item.key : current === item.key ? null : current))
+                  }
+                  onDraft={(body) => setPromptDrafts((d) => ({ ...d, [item.key]: body }))}
+                  onSave={() => void savePromptItem(item.key)}
+                  onRestore={() => void restorePromptItem(item.key)}
+                  onRollback={(hash) => void rollbackPromptItem(item.key, hash)}
+                  models={
+                    voiceModels == null
+                      ? null
+                      : toModelChoices(withSelectedVoiceModel(voiceModels, voiceStats, pick.model))
+                  }
+                  model={pick.model}
+                  effort={pick.effort}
+                  onModel={(model, effort) => persistPromptModel(item.key, model, effort)}
+                />
+                );
+                    })}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      ) : page === "heart" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <div className="mx-auto flex w-full max-w-md flex-col gap-6">
             <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
               <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
                 <input
@@ -737,7 +788,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
                 <span className="text-sm">运行记忆{brainOn ? "" : "（已暂停：只用人设 + 上下文，不整理、不主动找你）"}</span>
               </label>
-              <p className="px-1 pt-1 text-sm">回复带上什么</p>
               <label className="flex min-h-11 items-center gap-3 rounded-md px-1">
                 <input
                   type="checkbox"
@@ -748,8 +798,33 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                     persistProfile({ injectLongterm: next });
                   }}
                 />
-                <span className="text-sm">现在的你们和想起来的回忆</span>
+                <span className="text-sm">回复时带上「现在的你们」和想起来的回忆</span>
               </label>
+              <p className="px-1 pb-1 text-xs text-subtle">关掉「运行记忆」：他只靠人设和今天的对话说话，不整理、不主动找你。</p>
+            </div>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm">故事线</span>
+              <Textarea
+                value={storyDraft}
+                onChange={(e) => setStoryDraft(e.target.value)}
+                onBlur={() => {
+                  const next = storyDraft.trim();
+                  if (next !== profile.storyline.trim()) persistProfile({ storyline: next });
+                }}
+                maxLength={20000}
+                className="min-h-64 resize-none leading-relaxed"
+                placeholder="你们之前发生过的事"
+              />
+              <p className="text-xs text-subtle">他最早的回忆：按空行切成一件一件，放进下面的「回忆」。你说话时，他会想起和这句最相关的几件（不是每轮都带全文）。以后每天的事凌晨自动整理进回忆，不用写在这里；想补以前的事，写在这里。</p>
+            </label>
+            <DossierPanel maxChars={profile.dossierMaxChars} onMaxChars={(n) => persistProfile({ dossierMaxChars: n })} />
+            <MemoryPanel />
+          </div>
+        </div>
+      ) : page === "reply" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <div className="mx-auto flex w-full max-w-md flex-col gap-3">
+            <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
                   <p className="text-sm">上下文至少几条</p>
@@ -818,61 +893,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 ) : null}
               </div>
             </div>
-            <p className="text-xs text-subtle">
-              发给模型的每一个字都在这里，除了 {"{…}"} 换进去的内容（人设、身份、亲密设定在「清然是谁」）。记下后下一轮生效。
-            </p>
-            {promptError ? <p className="text-sm text-live">{promptError}</p> : null}
-            {promptItems.length === 0 ? (
-              <p className="text-sm text-subtle">正在读指令…</p>
-            ) : (
-              [
-                ["清然", ["voice", "editor"]],
-                ["日记", ["report"]],
-                ["材料", ["formats"]],
-              ].map(([title, keys]) => (
-                <div key={String(title)} className="flex flex-col gap-2">
-                  <p className="text-xs text-subtle">{title}</p>
-                  {(keys as string[])
-                    .map((key) => promptItems.find((item) => item.key === key))
-                    .filter((item): item is PromptItem => Boolean(item))
-                    .map((item) => {
-                const pick = promptPick(item.key);
-                return (
-                <PromptStepEditor
-                  key={item.key}
-                  item={item}
-                  draft={promptDrafts[item.key] ?? item.body}
-                  busy={promptBusy === item.key}
-                  open={openPrompt === item.key}
-                  onOpenChange={(next) =>
-                    setOpenPrompt((current) => (next ? item.key : current === item.key ? null : current))
-                  }
-                  onDraft={(body) => setPromptDrafts((d) => ({ ...d, [item.key]: body }))}
-                  onSave={() => void savePromptItem(item.key)}
-                  onRestore={() => void restorePromptItem(item.key)}
-                  onRollback={(hash) => void rollbackPromptItem(item.key, hash)}
-                  models={
-                    voiceModels == null
-                      ? null
-                      : toModelChoices(withSelectedVoiceModel(voiceModels, voiceStats, pick.model))
-                  }
-                  model={pick.model}
-                  effort={pick.effort}
-                  onModel={(model, effort) => persistPromptModel(item.key, model, effort)}
-                />
-                );
-                    })}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      ) : page === "heart" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto flex w-full max-w-md flex-col gap-6">
-            <p className="text-xs text-subtle">这些都是他自己记下的。你改的会记下来。</p>
-            <DossierPanel maxChars={profile.dossierMaxChars} onMaxChars={(n) => persistProfile({ dossierMaxChars: n })} />
-            <MemoryPanel />
           </div>
         </div>
       ) : page === "reach" ? (
@@ -884,7 +904,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "sound" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-            <p className="text-xs text-subtle">语速和静音跟主屏幕是同一个。</p>
+            <p className="text-xs text-subtle">语速和静音跟主屏幕是同一个。谁用哪个声线在「人设」里选；下面可以先试听。</p>
             <div className="flex items-center justify-between rounded-md bg-surface-2 px-3 py-3">
               <span className="text-sm">语速 {snapVoiceRate(profile.voiceSpeed).label}</span>
               <Button type="button" variant="outline" onClick={() => persistProfile({ voiceSpeed: nextVoiceRate(profile.voiceSpeed).speed })}>
@@ -916,22 +936,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
               </label>
             ))}
-            <label className="flex flex-col gap-1">
-              <span className="text-sm">角色声线</span>
-              <Textarea
-                key={profile.voiceCast}
-                defaultValue={profile.voiceCast}
-                className="min-h-20 font-mono"
-                placeholder={"林泽 lux\n其他人 ara"}
-                onBlur={(e) => {
-                  const next = e.target.value.trim();
-                  if (next !== profile.voiceCast) persistProfile({ voiceCast: next });
-                }}
-              />
-              <span className="text-xs text-subtle">
-                一行一个人：名字、空格、xAI 的声线。他的回复里「林泽：」开头的那一段（林泽的动作、他看到的、他说的）用这个声音念，「清然：」回到清然；清然是 Eve。没写在这里的人（服务员、路人）用「其他人」那一行的声线，没有这一行就是 Eve。
-              </span>
-            </label>
             <VoicePanel inCall={callPhase != null} />
             <LabelModeSwitch
               checked={debugHearing}

@@ -1,6 +1,6 @@
 import { timeFacts, dayWindow } from "../heart.ts";
 import { modelFacingText, photoNote } from "../../message-meta.ts";
-import { NEUTRAL_PERSONA, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
+import { NEUTRAL_PERSONA, charterText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getMessage, getMeta, listHistoryWindow, upsertMessage } from "../store.ts";
 import { enqueue } from "../jobs.ts";
@@ -9,7 +9,7 @@ import { loadFormats, loadPrompt } from "../prompts/store.ts";
 import { localDay } from "../time.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { recall, recallText, recentInner, type Memory } from "../memory.ts";
-import { LEAD, parseCast, splitSpeakers } from "../../cast.ts";
+import { LEAD, castOf, splitSpeakers, type Cast } from "../../cast.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
 
 export type HotContext = {
@@ -85,8 +85,7 @@ const SCENE_LOOKBACK = 8;
  * Who else is in the scene now: anyone with his own 「名字：」 block in the last few replies. Their memories that
  * 清然 does not share (`knows`) can come back while they are here; with 清然 alone they never do.
  */
-export function scenePresent(history: StoredMessage[], voiceCast: string): string[] {
-  const cast = parseCast(voiceCast);
+export function scenePresent(history: StoredMessage[], cast: Cast): string[] {
   const names = new Set<string>();
   for (const m of history.slice(-SCENE_LOOKBACK)) {
     if (m.role !== "assistant") continue;
@@ -147,7 +146,7 @@ export async function loadHotContext(input: {
   const us = parts.us;
   const clockText = parts.time.clock;
   const [charterHash, longtermHash] = await Promise.all([
-    rememberCharter([charter.trim() || NEUTRAL_PERSONA, input.profile.intimateNotes.trim()].filter(Boolean).join("\n\n")),
+    rememberCharter([charterText(input.profile, charter).trim() || NEUTRAL_PERSONA, input.profile.intimateNotes.trim()].filter(Boolean).join("\n\n")),
     rememberBlock("voice_longterm", us),
   ]);
   const historyIds = history.map((m) => m.id);
@@ -222,12 +221,12 @@ export async function gatherVoiceParts(input: {
   ]);
   const recalled = inject.memory
     ? await recall(recallQuery(input.userText, history), input.nowMs, {
-        present: scenePresent(history, input.profile.voiceCast),
+        present: scenePresent(history, castOf(input.profile)),
       })
     : { memories: [], scores: [], by: "none" as const };
   const images = input.images ?? [];
   const parts: VoicePackParts = {
-    charter: input.charter ?? input.profile.systemPrompt,
+    charter: charterText(input.profile, input.charter ?? input.profile.systemPrompt),
     intimate: input.profile.intimateNotes,
     identity: input.profile.identity,
     us,

@@ -1,12 +1,13 @@
 import { VOICE_IO } from "./brain/config";
+import type { Profile } from "./types";
 
 /**
  * Other people in the scene. One model plays everyone; a block that starts with 「林泽：」 is 林泽 until another
  * name starts a block (「清然：」 goes back to him). Without a name it is 清然. Each person's block (his actions,
  * what he sees, what he says, in his own first person) is read in his voice; 清然 is Eve.
  * Any short name at the start of a line followed by a colon starts a block (a waiter nobody named in advance too);
- * 「我说：」「他说：」 never do. A name in her table (设置 → 声音和听力 → 角色声线) is read in that voice; anyone else in
- * the voice of the line 「其他人 …」 if she wrote one, otherwise Eve.
+ * 「我说：」「他说：」 never do. Someone she added (设置 → 人设) is read in the voice she picked for him; anyone else in
+ * her 「其他人」 voice.
  */
 export const LEAD = "清然";
 
@@ -27,6 +28,13 @@ export function parseCast(text: string | undefined | null): Cast {
 
 /** The table line that gives everyone not named in it a voice: 「其他人 ara」. */
 export const OTHERS = "其他人";
+
+/** Her 人设 page as a cast: 清然, each character she added, everyone else. */
+export function castOf(profile: Pick<Profile, "leadVoice" | "characters" | "othersVoice">): Cast {
+  const cast: Cast = { [LEAD]: profile.leadVoice, [OTHERS]: profile.othersVoice };
+  for (const c of profile.characters) cast[c.name] = c.voice;
+  return cast;
+}
 
 export function voiceOf(who: string, cast: Cast): string {
   if (who === LEAD) return cast[LEAD] ?? VOICE_IO.voice;

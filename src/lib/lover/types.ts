@@ -23,6 +23,57 @@ export function isVoiceEffort(value: unknown): value is Exclude<VoiceEffort, nul
   return value === "low" || value === "medium" || value === "high";
 }
 
+/** Someone besides 清然 (林泽): how his lines sound and who he is. */
+export type Character = { name: string; voice: string; persona: string };
+
+function voiceId(value: unknown, fallback: string): string {
+  const v = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^[a-z][\w-]{0,31}$/.test(v) ? v : fallback;
+}
+
+/** Characters, 清然's voice and everyone else's; read from the old 「林泽 lux」 lines (voiceCast) until first saved. */
+function lockCast(raw: { voiceCast?: string; leadVoice?: string; characters?: unknown; othersVoice?: string }): {
+  leadVoice: string;
+  characters: Character[];
+  othersVoice: string;
+} {
+  const old: Record<string, string> = {};
+  for (const line of String(raw.voiceCast ?? "").split("\n")) {
+    const m = line.trim().match(/^(.{1,12}?)\s*[\s:：=]\s*([A-Za-z][\w-]{0,31})$/);
+    if (m?.[1] && m[2]) old[m[1].trim()] = m[2].toLowerCase();
+  }
+  const listed = Array.isArray(raw.characters)
+    ? raw.characters
+    : Object.entries(old)
+        .filter(([name]) => name !== "清然" && name !== "其他人")
+        .map(([name, voice]) => ({ name, voice, persona: "" }));
+  const seen = new Set<string>();
+  const characters: Character[] = [];
+  for (const item of listed.slice(0, 20)) {
+    const c = (item ?? {}) as Record<string, unknown>;
+    const name = typeof c.name === "string" ? c.name.trim().slice(0, 12) : "";
+    if (!name || name === "清然" || seen.has(name)) continue;
+    seen.add(name);
+    characters.push({ name, voice: voiceId(c.voice, "eve"), persona: typeof c.persona === "string" ? c.persona.slice(0, 4000) : "" });
+  }
+  return {
+    leadVoice: voiceId(raw.leadVoice ?? old["清然"], "eve"),
+    characters,
+    othersVoice: voiceId(raw.othersVoice ?? old["其他人"], "eve"),
+  };
+}
+
+/**
+ * The persona the model is given: 清然's, then everyone else she wrote (「林泽」 and who he is). One model plays them
+ * all, so they are always there; whether one of them is in the scene the talk itself says.
+ */
+export function charterText(profile: Pick<Profile, "systemPrompt" | "characters">, lead = profile.systemPrompt): string {
+  const others = profile.characters
+    .filter((c) => c.persona.trim())
+    .map((c) => `【${c.name}】\n${c.persona.trim()}`);
+  return [lead.trim(), others.length ? `其他人物：\n\n${others.join("\n\n")}` : ""].filter(Boolean).join("\n\n");
+}
+
 export type Profile = {
   systemPrompt: string;
   muted: boolean;
@@ -70,8 +121,12 @@ export type Profile = {
   brainOn: boolean;
   /** Where the persona text sits: system prompt, or the first user message. */
   personaPlacement: "system" | "first_user";
-  /** Other people's voices, one per line 「林泽 lux」 (src/lib/lover/cast.ts). 清然 is Eve. */
-  voiceCast: string;
+  /** 清然's xAI voice. */
+  leadVoice: string;
+  /** Other people she wrote: a name, a voice, and a persona that goes into every reply after 清然's (cast.ts). */
+  characters: Character[];
+  /** The voice of anyone in a scene who is not in `characters` (a waiter, a stranger). */
+  othersVoice: string;
   /** With the persona as the first message: his line right after it (a fixed line, no model call). */
   personaAck: string;
   /** In a call, what tapping the space left / right of the hang-up button adds to what she says (empty: nothing). */
@@ -148,7 +203,9 @@ export const DEFAULT_PROFILE: Profile = {
   storyline: "",
   brainOn: true,
   personaPlacement: "system",
-  voiceCast: "",
+  leadVoice: "eve",
+  characters: [],
+  othersVoice: "eve",
   personaAck: "嗯。",
   tapLeft: "嗯～",
   tapRight: "哼",
@@ -191,6 +248,9 @@ type LooseProfile = Partial<Profile> & {
   brainOn?: boolean;
   personaPlacement?: string;
   voiceCast?: string;
+  leadVoice?: string;
+  characters?: unknown;
+  othersVoice?: string;
   personaAck?: string;
   tapLeft?: string;
   tapRight?: string;
@@ -231,7 +291,7 @@ export function lockedProfile(input?: unknown): Profile {
     storyline: typeof raw.storyline === "string" ? raw.storyline.slice(0, 20000) : "",
     brainOn: raw.brainOn !== false,
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
-    voiceCast: typeof raw.voiceCast === "string" ? raw.voiceCast.slice(0, 1000) : "",
+    ...lockCast(raw),
     personaAck: typeof raw.personaAck === "string" && raw.personaAck.trim() ? raw.personaAck.trim().slice(0, 200) : "嗯。",
     tapLeft: typeof raw.tapLeft === "string" ? raw.tapLeft.trim().slice(0, 200) : "嗯～",
     tapRight: typeof raw.tapRight === "string" ? raw.tapRight.trim().slice(0, 200) : "哼",

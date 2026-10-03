@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { spokenForTts } from "./speech-tags";
 import { restoreSpeechText } from "./stt-text";
 import { ttsSpeed } from "./tts";
-import { parseCast } from "./cast";
+import { castOf } from "./cast";
 import { speakWhole } from "./speak";
 import { isQuotaHint, readXaiFail } from "./xai-error";
 import { HEARING, STT_KEYTERMS, xaiVadThreshold } from "./hearing/config";
@@ -26,7 +26,7 @@ export const speakAsLover = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (!spokenForTts(data.text.trim())) return { ok: false as const, error: "empty" };
     const [{ getProfileData }, { lockedProfile }] = await Promise.all([import("./brain/store"), import("./types")]);
-    const cast = parseCast(lockedProfile(await getProfileData().catch(() => ({}))).voiceCast);
+    const cast = castOf(lockedProfile(await getProfileData().catch(() => ({}))));
     const spoken = await speakWhole(data.text, cast, ttsSpeed(data.speed ?? 1));
     if (!spoken.ok) return { ok: false as const, error: spoken.error };
     return {

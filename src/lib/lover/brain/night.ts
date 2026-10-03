@@ -3,7 +3,7 @@ import { now } from "./clock.ts";
 import { appendInnerLog, getMeta, getProfileData, getProfilePrompt, patchBrainLog, patchMeta, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
 import { clockOf, localDay } from "./time.ts";
-import { lockedProfile } from "../types.ts";
+import { charterText, lockedProfile } from "../types.ts";
 import { fromStored, modelFacingText } from "../message-meta.ts";
 import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
 import { loadFormats, loadPrompt } from "./prompts/store.ts";
@@ -157,7 +157,7 @@ export async function runNight(
   const known = (await listMemories()).filter((m) => m.source === "night" || m.source === "rosie").slice(-NIGHT_MEMORIES);
   const loaded = await loadPrompt("editor");
   const messages = renderVariant(parsePromptBody("editor", loaded.body), "main", {
-    system_prompt: charter,
+    system_prompt: charterText(profile, charter),
     identity: ident.identity.trim(),
     us: us.trim(),
     memories: memoriesWithIds(known, formats),

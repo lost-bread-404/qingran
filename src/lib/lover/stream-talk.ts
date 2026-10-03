@@ -59,7 +59,7 @@ export type TalkStreamInput = {
   timeoutMs?: number;
   /** Her setting (profile.voiceTemperature). Missing → 1.0. */
   temperature?: number;
-  /** Other people's voices (profile.voiceCast, parsed). */
+  /** Who reads which block: castOf(profile) (人设 page). */
   cast?: Cast;
 };
 
