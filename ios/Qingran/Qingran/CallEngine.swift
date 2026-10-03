@@ -16,6 +16,8 @@ final class CallEngine: NSObject, ObservableObject {
   private var holdPlayer: AVAudioPlayer?
   private var endingFromWeb = false
   private var callGeneration = 0
+  /// iOS handed this call its audio (CallKit didActivate).
+  private var audioActivated = false
 
   override init() {
     let config = CXProviderConfiguration()
@@ -50,6 +52,7 @@ final class CallEngine: NSObject, ObservableObject {
 
   func startCall() {
     callGeneration += 1
+    audioActivated = false
     let generation = callGeneration
     requestMic { [weak self] allowed in
       guard let self, self.callGeneration == generation else { return }
@@ -61,7 +64,11 @@ final class CallEngine: NSObject, ObservableObject {
       }
       if self.callUUID != nil {
         self.inCall = true
-        if !self.nativeSession { self.startHoldLoop() }
+        if self.nativeSession {
+          NativePipeline.shared.startEngine()
+        } else {
+          self.startHoldLoop()
+        }
         return
       }
       let uuid = UUID()
@@ -69,20 +76,34 @@ final class CallEngine: NSObject, ObservableObject {
       let handle = CXHandle(type: .generic, value: QingranConfig.displayName)
       let action = CXStartCallAction(call: uuid, handle: handle)
       action.isVideo = false
-      self.controller.request(CXTransaction(action: action)) { error in
-        if let error {
-          NSLog("Qingran CallKit start: \(error.localizedDescription)")
-        }
+      self.controller.request(CXTransaction(action: action)) { [weak self] error in
+        guard let error else { return }
+        NSLog("Qingran CallKit start: \(error.localizedDescription)")
+        NativePipeline.shared.report("callkit start failed: \(error.localizedDescription)")
+        DispatchQueue.main.async { self?.startWithoutCallKit(generation) }
       }
       self.provider.reportOutgoingCall(with: uuid, startedConnectingAt: Date())
       self.provider.reportOutgoingCall(with: uuid, connectedAt: Date())
       self.inCall = true
       if self.nativeSession {
         self.startHoldLoop(false)
+        // The mic starts when iOS hands the call its audio. If that never comes, the call would sit there deaf.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+          guard let self, self.callGeneration == generation, self.nativeSession, !self.audioActivated else { return }
+          NativePipeline.shared.report("callkit audio never came")
+          self.startWithoutCallKit(generation)
+        }
       } else {
         self.startHoldLoop()
       }
     }
+  }
+
+  /// The call goes on without the system call (no green bar): the mic and speaker still work while the app is open.
+  private func startWithoutCallKit(_ generation: Int) {
+    guard callGeneration == generation, nativeSession else { return }
+    prepareAudioSession()
+    NativePipeline.shared.startEngine()
   }
 
   func beginNativeCall() {
@@ -180,6 +201,7 @@ extension CallEngine: CXProviderDelegate {
   }
 
   func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+    audioActivated = true
     prepareAudioSession()
     if nativeSession {
       startHoldLoop(false)

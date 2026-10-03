@@ -1152,6 +1152,11 @@ final class NativePipeline: @unchecked Sendable {
     }
   }
 
+  /// Something about the call seen elsewhere in the shell (CallKit), written to the same log.
+  func report(_ event: String) {
+    mark(event)
+  }
+
   /// What happened to the call (engine on, background, restarted), so a silent call can be traced afterwards.
   private func mark(_ event: String) {
     note(ok: true, error: "", detail: event)
