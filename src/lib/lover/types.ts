@@ -89,6 +89,8 @@ export type Profile = {
   claudeModel: string;
   /** Back to Claude when she has been away longer than this many minutes. */
   grokReturnMin: number;
+  /** How long Claude thinks before it answers (Anthropic's effort): low answers in a few seconds. */
+  claudeEffort: "low" | "medium" | "high";
   /** Temperature of the reply (and of his messages first). 0–2, default 1.0. */
   voiceTemperature: number;
   /** Pause that ends a turn, milliseconds. 800–3000, default 1500. */
@@ -192,6 +194,7 @@ export const DEFAULT_PROFILE: Profile = {
   voiceEffort: DEFAULT_VOICE_EFFORT,
   claudeModel: DEFAULT_CLAUDE_MODEL,
   grokReturnMin: DEFAULT_RETURN_MIN,
+  claudeEffort: "low",
   voiceTemperature: VOICE_TEMPERATURE,
   silenceMs: SILENCE_MS,
   injectLongterm: true,
@@ -238,6 +241,7 @@ type LooseProfile = Partial<Profile> & {
   voiceEffort?: string | null;
   claudeModel?: string;
   grokReturnMin?: number;
+  claudeEffort?: string;
   voiceTemperature?: number;
   silenceMs?: number;
   injectLongterm?: boolean;
@@ -287,6 +291,7 @@ export function lockedProfile(input?: unknown): Profile {
       typeof raw.grokReturnMin === "number" && Number.isFinite(raw.grokReturnMin)
         ? Math.max(5, Math.min(600, Math.round(raw.grokReturnMin)))
         : DEFAULT_RETURN_MIN,
+    claudeEffort: raw.claudeEffort === "medium" || raw.claudeEffort === "high" ? raw.claudeEffort : "low",
     voiceTemperature: clampVoiceTemperature(raw.voiceTemperature),
     silenceMs: hearingSense.endWaitMs,
     injectLongterm: raw.injectLongterm !== false,

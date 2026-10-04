@@ -842,6 +842,25 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   </span>
                 </label>
               ))}
+              <p className="pt-1 text-sm">Claude 想多久再回</p>
+              <div className="flex gap-2">
+                {(
+                  [
+                    ["low", "快（几秒）"],
+                    ["medium", "中"],
+                    ["high", "慢、想得最深"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => persistProfile({ claudeEffort: id })}
+                    className={`min-h-11 flex-1 rounded-md px-2 text-sm ${profile.claudeEffort === id ? "bg-fg text-bg" : "bg-surface"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <p className="pt-1 text-sm">Grok 用哪个模型</p>
               <select
                 value={voiceModel}

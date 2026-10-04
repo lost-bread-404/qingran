@@ -186,7 +186,7 @@ export const Route = createFileRoute("/api/talk")({
                 let result: TalkStreamResult | null = null;
                 try {
                   result = await runTalkStream(
-                    { text, messages, replyId, voiceSpeed: profile.voiceSpeed, failOnEmpty: true, model: profile.claudeModel, effort: null, cast, engine: "claude" },
+                    { text, messages, replyId, voiceSpeed: profile.voiceSpeed, failOnEmpty: true, model: profile.claudeModel, effort: profile.claudeEffort, cast, engine: "claude" },
                     (event) => {
                       if (event.t === "text") shown = true;
                       if (event.t === "text_end" || event.t === "done") said = event.speech || said;

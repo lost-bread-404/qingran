@@ -59,7 +59,7 @@ export async function speakFirst(input: {
   const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
   const picks: Array<VoiceModelPick & { messages: typeof grok }> = [];
   if (engine === "claude") {
-    picks.push({ model: profile.claudeModel, effort: null, timeoutMs: 90_000, messages: buildVoiceMessages({ ...parts, engine: "claude" }, "none") });
+    picks.push({ model: profile.claudeModel, effort: profile.claudeEffort, timeoutMs: 90_000, messages: buildVoiceMessages({ ...parts, engine: "claude" }, "none") });
   }
   picks.push({ ...primary, messages: grok });
   const safety = voiceSafetyPick();

@@ -37,6 +37,7 @@ const PATCH_KEYS = [
   "voiceEffort",
   "claudeModel",
   "grokReturnMin",
+  "claudeEffort",
   "voiceTemperature",
   "silenceMs",
   "injectLongterm",

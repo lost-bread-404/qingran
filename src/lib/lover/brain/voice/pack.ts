@@ -10,7 +10,7 @@ import { localDay } from "../time.ts";
 import { getDossier } from "../dossier.ts";
 import { agoText, dateClockText } from "../time.ts";
 import { fmt } from "../prompts/formats.ts";
-import { recall, recallText, recentInner, type Memory } from "../memory.ts";
+import { recentlyRecalled, recall, recallText, recentInner, type Memory } from "../memory.ts";
 import { LEAD, castOf, splitSpeakers, type Cast } from "../../cast.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
 
@@ -225,6 +225,7 @@ export async function gatherVoiceParts(input: {
   const recalled = inject.memory
     ? await recall(recallQuery(input.userText, history), input.nowMs, {
         present: scenePresent(history, castOf(input.profile)),
+        skip: await recentlyRecalled(input.nowMs).catch(() => undefined),
       })
     : { memories: [], scores: [], by: "none" as const };
   const images = input.images ?? [];

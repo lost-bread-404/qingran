@@ -510,7 +510,9 @@ final class NativePipeline: @unchecked Sendable {
     // words from Apple for a while. Without either, her own pause setting on loudness.
     let streaming = lineLive
     let smart = streaming && lineSaysDone
-    let wordless = lineWordsAt.map { Float(Date().timeIntervalSince($0) * 1000) >= NativeVad.wordlessMs } ?? false
+    // Her own pause setting, whether the quiet is measured by loudness or by words (10/4: in a noisy room the line
+    // waited 3 s after her last word every time, and his answer with it).
+    let wordless = lineWordsAt.map { Float(Date().timeIntervalSince($0) * 1000) >= min(NativeVad.wordlessMs, max(1000, params.endWaitMs)) } ?? false
     let wait = streaming ? max(params.endWaitMs, backstopMs) : params.endWaitMs
     let capped = speechMs >= params.maxUtteranceMs
     let ended = speechMs >= NativeVad.minSpeechMs && (smart || wordless || quietMs >= wait)

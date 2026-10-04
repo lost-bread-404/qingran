@@ -361,14 +361,33 @@ type RecallOpts = {
   minCos?: number;
   /** Others in the scene now (「林泽」): their own memories can come back too. */
   present?: readonly string[];
+  /** Came back in the last hours already: not again (it is already in the talk). */
+  skip?: ReadonlySet<number>;
 };
+
+/** How long a moment that came back stays out of what comes back next (10/4: one insight came back 48 times in 4 days). */
+export const RECALL_REST_MS = 12 * 3_600_000;
+
+/** The moments that came back to him in the last RECALL_REST_MS (from the turn log). */
+export async function recentlyRecalled(nowMs = now()): Promise<Set<number>> {
+  const db = await sql();
+  const rows = await db.query<{ id: string }>(
+    `select distinct jsonb_array_elements_text(refs->'pickedIds') as id from brain_log
+     where route = 'voice' and at > $1 and jsonb_typeof(refs->'pickedIds') = 'array'`,
+    [nowMs - RECALL_REST_MS],
+  );
+  return new Set(rows.map((r) => Number(r.id)).filter((n) => Number.isFinite(n)));
+}
 
 const DAY_MS = 86_400_000;
 
-/** Small lifts on top of how well a moment fits: important ones, recent ones, ones that often came back. */
+/**
+ * Small lifts on top of how well a moment fits: important ones, recent ones. (How often it came back no longer lifts
+ * it: that fed itself, and the same few moments came back every turn.)
+ */
 function lift(m: Memory, nowMs: number): number {
   const ageDays = m.at == null ? 365 : Math.max(0, (nowMs - m.at) / DAY_MS);
-  return 0.006 * Math.max(1, Math.min(10, m.importance)) + 0.03 * Math.exp(-ageDays / 30) + 0.002 * Math.min(10, m.recalled);
+  return 0.006 * Math.max(1, Math.min(10, m.importance)) + 0.03 * Math.exp(-ageDays / 30);
 }
 
 /**
@@ -381,7 +400,7 @@ export async function recall(query: string, nowMs = now(), opts: RecallOpts = {}
   const indexed = await memoryIndex();
   const { index, vecs } = indexed;
   const present = opts.present ?? [];
-  const memories = indexed.memories.filter((m) => knownHere(m, present));
+  const memories = indexed.memories.filter((m) => knownHere(m, present) && !opts.skip?.has(m.id));
   if (!memories.length) return { memories: [], scores: [], by: "none" };
   const top = opts.top ?? RECALL_TOP;
   const minFit = opts.minFit ?? RECALL_MIN_FIT;
