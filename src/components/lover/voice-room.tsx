@@ -38,7 +38,7 @@ import {
   uploadPhoto,
 } from "@/lib/lover/room";
 import { registerNativePush } from "@/lib/lover/push-client";
-import { nativeAddToCall, nativeCallPlan, nativeInterruptCall, nativePlayClip, nativeTalkTurn } from "@/lib/lover/native-shell";
+import { nativeAddToCall, nativeCallPlan, nativeInterruptCall, nativePlayClip, nativeTalkTurn, nativeSpeakTurn, nativeSpeakerStop } from "@/lib/lover/native-shell";
 import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { buildHearingContext, extractContextKeyterms, lastDialogueTurns, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
@@ -301,6 +301,8 @@ export function VoiceRoom() {
         setMessages((prev) => prev.filter((m) => m.id !== id));
         // It may already be saved (its request finished while held): she never heard it, so it is not kept.
         void deleteRoomMessages({ data: { ids: [id] } }).catch(() => undefined);
+      } else if (detail.type === "speakFail" && detail.text) {
+        setBanner(detail.text);
       } else if (detail.type === "reply" && detail.text) {
         const id = detail.id;
         const text = detail.text;
@@ -408,6 +410,7 @@ export function VoiceRoom() {
     }
     speakingIdRef.current = id;
     stopPlayback();
+    nativeSpeakerStop();
     setStatus("speaking");
     void unlockPlayback();
     void resumeAudio();
@@ -646,6 +649,28 @@ export function VoiceRoom() {
         })
       ) {
         // The shell's call runs this turn; its reply fills this message as it streams, and its phases drive the status.
+        pendingIdsRef.current.delete(reply.id);
+        if (inflightRef.current?.id === reply.id) inflightRef.current = null;
+        speakingIdRef.current = null;
+        busyRef.current = false;
+        setStatus("idle");
+        return;
+      }
+      if (
+        !callActiveRef.current &&
+        !profileRef.current.muted &&
+        nativeSpeakTurn({
+          text: tagged,
+          userMsgId: userMsg.id,
+          userCreatedAt: userMsg.createdAt || at,
+          replyId: reply.id,
+          replyCreatedAt: reply.createdAt,
+          images: userMsg.images,
+          profile: { voiceSpeed: profileRef.current.voiceSpeed, muted: false },
+        })
+      ) {
+        // Outside a call the shell asks and speaks this turn, so it goes on when she leaves the app; its words fill
+        // this message as they come (`reply`).
         pendingIdsRef.current.delete(reply.id);
         if (inflightRef.current?.id === reply.id) inflightRef.current = null;
         speakingIdRef.current = null;
@@ -973,6 +998,7 @@ export function VoiceRoom() {
     void unlockPlayback();
     if (!holdingRef.current) return;
     stopPlayback();
+    nativeSpeakerStop();
     const el = getPlaybackElement();
     el.muted = true;
     setBanner(null);

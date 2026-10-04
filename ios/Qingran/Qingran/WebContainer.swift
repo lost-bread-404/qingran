@@ -170,6 +170,14 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       if let body = message.body as? [String: Any], let audio = body["audio"] as? String {
         NativePipeline.shared.playFromPage(audio, mime: body["mime"] as? String ?? "")
       }
+    case "speakTurn":
+      if let body = message.body as? [String: Any] {
+        NativeSpeaker.shared.talk(body) { [weak self] detail in
+          self?.postNativeCall(detail)
+        }
+      }
+    case "stopSpeaker":
+      NativeSpeaker.shared.stop()
     case "keepAwake":
       var on = false
       if let body = message.body as? [String: Any], let flag = body["on"] as? Bool {
@@ -305,6 +313,7 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     window.QingranNative = {
       present: true,
       nativeCall: 2,
+      speaker: 1,
       startCall: function () { post('startCall'); },
       endCall: function () { post('endCall'); },
       prepareAudio: function () { post('prepareAudio'); },
@@ -314,7 +323,9 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       talkNativeCall: function (turn) { post('talkNativeCall', turn || {}); },
       playNativeCall: function (clip) { post('playNativeCall', clip || {}); },
       addNativeCall: function (text, attach) { post('addNativeCall', { text: String(text || ''), attach: !!attach }); },
-      keepAwake: function (on) { post('keepAwake', { on: !!on }); }
+      keepAwake: function (on) { post('keepAwake', { on: !!on }); },
+      speakTurn: function (turn) { post('speakTurn', turn || {}); },
+      stopSpeaker: function () { post('stopSpeaker'); }
     };
   })();
   """

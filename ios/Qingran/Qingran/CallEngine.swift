@@ -51,6 +51,7 @@ final class CallEngine: NSObject, ObservableObject {
   }
 
   func startCall() {
+    NativeSpeaker.shared.stop()
     callGeneration += 1
     audioActivated = false
     let generation = callGeneration

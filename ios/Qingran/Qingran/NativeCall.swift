@@ -1302,3 +1302,205 @@ struct Piece {
   let at: Int
   let text: Task<String, Never>
 }
+
+/// A turn she typed outside a call (2026-10-04): the shell asks /api/talk and speaks his reply itself, so it goes on
+/// when she leaves the app (iOS pauses the page in the background, and his voice with it). His words go to the page
+/// as the call's do (`reply`). No mic here; a call takes over the speaker when it starts (`stop()`).
+final class NativeSpeaker: @unchecked Sendable {
+  static let shared = NativeSpeaker()
+
+  private let queue = DispatchQueue(label: "qingran.speaker")
+  private let engine = AVAudioEngine()
+  private let player = AVAudioPlayerNode()
+  private let format = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)
+  private var attached = false
+  private var carry = Data()
+  private var pending = 0
+  private var streamDone = true
+  private var gen = 0
+  private var task: Task<Void, Never>?
+  private var keepAlive: UIBackgroundTaskIdentifier = .invalid
+
+  private init() {}
+
+  func talk(_ turn: [String: Any], emit: @escaping ([String: Any]) -> Void) {
+    queue.async {
+      self.gen += 1
+      let gen = self.gen
+      self.task?.cancel()
+      self.dropAudio()
+      self.streamDone = false
+      self.holdApp()
+      self.task = Task { await self.run(turn, gen: gen, emit: emit) }
+    }
+  }
+
+  /// She tapped another line, started holding to talk, or a call began: his voice stops; the reply is still saved.
+  func stop() {
+    queue.async {
+      self.gen += 1
+      self.dropAudio()
+      self.streamDone = true
+      self.letAppGo()
+    }
+  }
+
+  private func run(_ turn: [String: Any], gen: Int, emit: @escaping ([String: Any]) -> Void) async {
+    let replyId = turn["replyId"] as? String ?? ""
+    let userId = turn["userMsgId"] as? String ?? ""
+    defer { queue.async { if self.gen == gen { self.streamDone = true; self.finishIfIdle() } } }
+    guard let base = QingranConfig.savedURL, var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return }
+    parts.path = "/api/talk"
+    parts.query = nil
+    parts.fragment = nil
+    guard let url = parts.url else { return }
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+    req.setValue(await Self.cookieHeader(), forHTTPHeaderField: "Cookie")
+    var body = turn
+    body.removeValue(forKey: "type")
+    body["timeZone"] = TimeZone.current.identifier
+    body["nowMs"] = Int(Date().timeIntervalSince1970 * 1000)
+    req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+    let fail = { (text: String) in emit(["type": "speakFail", "id": replyId, "text": text]) }
+    do {
+      let (bytes, res) = try await URLSession.shared.bytes(for: req)
+      guard (res as? HTTPURLResponse)?.statusCode == 200 else {
+        fail("这会儿连不上。")
+        return
+      }
+      var buf = Data()
+      buf.reserveCapacity(64 * 1024)
+      var last: UInt8 = 0
+      var speech = ""
+      for try await byte in bytes {
+        if Task.isCancelled { return }
+        if byte == 10 && last == 10 {
+          let frame = buf
+          buf.removeAll(keepingCapacity: true)
+          last = 0
+          guard let event = Self.json(frame) else { continue }
+          let kind = event["t"] as? String ?? ""
+          if kind == "text", let d = event["d"] as? String {
+            speech += d
+            emit(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
+          } else if (kind == "text_end" || kind == "done"), let full = event["speech"] as? String, !full.isEmpty {
+            speech = full
+            emit(["type": "reply", "id": replyId, "text": speech, "replyTo": userId])
+          } else if kind == "audio", let b64 = event["b"] as? String {
+            let mime = event["m"] as? String ?? ""
+            let replace = event["replace"] as? Bool ?? false
+            queue.async { if self.gen == gen { self.play(b64, mime: mime, replace: replace) } }
+          } else if kind == "err", event["tts"] as? Bool != true {
+            fail(event["m"] as? String ?? "没回上。")
+          }
+          continue
+        }
+        buf.append(byte)
+        last = byte
+      }
+    } catch {
+      if !Task.isCancelled { fail("线路有点不稳。") }
+    }
+  }
+
+  private func play(_ b64: String, mime: String, replace: Bool) {
+    guard mime.contains("pcm"), let raw = Data(base64Encoded: b64), let format else { return }
+    if replace { dropAudio() }
+    guard ready() else { return }
+    var data = carry
+    data.append(raw)
+    carry = Data()
+    if data.count % 2 == 1 {
+      carry = Data(data.suffix(1))
+      data.removeLast()
+    }
+    let frames = data.count / 2
+    guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)),
+          let out = buffer.floatChannelData?[0] else { return }
+    buffer.frameLength = AVAudioFrameCount(frames)
+    data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+      let b = raw.bindMemory(to: UInt8.self)
+      for i in 0..<frames {
+        out[i] = Float(Int16(bitPattern: UInt16(b[2 * i]) | (UInt16(b[2 * i + 1]) << 8))) / 32768
+      }
+    }
+    let gen = self.gen
+    pending += 1
+    player.scheduleBuffer(buffer, completionHandler: { [weak self] in
+      self?.queue.async {
+        guard let self, self.gen == gen else { return }
+        self.pending = max(0, self.pending - 1)
+        self.finishIfIdle()
+      }
+    })
+    if !player.isPlaying { player.play() }
+  }
+
+  /// Plain playback (no mic), the same full-quality speaker as calls.
+  private func ready() -> Bool {
+    if CallEngine.shared.inCall { return false }
+    do {
+      let session = AVAudioSession.sharedInstance()
+      if session.category != .playback { try session.setCategory(.playback, mode: .default, options: []) }
+      try session.setActive(true, options: [])
+      if !attached, let format {
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        attached = true
+      }
+      if !engine.isRunning { try engine.start() }
+      return true
+    } catch {
+      NSLog("Qingran speaker: \(error.localizedDescription)")
+      return false
+    }
+  }
+
+  private func dropAudio() {
+    pending = 0
+    carry = Data()
+    if attached { player.stop() }
+  }
+
+  private func finishIfIdle() {
+    guard streamDone, pending == 0 else { return }
+    if engine.isRunning { engine.pause() }
+    letAppGo()
+  }
+
+  /// The few seconds before his voice starts (no audio yet to keep the app awake in the background).
+  private func holdApp() {
+    DispatchQueue.main.async {
+      guard self.keepAlive == .invalid else { return }
+      self.keepAlive = UIApplication.shared.beginBackgroundTask(withName: "qingran-reply") { [weak self] in self?.letAppGo() }
+    }
+  }
+
+  private func letAppGo() {
+    DispatchQueue.main.async {
+      guard self.keepAlive != .invalid else { return }
+      UIApplication.shared.endBackgroundTask(self.keepAlive)
+      self.keepAlive = .invalid
+    }
+  }
+
+  private static func json(_ frame: Data) -> [String: Any]? {
+    guard let text = String(data: frame, encoding: .utf8),
+          let line = text.split(separator: "\n").first(where: { $0.hasPrefix("data:") }),
+          let data = line.dropFirst(5).trimmingCharacters(in: .whitespaces).data(using: .utf8) else { return nil }
+    return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+  }
+
+  private static func cookieHeader() async -> String {
+    await withCheckedContinuation { cont in
+      DispatchQueue.main.async {
+        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+          cont.resume(returning: cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; "))
+        }
+      }
+    }
+  }
+}

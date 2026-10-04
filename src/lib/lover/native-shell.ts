@@ -16,6 +16,9 @@ export type NativeBridge = {
   /** Add a line she typed or tapped to the round of the shell's call. Shells built before 2026-10-02 do not have it. */
   addNativeCall?: (text: string, attach: boolean) => void;
   keepAwake?: (on: boolean) => void;
+  /** Outside a call: the shell asks and speaks this turn (it goes on in the background). Shells built before 2026-10-04 do not have it. */
+  speakTurn?: (turn: NativeSpeakTurn) => void;
+  stopSpeaker?: () => void;
 };
 
 declare global {
@@ -174,4 +177,30 @@ export function listenNativeHangup(onHangup: () => void) {
   const fn = () => onHangup();
   window.addEventListener("qingran-native-hangup", fn);
   return () => window.removeEventListener("qingran-native-hangup", fn);
+}
+
+export type NativeSpeakTurn = NativeTalkTurn & {
+  images?: string[];
+  profile?: { voiceSpeed: number; muted: boolean };
+};
+
+/**
+ * Outside a call, a turn she typed is asked and spoken by the shell, not the page: iOS pauses the page when she
+ * leaves the app, and his voice and the reply still coming stopped with it (她 2026-10-04). The shell's words come
+ * back as the call's do (`reply`). False on the web, in a call, or in an old shell.
+ */
+export function nativeSpeakTurn(turn: NativeSpeakTurn): boolean {
+  const bridge = typeof window === "undefined" ? undefined : window.QingranNative;
+  if (!bridge?.speakTurn) return false;
+  try {
+    bridge.speakTurn(turn);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** She tapped another line or started holding to talk: the shell's voice stops (the reply is still saved). */
+export function nativeSpeakerStop() {
+  post((bridge) => bridge.stopSpeaker?.());
 }
