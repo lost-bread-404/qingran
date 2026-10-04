@@ -250,6 +250,7 @@ export async function gatherVoiceParts(input: {
     formats,
     history,
     historyWindow: history.length,
+    nowMs: input.nowMs,
     userText: `${photoNote(images.length, formats)}${input.userText}`,
     userImages: images,
     first: input.first,

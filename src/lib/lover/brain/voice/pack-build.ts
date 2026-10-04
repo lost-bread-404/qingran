@@ -43,6 +43,8 @@ export type VoicePackParts = {
   formats: Formats;
   history: StoredMessage[];
   historyWindow: number;
+  /** When he is asked (a stretch Grok played that she left without a word is read as her falling asleep). */
+  nowMs?: number;
   userText: string;
   /** Photos she sent with this line (qr_photos ids). */
   userImages?: string[];
@@ -97,13 +99,20 @@ export function voiceHistoryMessages(
   limit = HISTORY_WINDOW,
   f: Formats = DEFAULT_FORMATS,
   engine: Engine = "grok",
+  nowMs?: number,
 ): VoiceChatMessage[] {
   if (limit <= 0) return [];
   const rows = history.filter((message) => !message.meta.nightNoise).slice(-limit);
   const out: VoiceChatMessage[] = [];
   const fold = fmt(f, "grokScene", {});
+  // She went quiet after the intimate part (half an hour or more): she fell asleep in his arms (她 2026-10-04 定的).
+  const asleep = fmt(f, "asleepAfter", {});
+  const fellAsleep = (last: StoredMessage | undefined, gap: number) => {
+    if (last && inGrokScene(last) && gap >= GAP_MARK_MS && asleep.trim()) out.push({ role: "system", content: asleep });
+  };
   rows.forEach((message, i) => {
     const gap = i > 0 ? message.createdAt - rows[i - 1]!.createdAt : 0;
+    fellAsleep(rows[i - 1], gap);
     const mark = gap >= GAP_MARK_MS ? fmt(f, "gap", { gap: gapText(gap) }) : "";
     if (mark.trim()) out.push({ role: "system", content: mark });
     if (engine === "claude" && inGrokScene(message)) {
@@ -119,6 +128,7 @@ export function voiceHistoryMessages(
       ...(images?.length ? { images } : {}),
     });
   });
+  if (nowMs != null) fellAsleep(rows[rows.length - 1], nowMs - (rows[rows.length - 1]?.createdAt ?? nowMs));
   return out;
 }
 
@@ -148,7 +158,7 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
   let rendered = renderPromptMessages(
     template,
     voiceVars(parts, strip),
-    voiceHistoryMessages(parts.history, historyLimit, parts.formats, engine),
+    voiceHistoryMessages(parts.history, historyLimit, parts.formats, engine, parts.nowMs),
   ) as VoiceChatMessage[];
   // 谁来演: after the persona, in the same (first) system message, so it is cached with it and survives the retries.
   const handoff = (engine === "claude" ? parts.handoff?.toGrok : parts.handoff?.back)?.trim();
