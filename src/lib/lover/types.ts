@@ -96,6 +96,12 @@ export type Profile = {
   claudePrompt: string;
   /** Back to Claude when she has been away longer than this many minutes. */
   grokReturnMin: number;
+  /**
+   * The longest a reply may run (characters she sees; 0 = no limit). The reply stops at the end of the sentence that
+   * reaches it (10/4: long replies made her drift off and are not 清然, and his long replies in the talk made the
+   * prompt long and were copied).
+   */
+  replyMaxChars: number;
   /** How long Claude thinks before it answers (Anthropic's effort): low answers in a few seconds. */
   claudeEffort: "low" | "medium" | "high";
   /** Temperature of the reply (and of his messages first). 0–2, default 1.0. */
@@ -204,6 +210,7 @@ export const DEFAULT_PROFILE: Profile = {
   claudePrompt: "",
   grokReturnMin: DEFAULT_RETURN_MIN,
   claudeEffort: "low",
+  replyMaxChars: 80,
   voiceTemperature: VOICE_TEMPERATURE,
   silenceMs: SILENCE_MS,
   injectLongterm: true,
@@ -253,6 +260,7 @@ type LooseProfile = Partial<Profile> & {
   claudePrompt?: string;
   grokReturnMin?: number;
   claudeEffort?: string;
+  replyMaxChars?: number;
   voiceTemperature?: number;
   silenceMs?: number;
   injectLongterm?: boolean;
@@ -304,6 +312,8 @@ export function lockedProfile(input?: unknown): Profile {
       typeof raw.grokReturnMin === "number" && Number.isFinite(raw.grokReturnMin)
         ? Math.max(5, Math.min(600, Math.round(raw.grokReturnMin)))
         : DEFAULT_RETURN_MIN,
+    replyMaxChars:
+      typeof raw.replyMaxChars === "number" && Number.isFinite(raw.replyMaxChars) ? Math.max(0, Math.min(2000, Math.round(raw.replyMaxChars))) : 80,
     claudeEffort: raw.claudeEffort === "medium" || raw.claudeEffort === "high" ? raw.claudeEffort : "low",
     voiceTemperature: clampVoiceTemperature(raw.voiceTemperature),
     silenceMs: hearingSense.endWaitMs,

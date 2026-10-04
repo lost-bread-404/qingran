@@ -40,6 +40,7 @@ const PATCH_KEYS = [
   "claudeRouting",
   "claudePrompt",
   "claudeEffort",
+  "replyMaxChars",
   "voiceTemperature",
   "silenceMs",
   "injectLongterm",

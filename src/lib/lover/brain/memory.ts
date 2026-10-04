@@ -504,11 +504,11 @@ export async function memoryCounts(): Promise<{ story: number; moments: number; 
 /** What he wrote inside ｛｝ lately (a game answer, his hand): shown back to him every turn, not left to recall. */
 /**
  * His ｛｝ notes: what he has to keep to (a game's answer, his cards, a score, a promise, a detail he made up), the
- * last few of the last day, whatever pauses came between (10/1: a game where he had not written his answer down and
+ * last few of the last day since she last cleared the chat (清空聊天 clears them too), whatever pauses came between (10/1: a game where he had not written his answer down and
  * made one up at the end). What he thinks of her is not kept there: he sees it afresh each turn (10/4).
  */
 const INNER_KEEP_MS = 24 * 3_600_000;
-const INNER_KEEP = 5;
+const INNER_KEEP = 8;
 
 /**
  * What he wrote in ｛｝ this turn: never shown or spoken; he sees it again with the clock for 16 hours, then the night
@@ -531,7 +531,9 @@ export async function recentInner(nowMs = now()): Promise<Array<{ body: string; 
   const db = await sql();
   const rows = await db.query<{ body: string; thread: string | null; at: number | string }>(
     `select body, thread, at from (
-       select body, thread, at, id from qr_memories where source = 'inner' and at > $1 and at <= $2 order by at desc, id desc limit ${INNER_KEEP}
+       select body, thread, at, id from qr_memories where source = 'inner' and at > $1 and at <= $2
+         and at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
+       order by at desc, id desc limit ${INNER_KEEP}
      ) t order by at asc, id asc`,
     [nowMs - INNER_KEEP_MS, nowMs],
   );

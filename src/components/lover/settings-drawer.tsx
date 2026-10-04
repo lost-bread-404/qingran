@@ -880,6 +880,22 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   </span>
                 </label>
               ))}
+              <label className="flex items-center justify-between gap-3">
+                <span className="text-sm">回复最长（字，0 = 不限）</span>
+                <input
+                  key={profile.replyMaxChars}
+                  type="number"
+                  min={0}
+                  max={2000}
+                  defaultValue={profile.replyMaxChars}
+                  onBlur={(e) => {
+                    const next = Math.max(0, Math.min(2000, Math.round(Number(e.target.value) || 0)));
+                    if (next !== profile.replyMaxChars) persistProfile({ replyMaxChars: next });
+                  }}
+                  className="min-h-11 w-20 rounded-md bg-surface px-2 text-right text-sm tabular-nums"
+                />
+              </label>
+              <p className="text-xs text-subtle">到这个字数时，他说完手上这一句就停（Claude 和 Grok 都是）。</p>
               <p className="pt-1 text-sm">Claude 想多久再回</p>
               <div className="flex gap-2">
                 {(

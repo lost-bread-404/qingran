@@ -19,6 +19,8 @@ export type VoiceFallbackInput = {
   safety: VoiceModelPick;
   temperature?: number;
   cast?: Cast;
+  /** 回复最长 (0: no limit). */
+  maxChars?: number;
 };
 
 export type VoiceStreamFn = (
@@ -140,6 +142,7 @@ function streamArgs(
     timeoutMs: pick.timeoutMs,
     temperature: data.temperature,
     cast: data.cast,
+    maxChars: data.maxChars,
   };
 }
 
