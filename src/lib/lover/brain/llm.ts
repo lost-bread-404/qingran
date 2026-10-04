@@ -14,6 +14,8 @@ import { jobRateHit, SPEND_RATE_ERR } from "./spend/rate.ts";
 import { codeVersion, maybeWriteRawLog, xaiStoreEnabled } from "./log-refs.ts";
 import { applyPromptModel } from "./prompts/models.ts";
 import { storedPromptModel } from "./prompts/model-store.ts";
+import { claudeBody, claudeFetch, claudeFinish, claudeText, claudeUsage, CLAUDE_TIMEOUT_MS, isClaudeModel } from "../claude.ts";
+import type { XaiMessage } from "../photos.ts";
 
 export function finishReasonFromApi(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return null;
@@ -224,7 +226,8 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     }
   }
 
-  if (!creds.length) {
+  const isClaude = isClaudeModel(resolved.model);
+  if (!creds.length && !isClaude) {
     const result = fail("no-key");
     const logId = await appendBrainLog({ ...failLog, ms: result.ms, note: "no-key", error: "no-key" });
     await maybeWriteRawLog(logId, { messages: logMessagesOf(input) });
@@ -267,22 +270,31 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
   };
 
   try {
-    const sent = await xaiFetch("https://api.x.ai/v1/responses", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(resolved.timeoutMs),
-    });
+    const sent = isClaude
+      ? {
+          res: await claudeFetch(
+            claudeBody(apiMessages as XaiMessage[], resolved.model, { stream: false, effort: resolved.effort }),
+            Math.max(resolved.timeoutMs, CLAUDE_TIMEOUT_MS),
+          ),
+          cred: { kind: "api" as const },
+        }
+      : await xaiFetch("https://api.x.ai/v1/responses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(resolved.timeoutMs),
+        });
     if (!sent) throw new Error("no-key");
     const { res, cred } = sent;
     const raw = await res.json().catch(() => null);
-    const text = outputText(raw);
+    const text = isClaude ? claudeText(raw) : outputText(raw);
     const json = parseJsonLoose(text);
     const ms = Date.now() - started;
-    const usageRaw = (raw && typeof raw === "object" ? (raw as { usage?: unknown }).usage : null) ?? null;
+    const usageRawApi = (raw && typeof raw === "object" ? (raw as { usage?: unknown }).usage : null) ?? null;
+    const usageRaw = isClaude ? claudeUsage(usageRawApi) : usageRawApi;
     const usage = parseUsage(usageRaw);
     const settled = settleLlmCost(resolved.model, usage, input.system + joinedUser(input), text);
-    const finish = finishReasonFromApi(raw);
+    const finish = isClaude ? claudeFinish((raw as { stop_reason?: unknown } | null)?.stop_reason) : finishReasonFromApi(raw);
     const failNote = res.ok ? null : `http_error ${res.status} ${responseSnippet(raw)}`;
     const logId = await appendBrainLog({
       ...baseLog,

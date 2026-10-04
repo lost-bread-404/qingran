@@ -13,6 +13,7 @@ import {
   brainListLogs,
   brainListPrompts,
   brainListVoiceModels,
+  brainEngineMode,
   brainRestorePrompt,
   brainRollbackPrompt,
   brainSavePrompt,
@@ -168,6 +169,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [voiceEffort, setVoiceEffort] = useState<VoiceEffort>(profile.voiceEffort);
   const [voiceModels, setVoiceModels] = useState<VoiceModelOption[] | null>(null);
   const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
+  const [claudeModels, setClaudeModels] = useState<Array<{ id: string; blurb: string; stats: VoiceModelStat | null }>>([]);
+  const [engineMode, setEngineModeView] = useState<"claude" | "grok" | null>(null);
   const [promptModels, setPromptModels] = useState(profile.promptModels);
   const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
   const [brainOn, setBrainOn] = useState(profile.brainOn);
@@ -221,10 +224,15 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     setPromptError(null);
     setCallById({});
     setClearArmed(false);
+    setEngineModeView(null);
+    void brainEngineMode()
+      .then((res) => setEngineModeView(res.mode))
+      .catch(() => setEngineModeView(null));
     void brainListVoiceModels()
       .then((res) => {
         setVoiceModels(res.models);
         setVoiceStats(res.stats ?? []);
+        setClaudeModels(res.claude ?? []);
       })
       .catch(() => {
         setVoiceModels([]);
@@ -590,7 +598,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <SettingsLink label="人设" hint="清然和其他角色是谁、用什么声音（可以试听）。每一轮回复都带着。" onClick={() => setPage("who")} />
             <SettingsLink label="记忆" hint="现在的你们、回忆。他说话前会想起相关的那几件。" onClick={() => setPage("heart")} />
-            <SettingsLink label="回复" hint="每轮带多少对话、温度。" onClick={() => setPage("reply")} />
+            <SettingsLink label="回复" hint="谁在回（Claude / Grok）、用哪个模型、每轮带多少对话、温度。" onClick={() => setPage("reply")} />
             <SettingsLink label="主动消息" hint="你不说话一阵后，他会不会来找你。" onClick={() => setPage("reach")} />
             <SettingsLink label="声音和听力" hint="他说话的快慢、静音；打电话时怎么听你。" onClick={() => setPage("sound")} />
             <SettingsLink label="数据" hint="故事线（记忆的起点）、导出、导入、清空聊天、退出。" onClick={() => setPage("data")} />
@@ -730,7 +738,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
               [
-                ["清然", ["voice", "editor"]],
+                ["清然", ["voice", "route", "editor"]],
                 ["日记", ["report"]],
                 ["材料", ["formats"]],
               ].map(([title, keys]) => (
@@ -808,6 +816,62 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "reply" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
+            <div className="flex flex-col gap-2 rounded-md bg-surface-2 px-4 py-3">
+              <p className="text-sm">
+                现在在回你的：{engineMode == null ? "…" : engineMode === "claude" ? "Claude" : "Grok"}
+              </p>
+              <p className="text-xs text-subtle">
+                平时 Claude 回，亲热时 Claude 交给 Grok，亲密的场面结束 Grok 再交回来（怎么交接在 高级 → 指令 → 谁来演）。这里只显示，不能手动换。
+              </p>
+              <p className="pt-1 text-sm">Claude 用哪个模型</p>
+              {(claudeModels.length ? claudeModels : [{ id: profile.claudeModel, blurb: "", stats: null }]).map((m) => (
+                <label key={m.id} className="flex min-h-11 items-center gap-3">
+                  <input
+                    type="radio"
+                    name="claude-model"
+                    checked={profile.claudeModel === m.id}
+                    onChange={() => persistProfile({ claudeModel: m.id })}
+                  />
+                  <span className="text-sm">
+                    {m.id}
+                    <span className="block text-xs text-subtle">
+                      {[m.blurb, m.stats?.avgMs != null ? `平均 ${(m.stats.avgMs / 1000).toFixed(1)} 秒（${m.stats.n} 次）` : "还没用过"]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </span>
+                </label>
+              ))}
+              <p className="pt-1 text-sm">Grok 用哪个模型</p>
+              <select
+                value={voiceModel}
+                aria-label="Grok 模型"
+                onChange={(e) => persistPromptModel("voice", e.target.value, voiceEffort)}
+                className="min-h-11 rounded-md bg-surface px-2 text-sm"
+              >
+                {withSelectedVoiceModel(voiceModels ?? [], voiceStats, voiceModel).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.id}
+                    {m.stats?.avgMs != null ? ` · 平均 ${(m.stats.avgMs / 1000).toFixed(1)} 秒` : ""}
+                  </option>
+                ))}
+              </select>
+              <label className="flex items-center justify-between gap-3 pt-1">
+                <span className="text-sm">离开多久换回 Claude（分钟）</span>
+                <input
+                  key={profile.grokReturnMin}
+                  type="number"
+                  min={5}
+                  max={600}
+                  defaultValue={profile.grokReturnMin}
+                  onBlur={(e) => {
+                    const next = Math.max(5, Math.min(600, Math.round(Number(e.target.value) || 30)));
+                    if (next !== profile.grokReturnMin) persistProfile({ grokReturnMin: next });
+                  }}
+                  className="min-h-11 w-20 rounded-md bg-surface px-2 text-right text-sm tabular-nums"
+                />
+              </label>
+            </div>
             <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
@@ -845,7 +909,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   }}
                   className="h-11 w-full accent-accent"
                 />
-                <p className="text-xs text-subtle">默认 1.0。</p>
+                <p className="text-xs text-subtle">默认 1.0。只用在 Grok 上（Claude 一定先想再答，不收温度）。</p>
               </div>
               <div className="flex flex-col gap-1 px-1 pb-2">
                 <p className="text-sm">人设放在哪</p>

@@ -25,13 +25,17 @@ export async function recordVoiceTurn(opts: {
   note?: string | null;
   effort?: string | null;
   personaMissing?: boolean;
+  /** What was really sent (Claude and Grok are given different messages); default: the pack's. */
+  messages?: Array<{ role: string; content: string }>;
+  /** Who played her this turn (docs/claude-grok-routing.md「记录」). */
+  route?: { engine: string; mark: string | null; modeBefore: string; modeAfter?: string; autoReturn: boolean };
 }): Promise<number | null> {
   const usage: TokenUsage =
     opts.usage && typeof opts.usage === "object" && "tokensIn" in (opts.usage as object)
       ? (opts.usage as TokenUsage)
       : parseUsage(opts.usage);
   const model = opts.model || "voice";
-  const messages = opts.ctx.messages;
+  const messages = opts.messages ?? opts.ctx.messages;
   const inputText = messages.map((m) => m.content).join("\n");
   const settled = settleLlmCost(model, usage, inputText, opts.display);
   const outputRef = opts.display ? `message:${opts.replyId}` : null;
@@ -71,6 +75,7 @@ export async function recordVoiceTurn(opts: {
       ttftMs: opts.ttftMs,
       firstAudioMs: opts.firstAudioMs,
       ...(opts.personaMissing ? { personaMissing: true } : {}),
+      ...(opts.route ? { ...opts.route, mark: opts.route.mark ? `〔${opts.route.mark}〕` : "无" } : {}),
     },
     outputRef,
     promptKey: opts.ctx.promptKey,

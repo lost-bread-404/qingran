@@ -36,7 +36,10 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
     userText,
     first,
   });
-  const withDraft = { ...parts, voiceTemplate: body ?? parts.voiceTemplate };
+  // What goes out now: to Claude or to Grok, whichever is playing her.
+  const { getEngineMode } = await import("../voice/engine.ts");
+  const engine = await getEngineMode();
+  const withDraft = { ...parts, engine, voiceTemplate: body ?? parts.voiceTemplate };
   const historyText =
     voiceHistoryMessages(parts.history, parts.history.length, parts.formats)
       .map((message) => `${message.role}：${message.content}`)
@@ -44,7 +47,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
   return {
     slots: { ...voiceVars(withDraft), history_messages: historyText },
     messages: buildVoiceMessages(withDraft),
-    note: first ? "主动找她：多久没说话用占位。" : "没有正在说的这一句，用「在吗」占位；想起来的事按最近几句找。",
+    note: `现在发给 ${engine === "claude" ? "Claude（不带亲密设定，Grok 那几段收成一行）" : "Grok"}。${first ? "主动找她：多久没说话用占位。" : "没有正在说的这一句，用「在吗」占位；想起来的事按最近几句找。"}`,
   };
 }
 
@@ -83,6 +86,9 @@ async function slotsFor(key: PromptKey): Promise<{ slots: Record<string, string>
       },
       note: "月报读每天的时间线和对话原文。对话太长时先走分段摘要。",
     };
+  }
+  if (key === "route") {
+    return { slots: {}, note: "不单独发给模型：「交给 Grok」接在 Claude 那边的人设后面，「回到日常」接在 Grok 那边的人设后面。" };
   }
   return { slots: {}, note: "材料的写法不单独发给模型，其他几步用它写材料。" };
 }

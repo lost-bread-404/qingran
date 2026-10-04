@@ -19,6 +19,8 @@ import { xaiCreds, xaiFetch, type XaiCred } from "./xai-auth";
 import { BraceCut } from "./brain/voice/brace-cut";
 import { VoiceLeveler } from "./voice-level";
 import { withPhotos } from "./photos";
+import { claudeBody, claudeFetch, claudeFinish, claudeUsage, CLAUDE_TIMEOUT_MS } from "./claude";
+import { MarkCut, type Engine, type Mark } from "./brain/voice/engine";
 
 const MAX_INPUT = 2000;
 
@@ -61,6 +63,8 @@ export type TalkStreamInput = {
   temperature?: number;
   /** Who reads which block: castOf(profile) (人设 page). */
   cast?: Cast;
+  /** Who writes the words: Grok (xAI, default) or Claude (Anthropic). Either way xAI speaks them. */
+  engine?: Engine;
 };
 
 type Emit = (event: TalkStreamEvent) => void;
@@ -87,6 +91,10 @@ export type TalkStreamResult = {
   innerNotes?: string;
   /** Who paid: her SuperGrok subscription or the API key. */
   paidBy?: "sub" | "api";
+  /** The mark at the very start of the reply (taken out of what is shown and spoken). */
+  mark?: Mark | null;
+  /** Claude wrote 〔转〕: nothing was shown or spoken; Grok answers this line instead. */
+  dropped?: boolean;
 };
 
 function emptyResult(partial: Partial<TalkStreamResult> = {}): TalkStreamResult {
@@ -108,12 +116,14 @@ function emptyResult(partial: Partial<TalkStreamResult> = {}): TalkStreamResult 
 
 export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<TalkStreamResult> {
   const apiKey = process.env.XAI_API_KEY;
-  if (!(await xaiCreds()).length) {
+  const creds = await xaiCreds();
+  if (!creds.length) {
     emit({ t: "err", m: "这会儿连不上。" });
     return emptyResult({ otherEvents: "no xAI credential" });
   }
-  // Whoever paid for the words also speaks them (SuperGrok first, the API key after it).
-  let cred: XaiCred = { kind: "api", token: apiKey ?? "" };
+  const claude = data.engine === "claude";
+  // Whoever paid for the words also speaks them (SuperGrok first, the API key after it). Claude's words: the key.
+  let cred: XaiCred = apiKey ? { kind: "api", token: apiKey } : creds[0]!;
 
   const say = data.text.trim().slice(0, MAX_INPUT);
   const herLine = [...data.messages].reverse().find((m) => m.role === "user");
@@ -129,7 +139,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     ...base,
     model: data.model || base.model,
     effort: data.effort !== undefined ? data.effort : base.effort,
-    timeoutMs: data.timeoutMs || base.timeoutMs,
+    timeoutMs: claude ? CLAUDE_TIMEOUT_MS : data.timeoutMs || base.timeoutMs,
   });
   let t0 = Date.now();
   let ttftSent = false;
@@ -178,6 +188,10 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   let res: Response;
   try {
+    if (claude) {
+      t0 = Date.now();
+      res = await claudeFetch(claudeBody(await withPhotos(data.messages), route.model, { stream: true, effort: route.effort }), route.timeoutMs);
+    } else {
     const body: Record<string, unknown> = {
       model: route.model,
       temperature: typeof data.temperature === "number" ? data.temperature : 1.0,
@@ -197,6 +211,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     if (!sent) throw new Error("no xAI credential");
     res = sent.res;
     cred = sent.cred;
+    }
   } catch (err) {
     const outcome = talkFailFromResult({ kind: "exception", threw: err, ms: Date.now() - t0 });
     fail(outcome.message ?? TALK_FAIL.network, outcome.log);
@@ -254,6 +269,12 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   /** Everything shown and spoken (his ｛｝ notes are taken out by `braces`). */
   let spoken = "";
   const braces = new BraceCut();
+  const marks = new MarkCut();
+  /** Claude wrote 〔转〕: stop reading, nothing goes out. */
+  let dropped = false;
+  /** Claude's usage comes in two parts (prompt at the start, output at the end). */
+  let claudeStart: Record<string, unknown> = {};
+  let claudeOut = 0;
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -271,11 +292,34 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   };
 
   const ingestToken = (token: string) => {
-    if (!token) return;
-    emitVisible(braces.push(token));
+    if (!token || dropped) return;
+    const out = marks.push(braces.push(token));
+    if (claude && marks.mark === "转") {
+      dropped = true;
+      return;
+    }
+    emitVisible(out);
+  };
+
+  const handleClaude = (json: unknown) => {
+    const o = (json && typeof json === "object" ? json : {}) as Record<string, any>;
+    if (o.type === "message_start") claudeStart = (o.message?.usage as Record<string, unknown>) ?? {};
+    else if (o.type === "content_block_delta" && o.delta?.type === "text_delta") ingestToken(String(o.delta.text ?? ""));
+    else if (o.type === "message_delta") {
+      if (typeof o.usage?.output_tokens === "number") claudeOut = o.usage.output_tokens;
+      if (o.delta?.stop_reason) finishReason = claudeFinish(o.delta.stop_reason);
+    } else if (o.type === "error") {
+      finishReason = "error";
+      otherParts.push(JSON.stringify(o.error ?? o).slice(0, 300));
+    }
+    usage = claudeUsage({ ...claudeStart, output_tokens: claudeOut });
   };
 
   const handleJson = (json: unknown) => {
+    if (claude) {
+      handleClaude(json);
+      return;
+    }
     const obj = json as { usage?: TalkStreamResult["usage"] };
     if (obj.usage) usage = obj.usage;
     const { token, finishReason: nextReason } = takeTalkDelta(json);
@@ -288,7 +332,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   const handleLine = (line: string) => {
     const trimmed = line.trim();
     if (!trimmed) return;
-    if (trimmed.startsWith(":")) return;
+    if (trimmed.startsWith(":") || trimmed.startsWith("event:")) return;
     sseChunks += 1;
     let payload = trimmed;
     if (trimmed.startsWith("data:")) payload = trimmed.slice(5).trim();
@@ -325,11 +369,33 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     sseBytes += value.byteLength;
     buf += decoder.decode(value, { stream: true });
     drainBuf(false);
+    if (dropped) {
+      void reader.cancel().catch(() => undefined);
+      break;
+    }
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  buf += decoder.decode();
-  drainBuf(true);
+  if (!dropped) {
+    buf += decoder.decode();
+    drainBuf(true);
+  }
   braces.finish();
+  if (!dropped) {
+    const rest = marks.finish();
+    if (claude && marks.mark === "转") dropped = true;
+    else emitVisible(rest);
+  }
+  if (dropped) {
+    // 〔转〕: like an answer taken back in a call. Nothing was shown or spoken; Grok answers this line.
+    return {
+      ...emptyResult({ model: route.model, effort: route.effort, status, finishReason, otherEvents: takeOtherEvents() }),
+      usage,
+      ms: Date.now() - t0,
+      mark: "转",
+      dropped: true,
+      innerNotes: braces.text(),
+    };
+  }
   const speech = spoken.trim();
   const innerNotes = braces.text();
 
@@ -360,6 +426,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
         chars: 0,
         otherEvents,
         innerNotes,
+        mark: marks.mark,
       };
     }
     emit({ t: "text_end", speech });
@@ -378,6 +445,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       chars: speech.length,
       otherEvents,
       innerNotes,
+      mark: marks.mark,
     };
   }
   emit({ t: "text_end", speech });
@@ -420,6 +488,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     chars: speech.length,
     otherEvents,
     innerNotes,
+    mark: marks.mark,
   };
 }
 

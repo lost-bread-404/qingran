@@ -6,6 +6,7 @@ import { resolveTalkProfile } from "../../talk-profile.ts";
 import { voiceInjectFromProfile } from "../../types.ts";
 import { BraceCut } from "./brace-cut.ts";
 import { buildVoiceMessages } from "./pack-build.ts";
+import { startEngine, takeMark } from "./engine.ts";
 import { gatherVoiceParts, replyHistory } from "./pack.ts";
 
 const CN = ["零", "一", "两", "三", "四", "五", "六", "七", "八", "九", "十"];
@@ -40,7 +41,7 @@ export async function speakFirst(input: {
   nowMs: number;
   timeZone: string;
   lastUserAt: number | null;
-}): Promise<{ text: string; passed: boolean; model: string; ms: number; reason: string | null }> {
+}): Promise<{ text: string; passed: boolean; model: string; ms: number; reason: string | null; engine: "claude" | "grok" }> {
   const { profile } = resolveTalkProfile(undefined, await getProfileData());
   const inject = voiceInjectFromProfile(profile);
   const { parts, voicePrompt } = await gatherVoiceParts({
@@ -52,18 +53,24 @@ export async function speakFirst(input: {
     // How long she has been away is said roughly in the note at the end, not as a time.
     first: { quiet: input.lastUserAt ? quietText(input.nowMs - input.lastUserAt) : "很久" },
   });
-  const messages = buildVoiceMessages(parts, "none");
+  // The mode of the moment (docs/claude-grok-routing.md); away longer than the setting → Claude.
+  const { engine } = await startEngine(input.lastUserAt, input.nowMs, profile.grokReturnMin);
+  const grok = buildVoiceMessages({ ...parts, engine: "grok" }, "none");
   const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
-  const picks: VoiceModelPick[] = [primary];
+  const picks: Array<VoiceModelPick & { messages: typeof grok }> = [];
+  if (engine === "claude") {
+    picks.push({ model: profile.claudeModel, effort: null, timeoutMs: 90_000, messages: buildVoiceMessages({ ...parts, engine: "claude" }, "none") });
+  }
+  picks.push({ ...primary, messages: grok });
   const safety = voiceSafetyPick();
-  if (safety.model !== primary.model || safety.effort !== primary.effort) picks.push(safety);
+  if (safety.model !== primary.model || safety.effort !== primary.effort) picks.push({ ...safety, messages: grok });
 
   let last = { model: primary.model, ms: 0 };
   for (const pick of picks) {
     const result = await callModel("voice", {
       system: "",
       input: "",
-      messages,
+      messages: pick.messages,
       model: pick.model,
       effort: pick.effort,
       temperature: profile.voiceTemperature,
@@ -74,11 +81,14 @@ export async function speakFirst(input: {
     last = { model: result.model, ms: result.ms };
     if (!result.ok) continue;
     const braces = new BraceCut();
-    const text = braces.push(result.text).trim();
+    const marked = takeMark(braces.push(result.text));
     braces.finish();
-    if (PASS.test(text)) return { text: "", passed: true, model: result.model, ms: result.ms, reason: null };
-    if (text) await keepInner(braces.text(), input.nowMs, input.timeZone);
-    if (text) return { text: text.slice(0, 2000), passed: false, model: result.model, ms: result.ms, reason: null };
+    // A message he starts does not change who plays her; Claude handing it over means Grok writes this one.
+    if (marked.mark === "转") continue;
+    const text = marked.text.trim();
+    if (PASS.test(text)) return { text: "", passed: true, model: result.model, ms: result.ms, reason: null, engine };
+    if (text) await keepInner(braces.text(), input.nowMs, input.timeZone, engine === "grok");
+    if (text) return { text: text.slice(0, 2000), passed: false, model: result.model, ms: result.ms, reason: null, engine };
   }
-  return { text: "", passed: false, model: last.model, ms: last.ms, reason: "模型没有回话" };
+  return { text: "", passed: false, model: last.model, ms: last.ms, reason: "模型没有回话", engine };
 }

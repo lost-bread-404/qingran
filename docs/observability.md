@@ -23,10 +23,10 @@
 
 | Route | `refs` | 输出 |
 |---|---|---|
-| `voice` | 给了他什么：charterHash、longtermHash、historyIds、clockText、userMsgId、timeZone、injectMemory、historyWindow、personaPlacement；想起了什么：pickedIds、queryScores、recallBy（按意思 / 按字面）、recalled（每件前 200 字）；这一轮怎么样：localDay、packMs、dbFirstMs、ttftMs、firstAudioMs、personaMissing | `output_ref = message:<replyId>`（有索引；她点大拇指的回复从这里找到那一轮） |
+| `voice` | 给了他什么：charterHash、longtermHash、historyIds、clockText、userMsgId、timeZone、injectMemory、historyWindow、personaPlacement；想起了什么：pickedIds、queryScores、recallBy（按意思 / 按字面）、recalled（每件前 200 字）；这一轮怎么样：localDay、packMs、dbFirstMs、ttftMs、firstAudioMs、personaMissing；谁来演：engine（这一轮最后是谁回的）、mark（〔接〕/〔转〕/〔回〕/无）、modeBefore、modeAfter、autoReturn（是不是因为隔太久换回 Claude）。Claude 写了〔转〕被丢掉、或者没回上改由 Grok 回的那次 Claude 调用另记一条（`step = voice:claude-…`，`note` 写着为什么），也能点开看发了什么、回了什么 | `output_ref = message:<replyId>`（有索引；她点大拇指的回复从这里找到那一轮） |
 | 低频（editor / report） | — | 存完整 `input_system` / `input_user` / `output_text` |
 
-所有 route 的完整 messages 另写入 `brain_log_raw`。设置 → 记录页点开某一条，分区显示输入（按 messages 段折叠）、输出、参数与耗时，并可复制全部。
+所有 route 的完整 messages 另写入 `brain_log_raw`（发给 Claude 的那次存的是换成 Anthropic 格式之前的 messages，字一样）。设置 → 记录页点开某一条，分区显示输入（按 messages 段折叠）、输出、参数与耗时，并可复制全部。
 
 `code_version` 为 `VERCEL_GIT_COMMIT_SHA`，本地为 `dev`。
 

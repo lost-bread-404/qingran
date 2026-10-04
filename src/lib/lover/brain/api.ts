@@ -1,3 +1,4 @@
+import { CLAUDE_MODELS, CLAUDE_MODEL_BLURBS } from "../claude.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { now } from "./clock.ts";
 import { enqueue, runJobsNow } from "./jobs.ts";
@@ -71,7 +72,15 @@ export const brainListVoiceModels = createServerFn({ method: "GET" }).handler(as
       stats: byModel.get(model.id) ?? null,
     })),
     stats,
+    // Claude plays her day to day (docs/claude-grok-routing.md); its turns are logged under its model name too.
+    claude: CLAUDE_MODELS.map((id) => ({ id, blurb: CLAUDE_MODEL_BLURBS[id] ?? "", stats: byModel.get(id) ?? null })),
   };
+});
+
+/** Who answers her now: Claude or Grok (shown on 设置 → 回复; not switchable by hand). */
+export const brainEngineMode = createServerFn({ method: "GET" }).handler(async () => {
+  const { getEngineMode } = await import("./voice/engine.ts");
+  return { mode: await getEngineMode() };
 });
 
 export const brainListLogs = createServerFn({ method: "POST" })

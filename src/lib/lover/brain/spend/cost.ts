@@ -13,10 +13,10 @@ export function estimateTokensFromChars(text: string): number {
   return cjk + Math.ceil(other / 4);
 }
 
-function pricesFor(model: string, tokensIn: number): { input: number; cached: number; output: number } | null {
+function pricesFor(model: string, tokensIn: number): { input: number; cached: number; output: number; cacheWrite?: number } | null {
   const p = MODEL_PRICES[model];
   if (!p) return null;
-  if (tokensIn >= LONG_CONTEXT_TOKENS) {
+  if (tokensIn >= LONG_CONTEXT_TOKENS && !p.cacheWrite) {
     return { input: p.input * 2, cached: p.cached * 2, output: p.output * 2 };
   }
   return p;
@@ -31,8 +31,10 @@ export function llmCostUsd(model: string, usage: TokenUsage): { usd: number; est
   const reasoning = usage.tokensReasoning ?? 0;
   const p = pricesFor(model, input);
   if (!p) return null;
-  const uncached = Math.max(0, input - cached);
-  const usd = (uncached * p.input + cached * p.cached + (output + reasoning) * p.output) / 1_000_000;
+  const written = Math.min(usage.tokensCacheWrite ?? 0, input - cached);
+  const uncached = Math.max(0, input - cached - written);
+  const usd =
+    (uncached * p.input + cached * p.cached + written * (p.cacheWrite ?? p.input) + (output + reasoning) * p.output) / 1_000_000;
   return { usd, estimated: false };
 }
 

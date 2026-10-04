@@ -1,3 +1,4 @@
+import { isClaudeModel } from "../claude.ts";
 import { callModel } from "./llm.ts";
 import { appendBrainLog, getProfileData, upsertMessage } from "./store.ts";
 import { now } from "./clock.ts";
@@ -125,7 +126,15 @@ export async function runWake(opts: { manual?: boolean; at?: number; complete?: 
   let pushResult: string | null = null;
   if (spoken.text) {
     messageId = newId();
-    await upsertMessage({ id: messageId, role: "assistant", text: spoken.text, createdAt: at, kind: "proactive", timeZone: zone });
+    await upsertMessage({
+      id: messageId,
+      role: "assistant",
+      text: spoken.text,
+      createdAt: at,
+      kind: "proactive",
+      timeZone: zone,
+      meta: { engine: isClaudeModel(spoken.model) ? "claude" : "grok", ...(spoken.engine === "grok" ? { scene: "grok" as const } : {}) },
+    });
     pushResult = await sendApns({ body: spoken.text, messageId });
   }
   await insertReachLog({

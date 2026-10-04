@@ -115,3 +115,4 @@
 - 2026-10-03：（她问为什么要经过 Neon 连 Claude）claude-grok-routing.md 改成直连 Anthropic API（ANTHROPIC_API_KEY），用自动 prompt caching、分开记缓存的账；Neon AI Gateway 只继续给记忆的向量用。
 - 2026-10-04：（她用交接指令在 claude.ai 试，Claude 拖了四轮、等到露骨的词才打〔转〕）claude-grok-routing.md 的「交给 Grok」指令改成：她表达想要、按人设下一步就是性时就交接，拖延的说法就是交接信号，优先〔接〕。
 - 2026-10-04：（她用新的交接指令和 Opus 5.5 试，「小猫想要你～」第一句就〔接〕）claude-grok-routing.md 记下这次结果。
+- 2026-10-04：（她让按 claude-grok-routing.md 实现回复分流）平时 Claude 回（默认 Opus 5.5，直连 Anthropic，`ANTHROPIC_API_KEY`），Claude 在回复最开头写〔接〕/〔转〕把亲热的戏交给 Grok，Grok 写〔回〕或她离开超过 30 分钟换回 Claude（`brain_meta.engineMode`、`voice/engine.ts`、`claude.ts`、`routes/api/talk.ts`）。两段交接指令是 指令 → 谁来演 的两页；给 Claude 的不带亲密设定、不带 Grok 那段的｛｝，Grok 那几段收成「材料的写法 → 亲热」一行；消息 meta 加 `engine`、`scene`。设置 → 回复 显示现在谁在回、选 Claude / Grok 模型、离开多久换回。主动找她跟着当时谁在回。记录里每轮加 engine / mark / modeBefore / modeAfter / autoReturn，被丢掉的〔转〕那次 Claude 调用单独一条。费用按 Claude 的缓存写入、命中分开算。

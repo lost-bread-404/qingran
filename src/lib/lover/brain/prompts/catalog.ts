@@ -5,7 +5,7 @@ import {
   type PromptVariantTemplate,
 } from "./templates.ts";
 
-export type PromptKey = "voice" | "editor" | "report" | "formats";
+export type PromptKey = "voice" | "route" | "editor" | "report" | "formats";
 
 export type { PromptMessage, PromptPlaceholder };
 
@@ -25,6 +25,11 @@ const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
     key: "voice",
     name: "每轮回复",
     blurb: "他说出口的每一句都由它写：你说完话立刻跑（每轮回复）；你很久没说话时，它也用同一个声音想要不要来找你，想就写那一条（主动找她）。它读：人设（亲密设定接在后面）、身份、「清然和 Rosie 现在」、此刻想起来的几件事（按你这句话从回忆里找的，不调用模型）、今天的对话、现在几点。",
+  },
+  {
+    key: "route",
+    name: "谁来演",
+    blurb: "平时由 Claude 回你，亲热时交给 Grok。「交给 Grok」接在 Claude 那边的人设后面：它在回复最前面写〔接〕（这条照常显示，下一句起 Grok 回）或〔转〕（这条不显示，Grok 重答这一句）。「回到日常」接在 Grok 那边的人设后面：它写〔回〕，下一句起换回 Claude。你离开超过「回复」页里写的分钟数，也换回 Claude。记号你看不到、也不会念出来。",
   },
   {
     key: "editor",

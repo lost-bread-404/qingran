@@ -3,7 +3,11 @@ import { assertModelConfig, LONG_DRAIN_MS, resolveVoiceChat, voiceSafetyPick } f
 import { enqueueReportIfDue } from "@/lib/lover/brain/diary/report";
 import { drainJobs } from "@/lib/lover/brain/jobs";
 import { runInBackground } from "@/lib/lover/brain/wait-until";
-import { upsertMessage, appendBrainLog, getMessage, getProfileData, newerAttempt, messageForgotten } from "@/lib/lover/brain/store";
+import { upsertMessage, appendBrainLog, getMessage, getProfileData, newerAttempt, messageForgotten, addMessageMeta } from "@/lib/lover/brain/store";
+import { modeAfter, setEngineMode, startEngine, type Engine, type Mark } from "@/lib/lover/brain/voice/engine";
+import { buildVoiceMessages } from "@/lib/lover/brain/voice/pack-build";
+import { runTalkStream, type TalkStreamResult } from "@/lib/lover/stream-talk";
+import { parseUsage } from "@/lib/lover/brain/usage";
 import { localDay } from "@/lib/lover/brain/time";
 import { loadHotContext } from "@/lib/lover/brain/voice/pack";
 import { runVoiceWithFallback, formatVoiceLogNote } from "@/lib/lover/brain/voice/voice-fallback";
@@ -114,9 +118,11 @@ export const Route = createFileRoute("/api/talk")({
               userCreatedAt = Number(body.userCreatedAt) || nowMs;
               replyId = String(body.replyId || "").trim() || newId();
               const round = Array.isArray(body.earlier);
+              const roundIds = new Set<string>([userMsgId]);
               for (const item of round ? body.earlier! : []) {
                 const id = String(item?.id || "");
                 const said = String(item?.text || "").trim();
+                if (id) roundIds.add(id);
                 if (!id || !said || (await getMessage(id))) continue;
                 await upsertMessage({ id, role: "user", text: said, createdAt: Number(item.at) || userCreatedAt - 1, timeZone });
               }
@@ -142,36 +148,130 @@ export const Route = createFileRoute("/api/talk")({
               tVoice = Date.now();
               const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
               const safety = voiceSafetyPick();
+              const cast = castOf(profile);
               let sentDone = false;
-              const fallback = await runVoiceWithFallback(
-                {
-                  text,
-                  parts: ctx.parts,
-                  replyId,
-                  voiceSpeed: profile.voiceSpeed,
-                  primary,
-                  safety,
-                  temperature: profile.voiceTemperature,
-                  cast: castOf(profile),
-                },
-                (event) => {
-                  if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;
-                  if (event.t === "timing" && event.k === "first_audio_ms") firstAudioMs = event.ms;
-                  if (event.t === "err") {
-                    send(event);
-                    return;
-                  }
-                  if (event.t === "done") {
-                    speech = event.speech || speech;
-                    if (!sentDone) {
-                      sentDone = true;
-                      send(event);
-                    }
-                    return;
-                  }
+              const forward = (event: TalkStreamEvent) => {
+                if (event.t === "timing" && event.k === "ttft_ms") ttftMs = event.ms;
+                if (event.t === "timing" && event.k === "first_audio_ms") firstAudioMs = event.ms;
+                if (event.t === "err") {
                   send(event);
-                },
-              );
+                  return;
+                }
+                if (event.t === "done") {
+                  speech = event.speech || speech;
+                  if (!sentDone) {
+                    sentDone = true;
+                    send(event);
+                  }
+                  return;
+                }
+                send(event);
+              };
+
+              // Who plays her this turn (docs/claude-grok-routing.md). Away too long → back to Claude.
+              const herBefore = ctx.parts.history.filter((m) => m.role === "user" && !roundIds.has(m.id) && m.createdAt < userCreatedAt);
+              const start = await startEngine(herBefore.at(-1)?.createdAt ?? null, nowMs, profile.grokReturnMin);
+              let mark: Mark | null = null;
+              /** Who wrote the reply that is kept. */
+              let answeredBy: Engine = start.engine;
+              let modeNext: Engine = start.engine;
+              if (start.engine === "grok") await addMessageMeta([...roundIds], { scene: "grok" });
+
+              let claudeDone: { result: TalkStreamResult; speech: string; failed: boolean; messages: ReturnType<typeof buildVoiceMessages> } | null = null;
+              if (start.engine === "claude") {
+                const messages = buildVoiceMessages({ ...ctx.parts, engine: "claude" }, "none");
+                let shown = false;
+                let said = "";
+                let errAfter = false;
+                let result: TalkStreamResult | null = null;
+                try {
+                  result = await runTalkStream(
+                    { text, messages, replyId, voiceSpeed: profile.voiceSpeed, failOnEmpty: true, model: profile.claudeModel, effort: null, cast, engine: "claude" },
+                    (event) => {
+                      if (event.t === "text") shown = true;
+                      if (event.t === "text_end" || event.t === "done") said = event.speech || said;
+                      // Until a word of Claude's is out, nothing else goes to her: a failure here is answered by Grok.
+                      if (!shown && (event.t === "err" || event.t === "text_end" || event.t === "done")) return;
+                      if (event.t === "err" && !event.tts) errAfter = true;
+                      forward(event);
+                    },
+                  );
+                } catch (err) {
+                  console.error(err);
+                }
+                const claudeNote = (what: string) =>
+                  recordVoiceTurn({
+                    ctx,
+                    messages,
+                    replyId,
+                    display: result?.dropped ? "〔转〕" : "",
+                    failed: !result?.dropped,
+                    model: profile.claudeModel,
+                    usage: parseUsage(result?.usage),
+                    totalMs: result?.ms ?? Date.now() - tVoice,
+                    ttftMs: null,
+                    firstAudioMs: null,
+                    userCreatedAt,
+                    userMsgId,
+                    localDay: localDay(userCreatedAt, timeZone),
+                    finishReason: result?.finishReason ?? null,
+                    route: { engine: "claude", mark: result?.mark ?? null, modeBefore: start.before, autoReturn: start.autoReturn },
+                    note: [what, result?.otherEvents ? `events=${result.otherEvents}` : null].filter(Boolean).join("\n"),
+                  }).catch((err) => console.error(err));
+                if (result?.dropped || (!shown && (result?.mark === "接" || result?.finishReason === "refusal"))) {
+                  // 〔转〕 (or a bare 〔接〕, or Claude declining): dropped like an answer taken back; Grok answers this line.
+                  mark = "转";
+                  modeNext = "grok";
+                  answeredBy = "grok";
+                  await addMessageMeta([...roundIds], { scene: "grok" });
+                  await claudeNote("〔转〕：这条不显示、不保存，同一句交给 Grok");
+                } else if (shown) {
+                  claudeDone = {
+                    result: result ?? { usage: null, ttftMs: null, firstAudioMs: null, model: profile.claudeModel, effort: null, ttsChars: 0, status: null, finishReason: null, ms: Date.now() - tVoice, chars: 0, otherEvents: "exception" },
+                    speech: said.trim(),
+                    failed: !result || errAfter || !said.trim(),
+                    messages,
+                  };
+                  mark = result?.mark ?? null;
+                  modeNext = modeAfter("claude", mark);
+                } else {
+                  // Claude failed before a word: Grok answers this turn, the mode stays.
+                  answeredBy = "grok";
+                  await claudeNote(`Claude 没回上（status=${result?.status ?? "-"} finish_reason=${result?.finishReason ?? "-"}），这一轮改由 Grok 回`);
+                }
+              }
+
+              const fallback = claudeDone
+                ? {
+                    result: claudeDone.result,
+                    speech: claudeDone.speech,
+                    failed: claudeDone.failed,
+                    usage: parseUsage(claudeDone.result.usage),
+                    messages: claudeDone.messages,
+                    attempts: [],
+                    usedStrip: "none" as const,
+                    failMessage: claudeDone.failed ? "Claude 说到一半断了" : null,
+                    modelFallback: null,
+                  }
+                : await runVoiceWithFallback(
+                    {
+                      text,
+                      parts: { ...ctx.parts, engine: "grok" },
+                      replyId,
+                      voiceSpeed: profile.voiceSpeed,
+                      primary,
+                      safety,
+                      temperature: profile.voiceTemperature,
+                      cast,
+                    },
+                    forward,
+                  );
+              if (!claudeDone && start.engine === "grok") {
+                mark = fallback.result.mark ?? null;
+                modeNext = modeAfter("grok", mark);
+              }
+              /** This reply belongs to a stretch Grok plays (folded out of what Claude is given later). */
+              const grokScene = start.engine === "grok" || mark === "转";
               const streamResult = fallback.result;
               speech = fallback.speech;
               const failed = fallback.failed;
@@ -199,7 +299,7 @@ export const Route = createFileRoute("/api/talk")({
                   id: replyId,
                   role: "assistant",
                   text: display,
-                  meta: { replyTo: userMsgId },
+                  meta: { replyTo: userMsgId, engine: answeredBy, ...(grokScene ? { scene: "grok" as const } : {}) },
                   createdAt: Number.isFinite(replyAt) && replyAt > 0 ? replyAt : userCreatedAt + 1,
                   timeZone,
                   attemptAt: round ? nowMs : undefined,
@@ -218,9 +318,20 @@ export const Route = createFileRoute("/api/talk")({
                 });
               }
 
+              // The mode moves only with a reply she keeps (one taken back leaves it where it was).
+              const kept = Boolean(display) && !superseded && !failed;
+              if (kept && modeNext !== start.engine) await setEngineMode(modeNext);
               const usage = fallback.usage;
               await recordVoiceTurn({
                 ctx,
+                messages: fallback.messages,
+                route: {
+                  engine: answeredBy,
+                  mark,
+                  modeBefore: start.before,
+                  modeAfter: kept ? modeNext : start.engine,
+                  autoReturn: start.autoReturn,
+                },
                 replyId,
                 display,
                 failed,
@@ -237,7 +348,9 @@ export const Route = createFileRoute("/api/talk")({
                 finishReason: streamResult.finishReason,
                 effort: streamResult.effort == null ? null : String(streamResult.effort),
                 personaMissing: resolved.personaMissing,
-                note: formatVoiceLogNote({
+                note: claudeDone
+                  ? [claudeDone.failed ? "Claude 说到一半断了" : "Claude 回的", `mark=${mark ?? "无"}`, `finish_reason=${claudeDone.result.finishReason ?? "-"}`, formatVoiceInjectLine(ctx.inject)].join("\n")
+                  : formatVoiceLogNote({
                   attempts: fallback.attempts,
                   usedStrip: fallback.usedStrip,
                   chars: ctx.inputChars,
@@ -249,7 +362,7 @@ export const Route = createFileRoute("/api/talk")({
               });
               if (!failed && !superseded && streamResult.innerNotes) {
                 const { keepInner } = await import("@/lib/lover/brain/memory");
-                await keepInner(streamResult.innerNotes, nowMs, timeZone);
+                await keepInner(streamResult.innerNotes, nowMs, timeZone, grokScene);
               }
               if (profile.brainOn && !failed && display && !superseded) {
                 const recalledIds = ctx.recalled.map((m) => m.id);

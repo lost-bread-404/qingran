@@ -1,3 +1,4 @@
+import { DEFAULT_CLAUDE_MODEL, DEFAULT_RETURN_MIN, isClaudeModel } from "./claude.ts";
 import { DEFAULT_HEARING_PROVIDER, type HearingProviderId, lockSttKeyterms } from "./hearing/config.ts";
 import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
@@ -84,6 +85,10 @@ export type Profile = {
   debugHearing: boolean;
   voiceModel: string;
   voiceEffort: VoiceEffort;
+  /** The model that plays her day to day (docs/claude-grok-routing.md); Grok (voiceModel) takes the intimate part. */
+  claudeModel: string;
+  /** Back to Claude when she has been away longer than this many minutes. */
+  grokReturnMin: number;
   /** Temperature of the reply (and of his messages first). 0–2, default 1.0. */
   voiceTemperature: number;
   /** Pause that ends a turn, milliseconds. 800–3000, default 1500. */
@@ -185,6 +190,8 @@ export const DEFAULT_PROFILE: Profile = {
   debugHearing: true,
   voiceModel: DEFAULT_VOICE_MODEL,
   voiceEffort: DEFAULT_VOICE_EFFORT,
+  claudeModel: DEFAULT_CLAUDE_MODEL,
+  grokReturnMin: DEFAULT_RETURN_MIN,
   voiceTemperature: VOICE_TEMPERATURE,
   silenceMs: SILENCE_MS,
   injectLongterm: true,
@@ -229,6 +236,8 @@ type LooseProfile = Partial<Profile> & {
   voiceChat?: string;
   voiceModel?: string;
   voiceEffort?: string | null;
+  claudeModel?: string;
+  grokReturnMin?: number;
   voiceTemperature?: number;
   silenceMs?: number;
   injectLongterm?: boolean;
@@ -273,6 +282,11 @@ export function lockedProfile(input?: unknown): Profile {
     captureAudio: raw.debugHearing !== false,
     voiceModel: pickVoiceModel(raw),
     voiceEffort: pickVoiceEffort(raw),
+    claudeModel: typeof raw.claudeModel === "string" && isClaudeModel(raw.claudeModel.trim()) ? raw.claudeModel.trim().slice(0, 80) : DEFAULT_CLAUDE_MODEL,
+    grokReturnMin:
+      typeof raw.grokReturnMin === "number" && Number.isFinite(raw.grokReturnMin)
+        ? Math.max(5, Math.min(600, Math.round(raw.grokReturnMin)))
+        : DEFAULT_RETURN_MIN,
     voiceTemperature: clampVoiceTemperature(raw.voiceTemperature),
     silenceMs: hearingSense.endWaitMs,
     injectLongterm: raw.injectLongterm !== false,

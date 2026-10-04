@@ -8,6 +8,8 @@ export type TokenUsage = {
   tokensOut: number | null;
   tokensReasoning: number | null;
   costTicks?: number | null;
+  /** Claude: prompt tokens written to its cache (part of tokensIn, priced apart). */
+  tokensCacheWrite?: number | null;
 };
 
 export type CostSource = "xai" | "price_table" | "char_estimate" | "supergrok";
@@ -53,6 +55,7 @@ export function parseUsage(raw: unknown): TokenUsage {
     tokensOut: num(u.output_tokens ?? u.completion_tokens),
     tokensReasoning: num(detailsOut.reasoning_tokens ?? u.reasoning_tokens),
     costTicks: num(u.cost_in_usd_ticks),
+    tokensCacheWrite: num(u.cache_creation_input_tokens),
   };
 }
 

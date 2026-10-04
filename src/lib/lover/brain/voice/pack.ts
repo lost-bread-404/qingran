@@ -6,6 +6,7 @@ import { getMessage, getMeta, listHistoryWindow, upsertMessage } from "../store.
 import { enqueue } from "../jobs.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadFormats, loadPrompt } from "../prompts/store.ts";
+import { variantMessages } from "../prompts/doc.ts";
 import { localDay } from "../time.ts";
 import { dossierTextForModel } from "../dossier.ts";
 import { recall, recallText, recentInner, type Memory } from "../memory.ts";
@@ -211,13 +212,14 @@ export async function gatherVoiceParts(input: {
   placement?: Profile["personaPlacement"];
 }): Promise<{ parts: VoicePackParts; recalled: Awaited<ReturnType<typeof recall>>; voicePrompt: Awaited<ReturnType<typeof loadPrompt>> }> {
   const inject = voiceInjectFromProfile(input.profile);
-  const [history, us, time, inner, voicePrompt, formats] = await Promise.all([
+  const [history, us, time, inner, voicePrompt, formats, route] = await Promise.all([
     input.history,
     inject.memory ? dossierTextForModel() : Promise.resolve(""),
     timeFacts(input.nowMs, input.timeZone, input.lastSaidBefore ?? input.nowMs, { sinceLast: !input.first }),
     recentInner(input.nowMs),
     loadPrompt("voice"),
     loadFormats(),
+    loadPrompt("route"),
   ]);
   const recalled = inject.memory
     ? await recall(recallQuery(input.userText, history), input.nowMs, {
@@ -232,7 +234,12 @@ export async function gatherVoiceParts(input: {
     us,
     recall: recallText(recalled.memories, formats),
     time,
-    inner,
+    inner: inner.all,
+    innerDaily: inner.daily,
+    handoff: {
+      toGrok: variantMessages(route.doc, "to_grok").map((m) => m.content).join("\n\n"),
+      back: variantMessages(route.doc, "back").map((m) => m.content).join("\n\n"),
+    },
     formats,
     history,
     historyWindow: history.length,

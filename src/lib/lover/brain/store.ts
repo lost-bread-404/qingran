@@ -323,6 +323,17 @@ export async function upsertMessage(msg: {
   };
 }
 
+/** Facts the server adds to messages already saved (merged into their meta). */
+export async function addMessageMeta(ids: string[], patch: MessageMeta): Promise<void> {
+  const list = ids.filter(Boolean);
+  if (!list.length) return;
+  const db = await getSql();
+  await db.query(`update qingran_messages set meta = coalesce(meta, '{}'::jsonb) || $2::jsonb where id = any($1::text[])`, [
+    list,
+    JSON.stringify(patch),
+  ]);
+}
+
 /** Her edit (or the page's update) of a message: the words and everything known about it, as the page has them. */
 export async function updateMessage(id: string, text: string, meta: MessageMeta): Promise<void> {
   const existing = await getMessage(id);
@@ -334,6 +345,9 @@ export async function updateMessage(id: string, text: string, meta: MessageMeta)
       [id, existing.text, ts],
     );
   }
+  // Who wrote it / which scene it was said in is the server's, not the page's: kept through an edit.
+  if (existing?.meta.engine) meta = { ...meta, engine: existing.meta.engine };
+  if (existing?.meta.scene) meta = { ...meta, scene: existing.meta.scene };
   await db.query(`update qingran_messages set body = $2, meta = $3::jsonb, edited_at = $4 where id = $1`, [
     id,
     text,

@@ -505,21 +505,26 @@ const INNER_KEEP_MS = 16 * 3_600_000;
  * pass has the day. It is not recalled later: plans he made in passing ("晚上再…") came back every turn for a day and
  * kept pulling him toward them.
  */
-export async function keepInner(notes: string, atMs: number, timeZone: string): Promise<void> {
+/** Notes written while Grok was playing her (亲热 scene): Claude is not given them (docs/claude-grok-routing.md). */
+export const GROK_SCENE_THREAD = "亲热";
+
+export async function keepInner(notes: string, atMs: number, timeZone: string, grokScene = false): Promise<void> {
   const body = notes.trim();
   if (!body) return;
-  await addMemories([{ kind: "moment", source: "inner", day: localDay(atMs, timeZone), at: atMs, body, importance: 3 }]).catch(
-    (err) => console.error(err),
-  );
+  await addMemories([
+    { kind: "moment", source: "inner", day: localDay(atMs, timeZone), at: atMs, body, importance: 3, thread: grokScene ? GROK_SCENE_THREAD : "" },
+  ]).catch((err) => console.error(err));
 }
 
-export async function recentInner(nowMs = now()): Promise<string> {
+/** His ｛｝ notes of the last 16 hours: all of them (Grok), and those outside a Grok scene (Claude). */
+export async function recentInner(nowMs = now()): Promise<{ all: string; daily: string }> {
   const db = await sql();
-  const rows = await db.query<{ body: string }>(
-    `select body from (
-       select body, at, id from qr_memories where source = 'inner' and at > $1 and at <= $2 order by at desc, id desc limit 8
+  const rows = await db.query<{ body: string; thread: string | null }>(
+    `select body, thread from (
+       select body, thread, at, id from qr_memories where source = 'inner' and at > $1 and at <= $2 order by at desc, id desc limit 8
      ) t order by at asc, id asc`,
     [nowMs - INNER_KEEP_MS, nowMs],
   );
-  return rows.map((r) => String(r.body).trim()).filter(Boolean).join("\n");
+  const text = (list: typeof rows) => list.map((r) => String(r.body).trim()).filter(Boolean).join("\n");
+  return { all: text(rows), daily: text(rows.filter((r) => r.thread !== GROK_SCENE_THREAD)) };
 }

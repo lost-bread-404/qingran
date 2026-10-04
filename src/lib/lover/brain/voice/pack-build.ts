@@ -5,6 +5,7 @@ import { modelFacingText } from "../../message-meta.ts";
 import { DEFAULT_FORMATS, fmt, type Formats } from "../prompts/formats.ts";
 import type { TimeFacts } from "../heart.ts";
 import { NEUTRAL_PERSONA } from "../../types.ts";
+import type { Engine } from "./engine.ts";
 
 /**
  * What the reply is given (docs/brain.md「回复看到的」):
@@ -26,6 +27,16 @@ export type VoicePackParts = {
   time: TimeFacts;
   /** His ｛｝ notes of the last 16 hours, one per line. */
   inner: string;
+  /** The same, without those written while Grok was playing her (what Claude is given). */
+  innerDaily: string;
+  /**
+   * Who these messages are for (docs/claude-grok-routing.md). Claude: no 亲密设定, no notes from a Grok scene, each
+   * stretch Grok played folded into one line, and 「交给 Grok」 after the persona. Grok: as before, and 「回到日常」
+   * after the persona. Missing = Grok.
+   */
+  engine?: Engine;
+  /** 指令 → 谁来演: the two instructions. */
+  handoff?: { toGrok: string; back: string };
   /** 材料的写法 (gaps and photos in the talk). */
   formats: Formats;
   history: StoredMessage[];
@@ -71,18 +82,34 @@ function gapText(ms: number): string {
   return m % 60 ? `${Math.floor(m / 60)} 小时 ${m % 60} 分钟` : `${Math.floor(m / 60)} 小时`;
 }
 
+/**
+ * Said or written while Grok was playing her (a stretch it played). A line Grok wrote only because Claude failed is
+ * not part of such a stretch: it stays in Claude's talk.
+ */
+export function inGrokScene(message: StoredMessage): boolean {
+  return message.meta.scene === "grok";
+}
+
 export function voiceHistoryMessages(
   history: StoredMessage[],
   limit = HISTORY_WINDOW,
   f: Formats = DEFAULT_FORMATS,
+  engine: Engine = "grok",
 ): VoiceChatMessage[] {
   if (limit <= 0) return [];
   const rows = history.filter((message) => !message.meta.nightNoise).slice(-limit);
   const out: VoiceChatMessage[] = [];
+  const fold = fmt(f, "grokScene", {});
   rows.forEach((message, i) => {
     const gap = i > 0 ? message.createdAt - rows[i - 1]!.createdAt : 0;
     const mark = gap >= GAP_MARK_MS ? fmt(f, "gap", { gap: gapText(gap) }) : "";
     if (mark.trim()) out.push({ role: "system", content: mark });
+    if (engine === "claude" && inGrokScene(message)) {
+      // One line for the whole stretch (a pause inside it still shows).
+      const prev = out[out.length - 1];
+      if (!(prev?.role === "system" && prev.content === fold) && fold.trim()) out.push({ role: "system", content: fold });
+      return;
+    }
     const images = message.role === "user" ? message.meta.images : undefined;
     out.push({
       role: message.role === "assistant" ? "assistant" : "user",
@@ -94,16 +121,17 @@ export function voiceHistoryMessages(
 }
 
 export function voiceVars(parts: VoicePackParts, strip: VoiceStrip = "none"): Record<string, string> {
+  const claude = parts.engine === "claude";
   return {
     system_prompt: parts.charter.trim() || NEUTRAL_PERSONA,
-    intimate_notes: parts.intimate.trim(),
+    intimate_notes: claude ? "" : parts.intimate.trim(),
     identity: parts.identity.trim(),
     us: strip === "none" ? parts.us.trim() : "",
     recall: strip === "none" ? parts.recall.trim() : "",
     clock: parts.time.clock,
     last_said: parts.time.lastSaid,
     since_last: parts.time.sinceLast,
-    inner: parts.inner.trim(),
+    inner: (claude ? parts.innerDaily : parts.inner).trim(),
     user_text: parts.userText,
     quiet: parts.first?.quiet ?? "",
   };
@@ -113,11 +141,16 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
   const variant = parts.first ? "first" : "main";
   const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant);
   const historyLimit = strip === "thin" ? Math.min(VOICE_THIN_HISTORY, parts.historyWindow) : parts.historyWindow;
+  const engine = parts.engine ?? "grok";
   let rendered = renderPromptMessages(
     template,
     voiceVars(parts, strip),
-    voiceHistoryMessages(parts.history, historyLimit, parts.formats),
+    voiceHistoryMessages(parts.history, historyLimit, parts.formats, engine),
   ) as VoiceChatMessage[];
+  // 谁来演: after the persona, in the same (first) system message, so it is cached with it and survives the retries.
+  const handoff = (engine === "claude" ? parts.handoff?.toGrok : parts.handoff?.back)?.trim();
+  const head = rendered.findIndex((message) => message.role === "system");
+  if (handoff && head >= 0) rendered[head] = { ...rendered[head]!, content: `${rendered[head]!.content}\n\n${handoff}` };
   if (strip === "thin") {
     // Persona, recent talk, her line (or the note that he may write first): the first system message, everything
     // that is not a system message, and the last message.

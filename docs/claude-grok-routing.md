@@ -1,6 +1,8 @@
-# 回复分流：默认 Claude，亲密时交给 Grok（待实现）
+# 回复分流：默认 Claude，亲密时交给 Grok（2026-10-04 已实现）
 
 Rosie 和 Claude 2026-10-03 商量定的方案。来由和讨论见 [requirements.md](requirements.md) 第 11 节。实现前先读 `CLAUDE.md` 和 `requirements.md`。
+
+实现和这份说明不一样的几处（2026-10-04，原因见 [brain.md](brain.md)「谁来演」）：缓存打在系统提示和他上一条回复末尾两个点上，不用顶层自动缓存；Claude 没回上、改由 Grok 代回的那条不算 Grok 那段、不收起（收起看的是 `scene`，不是 `engine`）；Claude 拒绝（`stop_reason = refusal`）或只写了〔接〕没有字，按〔转〕处理；Claude 模型列表多了 Sonnet 5.5。
 
 ## 为什么
 

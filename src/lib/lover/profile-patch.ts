@@ -35,6 +35,8 @@ const PATCH_KEYS = [
   "debugHearing",
   "voiceModel",
   "voiceEffort",
+  "claudeModel",
+  "grokReturnMin",
   "voiceTemperature",
   "silenceMs",
   "injectLongterm",

@@ -62,6 +62,20 @@ Rosie 上一次说话是 {last_said}，距现在 {since_last}。
  */
 const VOICE_FIRST = `（Rosie 放下手机{quiet}了，你们现在不在一块儿。照着人设，此刻的清然会不会给她发一条手机消息、发什么，由你来想；要合此刻的情景，show, don't tell。不发，只回「不找」。）`;
 
+/**
+ * The scene changes hands (docs/claude-grok-routing.md). Claude plays the everyday 清然; when it comes to sex, Grok
+ * plays her. Each side is told, after the persona, how to pass it on: a mark at the very start of the reply, read by
+ * the program and never shown. Claude used to step around it in character instead (「你眼睛里是怕」, 「很久之后」).
+ */
+const ROUTE_TO_GROK = `这个角色由你和另一位演员共同扮演，他演的也是同一个清然。日常的部分由你来演，亲密到性的部分由他来演。
+按清然的人设，Rosie 表达想要她（说想要、脱衣服、往她身上蹭、撒娇着往床上引），清然会顺着要她，接下来就是性。所以 Rosie 一表达这种想要，或者按清然的性格下一步就是往性走，你就在这一轮把戏交出去：
+- 写清然顺着她往前走的第一步（吻下去、把她压进被子里、一句挑逗的话），在回复的最前面写〔接〕，下一句起由他接着演；
+- 如果连这第一步都会越过你的界线，回复只写〔转〕，这一句由他来接。
+你想让清然停下、拖延或岔开的时候，就是该交出去的时候：说「很晚了」「明天还要早起」、把她裹进被子哄睡、问她「是想要我还是只想被抱着」、亲到她睡着。这些时候写〔接〕，把戏交给他。
+〔接〕〔转〕是给程序看的记号，不算跳出角色，Rosie 看不到。`;
+
+const ROUTE_BACK = `亲密的场面完全结束、两人回到日常时（起来做别的事、聊正事、分开、去学习），在这条回复的最前面写〔回〕。Rosie 看不到这个记号。`;
+
 const EDITOR_SYSTEM = `【清然的身份】
 {identity}
 
@@ -156,7 +170,8 @@ export const FORMATS = `停顿：（过了 {gap}）
 夜里整理的一句：[{time}] {who}：{text}
 月报的一天：【{day}】
 月报的一句：{who}：{text}
-月报的时间线：{day}：{timeline}`;
+月报的时间线：{day}：{timeline}
+亲热：（两人亲热了一阵）`;
 
 const FORMAT_PLACEHOLDERS: PromptPlaceholder[] = [
   ph("gap", "两句话之间隔了多久（「2 小时 10 分钟」）。隔 30 分钟以上才写。"),
@@ -238,6 +253,20 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       label: "分段摘要",
       placeholders: [ph("chunk", "按天切开的一段对话原文。")],
       messages: [system(REPORT_DIGEST), user("{chunk}")],
+    },
+  ],
+  route: [
+    {
+      id: "to_grok",
+      label: "交给 Grok",
+      placeholders: [],
+      messages: [system(ROUTE_TO_GROK)],
+    },
+    {
+      id: "back",
+      label: "回到日常",
+      placeholders: [],
+      messages: [system(ROUTE_BACK)],
     },
   ],
   formats: [

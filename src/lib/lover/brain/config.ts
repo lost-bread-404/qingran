@@ -128,13 +128,17 @@ export const DRAIN_BUDGET_MS = 15_000;
 export const LONG_DRAIN_MS = 270_000; // Vercel 函数上限 300s，留 30s 余量给收尾
 export const LOCK_SLACK_MS = 30_000;
 
-export const MODEL_PRICES: Record<string, { input: number; cached: number; output: number }> = {
+/** USD per million tokens. `cacheWrite`: Claude's price for prompt tokens written to its cache (5-minute cache). */
+export const MODEL_PRICES: Record<string, { input: number; cached: number; output: number; cacheWrite?: number }> = {
   "grok-4.6": { input: 2, cached: 0.5, output: 6 },
   "grok-4.5": { input: 2, cached: 0.3, output: 6 },
   "grok-4.7": { input: 2, cached: 0.3, output: 6 },
   "grok-4.3": { input: 1.25, cached: 0.2, output: 2.5 },
   "grok-4.20-0309-non-reasoning": { input: 1.25, cached: 0.2, output: 2.5 },
   "grok-4.20-0309-reasoning": { input: 1.25, cached: 0.2, output: 2.5 },
+  "claude-opus-5-5": { input: 4, cached: 0.2, output: 20, cacheWrite: 5 },
+  "claude-sonnet-5-5": { input: 2, cached: 0.2, output: 10, cacheWrite: 2.5 },
+  "claude-sonnet-5": { input: 2, cached: 0.2, output: 10, cacheWrite: 2.5 },
 };
 
 export const VOICE_PRICES = {
