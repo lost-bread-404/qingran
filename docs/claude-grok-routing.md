@@ -87,5 +87,4 @@ Rosie 和 Claude 2026-10-03 商量定的方案。来由和讨论见 [requirement
 
 ## 还要 Rosie 定的
 
-1. Claude 用 Opus 5.5 还是 Sonnet 5（按她每天约 130 轮粗算，不算缓存折扣，Opus 约每月 $85，Sonnet 约一半；Neon gateway 里现在只有 $5 额度）。
-2. Anthropic 使用政策要求面向消费者的聊天机器人在每次会话开头说明是 AI；她是唯一用户、自己知道，要不要在界面上加一句由她决定。
+- Claude 用 Opus 5.5 还是 Sonnet 5（按她每天约 130 轮粗算，不算缓存折扣，Opus 约每月 $85，Sonnet 约一半；Neon gateway 里现在只有 $5 额度）。
