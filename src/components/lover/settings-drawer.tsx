@@ -930,7 +930,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 ))}
               </select>
               <label className="flex items-center justify-between gap-3 pt-1">
-                <span className="text-sm">离开多久换回 Claude（分钟）</span>
+                <span className="text-sm">分开多久后清然来找你时换回 Claude（分钟）</span>
                 <input
                   key={profile.grokReturnMin}
                   type="number"

@@ -6,7 +6,7 @@ import { resolveTalkProfile } from "../../talk-profile.ts";
 import { voiceInjectFromProfile } from "../../types.ts";
 import { BraceCut } from "./brace-cut.ts";
 import { buildVoiceMessages } from "./pack-build.ts";
-import { startEngine, takeMark } from "./engine.ts";
+import { endScene, reachEngine, takeMark } from "./engine.ts";
 import { gatherVoiceParts, replyHistory } from "./pack.ts";
 
 const CN = ["零", "一", "两", "三", "四", "五", "六", "七", "八", "九", "十"];
@@ -53,10 +53,8 @@ export async function speakFirst(input: {
     // How long she has been away is said roughly in the note at the end, not as a time.
     first: { quiet: input.lastUserAt ? quietText(input.nowMs - input.lastUserAt) : "很久" },
   });
-  // The mode of the moment (docs/claude-grok-routing.md); away longer than the setting → Claude.
-  const { engine } = profile.claudeRouting
-    ? await startEngine(input.lastUserAt, input.nowMs, profile.grokReturnMin)
-    : { engine: "grok" as const };
+  // The mode of the moment (docs/claude-grok-routing.md); apart longer than the setting → the scene is over, Claude.
+  const engine = profile.claudeRouting ? await reachEngine(input.lastUserAt, input.nowMs, profile.grokReturnMin) : ("grok" as const);
   // Grok writing it in bed (routing, Grok's turn) gets its own persona; otherwise the whole one.
   const grok = buildVoiceMessages({ ...parts, engine: "grok", routing: profile.claudeRouting && engine === "grok" }, "none");
   const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
@@ -91,7 +89,11 @@ export async function speakFirst(input: {
     const text = marked.text.trim();
     if (PASS.test(text)) return { text: "", passed: true, model: result.model, ms: result.ms, reason: null, engine };
     if (text) await keepInner(braces.text(), input.nowMs, input.timeZone, engine === "grok");
-    if (text) return { text: text.slice(0, 2000), passed: false, model: result.model, ms: result.ms, reason: null, engine };
+    if (text) {
+      // Claude wrote to her after a while apart: the scene is over, Claude plays her from now on.
+      if (profile.claudeRouting && pick.model === profile.claudeModel) await endScene();
+      return { text: text.slice(0, 2000), passed: false, model: result.model, ms: result.ms, reason: null, engine };
+    }
   }
   return { text: "", passed: false, model: last.model, ms: last.ms, reason: "模型没有回话", engine };
 }

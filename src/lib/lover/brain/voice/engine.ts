@@ -2,7 +2,7 @@ import { getSql } from "../../../db.ts";
 
 /**
  * Who plays 清然 now (docs/claude-grok-routing.md): Claude by default; Grok from when Claude hands the scene over
- * (〔接〕 / 〔转〕 at the very start of its reply) until Grok hands it back (〔回〕) or she has been away a while.
+ * (〔接〕 / 〔转〕 at the very start of its reply) until Grok hands it back (〔回〕) or 清然 writes to her after a while apart.
  * The program only reads the mark; no model call is added before a reply.
  */
 export type Engine = "claude" | "grok";
@@ -26,15 +26,28 @@ export async function setEngineMode(mode: Engine): Promise<void> {
 }
 
 /**
- * Who answers this turn. Away longer than `returnMin` minutes (or nothing of hers to go by) → back to Claude, saved.
+ * Who answers her line: whoever plays her now. Her being away does not end a scene (10/4: she drifted off for an
+ * hour in the middle of it and came back to it); Grok hands it back with 〔回〕, or 清然 writing to her after a while
+ * apart does (`reachEngine`).
  */
-export async function startEngine(lastUserAt: number | null, nowMs: number, returnMin: number): Promise<{ engine: Engine; before: Engine; autoReturn: boolean }> {
+export async function startEngine(): Promise<{ engine: Engine; before: Engine; autoReturn: boolean }> {
   const before = await getEngineMode();
-  if (before === "grok" && (lastUserAt == null || nowMs - lastUserAt > returnMin * 60_000)) {
-    await setEngineMode("claude");
-    return { engine: "claude", before, autoReturn: true };
-  }
   return { engine: before, before, autoReturn: false };
+}
+
+/**
+ * Who writes a message he starts. Apart longer than `returnMin` minutes, the scene is over: Claude writes it (and,
+ * once it is sent, plays her from then on: `endScene`). Not saved here, since he may decide not to write.
+ */
+export async function reachEngine(lastUserAt: number | null, nowMs: number, returnMin: number): Promise<Engine> {
+  const mode = await getEngineMode();
+  if (mode === "grok" && (lastUserAt == null || nowMs - lastUserAt > returnMin * 60_000)) return "claude";
+  return mode;
+}
+
+/** A message Claude wrote to her after a while apart was sent: Claude plays her now. */
+export async function endScene(): Promise<void> {
+  if ((await getEngineMode()) === "grok") await setEngineMode("claude");
 }
 
 /** Where the mode goes after this reply, from its mark. A failed Claude turn answered by Grok leaves it as it was. */

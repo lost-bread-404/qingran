@@ -168,13 +168,10 @@ export const Route = createFileRoute("/api/talk")({
                 send(event);
               };
 
-              // Who plays her this turn (docs/claude-grok-routing.md). Away too long → back to Claude.
-              const herBefore = ctx.parts.history.filter((m) => m.role === "user" && !roundIds.has(m.id) && m.createdAt < userCreatedAt);
+              // Who plays her this turn (docs/claude-grok-routing.md): whoever plays her now, however long she was away.
               // 设置 → 回复 → Claude 分流 off: Grok plays all of her, no marks, no scenes (as before the routing).
               const routing = profile.claudeRouting;
-              const start = routing
-                ? await startEngine(herBefore.at(-1)?.createdAt ?? null, nowMs, profile.grokReturnMin)
-                : { engine: "grok" as Engine, before: "grok" as Engine, autoReturn: false };
+              const start = routing ? await startEngine() : { engine: "grok" as Engine, before: "grok" as Engine, autoReturn: false };
               let mark: Mark | null = null;
               /** Who wrote the reply that is kept. */
               let answeredBy: Engine = start.engine;
