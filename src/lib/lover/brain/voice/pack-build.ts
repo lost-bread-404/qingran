@@ -125,6 +125,16 @@ export function voiceHistoryMessages(
       return;
     }
     const images = message.role === "user" ? message.meta.images : undefined;
+    const prev = out[out.length - 1];
+    if (message.role === "user" && prev?.role === "user") {
+      // Her pieces one after another are one message, a blank line between them, as his are (she asked, 10/4).
+      out[out.length - 1] = {
+        ...prev,
+        content: `${prev.content}\n\n${modelFacingText(message, f)}`,
+        ...(images?.length || prev.images?.length ? { images: [...(prev.images ?? []), ...(images ?? [])] } : {}),
+      };
+      return;
+    }
     out.push({
       role: message.role === "assistant" ? "assistant" : "user",
       content: modelFacingText(message, f),
@@ -159,11 +169,12 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
   const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant);
   const historyLimit = strip === "thin" ? Math.min(VOICE_THIN_HISTORY, parts.historyWindow) : parts.historyWindow;
   const engine = parts.engine ?? "grok";
-  let rendered = renderPromptMessages(
-    template,
-    voiceVars(parts, strip),
-    voiceHistoryMessages(parts.history, historyLimit, parts.formats, engine, parts.nowMs),
-  ) as VoiceChatMessage[];
+  const talk = voiceHistoryMessages(parts.history, historyLimit, parts.formats, engine, parts.nowMs);
+  const vars = voiceVars(parts, strip);
+  // What she said just before this line in the same breath (her round) goes into the same message as it.
+  const lead = !parts.first && talk[talk.length - 1]?.role === "user" && !talk[talk.length - 1]!.images?.length ? talk.pop()! : null;
+  if (lead) vars.user_text = `${lead.content}\n\n${vars.user_text}`;
+  let rendered = renderPromptMessages(template, vars, talk) as VoiceChatMessage[];
   if (strip === "thin") {
     // Persona, recent talk, her line (or the note that he may write first): the first system message, everything
     // that is not a system message, and the last message.

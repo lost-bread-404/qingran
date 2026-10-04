@@ -36,10 +36,16 @@ const CLIENT_SECRET_URL = "https://api.x.ai/v1/realtime/client_secrets";
 const TICKET_SECONDS = 300;
 /** xAI waits this much silence before asking its turn model whether she is done. */
 const STREAM_ENDPOINTING_MS = 500;
-/** How sure the turn model must be that the sentence is finished. */
-const STREAM_SMART_TURN = 0.5;
-/** However unfinished the sentence sounds, this much silence ends it (xAI and the phone both). */
-export const STREAM_BACKSTOP_MS = 3000;
+/**
+ * How sure the turn model must be that the sentence is finished. 10/4: at 0.5 it cut her mid-sentence in places that
+ * made no sense; a cut piece is joined to the rest of what she says anyway, but the cut itself made him start too early.
+ */
+const STREAM_SMART_TURN = 0.7;
+/**
+ * However unfinished the sentence sounds, this much silence ends it (xAI and the phone both). 10/4: at 3 s, 「在听你」
+ * stayed for 3 s after every line the turn model was not sure of; now the same as her 「等待」 (2 s).
+ */
+export const STREAM_BACKSTOP_MS = 2000;
 /** Long keyterm lists are cut so the address stays a normal length. */
 const URL_MAX = 7000;
 
