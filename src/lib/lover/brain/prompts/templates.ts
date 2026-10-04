@@ -149,7 +149,7 @@ export const FORMATS = `停顿：（过了 {gap}）
 月报的一句：{who}：{text}
 月报的时间线：{day}：{timeline}
 心里记着的一句：（{when}）{body}
-亲热后没再说话：（Rosie 在清然怀里睡着了）
+亲热后没再说话：（亲热完 Rosie 就没再说话，睡过去了或者晕过去了）
 亲热：（两人亲热了一阵）`;
 
 const FORMAT_PLACEHOLDERS: PromptPlaceholder[] = [

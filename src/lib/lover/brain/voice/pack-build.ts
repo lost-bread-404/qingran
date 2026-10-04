@@ -102,20 +102,14 @@ export function voiceHistoryMessages(
   limit = HISTORY_WINDOW,
   f: Formats = DEFAULT_FORMATS,
   engine: Engine = "grok",
-  nowMs?: number,
+  asleepAt?: number,
 ): VoiceChatMessage[] {
   if (limit <= 0) return [];
   const rows = history.filter((message) => !message.meta.nightNoise).slice(-limit);
   const out: VoiceChatMessage[] = [];
   const fold = fmt(f, "grokScene", {});
-  // She went quiet after the intimate part (half an hour or more): she fell asleep in his arms (她 2026-10-04 定的).
-  const asleep = fmt(f, "asleepAfter", {});
-  const fellAsleep = (last: StoredMessage | undefined, gap: number) => {
-    if (last && inGrokScene(last) && gap >= GAP_MARK_MS && asleep.trim()) out.push({ role: "system", content: asleep });
-  };
   rows.forEach((message, i) => {
     const gap = i > 0 ? message.createdAt - rows[i - 1]!.createdAt : 0;
-    fellAsleep(rows[i - 1], gap);
     const mark = gap >= GAP_MARK_MS ? fmt(f, "gap", { gap: gapText(gap) }) : "";
     if (mark.trim()) out.push({ role: "system", content: mark });
     if (engine === "claude" && inGrokScene(message)) {
@@ -141,7 +135,14 @@ export function voiceHistoryMessages(
       ...(images?.length ? { images } : {}),
     });
   });
-  if (nowMs != null) fellAsleep(rows[rows.length - 1], nowMs - (rows[rows.length - 1]?.createdAt ?? nowMs));
+  // Only in a message he starts (`asleepAt`): she went quiet half an hour or more after the intimate part, so she
+  // passed out or fell asleep — what he writes goes from there. When she speaks again, he goes on from the talk,
+  // however long it was (她 2026-10-04 定的).
+  const last = rows[rows.length - 1];
+  const asleep = fmt(f, "asleepAfter", {});
+  if (asleepAt != null && last && inGrokScene(last) && asleepAt - last.createdAt >= GAP_MARK_MS && asleep.trim()) {
+    out.push({ role: "system", content: asleep });
+  }
   return out;
 }
 
@@ -169,7 +170,7 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
   const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant);
   const historyLimit = strip === "thin" ? Math.min(VOICE_THIN_HISTORY, parts.historyWindow) : parts.historyWindow;
   const engine = parts.engine ?? "grok";
-  const talk = voiceHistoryMessages(parts.history, historyLimit, parts.formats, engine, parts.nowMs);
+  const talk = voiceHistoryMessages(parts.history, historyLimit, parts.formats, engine, parts.first ? parts.nowMs : undefined);
   const vars = voiceVars(parts, strip);
   // What she said just before this line in the same breath (her round) goes into the same message as it.
   const lead = !parts.first && talk[talk.length - 1]?.role === "user" && !talk[talk.length - 1]!.images?.length ? talk.pop()! : null;
