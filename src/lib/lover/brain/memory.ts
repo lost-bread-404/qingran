@@ -361,23 +361,7 @@ type RecallOpts = {
   minCos?: number;
   /** Others in the scene now (「林泽」): their own memories can come back too. */
   present?: readonly string[];
-  /** Came back in the last hours already: not again (it is already in the talk). */
-  skip?: ReadonlySet<number>;
 };
-
-/** How long a moment that came back stays out of what comes back next (10/4: one insight came back 48 times in 4 days). */
-export const RECALL_REST_MS = 12 * 3_600_000;
-
-/** The moments that came back to him in the last RECALL_REST_MS (from the turn log). */
-export async function recentlyRecalled(nowMs = now()): Promise<Set<number>> {
-  const db = await sql();
-  const rows = await db.query<{ id: string }>(
-    `select distinct jsonb_array_elements_text(refs->'pickedIds') as id from brain_log
-     where route = 'voice' and at > $1 and jsonb_typeof(refs->'pickedIds') = 'array'`,
-    [nowMs - RECALL_REST_MS],
-  );
-  return new Set(rows.map((r) => Number(r.id)).filter((n) => Number.isFinite(n)));
-}
 
 const DAY_MS = 86_400_000;
 
@@ -401,7 +385,7 @@ export async function recall(query: string, nowMs = now(), opts: RecallOpts = {}
   const present = opts.present ?? [];
   if (!query.trim()) return { memories: [], scores: [], by: "none" };
   // Only what fits this moment, a few at most (10/4: given all of their past every turn, the prompt was mostly noise).
-  const memories = indexed.memories.filter((m) => knownHere(m, present) && !opts.skip?.has(m.id));
+  const memories = indexed.memories.filter((m) => knownHere(m, present));
   if (!memories.length) return { memories: [], scores: [], by: "none" };
   const top = opts.top ?? RECALL_TOP;
   const minFit = opts.minFit ?? RECALL_MIN_FIT;
@@ -518,7 +502,13 @@ export async function memoryCounts(): Promise<{ story: number; moments: number; 
 }
 
 /** What he wrote inside ｛｝ lately (a game answer, his hand): shown back to him every turn, not left to recall. */
-const INNER_KEEP_MS = 16 * 3_600_000;
+/**
+ * His ｛｝ notes: what he has to keep to (a game's answer, his cards, a score, a promise, a detail he made up), the
+ * last few of the last day, whatever pauses came between (10/1: a game where he had not written his answer down and
+ * made one up at the end). What he thinks of her is not kept there: he sees it afresh each turn (10/4).
+ */
+const INNER_KEEP_MS = 24 * 3_600_000;
+const INNER_KEEP = 5;
 
 /**
  * What he wrote in ｛｝ this turn: never shown or spoken; he sees it again with the clock for 16 hours, then the night
@@ -541,7 +531,7 @@ export async function recentInner(nowMs = now()): Promise<Array<{ body: string; 
   const db = await sql();
   const rows = await db.query<{ body: string; thread: string | null; at: number | string }>(
     `select body, thread, at from (
-       select body, thread, at, id from qr_memories where source = 'inner' and at > $1 and at <= $2 order by at desc, id desc limit 8
+       select body, thread, at, id from qr_memories where source = 'inner' and at > $1 and at <= $2 order by at desc, id desc limit ${INNER_KEEP}
      ) t order by at asc, id asc`,
     [nowMs - INNER_KEEP_MS, nowMs],
   );

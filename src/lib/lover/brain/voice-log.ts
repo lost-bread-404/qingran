@@ -43,7 +43,7 @@ export async function recordVoiceTurn(opts: {
   const sentMemory = [
     `══ 带上的往事（${memoryLines.length} 件${opts.ctx.recallBy === "all" ? "，全部" : opts.ctx.recallBy === "none" ? "" : "，按这句找的"}）══`,
     memoryLines.join("\n") || "（没有）",
-    "══ 他之前心里想的（这一段对话里的）══",
+    "══ 他记下的｛｝══",
     innerText || "（没有）",
   ].join("\n");
   const inputText = messages.map((m) => m.content).join("\n");

@@ -38,7 +38,7 @@ const VOICE_SYSTEM = `{identity}
 
 const VOICE_NOW = `现在是{clock}。Rosie 上一次说话是 {last_said}，距现在 {since_last}。
 
-你之前心里想的（括号里是多久以前）：
+你记下的（括号里是多久以前）：
 {inner}`;
 
 /**
