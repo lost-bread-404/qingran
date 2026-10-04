@@ -196,6 +196,24 @@ export async function loadHotContext(input: {
  * preview: what she wrote (persona, 亲密设定, 身份), 现在的你们, what comes back to him, the time, his ｛｝ notes.
  * Only data here; every word around it is in the template (指令 → 每轮回复) and 材料的写法.
  */
+/** A pause this long in the talk ends a sitting. */
+const SITTING_GAP_MS = 2 * 3_600_000;
+
+/**
+ * When the talk they are in now began: back from now through the messages until a pause of two hours or more. His ｛｝
+ * notes are for the scene they were written in (a game's answer, what he is up to); a note from an earlier sitting
+ * was followed as if it were now (10/4 13:57, in bed at noon: 「今晚必须让她带着只属于姐姐的感觉睡着」 from 00:34).
+ */
+export function sittingStart(history: StoredMessage[], nowMs: number): number {
+  let start = nowMs;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const at = history[i]!.createdAt;
+    if (start - at >= SITTING_GAP_MS) break;
+    start = at;
+  }
+  return start;
+}
+
 export async function gatherVoiceParts(input: {
   profile: Profile;
   nowMs: number;
@@ -229,6 +247,8 @@ export async function gatherVoiceParts(input: {
       })
     : { memories: [], scores: [], by: "none" as const };
   const images = input.images ?? [];
+  const since = sittingStart(history, input.nowMs);
+  const innerNow = inner.filter((n) => n.at >= since - 60_000);
   const parts: VoicePackParts = {
     charter: charterText(input.profile, input.charter ?? input.profile.systemPrompt),
     intimate: input.profile.intimateNotes,
@@ -236,9 +256,9 @@ export async function gatherVoiceParts(input: {
     us: us?.body.trim() ?? "",
     recall: recallText(recalled.memories, formats),
     time,
-    // Each note with when he wrote it: 「今晚……」 from last night is then read as last night.
-    inner: inner.map((n) => fmt(formats, "innerLine", { when: agoText(n.at, input.nowMs, input.timeZone), body: n.body })).join("\n"),
-    innerDaily: inner
+    // Each note with when he wrote it, and only those of this sitting (see sittingStart).
+    inner: innerNow.map((n) => fmt(formats, "innerLine", { when: agoText(n.at, input.nowMs, input.timeZone), body: n.body })).join("\n"),
+    innerDaily: innerNow
       .filter((n) => !n.grok)
       .map((n) => fmt(formats, "innerLine", { when: agoText(n.at, input.nowMs, input.timeZone), body: n.body }))
       .join("\n"),

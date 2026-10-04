@@ -36,12 +36,22 @@ export async function recordVoiceTurn(opts: {
       : parseUsage(opts.usage);
   const model = opts.model || "voice";
   const messages = opts.messages ?? opts.ctx.messages;
+  // What he was given to remember this turn, readable in 记录 (she asked to see it, 10/4).
+  const claudeTurn = opts.route?.engine === "claude";
+  const memoryLines = (opts.ctx.recalled ?? []).map((m) => `· ${m.body.trim()}`);
+  const innerText = (claudeTurn ? opts.ctx.parts.innerDaily : opts.ctx.parts.inner).trim();
+  const sentMemory = [
+    `══ 带上的往事（${memoryLines.length} 件${opts.ctx.recallBy === "all" ? "，全部" : opts.ctx.recallBy === "none" ? "" : "，按这句找的"}）══`,
+    memoryLines.join("\n") || "（没有）",
+    "══ 他之前心里想的（这一段对话里的）══",
+    innerText || "（没有）",
+  ].join("\n");
   const inputText = messages.map((m) => m.content).join("\n");
   const settled = settleLlmCost(model, usage, inputText, opts.display);
   const outputRef = opts.display ? `message:${opts.replyId}` : null;
-  const note =
-    opts.note ??
-    (opts.finishReason ? `finish_reason=${opts.finishReason}` : null);
+  const note = [opts.note ?? (opts.finishReason ? `finish_reason=${opts.finishReason}` : null), sentMemory]
+    .filter(Boolean)
+    .join("\n\n");
   const system = messages.find((m) => m.role === "system")?.content ?? "";
   const rest = messages.filter((m, i) => !(i === messages.findIndex((row) => row.role === "system") && m.role === "system"));
   const logId = await appendBrainLog({
