@@ -111,3 +111,4 @@
 - 2026-10-03：（她决定试模型自己标记的分流）只改文档：第 11 节写下她的方案（默认 Claude，Claude 判断要越界时在回复开头打标记交给 Grok，Grok 判断回到日常再换回）和补充的细节、检验句。代码没动。
 - 2026-10-03：（她要把商量好的分流方案写成给实现的 AI 的说明）新加 docs/claude-grok-routing.md：状态、每一轮怎么走、三个标记、两段指令初稿、接入、记录、检验句、还要她定的两件事；requirements 第 11 节指向它。代码没动。
 - 2026-10-03：（她决定不在界面上加「这是 AI」的说明）从 claude-grok-routing.md 和 requirements 第 11 节删掉这一条。
+- 2026-10-03：（她定了 Claude 用 Opus 5.5）claude-grok-routing.md 写成默认 Opus 5.5，删掉「还要 Rosie 定的」一节。

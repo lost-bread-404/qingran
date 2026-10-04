@@ -61,7 +61,7 @@ Rosie 和 Claude 2026-10-03 商量定的方案。来由和讨论见 [requirement
 
 ## 模型和接入
 
-- Claude 的模型在设置 → 回复里选，和 Grok 模型并排；每个模型旁显示它过去的平均回复时间（沿用现在的做法）。Opus 5.5 和 Sonnet 5 都列出来，初始值由 Rosie 定。
+- Claude 的模型在设置 → 回复里选，和 Grok 模型并排；每个模型旁显示它过去的平均回复时间（沿用现在的做法）。Opus 5.5 和 Sonnet 5 都列出来，默认 Opus 5.5（她 2026-10-03 定的）。
 - 接入：Neon AI Gateway 的模型列表里有 Anthropic 的模型，先看它的文档确认怎么调用（端点格式、模型名），用现有的 `NEON_AI_GATEWAY_BASE_URL` / `NEON_AI_GATEWAY_TOKEN`；不行再用 `ANTHROPIC_API_KEY` 直连 Anthropic API。模型名、价格写进 `brain/config.ts`，费用照常记账（设置 → 高级 → 费用）。
 - 用 Claude 的 prompt cache（不变的部分在前，现在的顺序已经是这样）。
 
@@ -84,7 +84,3 @@ Rosie 和 Claude 2026-10-03 商量定的方案。来由和讨论见 [requirement
 ## 要一起改的文档
 
 `requirements.md` 第 11 节（实现后把这一条从「还没定的」挪到「现在成立的」）、`brain.md`（回复看到的、模型）、`ui-map.md`、`observability.md`、`state-format.md`（如果导出带 `mode` / `engine`）、`changelog.md`。
-
-## 还要 Rosie 定的
-
-- Claude 用 Opus 5.5 还是 Sonnet 5（按她每天约 130 轮粗算，不算缓存折扣，Opus 约每月 $85，Sonnet 约一半；Neon gateway 里现在只有 $5 额度）。
