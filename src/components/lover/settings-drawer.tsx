@@ -738,7 +738,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
               [
-                ["清然", ["voice", "route", "editor"]],
+                ["清然", ["claude", "voice", "editor"]],
                 ["日记", ["report"]],
                 ["材料", ["formats"]],
               ].map(([title, keys]) => (

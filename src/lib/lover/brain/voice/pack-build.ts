@@ -33,12 +33,12 @@ export type VoicePackParts = {
   innerDaily: string;
   /**
    * Who these messages are for (docs/claude-grok-routing.md). Claude: no 亲密设定, no notes from a Grok scene, each
-   * stretch Grok played folded into one line, and 「交给 Grok」 after the persona. Grok: as before, and 「回到日常」
-   * after the persona. Missing = Grok.
+   * stretch Grok played folded into one line, its own instruction (指令 → 每轮回复（Claude）, ends with the handover).
+   * Grok: 指令 → 每轮回复（Grok）, with 亲密设定, ends with handing it back. Missing = Grok.
    */
   engine?: Engine;
-  /** 指令 → 谁来演: the two instructions. */
-  handoff?: { toGrok: string; back: string };
+  /** 指令 → 每轮回复（Claude）: what Claude is given (voiceTemplate is Grok's). */
+  claudeTemplate?: string;
   /** 材料的写法 (gaps and photos in the talk). */
   formats: Formats;
   history: StoredMessage[];
@@ -152,7 +152,10 @@ export function voiceVars(parts: VoicePackParts, strip: VoiceStrip = "none"): Re
 
 export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "none"): VoiceChatMessage[] {
   const variant = parts.first ? "first" : "main";
-  const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant);
+  const claudeTurn = parts.engine === "claude";
+  const template = claudeTurn
+    ? variantMessages(parsePromptBody("claude", parts.claudeTemplate), variant)
+    : variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant);
   const historyLimit = strip === "thin" ? Math.min(VOICE_THIN_HISTORY, parts.historyWindow) : parts.historyWindow;
   const engine = parts.engine ?? "grok";
   let rendered = renderPromptMessages(
@@ -160,10 +163,6 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
     voiceVars(parts, strip),
     voiceHistoryMessages(parts.history, historyLimit, parts.formats, engine, parts.nowMs),
   ) as VoiceChatMessage[];
-  // 谁来演: after the persona, in the same (first) system message, so it is cached with it and survives the retries.
-  const handoff = (engine === "claude" ? parts.handoff?.toGrok : parts.handoff?.back)?.trim();
-  const head = rendered.findIndex((message) => message.role === "system");
-  if (handoff && head >= 0) rendered[head] = { ...rendered[head]!, content: `${rendered[head]!.content}\n\n${handoff}` };
   if (strip === "thin") {
     // Persona, recent talk, her line (or the note that he may write first): the first system message, everything
     // that is not a system message, and the last message.

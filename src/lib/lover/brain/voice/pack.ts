@@ -6,7 +6,6 @@ import { getMessage, getMeta, listHistoryWindow, upsertMessage } from "../store.
 import { enqueue } from "../jobs.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadFormats, loadPrompt } from "../prompts/store.ts";
-import { variantMessages } from "../prompts/doc.ts";
 import { localDay } from "../time.ts";
 import { getDossier } from "../dossier.ts";
 import { agoText, dateClockText } from "../time.ts";
@@ -214,14 +213,14 @@ export async function gatherVoiceParts(input: {
   placement?: Profile["personaPlacement"];
 }): Promise<{ parts: VoicePackParts; recalled: Awaited<ReturnType<typeof recall>>; voicePrompt: Awaited<ReturnType<typeof loadPrompt>> }> {
   const inject = voiceInjectFromProfile(input.profile);
-  const [history, us, time, inner, voicePrompt, formats, route] = await Promise.all([
+  const [history, us, time, inner, voicePrompt, formats, claudePrompt] = await Promise.all([
     input.history,
     inject.memory ? getDossier() : Promise.resolve(null),
     timeFacts(input.nowMs, input.timeZone, input.lastSaidBefore ?? input.nowMs, { sinceLast: !input.first }),
     recentInner(input.nowMs),
     loadPrompt("voice"),
     loadFormats(),
-    loadPrompt("route"),
+    loadPrompt("claude"),
   ]);
   const recalled = inject.memory
     ? await recall(recallQuery(input.userText, history), input.nowMs, {
@@ -243,10 +242,6 @@ export async function gatherVoiceParts(input: {
       .map((n) => fmt(formats, "innerLine", { when: agoText(n.at, input.nowMs, input.timeZone), body: n.body }))
       .join("\n"),
     usWhen: us?.body.trim() && us.updatedAt ? dateClockText(us.updatedAt, input.timeZone) : "",
-    handoff: {
-      toGrok: variantMessages(route.doc, "to_grok").map((m) => m.content).join("\n\n"),
-      back: variantMessages(route.doc, "back").map((m) => m.content).join("\n\n"),
-    },
     formats,
     history,
     historyWindow: history.length,
@@ -255,6 +250,7 @@ export async function gatherVoiceParts(input: {
     userImages: images,
     first: input.first,
     voiceTemplate: voicePrompt.body,
+    claudeTemplate: claudePrompt.body,
     personaPlacement: input.placement ?? input.profile.personaPlacement,
     personaAck: input.profile.personaAck,
   };

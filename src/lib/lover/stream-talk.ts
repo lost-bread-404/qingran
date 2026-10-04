@@ -272,6 +272,12 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   const marks = new MarkCut();
   /** Claude wrote 〔转〕: stop reading, nothing goes out. */
   let dropped = false;
+  /**
+   * Claude's words come in bursts with pauses between them; streamed as they came, his voice ran dry between bursts
+   * and the words jumped (10/4: 「一卡一卡的」). Its reply is short and quick to finish once it starts, so it goes out
+   * whole: shown at once and read in one go.
+   */
+  let held = "";
   /** Claude's usage comes in two parts (prompt at the start, output at the end). */
   let claudeStart: Record<string, unknown> = {};
   let claudeOut = 0;
@@ -298,7 +304,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       dropped = true;
       return;
     }
-    emitVisible(out);
+    if (claude) held += out;
+    else emitVisible(out);
   };
 
   const handleClaude = (json: unknown) => {
@@ -383,7 +390,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   if (!dropped) {
     const rest = marks.finish();
     if (claude && marks.mark === "转") dropped = true;
-    else emitVisible(rest);
+    else emitVisible(held + rest);
   }
   if (dropped) {
     // 〔转〕: like an answer taken back in a call. Nothing was shown or spoken; Grok answers this line.
