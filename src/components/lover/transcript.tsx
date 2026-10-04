@@ -1,3 +1,4 @@
+import { stripSpeechTags } from "@/lib/lover/speech-tags";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Pencil, ThumbsDown, ThumbsUp, Volume2 } from "lucide-react";
 import { photoSrc } from "@/lib/lover/photo-client";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
@@ -224,7 +225,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                   ) : null}
                   <div className="min-w-0">
                     <p className="whitespace-pre-wrap break-words font-display text-lg font-medium leading-relaxed tracking-tight text-fg">
-                      {shown.text}
+                      {stripSpeechTags(shown.text)}
                     </p>
                   </div>
                   {onPlay ? (

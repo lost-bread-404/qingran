@@ -1,3 +1,4 @@
+import { stripSpeechTags } from "../speech-tags.ts";
 import { isClaudeModel } from "../claude.ts";
 import { callModel } from "./llm.ts";
 import { appendBrainLog, getProfileData, upsertMessage } from "./store.ts";
@@ -135,7 +136,7 @@ export async function runWake(opts: { manual?: boolean; at?: number; complete?: 
       timeZone: zone,
       meta: { engine: isClaudeModel(spoken.model) ? "claude" : "grok", ...(spoken.engine === "grok" ? { scene: "grok" as const } : {}) },
     });
-    pushResult = await sendApns({ body: spoken.text, messageId });
+    pushResult = await sendApns({ body: stripSpeechTags(spoken.text), messageId });
   }
   await insertReachLog({
     at,
