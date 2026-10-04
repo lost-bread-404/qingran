@@ -121,6 +121,19 @@ export function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
+/** How long ago, roughly, with the clock: 「7 小时前，00:34」 (so 「今晚」 written then is not read as now). */
+export function agoText(ms: number, nowMs: number, timeZone: string): string {
+  const m = Math.max(0, Math.round((nowMs - ms) / 60_000));
+  const ago = m < 60 ? `${Math.max(1, m)} 分钟前` : m < 48 * 60 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`;
+  return `${ago}，${clockOf(ms, timeZone)}`;
+}
+
+/** 「10 月 4 日 04:12」 in her zone. */
+export function dateClockText(ms: number, timeZone: string): string {
+  const p = zonedParts(ms, timeZone);
+  return `${p.month} 月 ${p.day} 日 ${clockOf(ms, timeZone)}`;
+}
+
 /** "HH:MM" in her zone. */
 export function clockOf(ms: number, timeZone: string): string {
   const p = zonedParts(ms, timeZone);

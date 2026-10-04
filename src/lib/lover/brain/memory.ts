@@ -516,15 +516,16 @@ export async function keepInner(notes: string, atMs: number, timeZone: string, g
   ]).catch((err) => console.error(err));
 }
 
-/** His ｛｝ notes of the last 16 hours: all of them (Grok), and those outside a Grok scene (Claude). */
-export async function recentInner(nowMs = now()): Promise<{ all: string; daily: string }> {
+/** His ｛｝ notes of the last 16 hours, oldest first; `grok`: written while Grok was playing her (Claude is not given those). */
+export async function recentInner(nowMs = now()): Promise<Array<{ body: string; at: number; grok: boolean }>> {
   const db = await sql();
-  const rows = await db.query<{ body: string; thread: string | null }>(
-    `select body, thread from (
+  const rows = await db.query<{ body: string; thread: string | null; at: number | string }>(
+    `select body, thread, at from (
        select body, thread, at, id from qr_memories where source = 'inner' and at > $1 and at <= $2 order by at desc, id desc limit 8
      ) t order by at asc, id asc`,
     [nowMs - INNER_KEEP_MS, nowMs],
   );
-  const text = (list: typeof rows) => list.map((r) => String(r.body).trim()).filter(Boolean).join("\n");
-  return { all: text(rows), daily: text(rows.filter((r) => r.thread !== GROK_SCENE_THREAD)) };
+  return rows
+    .map((r) => ({ body: String(r.body).trim(), at: Number(r.at) || 0, grok: r.thread === GROK_SCENE_THREAD }))
+    .filter((r) => r.body);
 }

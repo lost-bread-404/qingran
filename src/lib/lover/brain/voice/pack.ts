@@ -8,7 +8,9 @@ import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadFormats, loadPrompt } from "../prompts/store.ts";
 import { variantMessages } from "../prompts/doc.ts";
 import { localDay } from "../time.ts";
-import { dossierTextForModel } from "../dossier.ts";
+import { getDossier } from "../dossier.ts";
+import { agoText, dateClockText } from "../time.ts";
+import { fmt } from "../prompts/formats.ts";
 import { recall, recallText, recentInner, type Memory } from "../memory.ts";
 import { LEAD, castOf, splitSpeakers, type Cast } from "../../cast.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
@@ -214,7 +216,7 @@ export async function gatherVoiceParts(input: {
   const inject = voiceInjectFromProfile(input.profile);
   const [history, us, time, inner, voicePrompt, formats, route] = await Promise.all([
     input.history,
-    inject.memory ? dossierTextForModel() : Promise.resolve(""),
+    inject.memory ? getDossier() : Promise.resolve(null),
     timeFacts(input.nowMs, input.timeZone, input.lastSaidBefore ?? input.nowMs, { sinceLast: !input.first }),
     recentInner(input.nowMs),
     loadPrompt("voice"),
@@ -231,11 +233,16 @@ export async function gatherVoiceParts(input: {
     charter: charterText(input.profile, input.charter ?? input.profile.systemPrompt),
     intimate: input.profile.intimateNotes,
     identity: input.profile.identity,
-    us,
+    us: us?.body.trim() ?? "",
     recall: recallText(recalled.memories, formats),
     time,
-    inner: inner.all,
-    innerDaily: inner.daily,
+    // Each note with when he wrote it: 「今晚……」 from last night is then read as last night.
+    inner: inner.map((n) => fmt(formats, "innerLine", { when: agoText(n.at, input.nowMs, input.timeZone), body: n.body })).join("\n"),
+    innerDaily: inner
+      .filter((n) => !n.grok)
+      .map((n) => fmt(formats, "innerLine", { when: agoText(n.at, input.nowMs, input.timeZone), body: n.body }))
+      .join("\n"),
+    usWhen: us?.body.trim() && us.updatedAt ? dateClockText(us.updatedAt, input.timeZone) : "",
     handoff: {
       toGrok: variantMessages(route.doc, "to_grok").map((m) => m.content).join("\n\n"),
       back: variantMessages(route.doc, "back").map((m) => m.content).join("\n\n"),

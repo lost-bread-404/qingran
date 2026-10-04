@@ -22,6 +22,7 @@ const NAMES = {
   reportLine: "月报的一句",
   reportTimeline: "月报的时间线",
   grokScene: "亲热",
+  innerLine: "心里记着的一句",
 } as const;
 
 export type FormatKey = keyof typeof NAMES;

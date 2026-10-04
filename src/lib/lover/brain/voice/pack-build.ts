@@ -22,6 +22,8 @@ export type VoicePackParts = {
   identity: string;
   /** 清然和 Rosie 现在: the short text the night pass rewrites ("" = not injected). */
   us: string;
+  /** When that text was last written (「10 月 4 日 04:12」), so its words are read as of then. */
+  usWhen?: string;
   /** The moments that came back to him for this line, already written out ("" = none). */
   recall: string;
   time: TimeFacts;
@@ -127,6 +129,7 @@ export function voiceVars(parts: VoicePackParts, strip: VoiceStrip = "none"): Re
     intimate_notes: claude ? "" : parts.intimate.trim(),
     identity: parts.identity.trim(),
     us: strip === "none" ? parts.us.trim() : "",
+    us_when: strip === "none" && parts.us.trim() ? (parts.usWhen ?? "") : "",
     recall: strip === "none" ? parts.recall.trim() : "",
     clock: parts.time.clock,
     last_said: parts.time.lastSaid,
