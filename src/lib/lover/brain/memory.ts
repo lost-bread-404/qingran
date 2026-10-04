@@ -340,7 +340,7 @@ async function memoryIndex(): Promise<Indexed> {
 }
 
 /** How many come back at once, and how well a moment has to fit to come back at all. */
-const RECALL_TOP = 4;
+const RECALL_TOP = 3;
 const RECALL_WITH_THREAD = 2;
 /** Words alone (no vectors): BM25 fit needed, and the share of the best fit a moment must reach. */
 const RECALL_MIN_FIT = 12;
@@ -352,13 +352,6 @@ const RECALL_COS_BAND = 0.1;
 const QUERY_EMBED_MS = 1500;
 
 export type Recall = { memories: Memory[]; scores: Array<{ id: number; score: number }>; by: "all" | "meaning" | "words" | "none" };
-
-/**
- * While all of their past fits in this many characters, he is given all of it (in order) and nothing is searched
- * (10/4: 47 moments, ~3,900 characters; the search kept bringing back the same abstract few — one 51 times in 5 days —
- * and the rest were rarely seen). Past this, the search below picks.
- */
-export const RECALL_ALL_CHARS = 12_000;
 
 type RecallOpts = {
   top?: number;
@@ -406,10 +399,9 @@ export async function recall(query: string, nowMs = now(), opts: RecallOpts = {}
   const indexed = await memoryIndex();
   const { index, vecs } = indexed;
   const present = opts.present ?? [];
-  const known = indexed.memories.filter((m) => knownHere(m, present));
-  if (known.reduce((n, m) => n + m.body.length, 0) <= RECALL_ALL_CHARS) return { memories: known, scores: [], by: known.length ? "all" : "none" };
   if (!query.trim()) return { memories: [], scores: [], by: "none" };
-  const memories = known.filter((m) => !opts.skip?.has(m.id));
+  // Only what fits this moment, a few at most (10/4: given all of their past every turn, the prompt was mostly noise).
+  const memories = indexed.memories.filter((m) => knownHere(m, present) && !opts.skip?.has(m.id));
   if (!memories.length) return { memories: [], scores: [], by: "none" };
   const top = opts.top ?? RECALL_TOP;
   const minFit = opts.minFit ?? RECALL_MIN_FIT;

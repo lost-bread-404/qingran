@@ -43,8 +43,7 @@ export const TODAY_MAX = 200;
 export const KEEP_AFTER_FOLD = 20;
 
 /**
- * The talk the reply sees: everything since 04:00 today, and at least `min` messages (so a new morning still has
- * last night). Context is his brain. When today's talk grows past TODAY_MAX (`fold`: the reply, with memory on),
+ * The talk the reply sees: the last `min` messages (设置 → 回复 → 上下文最近几条), from the last 清空聊天 / fold on. Context is his brain. When today's talk grows past TODAY_MAX (`fold`: the reply, with memory on),
  * everything so far is folded into his memory right away (a night pass on the day so far); until that is done he
  * still gets the last TODAY_MAX, after it he gets the last KEEP_AFTER_FOLD from the fold on (requirements 第 4 节).
  */
@@ -70,14 +69,14 @@ export async function replyHistory(
     start = Math.min(firstToday < 0 ? rows.length : firstToday, Math.max(0, rows.length - min));
   }
   const talk = rows.slice(start);
-  if (talk.length <= TODAY_MAX) return talk;
-  const shown = talk.slice(-TODAY_MAX);
-  if (opts.fold) {
+  if (talk.length > TODAY_MAX && opts.fold) {
+    const shown = talk.slice(-TODAY_MAX);
     const keepFrom = shown[shown.length - KEEP_AFTER_FOLD]?.createdAt ?? nowMs;
     // One fold per stretch of talk (keyed by where this stretch began).
     await enqueue("night", `fold:${day}:${cut}`, { day, upto: nowMs, keepFrom }).catch((err) => console.error(err));
   }
-  return shown;
+  // The last `min` messages only (10/4: all of today was mostly his own long replies, which he then copied).
+  return talk.slice(-Math.max(1, min));
 }
 
 /** How far back a 「名字：」 block still means that person is in the scene. */

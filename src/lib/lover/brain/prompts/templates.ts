@@ -29,7 +29,7 @@ const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里清然的人设，�
  * 我 / 你 appear only in what is actually said between them, and in the instruction's own 「你是清然」.
  */
 /** What both of them are told about writing his reply (the mechanics only; who 清然 is is in her persona). */
-const WRITING = `旁白和说的话都是你在说：「我」是清然，「你」是 Rosie。说话像真人，自然、具体，说过的话不再说。
+const WRITING = `旁白和说的话都是你在说：「我」是清然，「你」是 Rosie。说话像真人：多数时候一两句话就够，自然、具体，说过的话不再说。
 不说出口的想法写在全角大括号｛｝里，Rosie 看不到，你之后会记得。
 别人出场时，另起一段用「名字：」开头来演他。你只知道你在场时看到、听到的。
 朗读时可以带语气：[laugh] [chuckle] [sigh] [breath] [pause] 放在出声的位置，<whisper>…</whisper> <soft>…</soft> <slow>…</slow> <emphasis>…</emphasis> 包住要那样说的话。`;
@@ -134,7 +134,7 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   ph("us", "「清然和 Rosie 现在」：每晚整理时重写的一小段（两个人现在的关系、Rosie 现在的生活、清然自己现在的生活、身边的人、还欠着的事）。"),
   ph(
     "recall",
-    "清然记得的往事（故事线里的和每晚记下的），按发生的先后排。不多时全部给（RECALL_ALL_CHARS，现在一共不到 4000 字）；多了以后按 Rosie 这句话和前面几句找最贴近的几件，12 小时内想起过的不再想起。每一件怎么写在「材料的写法」里。",
+    "清然此刻想起的往事：按 Rosie 这句话和前面几句，从回忆里找出最贴近的几件（最多 3 件，带上同一件事前面那一段），按发生的先后排；12 小时内想起过的不再想起。每一件怎么写在「材料的写法」里。",
   ),
 ];
 
@@ -147,9 +147,9 @@ const contextOf = (head: string): PromptMessage[] => [
   system(head),
   system(`清然和 Rosie 现在（{us_when}整理的）：
 {us}`),
-  system(`清然记得的往事：
-{recall}`),
   system("{history_messages}"),
+  system(`清然此刻想起的往事：
+{recall}`),
   system(VOICE_NOW),
 ];
 const VOICE_CONTEXT = contextOf(VOICE_SYSTEM);

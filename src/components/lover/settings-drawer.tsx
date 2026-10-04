@@ -894,7 +894,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
-                  <p className="text-sm">上下文至少几条</p>
+                  <p className="text-sm">上下文最近几条</p>
                   <p className="text-sm tabular-nums">{historyWindow}</p>
                 </div>
                 <input
