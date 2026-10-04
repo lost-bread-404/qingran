@@ -62,8 +62,8 @@ Rosie 和 Claude 2026-10-03 商量定的方案。来由和讨论见 [requirement
 ## 模型和接入
 
 - Claude 的模型在设置 → 回复里选，和 Grok 模型并排；每个模型旁显示它过去的平均回复时间（沿用现在的做法）。Opus 5.5 和 Sonnet 5 都列出来，默认 Opus 5.5（她 2026-10-03 定的）。
-- 接入：Neon AI Gateway 的模型列表里有 Anthropic 的模型，先看它的文档确认怎么调用（端点格式、模型名），用现有的 `NEON_AI_GATEWAY_BASE_URL` / `NEON_AI_GATEWAY_TOKEN`；不行再用 `ANTHROPIC_API_KEY` 直连 Anthropic API。模型名、价格写进 `brain/config.ts`，费用照常记账（设置 → 高级 → 费用）。
-- 用 Claude 的 prompt cache（不变的部分在前，现在的顺序已经是这样）。
+- 接入：**直连 Anthropic API**（和 Grok 直连 xAI 一样），环境变量 `ANTHROPIC_API_KEY`，模型名 `claude-opus-5-5` / `claude-sonnet-5`。不走 Neon AI Gateway：Neon 文档只写了 OpenAI 兼容格式，没写支持 Anthropic 的 prompt caching，默认还有每天 $20 花费上限和每分钟 20 万 tokens 的软限制（她 2026-10-03 定的）。模型名、价格（含缓存写入、缓存命中的价格）写进 `brain/config.ts`，费用照常记账（设置 → 高级 → 费用）。
+- 用 Claude 的 prompt caching：请求顶层加 `cache_control: {"type": "ephemeral"}`（自动缓存，5 分钟，命中一次就续期）。不变的部分在前、跟着这一句变的（想起来的事、时间、她这一句）在最后，现在的顺序已经是这样。记账要分开算缓存写入、缓存命中和普通输入（API 返回的 `cache_creation_input_tokens`、`cache_read_input_tokens`、`input_tokens`）。
 
 ## 记录
 
