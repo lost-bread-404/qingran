@@ -114,3 +114,4 @@
 - 2026-10-03：（她定了 Claude 用 Opus 5.5）claude-grok-routing.md 写成默认 Opus 5.5，删掉「还要 Rosie 定的」一节。
 - 2026-10-03：（她问为什么要经过 Neon 连 Claude）claude-grok-routing.md 改成直连 Anthropic API（ANTHROPIC_API_KEY），用自动 prompt caching、分开记缓存的账；Neon AI Gateway 只继续给记忆的向量用。
 - 2026-10-04：（她用交接指令在 claude.ai 试，Claude 拖了四轮、等到露骨的词才打〔转〕）claude-grok-routing.md 的「交给 Grok」指令改成：她表达想要、按人设下一步就是性时就交接，拖延的说法就是交接信号，优先〔接〕。
+- 2026-10-04：（她用新的交接指令和 Opus 5.5 试，「小猫想要你～」第一句就〔接〕）claude-grok-routing.md 记下这次结果。
