@@ -64,8 +64,9 @@ const FFT_SIZE = 2048;
  * breathing and rustling reached the start line of 中 (lifted ~0.005–0.008 over a ~0.002 floor; her softest real line
  * at night ~0.016). In the shell a line starts at least like 低; the hold line inside a line stays hers.
  */
-const SHELL_START_MIN = 0.01;
-const SHELL_START_HOLD_MS = 180;
+const SHELL_START_MIN = 0.015;
+/** 10/4: the room's noise (floor up to ~0.009 lifted) kept opening lines; a sound has to last a bit longer to be her. */
+const SHELL_START_HOLD_MS = 300;
 
 /** The iPhone shell runs the same VAD; it gets her numbers when the call starts. */
 function nativeCallParams(): NativeCallParams {

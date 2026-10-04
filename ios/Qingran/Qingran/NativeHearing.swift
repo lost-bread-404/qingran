@@ -69,6 +69,11 @@ final class LineHearing: @unchecked Sendable {
   private var appleRequest: SFSpeechAudioBufferRecognitionRequest?
   private var appleTask: SFSpeechRecognitionTask?
   private var appleText: String?
+  /// Some word has been heard in this line (Apple's guess or xAI's), so it is her talking and not the room.
+  var heardWords: Bool {
+    !(appleText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      || finals.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+  }
   private var appleDone = false
   private var appleFormat: AVAudioFormat?
 

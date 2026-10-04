@@ -542,12 +542,17 @@ final class NativePipeline: @unchecked Sendable {
       prefetchTicket()
       round.append(Piece(id: id, at: start, text: text))
       if roundReply != nil && askedPieces > 0 && !replyStarted {
-        // His answer to the round is on its way (or ready, held): it is thrown away only if this line has words.
-        heldBy.insert(id)
-        emit?(["type": "phase", "phase": "transcribing"])
+        // His answer to the round is on its way (or ready): it is thrown away only if this line has words. A line no
+        // word was heard in (a noise in the room, 10/4: 「一直在听我而不生成，不停的被打断」) does not hold it; if
+        // words turn up when it is fully heard, she went on after all.
+        let worded = hearing?.heardWords ?? true
+        if worded {
+          heldBy.insert(id)
+          emit?(["type": "phase", "phase": "transcribing"])
+        }
         Task {
           let said = await text.value
-          self.queue.async { self.resolveHeld(id, said: said) }
+          self.queue.async { self.resolveHeld(id, said: said, held: worded) }
         }
       } else {
         kick()
@@ -556,8 +561,13 @@ final class NativePipeline: @unchecked Sendable {
   }
 
   /// A line she said while his answer was on its way has been heard.
-  private func resolveHeld(_ id: String, said: String) {
-    guard running, heldBy.remove(id) != nil else { return }
+  private func resolveHeld(_ id: String, said: String, held: Bool = true) {
+    guard running else { return }
+    if held {
+      guard heldBy.remove(id) != nil else { return }
+    } else {
+      guard round.contains(where: { $0.id == id }) else { return }
+    }
     if !said.isEmpty {
       // She went on: what he had for the round goes now (even if she is already saying something else and he cannot
       // be asked yet), and he answers again with this line in it.
@@ -1135,7 +1145,8 @@ final class NativePipeline: @unchecked Sendable {
   private func flushPlayback() {
     guard !waiting.isEmpty, let fmt = playerFormat, fmt.sampleRate > 0 else { return }
     // She is saying something, or what she said is not heard yet: his answer does not start over her.
-    if !replyStarted && (inSpeech || !heldBy.isEmpty) { return }
+    // A line with no word heard yet (a noise) does not keep him waiting.
+    if !replyStarted && ((inSpeech && (line?.heardWords ?? true)) || !heldBy.isEmpty) { return }
     if !playing && !replyEnded {
       let need = (replyStarted ? Self.holdSec : Self.startSec) * fmt.sampleRate
       if waitingFrames < need { return }
