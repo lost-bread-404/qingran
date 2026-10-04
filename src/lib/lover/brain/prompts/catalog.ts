@@ -5,7 +5,7 @@ import {
   type PromptVariantTemplate,
 } from "./templates.ts";
 
-export type PromptKey = "claude" | "voice" | "editor" | "report" | "formats";
+export type PromptKey = "voice" | "editor" | "report" | "formats";
 
 export type { PromptMessage, PromptPlaceholder };
 
@@ -22,14 +22,9 @@ export type PromptSpec = {
 
 const META: Array<Pick<PromptSpec, "key" | "name" | "blurb">> = [
   {
-    key: "claude",
-    name: "每轮回复（Claude）",
-    blurb: "平时由 Claude 回你（模型在「回复」页选）。它读：人设（不带亲密设定）、身份、「清然和 Rosie 现在」、想起来的几件事、今天的对话（Grok 演的那几段收成一行）、现在几点。最后一段是交接：Rosie 想要清然、要往性走时，它在回复最前面写〔接〕（这条照常、下一句起 Grok 回）或〔转〕（这条不显示，Grok 重答这一句）。你很久没说话时，它也想要不要来找你（主动找她）。",
-  },
-  {
     key: "voice",
-    name: "每轮回复（Grok）",
-    blurb: "亲热时由 Grok 回你（Claude 交过来以后，或者 Claude 没回上时）。它读的和 Claude 一样，另外带着亲密设定、Grok 那几段的原文。最后一段是交回：亲密的场面结束时它在回复最前面写〔回〕，下一句起换回 Claude；你离开超过「回复」页里写的分钟数也换回 Claude。记号你看不到、也不会念出来。",
+    name: "每轮回复",
+    blurb: "每轮发给模型的材料怎么排：人设（在「人设」页，按现在谁在演选一份）、「清然和 Rosie 现在」、最近的对话、想起的往事、现在几点和他这一段里心里想的。指令都写在人设里，这里只排材料。你很久没说话时，他也想要不要来找你（主动找她）。",
   },
   {
     key: "editor",

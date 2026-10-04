@@ -20,7 +20,7 @@ export type PromptPreview = {
 };
 
 /** What the reply would be given right now, with 「在吗」 standing in for her line. */
-async function voicePreview(body: string | undefined, variantId: string, forClaude?: boolean): Promise<Omit<PromptPreview, "variantId">> {
+async function voicePreview(body: string | undefined, variantId: string): Promise<Omit<PromptPreview, "variantId">> {
   const first = variantId === "first" ? { quiet: "快一个小时" } : undefined;
   const userText = first ? "" : "在吗";
   const at = now();
@@ -39,10 +39,8 @@ async function voicePreview(body: string | undefined, variantId: string, forClau
   // What goes out now: to Claude or to Grok, whichever is playing her.
   const { getEngineMode } = await import("../voice/engine.ts");
   const playing = await getEngineMode();
-  const engine = forClaude === undefined ? playing : forClaude ? ("claude" as const) : ("grok" as const);
-  const withDraft = forClaude
-    ? { ...parts, engine, claudeTemplate: body ?? parts.claudeTemplate }
-    : { ...parts, engine, voiceTemplate: body ?? parts.voiceTemplate };
+  const engine = parts.routing ? playing : ("grok" as const);
+  const withDraft = { ...parts, engine, voiceTemplate: body ?? parts.voiceTemplate };
   const historyText =
     voiceHistoryMessages(parts.history, parts.history.length, parts.formats)
       .map((message) => `${message.role}：${message.content}`)
@@ -50,7 +48,7 @@ async function voicePreview(body: string | undefined, variantId: string, forClau
   return {
     slots: { ...voiceVars(withDraft), history_messages: historyText },
     messages: buildVoiceMessages(withDraft),
-    note: `现在是 ${playing === "claude" ? "Claude" : "Grok"} 在回。这是发给 ${engine === "claude" ? "Claude 的（不带亲密设定，Grok 那几段收成一行）" : "Grok 的"}。${first ? "主动找她：多久没说话用占位。" : "没有正在说的这一句，用「在吗」占位；想起来的事按最近几句找。"}`,
+    note: `${parts.routing ? `分流开着，现在是 ${engine === "claude" ? "Claude（用分流时 Claude 的人设，Grok 那几段收成一行）" : "Grok（用分流时 Grok 的人设）"} 在回。` : "分流关着，全部由 Grok 回（用只用 Grok 时的人设）。"}${first ? "主动找她：多久没说话用占位。" : "没有正在说的这一句，用「在吗」占位；想起来的事按最近几句找。"}`,
   };
 }
 
@@ -104,7 +102,7 @@ export async function previewPrompt(input: { key: string; variantId?: string; bo
   const key = input.key;
   const spec = promptSpec(key);
   const variantId = spec.variants.some((variant) => variant.id === input.variantId) ? input.variantId! : spec.variants[0]?.id ?? "main";
-  if (key === "voice" || key === "claude") return { variantId, ...(await voicePreview(input.body, variantId, key === "claude")) };
+  if (key === "voice") return { variantId, ...(await voicePreview(input.body, variantId)) };
   const loaded = await slotsFor(key);
   return { variantId, slots: loaded.slots, messages: render(key, variantId, input.body, loaded.slots), note: loaded.note };
 }

@@ -87,6 +87,13 @@ export type Profile = {
   voiceEffort: VoiceEffort;
   /** The model that plays her day to day (docs/claude-grok-routing.md); Grok (voiceModel) takes the intimate part. */
   claudeModel: string;
+  /** Claude plays her day to day and hands sex to Grok. Off: Grok plays all of her, as before the routing. */
+  claudeRouting: boolean;
+  /**
+   * Her persona per way of playing her (人设 page, everything the model is told): `systemPrompt` when Grok plays all
+   * of her; `claudePrompt` for Claude day to day; `intimateNotes` (name kept from before 10/4) for Grok in bed.
+   */
+  claudePrompt: string;
   /** Back to Claude when she has been away longer than this many minutes. */
   grokReturnMin: number;
   /** How long Claude thinks before it answers (Anthropic's effort): low answers in a few seconds. */
@@ -193,6 +200,8 @@ export const DEFAULT_PROFILE: Profile = {
   voiceModel: DEFAULT_VOICE_MODEL,
   voiceEffort: DEFAULT_VOICE_EFFORT,
   claudeModel: DEFAULT_CLAUDE_MODEL,
+  claudeRouting: true,
+  claudePrompt: "",
   grokReturnMin: DEFAULT_RETURN_MIN,
   claudeEffort: "low",
   voiceTemperature: VOICE_TEMPERATURE,
@@ -240,6 +249,8 @@ type LooseProfile = Partial<Profile> & {
   voiceModel?: string;
   voiceEffort?: string | null;
   claudeModel?: string;
+  claudeRouting?: boolean;
+  claudePrompt?: string;
   grokReturnMin?: number;
   claudeEffort?: string;
   voiceTemperature?: number;
@@ -286,6 +297,8 @@ export function lockedProfile(input?: unknown): Profile {
     captureAudio: raw.debugHearing !== false,
     voiceModel: pickVoiceModel(raw),
     voiceEffort: pickVoiceEffort(raw),
+    claudeRouting: raw.claudeRouting !== false,
+    claudePrompt: typeof raw.claudePrompt === "string" ? raw.claudePrompt.slice(0, 8000) : "",
     claudeModel: typeof raw.claudeModel === "string" && isClaudeModel(raw.claudeModel.trim()) ? raw.claudeModel.trim().slice(0, 80) : DEFAULT_CLAUDE_MODEL,
     grokReturnMin:
       typeof raw.grokReturnMin === "number" && Number.isFinite(raw.grokReturnMin)

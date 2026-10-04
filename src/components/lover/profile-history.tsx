@@ -6,8 +6,9 @@ import type { Profile } from "@/lib/lover/types";
 import { cn } from "@/lib/utils";
 
 const FIELDS: Array<{ id: VersionedField; label: string }> = [
-  { id: "systemPrompt", label: "人设" },
-  { id: "intimateNotes", label: "亲密设定" },
+  { id: "systemPrompt", label: "人设（只用 Grok）" },
+  { id: "claudePrompt", label: "人设（分流 · Claude）" },
+  { id: "intimateNotes", label: "人设（分流 · Grok）" },
   { id: "identity", label: "身份" },
 ];
 

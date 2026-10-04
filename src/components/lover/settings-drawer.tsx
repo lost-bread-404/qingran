@@ -182,6 +182,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
   const [voiceTemperature, setVoiceTemperature] = useState(profile.voiceTemperature);
   const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
+  const [claudeDraft, setClaudeDraft] = useState(profile.claudePrompt);
+  useEffect(() => setClaudeDraft(profile.claudePrompt), [profile.claudePrompt]);
   const [identityDraft, setIdentityDraft] = useState(profile.identity);
   const identityDirty = useRef(false);
   const intimateDirty = useRef(false);
@@ -307,6 +309,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     const baseRevs: Partial<FieldRevs> = {};
     if ("systemPrompt" in patch) baseRevs.systemPrompt = revsRef.current.systemPrompt;
     if ("intimateNotes" in patch) baseRevs.intimateNotes = revsRef.current.intimateNotes;
+    if ("claudePrompt" in patch) baseRevs.claudePrompt = revsRef.current.claudePrompt;
     if ("identity" in patch) baseRevs.identity = revsRef.current.identity;
     try {
       const result = await saveProfilePatch({ data: { patch, baseRevs } });
@@ -649,7 +652,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               />
             ) : null}
             <label className="flex flex-col gap-2">
-              <span className="text-sm">人设</span>
+              <span className="text-sm">人设（只用 Grok 时）</span>
           <Textarea
             value={draft}
             onChange={(e) => {
@@ -680,10 +683,36 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               onKeepMine={() => persistProfile({ systemPrompt: draft.trim() })}
             />
           ) : null}
-          <p className="mt-2 text-xs text-subtle">他是谁、怎么说话。你们之间发生过的事写在「记忆 → 故事线」里。</p>
+          <p className="mt-2 text-xs text-subtle">「回复 → Claude 分流」关着时，全部由 Grok 回，发给他的就是这一份（加上身份）。你们之间发生过的事写在「记忆 → 故事线」里。</p>
             </label>
             <label className="flex flex-col gap-2">
-              <span className="text-sm">亲密设定</span>
+              <span className="text-sm">人设（分流时 · Claude）</span>
+              <Textarea
+                value={claudeDraft}
+                onChange={(e) => setClaudeDraft(e.target.value)}
+                onBlur={() => {
+                  if (conflict?.field === "claudePrompt") return;
+                  const next = claudeDraft.trim();
+                  if (next !== profile.claudePrompt.trim()) persistProfile({ claudePrompt: next });
+                }}
+                maxLength={8000}
+                className="min-h-48 resize-none font-mono leading-relaxed"
+                placeholder="分流开着时，Claude 演日常的清然用的人设"
+              />
+              <p className="text-xs text-subtle">分流开着、Claude 在回时发给它的就是这一份（加上身份）。交给 Grok 的记号〔接〕〔转〕也写在这里。</p>
+              {conflict?.field === "claudePrompt" ? (
+                <VersionConflict
+                  latest={conflict.latest}
+                  onUseLatest={() => {
+                    setClaudeDraft(conflict.latest);
+                    setConflict(null);
+                  }}
+                  onKeepMine={() => persistProfile({ claudePrompt: claudeDraft.trim() })}
+                />
+              ) : null}
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-sm">人设（分流时 · Grok）</span>
               <Textarea
                 value={intimateDraft}
                 onChange={(e) => {
@@ -701,9 +730,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 }}
                 maxLength={8000}
                 className="min-h-36 resize-none leading-relaxed"
-                placeholder="清然在床上是什么样子"
+                placeholder="分流开着时，Grok 演床上的清然用的人设"
               />
-              <p className="text-xs text-subtle">接在人设后面，每轮都在，是他是谁的一部分。什么时候亲热、怎么亲热，他看你们正在说的话来定。</p>
+              <p className="text-xs text-subtle">分流开着、Grok 在回时发给它的就是这一份（不带身份）。交回 Claude 的记号〔回〕也写在这里。</p>
               {conflict?.field === "intimateNotes" ? (
                 <VersionConflict
                   latest={conflict.latest}
@@ -738,7 +767,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               <p className="text-sm text-subtle">正在读指令…</p>
             ) : (
               [
-                ["清然", ["claude", "voice", "editor"]],
+                ["清然", ["voice", "editor"]],
                 ["日记", ["report"]],
                 ["材料", ["formats"]],
               ].map(([title, keys]) => (
@@ -817,6 +846,15 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
             <div className="flex flex-col gap-2 rounded-md bg-surface-2 px-4 py-3">
+              <label className="flex min-h-11 items-center justify-between gap-3">
+                <span className="text-sm">Claude 分流（平时 Claude 回，亲热时交给 Grok）</span>
+                <input
+                  type="checkbox"
+                  checked={profile.claudeRouting}
+                  onChange={(e) => persistProfile({ claudeRouting: e.target.checked })}
+                />
+              </label>
+              <p className="text-xs text-subtle">关掉就全部由 Grok 回，跟分流之前一样。三份人设都在「人设」页。</p>
               <p className="text-sm">
                 现在在回你的：{engineMode == null ? "…" : engineMode === "claude" ? "Claude" : "Grok"}
               </p>

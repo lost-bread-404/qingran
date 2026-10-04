@@ -147,7 +147,11 @@ export async function loadHotContext(input: {
   const us = parts.us;
   const clockText = parts.time.clock;
   const [charterHash, longtermHash] = await Promise.all([
-    rememberCharter([charterText(input.profile, charter).trim() || NEUTRAL_PERSONA, input.profile.intimateNotes.trim()].filter(Boolean).join("\n\n")),
+    rememberCharter(
+      [charterText(input.profile, charter).trim() || NEUTRAL_PERSONA, input.profile.claudePrompt.trim(), input.profile.intimateNotes.trim()]
+        .filter(Boolean)
+        .join("\n\n"),
+    ),
     rememberBlock("voice_longterm", us),
   ]);
   const historyIds = history.map((m) => m.id);
@@ -230,14 +234,13 @@ export async function gatherVoiceParts(input: {
   placement?: Profile["personaPlacement"];
 }): Promise<{ parts: VoicePackParts; recalled: Awaited<ReturnType<typeof recall>>; voicePrompt: Awaited<ReturnType<typeof loadPrompt>> }> {
   const inject = voiceInjectFromProfile(input.profile);
-  const [history, us, time, inner, voicePrompt, formats, claudePrompt] = await Promise.all([
+  const [history, us, time, inner, voicePrompt, formats] = await Promise.all([
     input.history,
     inject.memory ? getDossier() : Promise.resolve(null),
     timeFacts(input.nowMs, input.timeZone, input.lastSaidBefore ?? input.nowMs, { sinceLast: !input.first }),
     recentInner(input.nowMs),
     loadPrompt("voice"),
     loadFormats(),
-    loadPrompt("claude"),
   ]);
   const recalled = inject.memory
     ? await recall(recallQuery(input.userText, history), input.nowMs, {
@@ -270,7 +273,9 @@ export async function gatherVoiceParts(input: {
     userImages: images,
     first: input.first,
     voiceTemplate: voicePrompt.body,
-    claudeTemplate: claudePrompt.body,
+    routing: input.profile.claudeRouting,
+    charterClaude: charterText(input.profile, input.profile.claudePrompt),
+    charterGrok: input.profile.intimateNotes,
     personaPlacement: input.placement ?? input.profile.personaPlacement,
     personaAck: input.profile.personaAck,
   };

@@ -37,8 +37,11 @@ export type VoicePackParts = {
    * Grok: 指令 → 每轮回复（Grok）, with 亲密设定, ends with handing it back. Missing = Grok.
    */
   engine?: Engine;
-  /** 指令 → 每轮回复（Claude）: what Claude is given (voiceTemplate is Grok's). */
-  claudeTemplate?: string;
+  /** Claude plays her day to day and hands sex to Grok (设置 → 回复 → Claude 分流). Off: Grok plays all of her. */
+  routing?: boolean;
+  /** Her persona for Claude day to day, and for Grok in bed (with routing on); `charter` is the one for Grok alone. */
+  charterClaude?: string;
+  charterGrok?: string;
   /** 材料的写法 (gaps and photos in the talk). */
   formats: Formats;
   history: StoredMessage[];
@@ -134,10 +137,11 @@ export function voiceHistoryMessages(
 
 export function voiceVars(parts: VoicePackParts, strip: VoiceStrip = "none"): Record<string, string> {
   const claude = parts.engine === "claude";
+  const persona = !parts.routing ? parts.charter : claude ? (parts.charterClaude ?? "") : (parts.charterGrok ?? "");
+  const inBed = Boolean(parts.routing) && !claude;
   return {
-    system_prompt: parts.charter.trim() || NEUTRAL_PERSONA,
-    intimate_notes: claude ? "" : parts.intimate.trim(),
-    identity: parts.identity.trim(),
+    system_prompt: persona.trim() || NEUTRAL_PERSONA,
+    identity: inBed ? "" : parts.identity.trim(),
     us: strip === "none" ? parts.us.trim() : "",
     us_when: strip === "none" && parts.us.trim() ? (parts.usWhen ?? "") : "",
     recall: strip === "none" ? parts.recall.trim() : "",
@@ -152,10 +156,7 @@ export function voiceVars(parts: VoicePackParts, strip: VoiceStrip = "none"): Re
 
 export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "none"): VoiceChatMessage[] {
   const variant = parts.first ? "first" : "main";
-  const claudeTurn = parts.engine === "claude";
-  const template = claudeTurn
-    ? variantMessages(parsePromptBody("claude", parts.claudeTemplate), variant)
-    : variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant);
+  const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant);
   const historyLimit = strip === "thin" ? Math.min(VOICE_THIN_HISTORY, parts.historyWindow) : parts.historyWindow;
   const engine = parts.engine ?? "grok";
   let rendered = renderPromptMessages(

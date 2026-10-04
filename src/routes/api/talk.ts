@@ -170,12 +170,16 @@ export const Route = createFileRoute("/api/talk")({
 
               // Who plays her this turn (docs/claude-grok-routing.md). Away too long → back to Claude.
               const herBefore = ctx.parts.history.filter((m) => m.role === "user" && !roundIds.has(m.id) && m.createdAt < userCreatedAt);
-              const start = await startEngine(herBefore.at(-1)?.createdAt ?? null, nowMs, profile.grokReturnMin);
+              // 设置 → 回复 → Claude 分流 off: Grok plays all of her, no marks, no scenes (as before the routing).
+              const routing = profile.claudeRouting;
+              const start = routing
+                ? await startEngine(herBefore.at(-1)?.createdAt ?? null, nowMs, profile.grokReturnMin)
+                : { engine: "grok" as Engine, before: "grok" as Engine, autoReturn: false };
               let mark: Mark | null = null;
               /** Who wrote the reply that is kept. */
               let answeredBy: Engine = start.engine;
               let modeNext: Engine = start.engine;
-              if (start.engine === "grok") await addMessageMeta([...roundIds], { scene: "grok" });
+              if (routing && start.engine === "grok") await addMessageMeta([...roundIds], { scene: "grok" });
 
               let claudeDone: { result: TalkStreamResult; speech: string; failed: boolean; messages: ReturnType<typeof buildVoiceMessages> } | null = null;
               if (start.engine === "claude") {
@@ -256,7 +260,8 @@ export const Route = createFileRoute("/api/talk")({
                 : await runVoiceWithFallback(
                     {
                       text,
-                      parts: { ...ctx.parts, engine: "grok" },
+                      // Grok in bed gets its own persona; Grok standing in for a Claude that failed gets the whole one.
+                      parts: { ...ctx.parts, engine: "grok", routing: routing && (start.engine === "grok" || mark === "转") },
                       replyId,
                       voiceSpeed: profile.voiceSpeed,
                       primary,
@@ -266,12 +271,12 @@ export const Route = createFileRoute("/api/talk")({
                     },
                     forward,
                   );
-              if (!claudeDone && start.engine === "grok") {
+              if (routing && !claudeDone && start.engine === "grok") {
                 mark = fallback.result.mark ?? null;
                 modeNext = modeAfter("grok", mark);
               }
               /** This reply belongs to a stretch Grok plays (folded out of what Claude is given later). */
-              const grokScene = start.engine === "grok" || mark === "转";
+              const grokScene = routing && (start.engine === "grok" || mark === "转");
               const streamResult = fallback.result;
               speech = fallback.speech;
               const failed = fallback.failed;

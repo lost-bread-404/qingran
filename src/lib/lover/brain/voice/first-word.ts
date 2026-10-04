@@ -54,8 +54,11 @@ export async function speakFirst(input: {
     first: { quiet: input.lastUserAt ? quietText(input.nowMs - input.lastUserAt) : "很久" },
   });
   // The mode of the moment (docs/claude-grok-routing.md); away longer than the setting → Claude.
-  const { engine } = await startEngine(input.lastUserAt, input.nowMs, profile.grokReturnMin);
-  const grok = buildVoiceMessages({ ...parts, engine: "grok" }, "none");
+  const { engine } = profile.claudeRouting
+    ? await startEngine(input.lastUserAt, input.nowMs, profile.grokReturnMin)
+    : { engine: "grok" as const };
+  // Grok writing it in bed (routing, Grok's turn) gets its own persona; otherwise the whole one.
+  const grok = buildVoiceMessages({ ...parts, engine: "grok", routing: profile.claudeRouting && engine === "grok" }, "none");
   const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
   const picks: Array<VoiceModelPick & { messages: typeof grok }> = [];
   if (engine === "claude") {

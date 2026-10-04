@@ -2,6 +2,8 @@
 
 Rosie 和 Claude 2026-10-03 商量定的方案。来由和讨论见 [requirements.md](requirements.md) 第 11 节。实现前先读 `CLAUDE.md` 和 `requirements.md`。
 
+2026-10-04 晚上再改：指令全部写进「人设」页的三份人设（只用 Grok / 分流时 Claude / 分流时 Grok），交接记号写在各自人设的最后；分流可以在设置 → 回复里关掉。下面一段说的「两份指令」已不用。
+
 2026-10-04 之后又改了：两段交接不再是单独的「谁来演」，而是 Claude、Grok 各一份完整的每轮回复指令，交接写在各自最后；人设里只有 Grok 演的部分挪进了亲密设定；Claude 的回复写完一起发、一起念。
 
 实现和这份说明不一样的几处（2026-10-04，原因见 [brain.md](brain.md)「谁来演」）：缓存打在系统提示和他上一条回复末尾两个点上，不用顶层自动缓存；Claude 没回上、改由 Grok 代回的那条不算 Grok 那段、不收起（收起看的是 `scene`，不是 `engine`）；Claude 拒绝（`stop_reason = refusal`）或只写了〔接〕没有字，按〔转〕处理；Claude 模型列表多了 Sonnet 5.5。

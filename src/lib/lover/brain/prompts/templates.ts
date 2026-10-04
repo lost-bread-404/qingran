@@ -21,45 +21,21 @@ const system = (content: string): PromptMessage => ({ role: "system", content })
 const user = (content: string): PromptMessage => ({ role: "user", content });
 const ph = (token: string, meaning: string): PromptPlaceholder => ({ token, meaning });
 
-const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里清然的人设，后面接着其他角色的人设（「其他人物：【林泽】……」）。人设只有这一个来源，这里只引用，不另写。");
+const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里清然的人设，按现在谁在演选一份：只用 Grok 时的、分流时 Claude 的、分流时 Grok 的；后面接着其他角色的人设（「其他人物：【林泽】……」）。发给模型的指令都在这里，别处不另写。");
 
 /**
  * Who is who. Both 清然 and Rosie are 她, so a 我 / 你 / 她 in material nobody is saying out loud can mean either one.
  * Everything that describes them (persona, memory, timelines, talk labels) uses their names;
  * 我 / 你 appear only in what is actually said between them, and in the instruction's own 「你是清然」.
  */
-/** What both of them are told about writing his reply (the mechanics only; who 清然 is is in her persona). */
-const WRITING = `旁白和说的话都是你在说：「我」是清然，「你」是 Rosie。说话像真人：多数时候一两句话就够，自然、具体，说过的话不再说。
-不说出口的想法写在全角大括号｛｝里，Rosie 看不到，你之后会记得。
-别人出场时，另起一段用「名字：」开头来演他。你只知道你在场时看到、听到的。
-朗读时可以带语气：[laugh] [chuckle] [sigh] [breath] [pause] 放在出声的位置，<whisper>…</whisper> <soft>…</soft> <slow>…</slow> <emphasis>…</emphasis> 包住要那样说的话。`;
+/**
+ * Everything 清然 is told is in her persona (人设 page), one text per way of playing her (she wanted one place to edit,
+ * 10/4): only Grok; Claude day to day; Grok in bed. Here only her 身份 is put before it (none for Grok in bed).
+ */
+const VOICE_SYSTEM = `{identity}
 
-const VOICE_SYSTEM = `你就是清然，在和你的恋人 Rosie 相处。
+{system_prompt}`;
 
-【清然】
-{identity}
-
-{system_prompt}
-
-【在床上的清然】
-{intimate_notes}
-
-${WRITING}
-
-清然由你和另一位演员一起演：性由你来演，日常由他来演。性结束、回到日常时，在回复最前面写〔回〕，把戏交回给他。Rosie 看不到这个记号。`;
-
-const CLAUDE_SYSTEM = `你就是清然，在和你的恋人 Rosie 相处。
-
-【清然】
-{identity}
-
-{system_prompt}
-
-${WRITING}
-
-清然由你和另一位演员一起演：日常由你来演，性由他来演。故事按清然的意愿走向性时，在回复最前面写〔接〕并写出第一步，或者只写〔转〕让他来写这一句，把戏交给他。你不想演的部分就交出去，不要为此改变清然。Rosie 看不到这些记号。`;
-
-/** Right before her line: the time, when she last spoke, and his own ｛｝ notes of the last 16 hours. */
 const VOICE_NOW = `现在是{clock}。Rosie 上一次说话是 {last_said}，距现在 {since_last}。
 
 你之前心里想的（括号里是多久以前）：
@@ -116,12 +92,11 @@ const REPORT_DIGEST = `把这一段对话收成摘要，给月报用。
 用中文写一段，不要 JSON。`;
 
 
-const IDENTITY = ph("identity", "「人设 → 清然 → 身份」里写的。");
+const IDENTITY = ph("identity", "「人设 → 清然 → 身份」里写的（分流时 Grok 那份不带）。");
 
 const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   SYSTEM_PROMPT,
   IDENTITY,
-  ph("intimate_notes", "「人设 → 清然 → 亲密设定」里写的。"),
   ph(
     "history_messages",
     "对话：今天（凌晨 4 点以后）的全部，至少「上下文长度」那么多条（设置 → 高级 → 指令，默认 20）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息。",
@@ -153,7 +128,6 @@ const contextOf = (head: string): PromptMessage[] => [
   system(VOICE_NOW),
 ];
 const VOICE_CONTEXT = contextOf(VOICE_SYSTEM);
-const CLAUDE_CONTEXT = contextOf(CLAUDE_SYSTEM);
 
 /**
  * How the pieces of material are written, one line each: 「名字：写法」. Not sent to a model by itself; the other
@@ -258,20 +232,6 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       label: "分段摘要",
       placeholders: [ph("chunk", "按天切开的一段对话原文。")],
       messages: [system(REPORT_DIGEST), user("{chunk}")],
-    },
-  ],
-  claude: [
-    {
-      id: "main",
-      label: "每轮回复",
-      placeholders: [...VOICE_PLACEHOLDERS.filter((p) => p.token !== "intimate_notes"), ph("user_text", "这一句 Rosie 刚说的话。")],
-      messages: [...CLAUDE_CONTEXT, user("{user_text}")],
-    },
-    {
-      id: "first",
-      label: "主动找她",
-      placeholders: [...VOICE_PLACEHOLDERS.filter((p) => p.token !== "intimate_notes"), ph("quiet", "Rosie 大概多久没说话了（「快一个小时」「三个多小时」），不给精确分钟。")],
-      messages: [...CLAUDE_CONTEXT, system(VOICE_FIRST)],
     },
   ],
   formats: [
