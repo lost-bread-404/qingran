@@ -73,7 +73,8 @@ export const ROUTES: Record<
 > = {
   voice: { cls: "FAST_THINKER", effort: "low", timeoutMs: 60_000, maxOutput: 2_000 },
   report: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 4_000 },
-  editor: { cls: "ANALYST", timeoutMs: 250_000, maxOutput: 32_000 },
+  // 64k: at xhigh / max effort Claude's thinking counts against it too (Anthropic suggests ~64k there).
+  editor: { cls: "ANALYST", timeoutMs: 250_000, maxOutput: 64_000 },
   replay: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 4_000 },
 };
 

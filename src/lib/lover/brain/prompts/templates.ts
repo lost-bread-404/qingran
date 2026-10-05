@@ -45,8 +45,8 @@ const VOICE_NOW = `现在是{clock}。Rosie 上一次说话是 {last_said}，距
 
 /**
  * When he may write first. A side note, not in her place (as her line it read as Rosie just speaking, and the scene
- * went on: 10/1 he "got up from the sofa" 48 minutes after a fight). Her putting the phone down means they are apart
- * now, so what he sends is a phone message. It has to carry something: 「pick up where you left off」 alone gave
+ * went on: 10/1 he "got up from the sofa" 48 minutes after a fight). Whether they are together or apart he reads from
+ * the scene (10/4: 「放下手机就是分开」 had him write 「姐姐还在实验室」 right after a night in bed). It has to carry something: 「pick up where you left off」 alone gave
  * four 「小猫，我在呢，姐姐一直抱着你」 on 10/2–10/3 (where they left off was cuddling), one 15 minutes into the
  * meeting she had said she was going to. Then 「我在实验室……很想你昨晚埋在我颈窝的样子。现在想我了吗？」 (10/3): says the
  * missing out loud, which 清然 (gentle, deep, reserved) would not. A list of what to say gets filled in like a form;
