@@ -1,80 +1,31 @@
 import { createServerFn } from "@tanstack/react-start";
 import { now } from "./clock.ts";
-import { insertManualEdit } from "./life-store.ts";
-import { deleteMemory, listMemories, memoryCounts, updateMemory } from "./memory.ts";
 
-/** Settings → 记忆: every moment he keeps, newest first. */
-export const brainGetMemories = createServerFn({ method: "GET" }).handler(async () => {
-  const [memories, counts] = await Promise.all([listMemories(), memoryCounts()]);
-  const { nextNightDay } = await import("./night.ts");
-  return { memories: memories.reverse(), counts, pendingDay: await nextNightDay(now()) };
+/** Settings → 记忆 → 你的抱怨: what the night pass found, newest first (for Rosie only; 清然 never sees it). */
+export const brainGetFeedback = createServerFn({ method: "GET" }).handler(async () => {
+  const { sql } = await import("./store.ts");
+  const db = await sql();
+  const rows = await db.query<{ id: number; day: string; body: string }>(
+    `select id, day, body from qr_feedback order by at desc, id desc limit 60`,
+  );
+  return { items: rows.map((r) => ({ id: Number(r.id), day: String(r.day ?? ""), body: String(r.body ?? "") })) };
 });
 
-export const brainEditMemory = createServerFn({ method: "POST" })
-  .validator((input: { id: number; body?: string; changed?: string; remove?: boolean }) => input)
-  .handler(async ({ data }) => {
-    const id = Number(data.id);
-    if (!Number.isFinite(id)) return { ok: false as const };
-    const before = (await listMemories()).find((m) => m.id === id) ?? null;
-    if (data.remove) await deleteMemory(id);
-    else await updateMemory(id, { body: data.body, changed: data.changed });
-    await insertManualEdit("memory", before, data);
-    return { ok: true as const };
-  });
-
 /**
- * 「现在整理」: the days that ended and are not in his memory yet (oldest first, while there is time), then today up to
- * now, the same way a long day is folded early, except the reply keeps all of today's talk (keepFrom 0). The pass
- * at the end of today then only reads what came after.
+ * 「现在整理一次」: the dossier is rewritten from the day so far (the first time, the old memories and the storyline
+ * are folded in too). Runs in the background: Claude at its highest effort takes a few minutes.
  */
 export const brainRunNightNow = createServerFn({ method: "POST" }).handler(async () => {
-  const [{ enqueueMemoryWork, nextNightDay }, { enqueue, runJobsNow }, { getMark }, { getMeta, getProfileData }, { localDay }, { resolveTz }, { lockedProfile }] =
-    await Promise.all([
-      import("./night.ts"),
-      import("./jobs.ts"),
-      import("./memory.ts"),
-      import("./store.ts"),
-      import("./time.ts"),
-      import("./tz.ts"),
-      import("../types.ts"),
-    ]);
-  if (!lockedProfile(await getProfileData()).brainOn) return { ok: false as const, done: [], pendingDay: null, error: "记忆暂停着（设置里「运行记忆」关了）。" };
-  const started = Date.now();
-  const done: string[] = [];
-  while (Date.now() - started < 30_000) {
-    const day = await enqueueMemoryWork(now());
-    if (!day || done.includes(day)) break;
-    await runJobsNow();
-    done.push(day);
-  }
-  const pendingDay = await nextNightDay(now());
-  if (!pendingDay) {
-    const at = now();
-    const today = localDay(at, resolveTz((await getMeta()).timeZone));
-    if (!(await getMark(`day:${today}`))) {
-      await enqueue("night", `fold:${today}:now:${at}`, { day: today, upto: at, keepFrom: 0 });
-      await runJobsNow();
-      if ((Number(await getMark(`day:${today}:upto`)) || 0) >= at) done.push("今天到现在");
-    }
-  }
-  return { ok: true as const, done, pendingDay: await nextNightDay(now()) };
+  const [{ enqueue, drainJobs }, { getProfileData }, { lockedProfile }, { runInBackground }, { LONG_DRAIN_MS }] = await Promise.all([
+    import("./jobs.ts"),
+    import("./store.ts"),
+    import("../types.ts"),
+    import("./wait-until.ts"),
+    import("./config.ts"),
+  ]);
+  if (!lockedProfile(await getProfileData()).brainOn) return { ok: false as const, error: "记忆暂停着（设置里「运行记忆」关了）。" };
+  const at = now();
+  await enqueue("night", `night-now:${at}`, { v: 7, upto: at, dossierOnly: true });
+  await runInBackground(() => drainJobs(LONG_DRAIN_MS));
+  return { ok: true as const };
 });
-
-/**
- * 数据 → 故事线 「保存，放进记忆」: the storyline is saved and cut again right away; its old moments are replaced
- * by the new cut, and everything the night pass wrote stays as it is.
- */
-export const brainSaveStoryline = createServerFn({ method: "POST" })
-  .validator((input: { storyline: string }) => input)
-  .handler(async ({ data }) => {
-    const [{ applyProfilePatch }, { syncStory, embedMissing, memoryCounts }] = await Promise.all([
-      import("../profile-patch.ts"),
-      import("./memory.ts"),
-    ]);
-    const storyline = String(data.storyline ?? "").trim().slice(0, 20000);
-    const saved = await applyProfilePatch({ patch: { storyline }, source: "storyline", force: true });
-    if (!saved.ok) return { ok: false as const, error: "没存上，再试一次。" };
-    const changed = await syncStory(storyline);
-    await embedMissing().catch(() => 0);
-    return { ok: true as const, changed, story: (await memoryCounts()).story };
-  });

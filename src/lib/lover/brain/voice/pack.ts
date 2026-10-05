@@ -1,17 +1,15 @@
-import { timeFacts, dayWindow } from "../heart.ts";
-import { modelFacingText, photoNote } from "../../message-meta.ts";
-import { NEUTRAL_PERSONA, charterText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
+import { timeFacts } from "../heart.ts";
+import { photoNote } from "../../message-meta.ts";
+import { NEUTRAL_PERSONA, personaText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getMessage, getMeta, listHistoryWindow, upsertMessage } from "../store.ts";
-import { enqueue } from "../jobs.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { loadFormats, loadPrompt } from "../prompts/store.ts";
-import { localDay } from "../time.ts";
 import { getDossier } from "../dossier.ts";
 import { agoText, dateClockText } from "../time.ts";
 import { fmt } from "../prompts/formats.ts";
-import { recall, recallText, recentInner, type Memory } from "../memory.ts";
-import { LEAD, castOf, splitSpeakers, type Cast } from "../../cast.ts";
+import { recentInner, type Memory } from "../memory.ts";
+import { dayStart } from "../sleep.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
 
 export type HotContext = {
@@ -37,68 +35,24 @@ export type HotContext = {
   personaPlacement: "system" | "first_user";
 };
 
-/** The most the reply is given of today's talk. Past this, the talk so far is folded into his memory. */
-export const TODAY_MAX = 200;
-/** After a fold, the reply starts again from this many of the last messages, and grows from there. */
-export const KEEP_AFTER_FOLD = 20;
+/** A safety cap on the talk the reply is given (a very long day); the newest are kept. */
+export const TODAY_MAX = 400;
 
 /**
- * The talk the reply sees: the last `min` messages (设置 → 回复 → 上下文最近几条), from the last 清空聊天 / fold on. Context is his brain. When today's talk grows past TODAY_MAX (`fold`: the reply, with memory on),
- * everything so far is folded into his memory right away (a night pass on the day so far); until that is done he
- * still gets the last TODAY_MAX, after it he gets the last KEEP_AFTER_FOLD from the fold on (requirements 第 4 节).
+ * The talk the reply sees (v7): her whole day, from the first message after she last slept, or from 清空聊天 if that
+ * came later. Context is his brain; there is no memory library to fold it into.
  */
 export async function replyHistory(
   excludeId: string | null,
-  min: number,
   nowMs: number,
   timeZone: string,
-  opts: { fold?: boolean; replyId?: string } = {},
+  opts: { replyId?: string } = {},
 ): Promise<StoredMessage[]> {
-  const day = localDay(nowMs, timeZone);
-  const from = dayWindow(day, timeZone).from;
-  const [all, meta] = await Promise.all([listHistoryWindow(excludeId, TODAY_MAX + 1), getMeta()]);
+  const [all, meta, start] = await Promise.all([listHistoryWindow(excludeId, TODAY_MAX + 1), getMeta(), dayStart(nowMs, timeZone)]);
   // An answer to an earlier part of her round that she never heard (she went on) is not part of the talk.
   const rows = opts.replyId ? all.filter((m) => m.id !== opts.replyId) : all;
-  const cut = Number(meta.contextFrom) || 0;
-  let start: number;
-  if (cut > from) {
-    const at = rows.findIndex((m) => m.createdAt >= cut);
-    start = at < 0 ? rows.length : at;
-  } else {
-    const firstToday = rows.findIndex((m) => m.createdAt >= from);
-    start = Math.min(firstToday < 0 ? rows.length : firstToday, Math.max(0, rows.length - min));
-  }
-  const talk = rows.slice(start);
-  if (talk.length > TODAY_MAX && opts.fold) {
-    const shown = talk.slice(-TODAY_MAX);
-    const keepFrom = shown[shown.length - KEEP_AFTER_FOLD]?.createdAt ?? nowMs;
-    // One fold per stretch of talk (keyed by where this stretch began).
-    await enqueue("night", `fold:${day}:${cut}`, { day, upto: nowMs, keepFrom }).catch((err) => console.error(err));
-  }
-  // The last `min` messages only (10/4: all of today was mostly his own long replies, which he then copied).
-  return talk.slice(-Math.max(1, min));
-}
-
-/** How far back a 「名字：」 block still means that person is in the scene. */
-const SCENE_LOOKBACK = 8;
-
-/**
- * Who else is in the scene now: anyone with his own 「名字：」 block in the last few replies. Their memories that
- * 清然 does not share (`knows`) can come back while they are here; with 清然 alone they never do.
- */
-export function scenePresent(history: StoredMessage[], cast: Cast): string[] {
-  const names = new Set<string>();
-  for (const m of history.slice(-SCENE_LOOKBACK)) {
-    if (m.role !== "assistant") continue;
-    for (const part of splitSpeakers(modelFacingText(m), cast)) if (part.who !== LEAD) names.add(part.who);
-  }
-  return [...names];
-}
-
-/** What she is talking about now: her line (weighted), and the few lines before it. */
-export function recallQuery(text: string, history: StoredMessage[]): string {
-  const before = history.slice(-3).map((m) => modelFacingText(m));
-  return [text, text, ...before].filter((line) => line.trim()).join("\n");
+  const from = Math.max(start, Number(meta.contextFrom) || 0);
+  return rows.filter((m) => m.createdAt >= from).slice(-TODAY_MAX);
 }
 
 /** Everything the reply needs, read before the model is called (no model call here). */
@@ -134,10 +88,7 @@ export async function loadHotContext(input: {
     profile: input.profile,
     nowMs: input.nowMs,
     timeZone: input.timeZone,
-    history: replyHistory(input.userMsgId, inject.history, input.nowMs, input.timeZone, {
-      fold: inject.memory,
-      replyId: input.replyId,
-    }),
+    history: replyHistory(input.userMsgId, input.nowMs, input.timeZone, { replyId: input.replyId }),
     userText: input.text,
     images,
     lastSaidBefore: input.userCreatedAt,
@@ -148,9 +99,7 @@ export async function loadHotContext(input: {
   const clockText = parts.time.clock;
   const [charterHash, longtermHash] = await Promise.all([
     rememberCharter(
-      [charterText(input.profile, charter).trim() || NEUTRAL_PERSONA, input.profile.claudePrompt.trim(), input.profile.intimateNotes.trim()]
-        .filter(Boolean)
-        .join("\n\n"),
+      personaText(input.profile, charter).trim() || NEUTRAL_PERSONA,
     ),
     rememberBlock("voice_longterm", us),
   ]);
@@ -214,36 +163,33 @@ export async function gatherVoiceParts(input: {
   /** Replay's other side: another persona. */
   charter?: string;
   placement?: Profile["personaPlacement"];
-}): Promise<{ parts: VoicePackParts; recalled: Awaited<ReturnType<typeof recall>>; voicePrompt: Awaited<ReturnType<typeof loadPrompt>> }> {
+}): Promise<{ parts: VoicePackParts; recalled: Recalled; voicePrompt: Awaited<ReturnType<typeof loadPrompt>> }> {
   const inject = voiceInjectFromProfile(input.profile);
-  const [history, us, time, inner, voicePrompt, formats] = await Promise.all([
+  const [history, us, time, inner, voicePrompt, formats, start] = await Promise.all([
     input.history,
     inject.memory ? getDossier() : Promise.resolve(null),
     timeFacts(input.nowMs, input.timeZone, input.lastSaidBefore ?? input.nowMs, { sinceLast: !input.first }),
     recentInner(input.nowMs),
     loadPrompt("voice"),
     loadFormats(),
+    dayStart(input.nowMs, input.timeZone),
   ]);
-  const recalled = inject.memory
-    ? await recall(recallQuery(input.userText, history), input.nowMs, {
-        present: scenePresent(history, castOf(input.profile)),
-      })
-    : { memories: [], scores: [], by: "none" as const };
   const images = input.images ?? [];
-  const innerNow = inner;
+  // Only what he wrote in ｛｝ today (since she last slept); nothing at all when there is none.
+  const innerText = inner
+    .filter((n) => n.at >= start)
+    .map((n) => fmt(formats, "innerLine", { when: agoText(n.at, input.nowMs, input.timeZone), body: n.body }))
+    .join("\n");
+  const persona = personaText(input.profile, input.charter ?? input.profile.systemPrompt);
   const parts: VoicePackParts = {
-    charter: charterText(input.profile, input.charter ?? input.profile.systemPrompt),
+    charter: persona,
     intimate: input.profile.intimateNotes,
     identity: input.profile.identity,
     us: us?.body.trim() ?? "",
-    recall: recallText(recalled.memories, formats),
+    recall: "",
     time,
-    // Each note with when he wrote it.
-    inner: innerNow.map((n) => fmt(formats, "innerLine", { when: agoText(n.at, input.nowMs, input.timeZone), body: n.body })).join("\n"),
-    innerDaily: innerNow
-      .filter((n) => !n.grok)
-      .map((n) => fmt(formats, "innerLine", { when: agoText(n.at, input.nowMs, input.timeZone), body: n.body }))
-      .join("\n"),
+    inner: innerText,
+    innerDaily: innerText,
     usWhen: us?.body.trim() && us.updatedAt ? dateClockText(us.updatedAt, input.timeZone) : "",
     formats,
     history,
@@ -253,11 +199,15 @@ export async function gatherVoiceParts(input: {
     userImages: images,
     first: input.first,
     voiceTemplate: voicePrompt.body,
-    routing: input.profile.claudeRouting,
-    charterClaude: charterText(input.profile, input.profile.claudePrompt),
-    charterGrok: input.profile.intimateNotes,
+    routing: false,
+    charterClaude: persona,
+    charterGrok: persona,
     personaPlacement: input.placement ?? input.profile.personaPlacement,
     personaAck: input.profile.personaAck,
   };
-  return { parts, recalled, voicePrompt };
+  return { parts, recalled: NO_RECALL, voicePrompt };
 }
+
+/** v7 has no memory library: nothing is recalled (the fields stay for the logs). */
+type Recalled = { memories: Memory[]; scores: Array<{ id: number; score: number }>; by: "none" | "all" };
+const NO_RECALL: Recalled = { memories: [], scores: [], by: "none" };

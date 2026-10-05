@@ -3,7 +3,6 @@ import { callModel } from "../llm.ts";
 import { getProfileData } from "../store.ts";
 import { keepInner } from "../memory.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
-import { voiceInjectFromProfile } from "../../types.ts";
 import { BraceCut } from "./brace-cut.ts";
 import { buildVoiceMessages } from "./pack-build.ts";
 import { reachEngine, takeMark } from "./engine.ts";
@@ -43,12 +42,11 @@ export async function speakFirst(input: {
   lastUserAt: number | null;
 }): Promise<{ text: string; passed: boolean; model: string; ms: number; reason: string | null; engine: "claude" | "grok" }> {
   const { profile } = resolveTalkProfile(undefined, await getProfileData());
-  const inject = voiceInjectFromProfile(profile);
   const { parts, voicePrompt } = await gatherVoiceParts({
     profile,
     nowMs: input.nowMs,
     timeZone: input.timeZone,
-    history: replyHistory(null, inject.history, input.nowMs, input.timeZone),
+    history: replyHistory(null, input.nowMs, input.timeZone),
     userText: "",
     // How long she has been away is said roughly in the note at the end, not as a time.
     first: { quiet: input.lastUserAt ? quietText(input.nowMs - input.lastUserAt) : "很久" },

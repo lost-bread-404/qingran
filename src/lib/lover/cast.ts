@@ -30,7 +30,9 @@ export function parseCast(text: string | undefined | null): Cast {
 export const OTHERS = "其他人";
 
 /** Her 人设 page as a cast: 清然, each character she added, everyone else. */
-export function castOf(profile: Pick<Profile, "leadVoice" | "characters" | "othersVoice">): Cast {
+export function castOf(profile: Pick<Profile, "leadVoice" | "characters" | "othersVoice"> & { castOn?: boolean }): Cast {
+  // 其他角色 off (v7): everything is read in 清然's voice.
+  if (!profile.castOn) return { [LEAD]: profile.leadVoice, [OTHERS]: profile.leadVoice };
   const cast: Cast = { [LEAD]: profile.leadVoice, [OTHERS]: profile.othersVoice };
   for (const c of profile.characters) cast[c.name] = c.voice;
   return cast;

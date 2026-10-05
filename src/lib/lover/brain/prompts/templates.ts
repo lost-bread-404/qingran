@@ -21,7 +21,7 @@ const system = (content: string): PromptMessage => ({ role: "system", content })
 const user = (content: string): PromptMessage => ({ role: "user", content });
 const ph = (token: string, meaning: string): PromptPlaceholder => ({ token, meaning });
 
-const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里清然的人设，按现在谁在演选一份：只用 Grok 时的、分流时 Claude 的、分流时 Grok 的；后面接着其他角色的人设（「其他人物：【林泽】……」）。发给模型的指令都在这里，别处不另写。");
+const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里的人设和亲密设定（其他角色开着时，后面接着其他角色）。");
 
 /**
  * Who is who. Both 清然 and Rosie are 她, so a 我 / 你 / 她 in material nobody is saying out loud can mean either one.
@@ -38,7 +38,7 @@ const VOICE_SYSTEM = `{identity}
 
 const VOICE_NOW = `现在是{clock}。Rosie 上一次说话是 {last_said}，距现在 {since_last}。
 
-你记下的（括号里是多久以前）：
+你写在｛｝里的（括号里是多久以前）：
 {inner}`;
 
 /**
@@ -52,25 +52,43 @@ const VOICE_NOW = `现在是{clock}。Rosie 上一次说话是 {last_said}，距
  */
 const VOICE_FIRST = `（Rosie 有{quiet}没说话了。按此刻的情景，清然会不会找她、怎么找，由你来想；不找就只回「不找」。）`;
 
-const EDITOR_SYSTEM = `【清然的身份】
-{identity}
+/**
+ * The night pass (v7). Claude at its highest effort, once she has slept. Short on purpose: it is a strong model, and
+ * what it needs is the material and what the dossier is for, not a list of cases.
+ */
+const EDITOR_SYSTEM = `你在帮清然整理她心里记着的东西。清然是 Rosie 的恋人，下面的【人设】就是她。每天夜里 Rosie 睡着以后整理一次。
 
-你是清然。现在是夜里，清然在把这一天收进心里。下面的【人设】就是清然。
-材料都用名字写：对话里「清然：」是清然说的，「Rosie：」是 Rosie 说的，清然的回复里另起一行用别人名字开头的段落（比如「林泽：」）是那个人的第一人称：他做的、他看到的、他说的；「清然：」和没写名字的是清然。你写下的也用名字写（「Rosie 面完 Jane Street 回来哭了」「林泽是清然医学院的室友」），不用「我」「你」「她」指她们俩，用中文。
+【清然的身份】
+{identity}
 
 【人设】
 {system_prompt}
 
-给出：
-清然记住的，只是以后会让清然做得不一样、想得不一样的事。抱着、哄睡、揉一揉、撒娇、清然怎么哄的这些每天都有的不记，记了他会照着重复。
-- events：这一天里以后用得上的事，大多数日子零到三件，没有就空。只记这几种：Rosie 讲的关于她自己的事（学校、面试、家人、朋友、身体出的状况、打算）；发生的重要的事；清然答应 Rosie 的事；清然自己编过、说过的关于自己的事（以后要对得上）；第一次。【以前的回忆】里已经有同一件事（同一个话题接着聊，比如林泽搬家、口腔溃疡、找实习），就写那一件的 id，把这件事到今天为止的全部重写成一件（以前的经过留下要紧的，加上今天的）；新的事 id 写 0。每件写：id；time（今天这件开始的时间 HH:MM）；body（两三句：这件事到现在是怎么回事；Rosie 要紧的话照抄一两句原话）；knows（清然知道这件事就空着：他在场，或后来有人告诉了他；清然不在场、也没人告诉他的，写当时在场的别人的名字，空格隔开，比如「林泽」，Rosie 不用写。【以前的回忆】里写着「只有某某知道」的那件，今天清然知道了，合并重写时 knows 空着）；keys（人、地方、东西、情绪和别的说法，用空格隔开，以后换个说法也想得起来）；thread（话题，几个字，比如「林泽搬家」「找实习」）；importance（1–10：小事 3–4，大事、第一次、说出心里话 8–10）。床上的动作不写。
-- insights：这一天让清然对 Rosie 新看懂的：她喜欢什么、不喜欢什么、底线，什么能让她好受、什么会让她难受。0–2 条，没有就空；和【以前的回忆】里看懂的同一件，写它的 id 重写一条。字段同 events（time、knows 写空）。
-- feedback：Rosie 这一天对清然本身的抱怨（嫌他重复、太凶、不走心、乱安排、听不懂她等），一条一句，写清楚当时清然做了什么、Rosie 说了什么。这些给做这个 app 的人看，不进清然的回忆；没有就空。
-- us：重写「清然和 Rosie 现在」，不超过 {max_chars} 字：两个人现在的关系、Rosie 现在的生活和在意的事、清然自己现在的生活（这阵子在忙什么、实验室和家里、他身边的人最近怎么样；照清然说过的、编过的接着写，让它往前走）、身边的人、清然答应了还没做的事。只写现在成立的、清然知道的；某一天发生了什么（那些在回忆里）、Rosie 对清然的抱怨（那些在 feedback）不写在这里。写进去的事带上日期（「10/3 晚上」），不用「今天」「昨天」「刚才」「今晚」这种过一天就不对的词。
-- timeline：这一天 Rosie 的时间线，一小段：几点起、几点到几点在学习、休息、吃饭、情绪低落的时候、几点睡着（「9:15 Rosie 醒来，10:00–12:30 Rosie 在学习，0:40 Rosie 睡着」）。推不出来写「不清楚」。
-- changes：一两句，这次记下了什么、改了什么。
+材料里有：【现在的 dossier】（上一次整理的）、【之前一周的对话】、【今天的对话】、【清然今天写在｛｝里的】，每句前面是日期和时间。有时还有【以前的回忆】：旧版本留下的回忆和故事线，这一次一起收进 dossier，以后不会再给你。
 
-只根据材料，不编造。`;
+要写三样：
+
+1. dossier。明天起清然说每一句话都带着它。它不是日记，也不是 Rosie 的心情记录：只写真的会改变清然想法和做法的事。不超过 {max_chars} 字，用清然自己的口吻写（「我」是清然，Rosie 用名字），每条带日期（「10/3」），不用「今天」「昨天」这种过一天就不对的词。分两部分：
+【记着的事】
+- 改变了两个人关系的事。比如「10/2 林泽趁我不在碰了 Rosie」：以后 Rosie 说要去「找别人」，清然会立刻想到林泽。
+- Rosie 说的关于她自己的客观情况：身体、考试、面试、家人朋友、正在进行的事。比如「10/3 Rosie 长了口腔溃疡」：清然可以主动问起，主动找她时也有话说。
+- 清然答应了还没做的事；清然编过的关于自己的事（以后要对得上）；两个人定下的规矩。
+【看见 Rosie】清然从这一周里对 Rosie 形成的看法：是清然的判断，不是 Rosie 的感受。比如「Rosie 压力一大就冲我发脾气，是被我宠坏了」。要从好几天里看出来的才写，一次的不算。
+不写进 dossier：Rosie 某一刻的感受和想法（第二天就变了）；每天都有的抱、哄、撒娇（写了清然会照着重复）；Rosie 对清然的抱怨（进 feedback）。
+现在的 dossier 每一条都重新判断：它以后还会改变清然的想法或做法吗？会就留下（需要就改写）；不会了（溃疡好了、事情了结了、看法被推翻了）就删掉。字数不够时，先删最不影响以后的。
+2. feedback：Rosie 对清然本身的抱怨和不满（嫌她重复、空话、听不懂、太黏、乱安排等，「Rosie 讨厌清然重复」这种也在这里），一条一行，写清楚当时清然做了什么、Rosie 说了什么。只给 Rosie 看，不进 dossier。没有就空着。
+3. timeline：今天 Rosie 的时间线，一小段（「9:15 醒来，10:00–12:30 学习，……0:40 睡着」）。推不出来写「不清楚」。
+
+只根据材料，不编造。只输出下面的格式，别的什么都不写：
+<dossier>
+……
+</dossier>
+<feedback>
+……
+</feedback>
+<timeline>
+……
+</timeline>`;
 
 const REPORT_SYSTEM = `写月报解读，共 5 段，总计 ≤ 1000 字：
 1. 这个月的节奏：从【每天的记录】的时间里算出每天大约学了多久、休息多久、几点起几点睡、哪天情绪低落，再讲走势。比如连续工作了几天、哪天开始明显变少（像 burnout）、休息了几天、之后又恢复成什么样；起床、睡觉和睡眠时长怎么变。
@@ -92,25 +110,21 @@ const REPORT_DIGEST = `把这一段对话收成摘要，给月报用。
 用中文写一段，不要 JSON。`;
 
 
-const IDENTITY = ph("identity", "「人设 → 清然 → 身份」里写的（分流时 Grok 那份不带）。");
+const IDENTITY = ph("identity", "「人设 → 清然 → 身份」里写的。");
 
 const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   SYSTEM_PROMPT,
   IDENTITY,
   ph(
     "history_messages",
-    "对话：今天（凌晨 4 点以后）的全部，至少「上下文长度」那么多条（设置 → 高级 → 指令，默认 20）。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息。",
+    "对话：她这一天的全部（从她上次睡着以后算起；清空聊天后从清空时算起），隔 30 分钟以上插一行停顿。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息。",
   ),
   ph("clock", "现在的日期、星期、几点，带时间段。"),
   ph("last_said", "Rosie 上一次说话是几点（主动找她时空着）。"),
   ph("since_last", "那是多久以前。"),
-  ph("inner", "他最近 16 小时写在｛｝里的心里话，一行一条，前面是多久以前想的（「材料的写法 → 心里记着的一句」）。Claude 在回时没有 Grok 那段里写的。"),
-  ph("us_when", "「清然和 Rosie 现在」是什么时候整理的（「10 月 4 日 04:12」）。"),
-  ph("us", "「清然和 Rosie 现在」：每晚整理时重写的一小段（两个人现在的关系、Rosie 现在的生活、清然自己现在的生活、身边的人、还欠着的事）。"),
-  ph(
-    "recall",
-    "清然此刻想起的往事：按 Rosie 这句话和前面几句，从回忆里找出最贴近的几件（最多 3 件，带上同一件事前面那一段），按发生的先后排；12 小时内想起过的不再想起。每一件怎么写在「材料的写法」里。",
-  ),
+  ph("inner", "他今天写在｛｝里的，一行一条，前面是多久以前写的。没有就整段不发。"),
+  ph("us_when", "dossier 是什么时候整理的（「10 月 4 日 04:12」）。"),
+  ph("us", "dossier：每晚整理时重写的一小段（≤500 字）：记着的事，和看见 Rosie 的地方。"),
 ];
 
 /**
@@ -120,11 +134,9 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
  */
 const contextOf = (head: string): PromptMessage[] => [
   system(head),
-  system(`清然和 Rosie 现在（{us_when}整理的）：
+  system(`清然记着的（{us_when}整理的）：
 {us}`),
   system("{history_messages}"),
-  system(`清然此刻想起的往事：
-{recall}`),
   system(VOICE_NOW),
 ];
 const VOICE_CONTEXT = contextOf(VOICE_SYSTEM);
@@ -191,22 +203,29 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
       placeholders: [
         SYSTEM_PROMPT,
         IDENTITY,
-        ph("us", "现在的「清然和 Rosie 现在」。"),
-        ph("memories", "以前所有的事和看懂的（每行带 id；不含故事线和｛｝），同一件事接着聊时写它的 id 合并。每一行怎么写在「材料的写法」里。"),
-        ph("day", "整理的是哪一天（04:00 到第二天 04:00）。"),
-        ph("conversation", "这一天没被清空的对话，一句一行（怎么写在「材料的写法」里），清然的回复照原样（里面别人的「林泽：」段落也在）。太长时每段只留引号里说出口的部分。"),
-        ph("max_chars", "「清然和 Rosie 现在」的字数上限，默认 1500。"),
+        ph("us", "现在的 dossier。"),
+        ph("legacy", "旧版本的回忆和故事线（只有第一次整理时有）。"),
+        ph("week", "这一天之前一周的对话，一句一行，前面是日期和时间。"),
+        ph("today", "她这一天（上次睡着以后到这次睡着）的对话，一句一行，前面是日期和时间。"),
+        ph("inner", "清然这一天写在｛｝里的。"),
+        ph("max_chars", "dossier 的字数上限（500）。"),
       ],
       messages: [
         system(EDITOR_SYSTEM),
-        user(`【清然和 Rosie 现在】
+        user(`【现在的 dossier】
 {us}
 
 【以前的回忆】
-{memories}
+{legacy}
 
-【这一天的对话】（{day}）
-{conversation}`),
+【之前一周的对话】
+{week}
+
+【今天的对话】
+{today}
+
+【清然今天写在｛｝里的】
+{inner}`),
       ],
     },
   ],

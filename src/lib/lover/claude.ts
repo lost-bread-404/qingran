@@ -51,7 +51,11 @@ function blocksOf(content: XaiMessage["content"]): Block[] {
  * with several blocks, so a block once sent stays the same block next turn (the cache keeps working).
  * Cached: the system prompt, and everything up to his last reply.
  */
-export function claudeBody(messages: XaiMessage[], model: string, opts: { stream: boolean; effort?: string | null }): Record<string, unknown> {
+export function claudeBody(
+  messages: XaiMessage[],
+  model: string,
+  opts: { stream: boolean; effort?: string | null; maxTokens?: number },
+): Record<string, unknown> {
   const system: Block[] = [];
   let i = 0;
   for (; i < messages.length && messages[i]!.role === "system"; i += 1) system.push(...blocksOf(messages[i]!.content));
@@ -74,12 +78,13 @@ export function claudeBody(messages: XaiMessage[], model: string, opts: { stream
   }
   const body: Record<string, unknown> = {
     model,
-    max_tokens: CLAUDE_MAX_TOKENS,
+    max_tokens: Math.max(CLAUDE_MAX_TOKENS, opts.maxTokens ?? 0),
     messages: talk,
     stream: opts.stream,
   };
   if (system.length) body.system = system;
-  if (opts.effort === "low" || opts.effort === "medium" || opts.effort === "high") body.output_config = { effort: opts.effort };
+  if (opts.effort === "low" || opts.effort === "medium" || opts.effort === "high" || opts.effort === "xhigh" || opts.effort === "max")
+    body.output_config = { effort: opts.effort };
   return body;
 }
 

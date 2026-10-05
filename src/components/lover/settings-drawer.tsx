@@ -13,7 +13,6 @@ import {
   brainListLogs,
   brainListPrompts,
   brainListVoiceModels,
-  brainEngineMode,
   brainRestorePrompt,
   brainRollbackPrompt,
   brainSavePrompt,
@@ -25,12 +24,11 @@ import { HearingSensePanel } from "@/components/lover/hearing-sense-panel";
 import { StatePanel } from "@/components/lover/state-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
 import { DossierPanel } from "@/components/lover/dossier-panel";
-import { MemoryPanel } from "@/components/lover/memory-panel";
+import { NightPanel } from "@/components/lover/night-panel";
 import { BrainSpendPage } from "@/components/lover/brain-spend-page";
 import { ReplayPanel } from "@/components/lover/replay-panel";
 import { VoicePanel } from "@/components/lover/voice-panel";
-import { StorylinePanel } from "@/components/lover/storyline-panel";
-import { CharactersPanel, VoiceSelect, useVoiceChoices } from "@/components/lover/characters-panel";
+import { CharactersPanel, useVoiceChoices } from "@/components/lover/characters-panel";
 import { ProfileHistory, VersionConflict } from "@/components/lover/profile-history";
 import { saveProfilePatch } from "@/lib/lover/room";
 import type { FieldRevs, VersionedField } from "@/lib/lover/profile-patch";
@@ -169,8 +167,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [voiceEffort, setVoiceEffort] = useState<VoiceEffort>(profile.voiceEffort);
   const [voiceModels, setVoiceModels] = useState<VoiceModelOption[] | null>(null);
   const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
-  const [claudeModels, setClaudeModels] = useState<Array<{ id: string; blurb: string; stats: VoiceModelStat | null }>>([]);
-  const [engineMode, setEngineModeView] = useState<"claude" | "grok" | null>(null);
   const [promptModels, setPromptModels] = useState(profile.promptModels);
   const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
   const [brainOn, setBrainOn] = useState(profile.brainOn);
@@ -182,8 +178,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
   const [voiceTemperature, setVoiceTemperature] = useState(profile.voiceTemperature);
   const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
-  const [claudeDraft, setClaudeDraft] = useState(profile.claudePrompt);
-  useEffect(() => setClaudeDraft(profile.claudePrompt), [profile.claudePrompt]);
   const [identityDraft, setIdentityDraft] = useState(profile.identity);
   const identityDirty = useRef(false);
   const intimateDirty = useRef(false);
@@ -226,15 +220,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     setPromptError(null);
     setCallById({});
     setClearArmed(false);
-    setEngineModeView(null);
-    void brainEngineMode()
-      .then((res) => setEngineModeView(res.mode))
-      .catch(() => setEngineModeView(null));
     void brainListVoiceModels()
       .then((res) => {
         setVoiceModels(res.models);
         setVoiceStats(res.stats ?? []);
-        setClaudeModels(res.claude ?? []);
       })
       .catch(() => {
         setVoiceModels([]);
@@ -600,11 +589,11 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <SettingsLink label="人设" hint="清然和其他角色是谁、用什么声音（可以试听）。每一轮回复都带着。" onClick={() => setPage("who")} />
-            <SettingsLink label="记忆" hint="现在的你们、回忆。他说话前会想起相关的那几件。" onClick={() => setPage("heart")} />
-            <SettingsLink label="回复" hint="谁在回（Claude / Grok）、用哪个模型、每轮带多少对话、温度。" onClick={() => setPage("reply")} />
+            <SettingsLink label="记忆" hint="dossier（他记着的）和你的抱怨。每晚你睡着后整理。" onClick={() => setPage("heart")} />
+            <SettingsLink label="回复" hint="Grok 用哪个模型、回复多长、温度。" onClick={() => setPage("reply")} />
             <SettingsLink label="主动消息" hint="你不说话一阵后，他会不会来找你。" onClick={() => setPage("reach")} />
             <SettingsLink label="声音和听力" hint="他说话的快慢、静音；打电话时怎么听你。" onClick={() => setPage("sound")} />
-            <SettingsLink label="数据" hint="故事线（记忆的起点）、导出、导入、清空聊天、退出。" onClick={() => setPage("data")} />
+            <SettingsLink label="数据" hint="导出、导入、清空聊天、退出。" onClick={() => setPage("data")} />
             <SettingsLink label="高级" hint="发给模型的每一个字、调用记录、费用、听力参数。调试用。" onClick={() => setPage("advanced")} />
           </div>
         </div>
@@ -621,9 +610,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "who" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
-            <p className="text-xs text-subtle">一个模型演所有人。这一页的每个字每轮回复都带着：清然的身份、人设、亲密设定，再接着下面每个角色的人设。别人出场时，他那一段（「林泽：」开头）用他的声线念。</p>
+            <p className="text-xs text-subtle">这一页的每个字每轮都带着：身份、人设、亲密设定；「其他角色」开着时再接着他们。清然的声音固定是 eve。</p>
             <p className="font-display text-lg">清然</p>
-            <VoiceSelect label="声线" inCall={callPhase != null} value={profile.leadVoice} voices={voiceChoices} onChange={(voice) => persistProfile({ leadVoice: voice })} />
             <IdentityField
               value={identityDraft}
               paused={conflict?.field === "identity"}
@@ -652,7 +640,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               />
             ) : null}
             <label className="flex flex-col gap-2">
-              <span className="text-sm">人设（只用 Grok 时）</span>
+              <span className="text-sm">人设</span>
           <Textarea
             value={draft}
             onChange={(e) => {
@@ -683,36 +671,10 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               onKeepMine={() => persistProfile({ systemPrompt: draft.trim() })}
             />
           ) : null}
-          <p className="mt-2 text-xs text-subtle">「回复 → Claude 分流」关着时，全部由 Grok 回，发给他的就是这一份（加上身份）。你们之间发生过的事写在「记忆 → 故事线」里。</p>
+          <p className="mt-2 text-xs text-subtle">清然是谁、怎么爱 Rosie、怎么说话（语气标签、｛｝的写法也写在这里）。每一轮都带着，接在身份后面。</p>
             </label>
             <label className="flex flex-col gap-2">
-              <span className="text-sm">人设（分流时 · Claude）</span>
-              <Textarea
-                value={claudeDraft}
-                onChange={(e) => setClaudeDraft(e.target.value)}
-                onBlur={() => {
-                  if (conflict?.field === "claudePrompt") return;
-                  const next = claudeDraft.trim();
-                  if (next !== profile.claudePrompt.trim()) persistProfile({ claudePrompt: next });
-                }}
-                maxLength={8000}
-                className="min-h-48 resize-none font-mono leading-relaxed"
-                placeholder="分流开着时，Claude 演日常的清然用的人设"
-              />
-              <p className="text-xs text-subtle">分流开着、Claude 在回时发给它的就是这一份（加上身份）。交给 Grok 的记号〔接〕〔转〕也写在这里。</p>
-              {conflict?.field === "claudePrompt" ? (
-                <VersionConflict
-                  latest={conflict.latest}
-                  onUseLatest={() => {
-                    setClaudeDraft(conflict.latest);
-                    setConflict(null);
-                  }}
-                  onKeepMine={() => persistProfile({ claudePrompt: claudeDraft.trim() })}
-                />
-              ) : null}
-            </label>
-            <label className="flex flex-col gap-2">
-              <span className="text-sm">人设（分流时 · Grok）</span>
+              <span className="text-sm">亲密设定</span>
               <Textarea
                 value={intimateDraft}
                 onChange={(e) => {
@@ -730,9 +692,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 }}
                 maxLength={8000}
                 className="min-h-36 resize-none leading-relaxed"
-                placeholder="分流开着时，Grok 演床上的清然用的人设"
+                placeholder="清然在床上是什么样的人。每一轮都带着，接在人设后面。"
               />
-              <p className="text-xs text-subtle">分流开着、Grok 在回时发给它的就是这一份（不带身份）。交回 Claude 的记号〔回〕也写在这里。</p>
+              <p className="text-xs text-subtle">每一轮都带着，接在人设后面。</p>
               {conflict?.field === "intimateNotes" ? (
                 <VersionConflict
                   latest={conflict.latest}
@@ -745,14 +707,21 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
               ) : null}
             </label>
-            <p className="font-display text-lg">其他角色</p>
-            <CharactersPanel
-              characters={profile.characters}
-              othersVoice={profile.othersVoice}
-              voices={voiceChoices}
-              inCall={callPhase != null}
-              onSave={(patch) => persistProfile(patch)}
-            />
+            <label className="flex min-h-11 items-center justify-between gap-3">
+              <span className="font-display text-lg">其他角色</span>
+              <input type="checkbox" checked={profile.castOn} onChange={(e) => persistProfile({ castOn: e.target.checked })} />
+            </label>
+            {profile.castOn ? (
+              <CharactersPanel
+                characters={profile.characters}
+                othersVoice={profile.othersVoice}
+                voices={voiceChoices}
+                inCall={callPhase != null}
+                onSave={(patch) => persistProfile(patch)}
+              />
+            ) : (
+              <p className="text-xs text-subtle">关着：不跟他提别人，所有话都用清然的声音念。</p>
+            )}
             <VoicePanel inCall={callPhase != null} />
           </div>
         </div>
@@ -834,52 +803,19 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                     persistProfile({ injectLongterm: next });
                   }}
                 />
-                <span className="text-sm">回复时带上「现在的你们」和想起来的回忆</span>
+                <span className="text-sm">回复时带上 dossier</span>
               </label>
-              <p className="px-1 pb-1 text-xs text-subtle">关掉「运行记忆」：他只靠人设和今天的对话说话，不整理、不主动找你。</p>
+              <p className="px-1 pb-1 text-xs text-subtle">关掉「运行记忆」：他只靠人设和今天的对话说话，夜里不整理、不主动找你。</p>
             </div>
             <DossierPanel maxChars={profile.dossierMaxChars} onMaxChars={(n) => persistProfile({ dossierMaxChars: n })} />
-            <MemoryPanel />
+            <NightPanel />
           </div>
         </div>
       ) : page === "reply" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
             <div className="flex flex-col gap-2 rounded-md bg-surface-2 px-4 py-3">
-              <label className="flex min-h-11 items-center justify-between gap-3">
-                <span className="text-sm">Claude 分流（平时 Claude 回，亲热时交给 Grok）</span>
-                <input
-                  type="checkbox"
-                  checked={profile.claudeRouting}
-                  onChange={(e) => persistProfile({ claudeRouting: e.target.checked })}
-                />
-              </label>
-              <p className="text-xs text-subtle">关掉就全部由 Grok 回，跟分流之前一样。三份人设都在「人设」页。</p>
-              <p className="text-sm">
-                现在在回你的：{engineMode == null ? "…" : engineMode === "claude" ? "Claude" : "Grok"}
-              </p>
-              <p className="text-xs text-subtle">
-                平时 Claude 回，亲热时 Claude 交给 Grok，亲密的场面结束 Grok 再交回来（怎么交接在 高级 → 指令 → 谁来演）。这里只显示，不能手动换。
-              </p>
-              <p className="pt-1 text-sm">Claude 用哪个模型</p>
-              {(claudeModels.length ? claudeModels : [{ id: profile.claudeModel, blurb: "", stats: null }]).map((m) => (
-                <label key={m.id} className="flex min-h-11 items-center gap-3">
-                  <input
-                    type="radio"
-                    name="claude-model"
-                    checked={profile.claudeModel === m.id}
-                    onChange={() => persistProfile({ claudeModel: m.id })}
-                  />
-                  <span className="text-sm">
-                    {m.id}
-                    <span className="block text-xs text-subtle">
-                      {[m.blurb, m.stats?.avgMs != null ? `平均 ${(m.stats.avgMs / 1000).toFixed(1)} 秒（${m.stats.n} 次）` : "还没用过"]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
-                  </span>
-                </label>
-              ))}
+              <p className="text-xs text-subtle">白天全部由 Grok 回；夜里你睡着后，Claude（Opus 最高档）整理 dossier。</p>
               <label className="flex items-center justify-between gap-3">
                 <span className="text-sm">回复最长（字，0 = 不限）</span>
                 <input
@@ -895,26 +831,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   className="min-h-11 w-20 rounded-md bg-surface px-2 text-right text-sm tabular-nums"
                 />
               </label>
-              <p className="text-xs text-subtle">到这个字数时，他说完手上这一句就停（Claude 和 Grok 都是）。</p>
-              <p className="pt-1 text-sm">Claude 想多久再回</p>
-              <div className="flex gap-2">
-                {(
-                  [
-                    ["low", "快（几秒）"],
-                    ["medium", "中"],
-                    ["high", "慢、想得最深"],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => persistProfile({ claudeEffort: id })}
-                    className={`min-h-11 flex-1 rounded-md px-2 text-sm ${profile.claudeEffort === id ? "bg-fg text-bg" : "bg-surface"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <p className="text-xs text-subtle">到这个字数时，他说完手上这一句就停。</p>
               <p className="pt-1 text-sm">Grok 用哪个模型</p>
               <select
                 value={voiceModel}
@@ -1094,7 +1011,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "data" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-            <StorylinePanel storyline={profile.storyline} onSaved={(storyline) => onPatch({ storyline })} />
             <StatePanel />
             <LogoutButton />
             {!clearArmed ? (

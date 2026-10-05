@@ -1,15 +1,12 @@
-import { charterText, lockedProfile, voiceInjectFromProfile } from "../../types.ts";
+import { lockedProfile, personaText } from "../../types.ts";
 import { now } from "../clock.ts";
-import { getMeta, getProfileData, getProfilePrompt } from "../store.ts";
-import { localDay } from "../time.ts";
+import { getMeta, getProfileData } from "../store.ts";
 import { resolveTz } from "../tz.ts";
 import { isPromptKey, promptSpec, type PromptKey } from "./catalog.ts";
 import { parsePromptBody, renderVariant, type RenderedMessage } from "./doc.ts";
 import { buildVoiceMessages, voiceHistoryMessages, voiceVars } from "../voice/pack-build.ts";
 import { gatherVoiceParts, replyHistory } from "../voice/pack.ts";
-import { loadFormats } from "./store.ts";
 import { dossierTextForModel } from "../dossier.ts";
-import { listMemories, memoriesWithIds } from "../memory.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
 
 export type PromptPreview = {
@@ -27,20 +24,15 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
   const [meta, profileData] = await Promise.all([getMeta(), getProfileData()]);
   const tz = resolveTz(meta.timeZone);
   const profile = resolveTalkProfile(undefined, profileData).profile;
-  const inject = voiceInjectFromProfile(profile);
   const { parts } = await gatherVoiceParts({
     profile,
     nowMs: at,
     timeZone: tz,
-    history: replyHistory(null, inject.history, at, tz),
+    history: replyHistory(null, at, tz),
     userText,
     first,
   });
-  // What goes out now: to Claude or to Grok, whichever is playing her.
-  const { getEngineMode } = await import("../voice/engine.ts");
-  const playing = await getEngineMode();
-  const engine = parts.routing ? playing : ("grok" as const);
-  const withDraft = { ...parts, engine, voiceTemplate: body ?? parts.voiceTemplate };
+  const withDraft = { ...parts, engine: "grok" as const, voiceTemplate: body ?? parts.voiceTemplate };
   const historyText =
     voiceHistoryMessages(parts.history, parts.history.length, parts.formats)
       .map((message) => `${message.role}：${message.content}`)
@@ -48,35 +40,28 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
   return {
     slots: { ...voiceVars(withDraft), history_messages: historyText },
     messages: buildVoiceMessages(withDraft),
-    note: `${parts.routing ? `分流开着，现在是 ${engine === "claude" ? "Claude（用分流时 Claude 的人设，Grok 那几段收成一行）" : "Grok（用分流时 Grok 的人设）"} 在回。` : "分流关着，全部由 Grok 回（用只用 Grok 时的人设）。"}${first ? "主动找她：多久没说话用占位。" : "没有正在说的这一句，用「在吗」占位；想起来的事按最近几句找。"}`,
+    note: first ? "主动找她：多久没说话用占位。" : "没有正在说的这一句，用「在吗」占位。",
   };
 }
 
 async function editorSlots(): Promise<Record<string, string>> {
-  const tz = resolveTz((await getMeta()).timeZone);
-  const at = now();
-  const [us, charter, profileData, memories, formats] = await Promise.all([
-    dossierTextForModel(),
-    getProfilePrompt(),
-    getProfileData(),
-    listMemories(),
-    loadFormats(),
-  ]);
+  const [us, profileData] = await Promise.all([dossierTextForModel(), getProfileData()]);
   const profile = lockedProfile(profileData);
   return {
-    system_prompt: charterText(profile, charter),
+    system_prompt: personaText(profile),
     identity: profile.identity.trim(),
     us: us.trim(),
-    memories: memoriesWithIds(memories.filter((m) => m.source === "night" || m.source === "rosie").slice(-200), formats),
-    day: localDay(at, tz),
-    conversation: "（要等这次整理才有：这一天没被清空的对话）",
+    legacy: "",
+    week: "（整理时才有：之前一周的对话，带时间）",
+    today: "（整理时才有：这一天的对话，带时间）",
+    inner: "",
     max_chars: String(profile.dossierMaxChars),
   };
 }
 
 async function slotsFor(key: PromptKey): Promise<{ slots: Record<string, string>; note: string }> {
   if (key === "editor") {
-    return { slots: await editorSlots(), note: "整理时带上这一天的对话，和以前所有的事、看懂的（同一件事接着聊就合并进去）。" };
+    return { slots: await editorSlots(), note: "整理时带上现在的 dossier、这一天和之前一周的对话（带时间）。用 Claude Opus 最高档。" };
   }
   if (key === "report") {
     return {

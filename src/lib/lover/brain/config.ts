@@ -6,7 +6,7 @@ export type ModelClass =
   | "DEEP_THINKER"
   | "AGENT";
 
-export type Effort = "none" | "low" | "medium" | "high" | "xhigh" | null;
+export type Effort = "none" | "low" | "medium" | "high" | "xhigh" | "max" | null;
 
 export const MODEL_CLASSES: Record<ModelClass, { model: string; effort: Effort }> = {
   REALTIME: { model: "grok-4.20-0309-non-reasoning", effort: null },
@@ -72,7 +72,7 @@ export const ROUTES: Record<
 > = {
   voice: { cls: "FAST_THINKER", effort: "low", timeoutMs: 60_000, maxOutput: 2_000 },
   report: { cls: "ANALYST", timeoutMs: 120_000, maxOutput: 4_000 },
-  editor: { cls: "ANALYST", timeoutMs: 240_000, maxOutput: 12_000 },
+  editor: { cls: "ANALYST", timeoutMs: 250_000, maxOutput: 32_000 },
   replay: { cls: "FAST_THINKER", timeoutMs: 60_000, maxOutput: 4_000 },
 };
 
@@ -87,6 +87,15 @@ export const VOICE_IO = {
 };
 
 export const DAY_BOUNDARY_HOUR = 4;
+/**
+ * v7: her day ends when she falls asleep: a silence at least this long that runs past SLEEP_MARK_HOUR (local).
+ * The day reply starts again after it, and the night pass runs on the day before it (src/lib/lover/brain/sleep.ts).
+ */
+export const SLEEP_GAP_MS = 2 * 60 * 60_000;
+export const SLEEP_MARK_HOUR = 5;
+/** The night pass: Claude at its highest effort (falls back to high once if that ran out of time). */
+export const NIGHT_MODEL = "claude-opus-5-5";
+export const NIGHT_EFFORT = "max" as const;
 export const HISTORY_WINDOW = 20;
 export const HISTORY_WINDOW_MIN = 0;
 export const HISTORY_WINDOW_MAX = 80;
@@ -106,10 +115,10 @@ export function clampVoiceTemperature(value: unknown, fallback = VOICE_TEMPERATU
   if (!Number.isFinite(n)) return fallback;
   return Math.max(VOICE_TEMPERATURE_MIN, Math.min(VOICE_TEMPERATURE_MAX, Math.round(n * 20) / 20));
 }
-/** 「清然和 Rosie 现在」 is short: what holds now. The moments themselves live in the memory, without a cap. */
-export const DOSSIER_MAX_CHARS = 1500;
-export const DOSSIER_MAX_CHARS_MIN = 500;
-export const DOSSIER_MAX_CHARS_MAX = 3000;
+/** The dossier (v7): at most 500 characters, only what still changes how 清然 thinks and acts. */
+export const DOSSIER_MAX_CHARS = 500;
+export const DOSSIER_MAX_CHARS_MIN = 200;
+export const DOSSIER_MAX_CHARS_MAX = 500;
 
 export function clampDossierMaxChars(value: unknown, fallback = DOSSIER_MAX_CHARS): number {
   const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;

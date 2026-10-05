@@ -68,11 +68,22 @@ function lockCast(raw: { voiceCast?: string; leadVoice?: string; characters?: un
  * The persona the model is given: 清然's, then everyone else she wrote (「林泽」 and who he is). One model plays them
  * all, so they are always there; whether one of them is in the scene the talk itself says.
  */
-export function charterText(profile: Pick<Profile, "systemPrompt" | "characters">, lead = profile.systemPrompt): string {
-  const others = profile.characters
-    .filter((c) => c.persona.trim())
-    .map((c) => `【${c.name}】\n${c.persona.trim()}`);
-  return [lead.trim(), others.length ? `其他人物：\n\n${others.join("\n\n")}` : ""].filter(Boolean).join("\n\n");
+export function charterText(profile: Pick<Profile, "systemPrompt" | "characters"> & { castOn?: boolean }, lead = profile.systemPrompt): string {
+  const others = profile.castOn
+    ? profile.characters.filter((c) => c.persona.trim()).map((c) => `【${c.name}】\n${c.persona.trim()}`)
+    : [];
+  return [lead.trim(), others.length ? `${CAST_RULE}\n\n其他人物：\n\n${others.join("\n\n")}` : ""].filter(Boolean).join("\n\n");
+}
+
+/** Sent only with 其他角色 on (the one line about playing other people). */
+export const CAST_RULE = "别人出场时另起一段，用「名字：」开头来演他；你只知道你在场时看到、听到的。";
+
+/**
+ * Everything the day reply is told about who 清然 is (v7): her persona, then her intimate side, then (其他角色 on)
+ * the others. 身份 goes before it in the template.
+ */
+export function personaText(profile: Pick<Profile, "systemPrompt" | "intimateNotes" | "characters" | "castOn">, lead = profile.systemPrompt): string {
+  return charterText(profile, [lead.trim(), profile.intimateNotes.trim()].filter(Boolean).join("\n\n"));
 }
 
 export type Profile = {
@@ -147,6 +158,11 @@ export type Profile = {
   characters: Character[];
   /** The voice of anyone in a scene who is not in `characters` (a waiter, a stranger). */
   othersVoice: string;
+  /**
+   * 其他角色 on (人设 page): their personas, the 「名字：」 rule and their voices go into the reply. Off: not a word
+   * about them is sent and every line is read in 清然's voice (v7, 10/4).
+   */
+  castOn: boolean;
   /** With the persona as the first message: his line right after it (a fixed line, no model call). */
   personaAck: string;
   /** In a call, what tapping the space left / right of the hang-up button adds to what she says (empty: nothing). */
@@ -232,6 +248,7 @@ export const DEFAULT_PROFILE: Profile = {
   leadVoice: "eve",
   characters: [],
   othersVoice: "eve",
+  castOn: false,
   personaAck: "嗯。",
   tapLeft: "嗯～",
   tapRight: "哼",
@@ -283,6 +300,7 @@ type LooseProfile = Partial<Profile> & {
   leadVoice?: string;
   characters?: unknown;
   othersVoice?: string;
+  castOn?: boolean;
   personaAck?: string;
   tapLeft?: string;
   tapRight?: string;
@@ -305,7 +323,7 @@ export function lockedProfile(input?: unknown): Profile {
     captureAudio: raw.debugHearing !== false,
     voiceModel: pickVoiceModel(raw),
     voiceEffort: pickVoiceEffort(raw),
-    claudeRouting: raw.claudeRouting !== false,
+    claudeRouting: false,
     claudePrompt: typeof raw.claudePrompt === "string" ? raw.claudePrompt.slice(0, 8000) : "",
     claudeModel: typeof raw.claudeModel === "string" && isClaudeModel(raw.claudeModel.trim()) ? raw.claudeModel.trim().slice(0, 80) : DEFAULT_CLAUDE_MODEL,
     grokReturnMin:
@@ -334,6 +352,9 @@ export function lockedProfile(input?: unknown): Profile {
     brainOn: raw.brainOn !== false,
     personaPlacement: raw.personaPlacement === "first_user" ? "first_user" : "system",
     ...lockCast(raw),
+    // 清然 is always eve (v7).
+    leadVoice: "eve",
+    castOn: raw.castOn === true,
     personaAck: typeof raw.personaAck === "string" && raw.personaAck.trim() ? raw.personaAck.trim().slice(0, 200) : "嗯。",
     tapLeft: typeof raw.tapLeft === "string" ? raw.tapLeft.trim().slice(0, 200) : "嗯～",
     tapRight: typeof raw.tapRight === "string" ? raw.tapRight.trim().slice(0, 200) : "哼",

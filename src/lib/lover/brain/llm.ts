@@ -273,7 +273,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
     const sent = isClaude
       ? {
           res: await claudeFetch(
-            claudeBody(apiMessages as XaiMessage[], resolved.model, { stream: false, effort: resolved.effort }),
+            claudeBody(apiMessages as XaiMessage[], resolved.model, { stream: false, effort: resolved.effort, maxTokens: resolved.maxOutput }),
             Math.max(resolved.timeoutMs, CLAUDE_TIMEOUT_MS),
           ),
           cred: { kind: "api" as const },
