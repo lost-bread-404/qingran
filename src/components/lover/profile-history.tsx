@@ -94,7 +94,6 @@ export function ProfileHistory({
 
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-3">
-      <p className="text-xs text-subtle">人设、亲密设定和身份每次记下都会留一份。可以看是哪个客户端写的，也可以恢复。</p>
       <div className="flex gap-2">
         {FIELDS.map((item) => (
           <button

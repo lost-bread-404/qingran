@@ -158,11 +158,6 @@ export async function addFeedback(rows: Array<{ day: string; at: number; body: s
   }
 }
 
-export async function deleteMemory(id: number): Promise<void> {
-  const db = await sql();
-  await db.query(`delete from qr_memories where id = $1`, [id]);
-}
-
 // ---------- marks ----------
 
 export async function getMark(key: string): Promise<string | null> {

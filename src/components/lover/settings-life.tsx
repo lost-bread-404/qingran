@@ -93,7 +93,7 @@ export function ReachPanel() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-xs text-subtle">你没说话 45 分钟、3 小时、8 小时、20 小时（之后每天一次）时，他会想一下要不要来找你，想就写一条，不想就不发。这里只是开关和记录。</p>
+      <p className="text-xs text-subtle">你 45 分钟、3 小时、8 小时、20 小时没说话时，他会想要不要来找你。</p>
       {error ? <p className="text-sm text-live">{error}</p> : null}
       {note ? <p className="text-sm text-subtle">{note}</p> : null}
       <label className="flex min-h-11 items-center gap-3">

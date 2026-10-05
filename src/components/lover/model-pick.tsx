@@ -68,7 +68,6 @@ export function ModelPick({
           ) : null,
         )}
       </select>
-      {options.find((m) => m.id === model)?.blurb ? <p className="text-xs text-subtle">{options.find((m) => m.id === model)!.blurb}</p> : null}
       {efforts.length ? (
         <div className="flex gap-2">
           {efforts.map((id) => (

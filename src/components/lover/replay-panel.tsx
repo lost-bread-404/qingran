@@ -80,9 +80,6 @@ export function ReplayPanel({ profile }: { profile: Profile }) {
 
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-      <p className="text-xs text-subtle">
-        用当时的对话、现在的你们、他想起来的回忆，各生成一次。不写入聊天，也不改他的记忆。同一句可以多跑几次看稳不稳。
-      </p>
       {error ? <p className="text-sm text-live">{error}</p> : null}
       <label className="flex flex-col gap-1">
         <span className="text-sm">哪一句</span>

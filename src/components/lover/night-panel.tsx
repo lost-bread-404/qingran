@@ -18,9 +18,6 @@ export function NightPanel() {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-xs text-subtle">
-        每晚你睡着后（夜里安静满 2 小时），Claude 读昨天的 dossier、今天和之前一周的对话，重写 dossier（≤500 字），记下你的抱怨和今天的时间线。
-      </p>
       <Button
         variant="outline"
         disabled={busy}

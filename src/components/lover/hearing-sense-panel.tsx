@@ -159,9 +159,6 @@ export function HearingSensePanel({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-display text-lg font-medium tracking-tight">听力灵敏度</p>
-          <p className="mt-1 text-xs text-subtle">
-            每一类先调总的。点开「具体参数」才能改里面的数。改了数，总的就变成自定义；再把总的滑回低、中、高，会盖掉里面的数。同一个数出现在两类里时，改一边，另一边跟着变。下一句生效。
-          </p>
           <p className="mt-1 text-xs text-subtle">{formatSenseLine(sense)}</p>
         </div>
         <button
@@ -502,7 +499,6 @@ export function HearingSensePanel({
         >
           {previewBusy ? "正在用已有录音试…" : "用已有录音试一次"}
         </Button>
-        <p className="text-xs text-subtle">取最近 50 条已标注录音，只用存下来的韵律在本地重算，不调用接口。</p>
         {preview ? <p className="text-xs text-fg">{preview}</p> : null}
       </Category>
     </div>

@@ -206,7 +206,7 @@ export function CharactersPanel({
       </Button>
       <div className="flex flex-col gap-1">
         <VoiceSelect label="其他人的声线" inCall={inCall} value={othersVoice} voices={voices} onChange={(voice) => onSave({ othersVoice: voice })} />
-        <p className="text-xs text-subtle">没写在这里、临时出场的人（服务员、路人）用这个声音。</p>
+        <p className="text-xs text-subtle">临时出场的人用这个声音。</p>
       </div>
     </div>
   );

@@ -531,9 +531,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         </button>
         <div className="min-w-0 flex-1">
           <p className="font-display text-lg font-medium tracking-tight">{pageTitle[page]}</p>
-          <p className="text-xs text-subtle">
-            {page === "home" ? "点进去改。改完自己会记下。" : "停一下就记下。"}
-          </p>
         </div>
         {savedFlash ? <span className="text-xs text-subtle">已保存</span> : null}
         {saveError ? <span className="text-xs text-live">{saveError}</span> : null}
@@ -544,21 +541,20 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       {page === "home" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
-            <SettingsLink label="人设" hint="清然和其他角色是谁、用什么声音（可以试听）。每一轮回复都带着。" onClick={() => setPage("who")} />
-            <SettingsLink label="记忆" hint="dossier（他记着的）和你的抱怨。每晚你睡着后整理。" onClick={() => setPage("heart")} />
-            <SettingsLink label="回复" hint="Grok 用哪个模型、回复多长、温度。" onClick={() => setPage("reply")} />
-            <SettingsLink label="主动消息" hint="你不说话一阵后，他会不会来找你。" onClick={() => setPage("reach")} />
-            <SettingsLink label="声音和听力" hint="他说话的快慢、静音；打电话时怎么听你。" onClick={() => setPage("sound")} />
-            <SettingsLink label="数据" hint="导出、导入、清空聊天、退出。" onClick={() => setPage("data")} />
-            <SettingsLink label="高级" hint="发给模型的每一个字、调用记录、费用、听力参数。调试用。" onClick={() => setPage("advanced")} />
+            <SettingsLink label="人设" hint="清然、其他角色、声音" onClick={() => setPage("who")} />
+            <SettingsLink label="记忆" hint="dossier、夜里整理、你的抱怨" onClick={() => setPage("heart")} />
+            <SettingsLink label="回复" hint="模型、长度、温度" onClick={() => setPage("reply")} />
+            <SettingsLink label="主动消息" hint="开关、记录" onClick={() => setPage("reach")} />
+            <SettingsLink label="声音和听力" hint="语速、通话" onClick={() => setPage("sound")} />
+            <SettingsLink label="数据" hint="导出、导入、清空、退出" onClick={() => setPage("data")} />
+            <SettingsLink label="高级" hint="调试用" onClick={() => setPage("advanced")} />
           </div>
         </div>
       ) : page === "advanced" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
-            <p className="text-xs text-subtle">调试用，平时不用进。</p>
-            <SettingsLink label="指令" hint="每一步发给模型的原文和用哪个模型" onClick={() => setPage("prompts")} />
-            <SettingsLink label="记录" hint="调用记录、改动记录、重放对比" onClick={() => setPage("log")} />
+            <SettingsLink label="指令" hint="原文和模型" onClick={() => setPage("prompts")} />
+            <SettingsLink label="记录" hint="调用、改动、重放" onClick={() => setPage("log")} />
             <SettingsLink label="费用" onClick={() => setPage("spend")} />
             <SettingsLink label="听力参数" onClick={() => setPage("hearing")} />
           </div>
@@ -566,7 +562,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "who" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-5">
-            <p className="text-xs text-subtle">这一页的每个字每轮都带着：身份、人设、亲密设定；「其他角色」开着时再接着他们。清然的声音固定是 eve。</p>
             <p className="font-display text-lg">清然</p>
             <IdentityField
               value={identityDraft}
@@ -627,7 +622,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               onKeepMine={() => persistProfile({ systemPrompt: draft.trim() })}
             />
           ) : null}
-          <p className="mt-2 text-xs text-subtle">清然是谁、怎么爱 Rosie、怎么说话（语气标签、｛｝的写法也写在这里）。每一轮都带着，接在身份后面。</p>
             </label>
             <label className="flex flex-col gap-2">
               <span className="text-sm">亲密设定</span>
@@ -650,7 +644,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 className="min-h-36 resize-none leading-relaxed"
                 placeholder="清然在床上是什么样的人。每一轮都带着，接在人设后面。"
               />
-              <p className="text-xs text-subtle">每一轮都带着，接在人设后面。</p>
               {conflict?.field === "intimateNotes" ? (
                 <VersionConflict
                   latest={conflict.latest}
@@ -676,7 +669,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 onSave={(patch) => persistProfile(patch)}
               />
             ) : (
-              <p className="text-xs text-subtle">关着：不跟他提别人，所有话都用清然的声音念。</p>
+              <p className="text-xs text-subtle">关着时，所有话都用清然的声音。</p>
             )}
             <VoicePanel inCall={callPhase != null} />
           </div>
@@ -684,9 +677,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "prompts" ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
-            <p className="text-xs text-subtle">
-              发给模型的每一个字都在这里，除了 {"{…}"} 换进去的内容（人设、身份、亲密设定、其他角色在「人设」）。记下后下一轮生效。
-            </p>
             {promptError ? <p className="text-sm text-live">{promptError}</p> : null}
             {promptItems.length === 0 ? (
               <p className="text-sm text-subtle">正在读指令…</p>
@@ -761,7 +751,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
                 <span className="text-sm">回复时带上 dossier</span>
               </label>
-              <p className="px-1 pb-1 text-xs text-subtle">关掉「运行记忆」：他只靠人设和今天的对话说话，夜里不整理、不主动找你。</p>
+              <p className="px-1 pb-1 text-xs text-subtle">关了就不整理、不主动找你。</p>
             </div>
             <div className="flex flex-col gap-2 rounded-md bg-surface-2 px-4 py-3">
               <ModelPick
@@ -773,7 +763,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 timeWord="每次整理"
                 onChange={(model, effort) => persistProfile({ nightModel: model, nightEffort: effort })}
               />
-              <p className="text-xs text-subtle">最高档最聪明也最慢；一次跑超时，下一次会自动降到「高」。</p>
             </div>
             <DossierPanel maxChars={profile.dossierMaxChars} onMaxChars={(n) => persistProfile({ dossierMaxChars: n })} />
             <NightPanel />
@@ -792,7 +781,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 timeWord="每句"
                 onChange={(model, effort) => persistPromptModel("voice", model, effort)}
               />
-              <p className="text-xs text-subtle">选中的模型没回话时，Grok 推理版补上。夜里整理的模型在「记忆」里选。</p>
               <label className="flex items-center justify-between gap-3 pt-1">
                 <span className="text-sm">回复最长（字，0 = 不限）</span>
                 <input
@@ -808,7 +796,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   className="min-h-11 w-20 rounded-md bg-surface px-2 text-right text-sm tabular-nums"
                 />
               </label>
-              <p className="text-xs text-subtle">写进每一轮的指令里告诉他，程序不截断。0 = 不说。</p>
+              <p className="text-xs text-subtle">0 = 不限。</p>
             </div>
             <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
               <div className="px-1 pb-2">
@@ -823,18 +811,19 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   step={0.05}
                   value={voiceTemperature}
                   aria-label="温度"
-                  onChange={(e) => {
-                    const next = clampVoiceTemperature(Number(e.target.value));
-                    setVoiceTemperature(next);
-                    persistProfile({ voiceTemperature: next });
+                  onChange={(e) => setVoiceTemperature(clampVoiceTemperature(Number(e.target.value)))}
+                  // Saved once when she lets go, not on every step of the drag.
+                  onPointerUp={() => persistProfile({ voiceTemperature })}
+                  onKeyUp={() => persistProfile({ voiceTemperature })}
+                  onBlur={() => {
+                    if (voiceTemperature !== profile.voiceTemperature) persistProfile({ voiceTemperature });
                   }}
                   className="h-11 w-full accent-accent"
                 />
-                <p className="text-xs text-subtle">默认 1.0。只用在 Grok 上（Claude 不收温度）。</p>
+                <p className="text-xs text-subtle">只对 Grok 有效。</p>
               </div>
               <div className="flex flex-col gap-1 px-1 pb-2">
                 <p className="text-sm">人设放在哪</p>
-                <p className="text-xs text-subtle">「每轮回复」的第一条消息作为系统提示发，或者作为聊天里你说的第一句发。</p>
                 {(["system", "first_user"] as const).map((id) => (
                   <label key={id} className="flex min-h-11 items-center gap-3">
                     <input
@@ -873,7 +862,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "sound" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-            <p className="text-xs text-subtle">语速和静音跟主屏幕是同一个。谁用哪个声线、试听，在「人设」里。</p>
             <div className="flex items-center justify-between rounded-md bg-surface-2 px-3 py-3">
               <span className="text-sm">语速 {snapVoiceRate(profile.voiceSpeed).label}</span>
               <Button type="button" variant="outline" onClick={() => persistProfile({ voiceSpeed: nextVoiceRate(profile.voiceSpeed).speed })}>
@@ -888,9 +876,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               />
               <span className="text-sm">静音</span>
             </label>
-            <p className="text-xs text-subtle">
-              打电话时点挂断键左边 / 右边的空白，把这句加进你说的话：正在说就接在这句末尾，没在说就单独发一条。空着就不加。
-            </p>
+            <p className="text-xs text-subtle">通话时点挂断键左 / 右边的空白，把这句加进你说的话。</p>
             {(["tapLeft", "tapRight"] as const).map((key) => (
               <label key={key} className="flex flex-col gap-1">
                 <span className="text-xs text-subtle">{key === "tapLeft" ? "左边" : "右边"}</span>
@@ -951,7 +937,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             ) : (
               <div className="flex flex-col gap-2">
                 <p className="text-sm text-subtle">
-                  清掉屏幕上的聊天和今天还没整理进记忆的对话，适合他轴在一个话题上的时候用。回忆和「现在的你们」都还在。
+                  清掉屏幕上的聊天、还没整理的对话和他记着的｛｝。dossier 还在。
                 </p>
                 <div className="flex gap-2">
                   <Button
@@ -997,7 +983,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               <label className="text-sm" htmlFor="stt-keyterms">
                 发给 xAI 的 keyterm
               </label>
-              <p className="text-xs text-subtle">一行一个，最近说过的词另外带上。识别只收这些词，不收说明。</p>
               <Textarea
                 id="stt-keyterms"
                 value={keytermDraft}
@@ -1046,8 +1031,8 @@ Apple: zh-CN · continuous · interimResults · maxAlternatives 3`}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-2">
             <p className="text-xs text-subtle">
-              每一次调用模型都在这里，点开是发给它的全部原文和它回的。记录留 30 天，占用 {formatDbBytes(dbSize?.totalBytes ?? null)}
-              {dbSize?.limitMb ? ` / ${dbSize.limitMb} MB` : ""}。
+              占用 {formatDbBytes(dbSize?.totalBytes ?? null)}
+              {dbSize?.limitMb ? ` / ${dbSize.limitMb} MB` : ""}
             </p>
             <div className="flex flex-wrap gap-2">
               {([[null, "全部"], ...LOG_ROUTE_FILTERS] as Array<[string | null, string]>).map(([id, label]) => (
