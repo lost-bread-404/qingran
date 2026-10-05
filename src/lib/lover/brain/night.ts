@@ -1,6 +1,7 @@
 import { callModel, type CallModelResult } from "./llm.ts";
 import { now } from "./clock.ts";
-import { clampVoiceEffort } from "./config.ts";
+import { clampVoiceEffort, voiceSafetyPick } from "./config.ts";
+import { isClaudeModel } from "../claude.ts";
 import { appendInnerLog, getMeta, getProfileData, patchBrainLog, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
 import { localDay, zonedParts } from "./time.ts";
@@ -125,18 +126,28 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
   // Her pick (设置 → 记忆); once the highest effort has run out of time, the next try steps down to high.
   const picked = clampVoiceEffort(profile.nightModel, profile.nightEffort);
   const effort = slow && (picked === "max" || picked === "xhigh") ? "high" : picked;
-  const result: CallModelResult = await callModel("editor", {
-    system,
-    input: users.join("\n\n"),
-    inputParts: users,
-    jobId,
-    promptKey: loaded.key,
-    promptHash: loaded.hash,
-    model: profile.nightModel,
-    effort,
-    outputRef: `night:${upto}`,
-  });
-  const dossier = result.ok ? tag(result.text, "dossier") : null;
+  const ask = (model: string, eff: typeof effort) =>
+    callModel("editor", {
+      system,
+      input: users.join("\n\n"),
+      inputParts: users,
+      jobId,
+      promptKey: loaded.key,
+      promptHash: loaded.hash,
+      model,
+      effort: eff,
+      outputRef: `night:${upto}`,
+    });
+  let result: CallModelResult = await ask(profile.nightModel, effort);
+  let dossier = result.ok ? tag(result.text, "dossier") : null;
+  // Claude declines the explicit parts of her day (10/5: three refusals at 05:00, the day was lost). Grok reads the
+  // same material at once, as Grok stands in for the day reply. A timeout is left to the retry (it steps down to high).
+  if (!dossier && isClaudeModel(profile.nightModel) && result.failKind !== "timeout") {
+    await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
+    const grok = voiceSafetyPick();
+    result = await ask(grok.model, grok.effort);
+    dossier = result.ok ? tag(result.text, "dossier") : null;
+  }
   if (!dossier) {
     if (result.failKind === "timeout" && !slow) await setMark(NIGHT_SLOW, "1", at);
     await appendInnerLog({ turnSeq: 0, data: { kind: "night", upto, error: result.failKind ?? "no-dossier" }, model: result.model, ms: result.ms });
