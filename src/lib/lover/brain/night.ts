@@ -35,6 +35,10 @@ const NIGHT_UPTO = "night:upto";
 const LEGACY_FOLDED = "night:legacy-folded";
 /** Set when the highest effort ran out of time: the next try uses high. */
 const NIGHT_SLOW = "night:slow";
+/** Set when Claude came back without a dossier too late to ask Grok in the same run: the next try is Grok's. */
+const NIGHT_GROK = "night:grok";
+/** Ask Grok in the same run only if Claude answered within this (Grok's own call may take up to the editor timeout). */
+const GROK_NOW_MS = 30_000;
 
 type Row = { id: string; role: string; body: string; meta: unknown; created_at: number };
 
@@ -95,7 +99,7 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
   const at = now();
   const tz = resolveTz((await getMeta()).timeZone);
   const from = await dayStart(upto, tz);
-  const [today, week, profileData, us, ident, legacyDone, slow] = await Promise.all([
+  const [today, week, profileData, us, ident, legacyDone, slow, grokNext] = await Promise.all([
     messagesBetween(from, upto),
     messagesBetween(from - WEEK_MS, from - 1),
     getProfileData(),
@@ -103,6 +107,7 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
     readIdentity(),
     getMark(LEGACY_FOLDED),
     getMark(NIGHT_SLOW),
+    getMark(NIGHT_GROK),
   ]);
   if (!today.length) {
     if (!opts.dossierOnly) await setMark(NIGHT_UPTO, String(upto), at);
@@ -138,22 +143,30 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
       effort: eff,
       outputRef: `night:${upto}`,
     });
-  let result: CallModelResult = await ask(profile.nightModel, effort);
+  // A Claude pick that came back without a dossier last time (it declined): this try is Grok's.
+  const grok = voiceSafetyPick();
+  const viaGrok = isClaudeModel(profile.nightModel) && Boolean(grokNext);
+  const t0 = Date.now();
+  let result: CallModelResult = viaGrok ? await ask(grok.model, grok.effort) : await ask(profile.nightModel, effort);
   let dossier = result.ok ? tag(result.text, "dossier") : null;
   // Claude declines the explicit parts of her day (10/5: three refusals at 05:00, the day was lost). Grok reads the
-  // same material at once, as Grok stands in for the day reply. A timeout is left to the retry (it steps down to high).
-  if (!dossier && isClaudeModel(profile.nightModel) && result.failKind !== "timeout") {
+  // same material: at once while there is time left in this run (one job has about 280 s), else on the next try.
+  // A timeout is left to the retry (it steps down to high).
+  const claudeDeclined = !dossier && !viaGrok && isClaudeModel(profile.nightModel) && result.failKind !== "timeout";
+  if (claudeDeclined && Date.now() - t0 < GROK_NOW_MS) {
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
-    const grok = voiceSafetyPick();
     result = await ask(grok.model, grok.effort);
     dossier = result.ok ? tag(result.text, "dossier") : null;
+  } else if (claudeDeclined) {
+    await setMark(NIGHT_GROK, "1", at);
   }
   if (!dossier) {
-    if (result.failKind === "timeout" && !slow) await setMark(NIGHT_SLOW, "1", at);
+    if (result.failKind === "timeout" && !slow && isClaudeModel(result.model)) await setMark(NIGHT_SLOW, "1", at);
     await appendInnerLog({ turnSeq: 0, data: { kind: "night", upto, error: result.failKind ?? "no-dossier" }, model: result.model, ms: result.ms });
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
     throw new Error(`night:${result.failKind ?? "no-dossier"}`);
   }
+  if (grokNext) await setMark(NIGHT_GROK, "", at);
   if (slow) await setMark(NIGHT_SLOW, "", at);
   const day = localDay(from, tz);
   await publishMemory(dossier.slice(0, profile.dossierMaxChars + 100), "night", upto, { upto, dossierOnly: Boolean(opts.dossierOnly) });
