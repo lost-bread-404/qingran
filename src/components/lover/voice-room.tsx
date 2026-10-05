@@ -99,7 +99,7 @@ function lastUserSay(messages: ChatMessage[]): ChatMessage | null {
 
 export function VoiceRoom() {
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
-  const [revs, setRevs] = useState<FieldRevs>({ systemPrompt: 0, intimateNotes: 0, identity: 0, claudePrompt: 0 });
+  const [revs, setRevs] = useState<FieldRevs>({ systemPrompt: 0, intimateNotes: 0, identity: 0 });
   const revsRef = useRef(revs);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hydrated, setHydrated] = useState(false);

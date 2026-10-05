@@ -1,3 +1,4 @@
+import { CLAUDE_EFFORTS, isClaudeModel } from "../claude.ts";
 export type ModelClass =
   | "REALTIME"
   | "FAST_THINKER"
@@ -93,9 +94,7 @@ export const DAY_BOUNDARY_HOUR = 4;
  */
 export const SLEEP_GAP_MS = 2 * 60 * 60_000;
 export const SLEEP_MARK_HOUR = 5;
-/** The night pass: Claude at its highest effort (falls back to high once if that ran out of time). */
-export const NIGHT_MODEL = "claude-opus-5-5";
-export const NIGHT_EFFORT = "max" as const;
+
 export const HISTORY_WINDOW = 20;
 export const HISTORY_WINDOW_MIN = 0;
 export const HISTORY_WINDOW_MAX = 80;
@@ -260,6 +259,7 @@ export function isVoiceChatModelId(id: string): boolean {
 }
 
 export function voiceEffortsFor(model: string): Effort[] {
+  if (isClaudeModel(model)) return [...CLAUDE_EFFORTS];
   const caps = MODEL_CAPS[model];
   if (caps) return caps.efforts;
   if (/non-reasoning/i.test(model)) return [null];
@@ -272,7 +272,7 @@ export function voiceSupportsUiEffort(model: string): boolean {
 
 export function clampVoiceEffort(model: string, effort?: string | null): Effort {
   const allowed = voiceEffortsFor(model);
-  if (effort === "low" || effort === "medium" || effort === "high" || effort === "none" || effort === "xhigh" || effort === null) {
+  if (effort === "low" || effort === "medium" || effort === "high" || effort === "none" || effort === "xhigh" || effort === "max" || effort === null) {
     if (allowed.includes(effort)) return effort;
   }
   if (allowed.includes("low")) return "low";
@@ -280,6 +280,7 @@ export function clampVoiceEffort(model: string, effort?: string | null): Effort 
 }
 
 export function voiceTimeoutMs(effort: Effort): number {
+  if (effort === "max") return 240_000;
   if (effort === "high" || effort === "xhigh") return 120_000;
   if (effort === "medium") return 90_000;
   if (effort == null || effort === "none") return 28_000;

@@ -1,7 +1,7 @@
 import { getSql } from "../db.ts";
 import { lockedProfile, type Profile } from "./types.ts";
 
-export const VERSIONED_FIELDS = ["systemPrompt", "intimateNotes", "identity", "claudePrompt"] as const;
+export const VERSIONED_FIELDS = ["systemPrompt", "intimateNotes", "identity"] as const;
 export type VersionedField = (typeof VERSIONED_FIELDS)[number];
 
 export type FieldRevs = Record<VersionedField, number>;
@@ -35,11 +35,8 @@ const PATCH_KEYS = [
   "debugHearing",
   "voiceModel",
   "voiceEffort",
-  "claudeModel",
-  "grokReturnMin",
-  "claudeRouting",
-  "claudePrompt",
-  "claudeEffort",
+  "nightModel",
+  "nightEffort",
   "replyMaxChars",
   "voiceTemperature",
   "silenceMs",
@@ -71,7 +68,7 @@ const PATCH_KEYS = [
 const PATCH_KEY_SET = new Set<string>(PATCH_KEYS);
 
 export function emptyFieldRevs(): FieldRevs {
-  return { systemPrompt: 0, intimateNotes: 0, identity: 0, claudePrompt: 0 };
+  return { systemPrompt: 0, intimateNotes: 0, identity: 0 };
 }
 
 export function readFieldRevs(raw: unknown): FieldRevs {
@@ -84,7 +81,6 @@ export function readFieldRevs(raw: unknown): FieldRevs {
     systemPrompt: n(obj.systemPrompt),
     intimateNotes: n(obj.intimateNotes),
     identity: n(obj.identity),
-    claudePrompt: n(obj.claudePrompt),
   };
 }
 
@@ -238,8 +234,6 @@ export async function applyProfilePatch(input: {
     expected("intimateNotes"),
     check("identity"),
     expected("identity"),
-    check("claudePrompt"),
-    expected("claudePrompt"),
   ];
   const writeSql = `update qingran_profile set
        data = coalesce(qingran_profile.data, '{}'::jsonb) || $1::jsonb,
@@ -254,7 +248,6 @@ export async function applyProfilePatch(input: {
        and ($8::boolean or coalesce((qingran_profile.field_revs->>'systemPrompt')::bigint, 0) = $9::bigint)
        and ($10::boolean or coalesce((qingran_profile.field_revs->>'intimateNotes')::bigint, 0) = $11::bigint)
        and ($12::boolean or coalesce((qingran_profile.field_revs->>'identity')::bigint, 0) = $13::bigint)
-       and ($14::boolean or coalesce((qingran_profile.field_revs->>'claudePrompt')::bigint, 0) = $15::bigint)
      returning data, identity, rhythm, field_revs, updated_at`;
 
   let rows = before.exists ? await db.query<ProfileRow>(writeSql, params) : [];

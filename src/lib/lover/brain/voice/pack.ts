@@ -8,7 +8,7 @@ import { loadFormats, loadPrompt } from "../prompts/store.ts";
 import { getDossier } from "../dossier.ts";
 import { agoText, dateClockText } from "../time.ts";
 import { fmt } from "../prompts/formats.ts";
-import { recentInner, type Memory } from "../memory.ts";
+import { recentInner } from "../memory.ts";
 import { dayStart } from "../sleep.ts";
 import { buildVoiceMessages, voiceInputChars, type VoiceInputChars, type VoicePackParts } from "./pack-build.ts";
 
@@ -29,9 +29,6 @@ export type HotContext = {
   promptKey: string;
   promptHash: string;
   inject: VoiceInjectFlags;
-  /** The moments that came back to him for this line, and whether they were found by meaning or by words. */
-  recalled: Memory[];
-  recallBy: string;
   personaPlacement: "system" | "first_user";
 };
 
@@ -84,7 +81,7 @@ export async function loadHotContext(input: {
 
   // Memory off → persona + context only.
   const inject = voiceInjectFromProfile(input.profile);
-  const { parts, recalled, voicePrompt } = await gatherVoiceParts({
+  const { parts, voicePrompt } = await gatherVoiceParts({
     profile: input.profile,
     nowMs: input.nowMs,
     timeZone: input.timeZone,
@@ -108,11 +105,7 @@ export async function loadHotContext(input: {
     charterHash,
     longtermHash,
     historyIds,
-    pickedIds: recalled.by === "all" ? [] : recalled.memories.map((m) => String(m.id)),
-    recallBy: recalled.by,
-    recalled: recalled.by === "all" ? [`全部 ${recalled.memories.length} 件`] : recalled.memories.map((m) => m.body.slice(0, 200)),
     personaPlacement: input.profile.personaPlacement,
-    queryScores: recalled.scores,
     clockText,
     userMsgId: input.userMsgId,
     timeZone: input.timeZone,
@@ -137,8 +130,6 @@ export async function loadHotContext(input: {
     promptKey: voicePrompt.key,
     promptHash: voicePrompt.hash,
     inject,
-    recalled: recalled.memories,
-    recallBy: recalled.by,
     personaPlacement: input.profile.personaPlacement,
   };
 }
@@ -163,7 +154,7 @@ export async function gatherVoiceParts(input: {
   /** Replay's other side: another persona. */
   charter?: string;
   placement?: Profile["personaPlacement"];
-}): Promise<{ parts: VoicePackParts; recalled: Recalled; voicePrompt: Awaited<ReturnType<typeof loadPrompt>> }> {
+}): Promise<{ parts: VoicePackParts; voicePrompt: Awaited<ReturnType<typeof loadPrompt>> }> {
   const inject = voiceInjectFromProfile(input.profile);
   const [history, us, time, inner, voicePrompt, formats, start] = await Promise.all([
     input.history,
@@ -186,29 +177,19 @@ export async function gatherVoiceParts(input: {
     intimate: input.profile.intimateNotes,
     identity: input.profile.identity,
     us: us?.body.trim() ?? "",
-    recall: "",
     time,
     inner: innerText,
-    innerDaily: innerText,
     usWhen: us?.body.trim() && us.updatedAt ? dateClockText(us.updatedAt, input.timeZone) : "",
     maxChars: input.profile.replyMaxChars,
     formats,
     history,
     historyWindow: history.length,
-    nowMs: input.nowMs,
     userText: `${photoNote(images.length, formats)}${input.userText}`,
     userImages: images,
     first: input.first,
     voiceTemplate: voicePrompt.body,
-    routing: false,
-    charterClaude: persona,
-    charterGrok: persona,
     personaPlacement: input.placement ?? input.profile.personaPlacement,
     personaAck: input.profile.personaAck,
   };
-  return { parts, recalled: NO_RECALL, voicePrompt };
+  return { parts, voicePrompt };
 }
-
-/** v7 has no memory library: nothing is recalled (the fields stay for the logs). */
-type Recalled = { memories: Memory[]; scores: Array<{ id: number; score: number }>; by: "none" | "all" };
-const NO_RECALL: Recalled = { memories: [], scores: [], by: "none" };

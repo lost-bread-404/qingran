@@ -2,7 +2,7 @@ import { CLAUDE_MODELS, CLAUDE_MODEL_BLURBS } from "../claude.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { now } from "./clock.ts";
 import { enqueue, runJobsNow } from "./jobs.ts";
-import { LONG_DRAIN_MS, listVoiceCatalog } from "./config.ts";
+import { LONG_DRAIN_MS, listVoiceCatalog, voiceEffortsFor } from "./config.ts";
 import { runInBackground } from "./wait-until.ts";
 import { appendBrainLog, getMeta, listBrainLog, listJobStatus, listReports, voiceModelStatsLast7d } from "./store.ts";
 import type { JobType } from "./types.ts";
@@ -58,29 +58,20 @@ export const brainRunDue = createServerFn({ method: "POST" })
 
 export const brainJobStatus = createServerFn({ method: "GET" }).handler(async () => listJobStatus());
 
+/**
+ * The models she can pick (设置 → 回复 for the day reply, 设置 → 记忆 for the night pass): Claude and Grok, each
+ * with its effort levels and how long it has taken (day: per reply; night: per run).
+ */
 export const brainListVoiceModels = createServerFn({ method: "GET" }).handler(async () => {
-  const [models, stats] = await Promise.all([
+  const [catalog, stats, nightStats] = await Promise.all([
     listVoiceCatalog(process.env.XAI_API_KEY),
-    voiceModelStatsLast7d().catch(() => []),
+    voiceModelStatsLast7d("voice").catch(() => []),
+    voiceModelStatsLast7d("editor").catch(() => []),
   ]);
-  const byModel = new Map(stats.map((row) => [row.model, row]));
-  return {
-    models: models.map((model) => ({
-      id: model.id,
-      blurb: model.blurb,
-      supportsEffort: model.supportsEffort,
-      stats: byModel.get(model.id) ?? null,
-    })),
-    stats,
-    // Claude plays her day to day (docs/claude-grok-routing.md); its turns are logged under its model name too.
-    claude: CLAUDE_MODELS.map((id) => ({ id, blurb: CLAUDE_MODEL_BLURBS[id] ?? "", stats: byModel.get(id) ?? null })),
-  };
-});
-
-/** Who answers her now: Claude or Grok (shown on 设置 → 回复; not switchable by hand). */
-export const brainEngineMode = createServerFn({ method: "GET" }).handler(async () => {
-  const { getEngineMode } = await import("./voice/engine.ts");
-  return { mode: await getEngineMode() };
+  const ids = [...CLAUDE_MODELS, ...catalog.map((m) => m.id)];
+  const blurb = new Map<string, string>([...catalog.map((m) => [m.id, m.blurb] as const), ...Object.entries(CLAUDE_MODEL_BLURBS)]);
+  const models = ids.map((id) => ({ id, blurb: blurb.get(id) ?? "", efforts: voiceEffortsFor(id) }));
+  return { models, stats, nightStats };
 });
 
 export const brainListLogs = createServerFn({ method: "POST" })

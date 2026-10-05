@@ -1,6 +1,6 @@
 import { callModel, type CallModelResult } from "./llm.ts";
 import { now } from "./clock.ts";
-import { NIGHT_EFFORT, NIGHT_MODEL } from "./config.ts";
+import { clampVoiceEffort } from "./config.ts";
 import { appendInnerLog, getMeta, getProfileData, patchBrainLog, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
 import { localDay, zonedParts } from "./time.ts";
@@ -122,7 +122,9 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
   });
   const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
   const users = messages.filter((m) => m.role !== "system").map((m) => m.content);
-  const effort = slow ? "high" : NIGHT_EFFORT;
+  // Her pick (设置 → 记忆); once the highest effort has run out of time, the next try steps down to high.
+  const picked = clampVoiceEffort(profile.nightModel, profile.nightEffort);
+  const effort = slow && (picked === "max" || picked === "xhigh") ? "high" : picked;
   const result: CallModelResult = await callModel("editor", {
     system,
     input: users.join("\n\n"),
@@ -130,7 +132,7 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
     jobId,
     promptKey: loaded.key,
     promptHash: loaded.hash,
-    model: NIGHT_MODEL,
+    model: profile.nightModel,
     effort,
     outputRef: `night:${upto}`,
   });

@@ -1,4 +1,3 @@
-import { DEFAULT_CLAUDE_MODEL, DEFAULT_RETURN_MIN, isClaudeModel } from "./claude.ts";
 import { DEFAULT_HEARING_PROVIDER, type HearingProviderId, lockSttKeyterms } from "./hearing/config.ts";
 import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
@@ -14,15 +13,20 @@ export type { HearingSense };
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "unheard" | "proactive" | "system_notice";
-export type VoiceEffort = "low" | "medium" | "high" | null;
+/** Grok: low / medium / high; Claude also xhigh / max. */
+export type VoiceEffort = "low" | "medium" | "high" | "xhigh" | "max" | null;
 
 export const DEFAULT_VOICE_MODEL = "grok-4.20-0309-reasoning";
 export const DEFAULT_VOICE_EFFORT: VoiceEffort = "low";
 export const VOICE_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
 
 export function isVoiceEffort(value: unknown): value is Exclude<VoiceEffort, null> {
-  return value === "low" || value === "medium" || value === "high";
+  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
 }
+
+/** The night pass (设置 → 记忆): Claude Opus at its highest effort unless she picks otherwise. */
+export const DEFAULT_NIGHT_MODEL = "claude-opus-5-5";
+export const DEFAULT_NIGHT_EFFORT: VoiceEffort = "max";
 
 /** Someone besides 清然 (林泽): how his lines sound and who he is. */
 export type Character = { name: string; voice: string; persona: string };
@@ -96,25 +100,15 @@ export type Profile = {
   debugHearing: boolean;
   voiceModel: string;
   voiceEffort: VoiceEffort;
-  /** The model that plays her day to day (docs/claude-grok-routing.md); Grok (voiceModel) takes the intimate part. */
-  claudeModel: string;
-  /** Claude plays her day to day and hands sex to Grok. Off: Grok plays all of her, as before the routing. */
-  claudeRouting: boolean;
-  /**
-   * Her persona per way of playing her (人设 page, everything the model is told): `systemPrompt` when Grok plays all
-   * of her; `claudePrompt` for Claude day to day; `intimateNotes` (name kept from before 10/4) for Grok in bed.
-   */
-  claudePrompt: string;
-  /** Back to Claude when she has been away longer than this many minutes. */
-  grokReturnMin: number;
+  /** The night pass's model (Claude or Grok) and effort (设置 → 记忆). */
+  nightModel: string;
+  nightEffort: VoiceEffort;
   /**
    * The longest a reply may run (characters she sees; 0 = no limit). The reply stops at the end of the sentence that
    * reaches it (10/4: long replies made her drift off and are not 清然, and his long replies in the talk made the
    * prompt long and were copied).
    */
   replyMaxChars: number;
-  /** How long Claude thinks before it answers (Anthropic's effort): low answers in a few seconds. */
-  claudeEffort: "low" | "medium" | "high";
   /** Temperature of the reply (and of his messages first). 0–2, default 1.0. */
   voiceTemperature: number;
   /** Pause that ends a turn, milliseconds. 800–3000, default 1500. */
@@ -221,11 +215,8 @@ export const DEFAULT_PROFILE: Profile = {
   debugHearing: true,
   voiceModel: DEFAULT_VOICE_MODEL,
   voiceEffort: DEFAULT_VOICE_EFFORT,
-  claudeModel: DEFAULT_CLAUDE_MODEL,
-  claudeRouting: true,
-  claudePrompt: "",
-  grokReturnMin: DEFAULT_RETURN_MIN,
-  claudeEffort: "low",
+  nightModel: DEFAULT_NIGHT_MODEL,
+  nightEffort: DEFAULT_NIGHT_EFFORT,
   replyMaxChars: 80,
   voiceTemperature: VOICE_TEMPERATURE,
   silenceMs: SILENCE_MS,
@@ -272,11 +263,8 @@ type LooseProfile = Partial<Profile> & {
   voiceChat?: string;
   voiceModel?: string;
   voiceEffort?: string | null;
-  claudeModel?: string;
-  claudeRouting?: boolean;
-  claudePrompt?: string;
-  grokReturnMin?: number;
-  claudeEffort?: string;
+  nightModel?: string;
+  nightEffort?: string | null;
   replyMaxChars?: number;
   voiceTemperature?: number;
   silenceMs?: number;
@@ -323,16 +311,10 @@ export function lockedProfile(input?: unknown): Profile {
     captureAudio: raw.debugHearing !== false,
     voiceModel: pickVoiceModel(raw),
     voiceEffort: pickVoiceEffort(raw),
-    claudeRouting: false,
-    claudePrompt: typeof raw.claudePrompt === "string" ? raw.claudePrompt.slice(0, 8000) : "",
-    claudeModel: typeof raw.claudeModel === "string" && isClaudeModel(raw.claudeModel.trim()) ? raw.claudeModel.trim().slice(0, 80) : DEFAULT_CLAUDE_MODEL,
-    grokReturnMin:
-      typeof raw.grokReturnMin === "number" && Number.isFinite(raw.grokReturnMin)
-        ? Math.max(5, Math.min(600, Math.round(raw.grokReturnMin)))
-        : DEFAULT_RETURN_MIN,
+    nightModel: typeof raw.nightModel === "string" && raw.nightModel.trim() ? raw.nightModel.trim().slice(0, 80) : DEFAULT_NIGHT_MODEL,
+    nightEffort: isVoiceEffort(raw.nightEffort) || raw.nightEffort === null ? raw.nightEffort : DEFAULT_NIGHT_EFFORT,
     replyMaxChars:
       typeof raw.replyMaxChars === "number" && Number.isFinite(raw.replyMaxChars) ? Math.max(0, Math.min(2000, Math.round(raw.replyMaxChars))) : 80,
-    claudeEffort: raw.claudeEffort === "medium" || raw.claudeEffort === "high" ? raw.claudeEffort : "low",
     voiceTemperature: clampVoiceTemperature(raw.voiceTemperature),
     silenceMs: hearingSense.endWaitMs,
     injectLongterm: raw.injectLongterm !== false,

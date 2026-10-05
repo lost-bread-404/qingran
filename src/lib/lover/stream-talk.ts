@@ -18,8 +18,7 @@ import { xaiCreds, xaiFetch, type XaiCred } from "./xai-auth";
 import { BraceCut } from "./brain/voice/brace-cut";
 import { VoiceLeveler } from "./voice-level";
 import { withPhotos } from "./photos";
-import { claudeBody, claudeFetch, claudeFinish, claudeUsage, CLAUDE_TIMEOUT_MS } from "./claude";
-import { MarkCut, type Engine, type Mark } from "./brain/voice/engine";
+import { claudeBody, claudeFetch, claudeFinish, claudeUsage, isClaudeModel, CLAUDE_TIMEOUT_MS } from "./claude";
 
 const MAX_INPUT = 2000;
 
@@ -62,8 +61,6 @@ export type TalkStreamInput = {
   temperature?: number;
   /** Who reads which block: castOf(profile) (人设 page). */
   cast?: Cast;
-  /** Who writes the words: Grok (xAI, default) or Claude (Anthropic). Either way xAI speaks them. */
-  engine?: Engine;
 };
 
 type Emit = (event: TalkStreamEvent) => void;
@@ -90,10 +87,6 @@ export type TalkStreamResult = {
   innerNotes?: string;
   /** Who paid: her SuperGrok subscription or the API key. */
   paidBy?: "sub" | "api";
-  /** The mark at the very start of the reply (taken out of what is shown and spoken). */
-  mark?: Mark | null;
-  /** Claude wrote 〔转〕: nothing was shown or spoken; Grok answers this line instead. */
-  dropped?: boolean;
 };
 
 function emptyResult(partial: Partial<TalkStreamResult> = {}): TalkStreamResult {
@@ -120,7 +113,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     emit({ t: "err", m: "这会儿连不上。" });
     return emptyResult({ otherEvents: "no xAI credential" });
   }
-  const claude = data.engine === "claude";
+  // Claude or Grok writes the words, by the model she picked (设置 → 回复); xAI speaks them either way.
+  const claude = isClaudeModel(data.model);
   // Whoever paid for the words also speaks them (SuperGrok first, the API key after it). Claude's words: the key.
   let cred: XaiCred = apiKey ? { kind: "api", token: apiKey } : creds[0]!;
 
@@ -138,7 +132,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     ...base,
     model: data.model || base.model,
     effort: data.effort !== undefined ? data.effort : base.effort,
-    timeoutMs: claude ? CLAUDE_TIMEOUT_MS : data.timeoutMs || base.timeoutMs,
+    timeoutMs: claude ? Math.max(CLAUDE_TIMEOUT_MS, data.timeoutMs ?? 0) : data.timeoutMs || base.timeoutMs,
   });
   let t0 = Date.now();
   let ttftSent = false;
@@ -268,9 +262,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   /** Everything shown and spoken (his ｛｝ notes are taken out by `braces`). */
   let spoken = "";
   const braces = new BraceCut();
-  const marks = new MarkCut();
-  /** Claude wrote 〔转〕: stop reading, nothing goes out. */
-  let dropped = false;
   /**
    * Claude's words come in bursts with pauses between them; streamed as they came, his voice ran dry between bursts
    * and the words jumped (10/4: 「一卡一卡的」). Its reply is short and quick to finish once it starts, so it goes out
@@ -297,12 +288,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   };
 
   const ingestToken = (token: string) => {
-    if (!token || dropped) return;
-    const out = marks.push(braces.push(token));
-    if (claude && marks.mark === "转") {
-      dropped = true;
-      return;
-    }
+    if (!token) return;
+    const out = braces.push(token);
     if (claude) held += out;
     else emitVisible(out);
   };
@@ -375,33 +362,12 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     sseBytes += value.byteLength;
     buf += decoder.decode(value, { stream: true });
     drainBuf(false);
-    if (dropped) {
-      void reader.cancel().catch(() => undefined);
-      break;
-    }
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  if (!dropped) {
-    buf += decoder.decode();
-    drainBuf(true);
-  }
+  buf += decoder.decode();
+  drainBuf(true);
   braces.finish();
-  if (!dropped) {
-    const rest = marks.finish();
-    if (claude && marks.mark === "转") dropped = true;
-    else emitVisible(claude ? held + rest : rest);
-  }
-  if (dropped) {
-    // 〔转〕: like an answer taken back in a call. Nothing was shown or spoken; Grok answers this line.
-    return {
-      ...emptyResult({ model: route.model, effort: route.effort, status, finishReason, otherEvents: takeOtherEvents() }),
-      usage,
-      ms: Date.now() - t0,
-      mark: "转",
-      dropped: true,
-      innerNotes: braces.text(),
-    };
-  }
+  if (claude) emitVisible(held);
   const speech = spoken.trim();
   const innerNotes = braces.text();
 
@@ -432,7 +398,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
         chars: 0,
         otherEvents,
         innerNotes,
-        mark: marks.mark,
       };
     }
     emit({ t: "text_end", speech });
@@ -451,7 +416,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       chars: speech.length,
       otherEvents,
       innerNotes,
-      mark: marks.mark,
     };
   }
   emit({ t: "text_end", speech });
@@ -494,7 +458,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     chars: speech.length,
     otherEvents,
     innerNotes,
-    mark: marks.mark,
   };
 }
 

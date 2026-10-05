@@ -10,18 +10,11 @@ export type VoiceRefs = {
   charterHash: string;
   longtermHash: string;
   historyIds: string[];
-  /** The moments that came back to him (ids), and how well the best ones fit. */
-  pickedIds: string[];
-  queryScores: Array<{ id: number; score: number }>;
   clockText: string;
   userMsgId: string;
   timeZone: string;
   injectMemory?: boolean;
   historyWindow?: number;
-  /** Found by meaning or by words ("none" with memory off). */
-  recallBy?: string;
-  /** The moments that came back to him, first 200 characters each (for looking back at a turn she liked). */
-  recalled?: string[];
   personaPlacement?: "system" | "first_user";
   /** Filled in when the turn is logged: how the turn went. */
   localDay?: string;

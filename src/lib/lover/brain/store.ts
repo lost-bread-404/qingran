@@ -345,9 +345,8 @@ export async function updateMessage(id: string, text: string, meta: MessageMeta)
       [id, existing.text, ts],
     );
   }
-  // Who wrote it / which scene it was said in is the server's, not the page's: kept through an edit.
+  // Who wrote it is the server's, not the page's: kept through an edit.
   if (existing?.meta.engine) meta = { ...meta, engine: existing.meta.engine };
-  if (existing?.meta.scene) meta = { ...meta, scene: existing.meta.scene };
   await db.query(`update qingran_messages set body = $2, meta = $3::jsonb, edited_at = $4 where id = $1`, [
     id,
     text,
@@ -706,7 +705,8 @@ function isEmptyVoiceLog(row: { ok: boolean; note: string | null; error: string 
   return /空回复|\bempty\b/.test(`${row.note ?? ""}\n${row.error ?? ""}`);
 }
 
-export async function voiceModelStatsLast7d(): Promise<VoiceModelStats[]> {
+/** Average time per model over the last 90 days: the day reply ("voice") or the night pass ("editor"). */
+export async function voiceModelStatsLast7d(route: "voice" | "editor" = "voice"): Promise<VoiceModelStats[]> {
   const db = await getSql();
   const since = now() - 90 * 86_400_000;
   const rows = await db.query<{
@@ -715,7 +715,7 @@ export async function voiceModelStatsLast7d(): Promise<VoiceModelStats[]> {
     ok: unknown;
     note: string | null;
     error: string | null;
-  }>(`select model, ms, ok, note, error from brain_log where route = $1 and at >= $2`, ["voice", since]);
+  }>(`select model, ms, ok, note, error from brain_log where route = $1 and at >= $2`, [route, since]);
   const by = new Map<string, { n: number; ms: number[]; ttft: number[]; empty: number }>();
   for (const row of rows) {
     const model = (row.model ?? "").trim();

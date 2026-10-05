@@ -1,5 +1,4 @@
 import { stripSpeechTags } from "../speech-tags.ts";
-import { isClaudeModel } from "../claude.ts";
 import { callModel } from "./llm.ts";
 import { appendBrainLog, getProfileData, upsertMessage } from "./store.ts";
 import { now } from "./clock.ts";
@@ -134,15 +133,9 @@ export async function runWake(opts: { manual?: boolean; at?: number; complete?: 
       createdAt: at,
       kind: "proactive",
       timeZone: zone,
-      meta: { engine: isClaudeModel(spoken.model) ? "claude" : "grok", ...(spoken.engine === "grok" ? { scene: "grok" as const } : {}) },
+      meta: { engine: spoken.engine },
     });
     pushResult = await sendApns({ body: stripSpeechTags(spoken.text), messageId });
-    // Claude wrote to her after a while apart and it is sent: the scene is over, Claude plays her from now on
-    // (docs/claude-grok-routing.md). Not if she spoke while it was being written (she may be back in the scene).
-    if (profile.claudeRouting && isClaudeModel(spoken.model) && (await lastUserAt(Date.now() + 1)) === (last ?? null)) {
-      const { endScene } = await import("./voice/engine.ts");
-      await endScene();
-    }
   }
   await insertReachLog({
     at,

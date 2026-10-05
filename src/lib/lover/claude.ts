@@ -1,17 +1,23 @@
 import type { XaiMessage } from "./photos.ts";
 
 /**
- * Claude, straight from the Anthropic API (docs/claude-grok-routing.md「模型和接入」). Key: ANTHROPIC_API_KEY.
+ * Claude, straight from the Anthropic API. Key: ANTHROPIC_API_KEY.
  * The chat messages the rest of the program builds (system / user / assistant, photos as data URLs) are turned into
  * Anthropic's shape here; the words are the same.
  */
 export const CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-5"] as const;
 export const DEFAULT_CLAUDE_MODEL = "claude-opus-5-5";
-/** Back to Claude when she has been away longer than this (minutes; 设置 → 回复). */
-export const DEFAULT_RETURN_MIN = 30;
+/** Who wrote a reply: Claude or Grok (by the model). */
+export type Engine = "claude" | "grok";
+export function engineOf(model: string | null | undefined): Engine {
+  return isClaudeModel(model) ? "claude" : "grok";
+}
+
+/** Claude's effort levels (Opus 5.5 always thinks; low is the quickest). */
+export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export const CLAUDE_MODEL_BLURBS: Record<string, string> = {
-  "claude-opus-5-5": "Claude 最聪明的一档（默认）",
+  "claude-opus-5-5": "Claude 最聪明的一档",
   "claude-sonnet-5-5": "价格是 Opus 的一半，快一些",
   "claude-sonnet-5": "上一代 Sonnet，同价",
 };

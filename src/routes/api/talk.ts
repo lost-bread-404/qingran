@@ -14,6 +14,7 @@ import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
 import { formatVoiceInjectLine, type Profile } from "@/lib/lover/types";
 import { castOf } from "@/lib/lover/cast";
+import { engineOf } from "@/lib/lover/claude";
 import { resolveTalkProfile } from "@/lib/lover/talk-profile";
 import { type TalkStreamEvent } from "@/lib/lover/stream-talk";
 import { logTalkTurn, talkFailFromResult } from "@/lib/lover/talk-fail";
@@ -164,11 +165,11 @@ export const Route = createFileRoute("/api/talk")({
                 send(event);
               };
 
-              // v7: Grok plays her all day (Claude only does the night pass).
+              // The model she picked (设置 → 回复), Claude or Grok; a thinking Grok steps in if it gives nothing.
               const fallback = await runVoiceWithFallback(
                 {
                   text,
-                  parts: { ...ctx.parts, engine: "grok", routing: false },
+                  parts: ctx.parts,
                   replyId,
                   voiceSpeed: profile.voiceSpeed,
                   primary,
@@ -205,7 +206,7 @@ export const Route = createFileRoute("/api/talk")({
                   id: replyId,
                   role: "assistant",
                   text: display,
-                  meta: { replyTo: userMsgId, engine: "grok" },
+                  meta: { replyTo: userMsgId, engine: engineOf(streamResult.model || primary.model) },
                   createdAt: Number.isFinite(replyAt) && replyAt > 0 ? replyAt : userCreatedAt + 1,
                   timeZone,
                   attemptAt: round ? nowMs : undefined,

@@ -25,6 +25,7 @@ import { StatePanel } from "@/components/lover/state-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
 import { DossierPanel } from "@/components/lover/dossier-panel";
 import { NightPanel } from "@/components/lover/night-panel";
+import { ModelPick, type ModelOption, type ModelStat } from "@/components/lover/model-pick";
 import { BrainSpendPage } from "@/components/lover/brain-spend-page";
 import { ReplayPanel } from "@/components/lover/replay-panel";
 import { VoicePanel } from "@/components/lover/voice-panel";
@@ -40,7 +41,7 @@ import {
 } from "@/components/lover/settings-life";
 import { applyHearingTier, hearingTierOf, HEARING_TIER_BLURB } from "@/lib/lover/hearing/sense";
 import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
-import { clampHistoryWindow, clampVoiceTemperature, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
+import { clampVoiceTemperature, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
 import { defaultPromptModel } from "@/lib/lover/brain/prompts/models";
 import { cn } from "@/lib/utils";
 
@@ -66,55 +67,20 @@ type CallDetail = {
   output: string;
 };
 
-type VoiceModelStat = {
-  model: string;
-  n: number;
-  avgMs: number | null;
-  avgTtftMs: number | null;
-  emptyRate: number | null;
-};
-
-type VoiceModelOption = {
-  id: string;
-  blurb: string;
-  supportsEffort: boolean;
-  stats: VoiceModelStat | null;
-};
-
-function toModelChoices(models: VoiceModelOption[]): PromptModelChoice[] {
-  return models.map((model) => ({
-    id: model.id,
-    blurb: model.blurb,
-    supportsEffort: model.supportsEffort,
-    stats: model.stats
-      ? {
-          n: model.stats.n,
-          avgMs: model.stats.avgMs,
-          avgTtftMs: model.stats.avgTtftMs,
-          emptyRate: model.stats.emptyRate,
-        }
-      : null,
-  }));
-}
-
-function withSelectedVoiceModel(
-  models: VoiceModelOption[],
-  stats: VoiceModelStat[],
-  selected: string,
-): VoiceModelOption[] {
-  const byStats = new Map(stats.map((row) => [row.model, row]));
-  const list = models.some((model) => model.id === selected)
-    ? models
-    : [
-        {
-          id: selected,
-          blurb: "暂无说明",
-          supportsEffort: !/non-reasoning/i.test(selected),
-          stats: null,
-        },
-        ...models,
-      ];
-  return list.map((model) => ({ ...model, stats: model.stats ?? byStats.get(model.id) ?? null }));
+/** 指令 page (月报 only): a model option in the step editor's shape. */
+function toModelChoices(models: ModelOption[], stats: ModelStat[]): PromptModelChoice[] {
+  const byModel = new Map(stats.map((row) => [row.model, row]));
+  return models
+    .filter((m) => !m.id.startsWith("claude-"))
+    .map((m) => {
+      const st = byModel.get(m.id);
+      return {
+        id: m.id,
+        blurb: m.blurb,
+        supportsEffort: m.efforts.some((e) => e != null),
+        stats: st ? { n: st.n, avgMs: st.avgMs, avgTtftMs: null, emptyRate: null } : null,
+      };
+    });
 }
 
 type Props = {
@@ -165,8 +131,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [clearArmed, setClearArmed] = useState(false);
   const [voiceModel, setVoiceModel] = useState(profile.voiceModel);
   const [voiceEffort, setVoiceEffort] = useState<VoiceEffort>(profile.voiceEffort);
-  const [voiceModels, setVoiceModels] = useState<VoiceModelOption[] | null>(null);
-  const [voiceStats, setVoiceStats] = useState<VoiceModelStat[]>([]);
+  const [voiceModels, setVoiceModels] = useState<ModelOption[] | null>(null);
+  const [voiceStats, setVoiceStats] = useState<ModelStat[]>([]);
+  const [nightStats, setNightStats] = useState<ModelStat[]>([]);
   const [promptModels, setPromptModels] = useState(profile.promptModels);
   const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
   const [brainOn, setBrainOn] = useState(profile.brainOn);
@@ -175,7 +142,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     setBrainOn(profile.brainOn);
   }, [profile.brainOn]);
   const [injectLongterm, setInjectLongterm] = useState(profile.injectLongterm);
-  const [historyWindow, setHistoryWindow] = useState(profile.historyWindow);
   const [voiceTemperature, setVoiceTemperature] = useState(profile.voiceTemperature);
   const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
   const [identityDraft, setIdentityDraft] = useState(profile.identity);
@@ -208,7 +174,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     setPromptModels(profile.promptModels);
     setSense(profile.hearingSense);
     setInjectLongterm(profile.injectLongterm);
-    setHistoryWindow(profile.historyWindow);
     setVoiceTemperature(profile.voiceTemperature);
     if (!intimateDirty.current) setIntimateDraft(profile.intimateNotes);
     if (!identityDirty.current) setIdentityDraft(profile.identity);
@@ -224,11 +189,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       .then((res) => {
         setVoiceModels(res.models);
         setVoiceStats(res.stats ?? []);
+        setNightStats(res.nightStats ?? []);
       })
-      .catch(() => {
-        setVoiceModels([]);
-        setVoiceStats([]);
-      });
+      .catch(() => setVoiceModels([]));
     // Snapshot the open profile once. Later saves must not jump back to the first page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -298,7 +261,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     const baseRevs: Partial<FieldRevs> = {};
     if ("systemPrompt" in patch) baseRevs.systemPrompt = revsRef.current.systemPrompt;
     if ("intimateNotes" in patch) baseRevs.intimateNotes = revsRef.current.intimateNotes;
-    if ("claudePrompt" in patch) baseRevs.claudePrompt = revsRef.current.claudePrompt;
     if ("identity" in patch) baseRevs.identity = revsRef.current.identity;
     try {
       const result = await saveProfilePatch({ data: { patch, baseRevs } });
@@ -368,12 +330,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     if (saved) return { model: saved.model, effort: uiEffort(saved.effort) };
     const fallback = defaultPromptModel(key);
     return { model: fallback.model, effort: uiEffort(fallback.effort) };
-  }
-
-  function commitHistoryWindow(nextRaw: number) {
-    const next = clampHistoryWindow(nextRaw);
-    setHistoryWindow(next);
-    persistProfile({ historyWindow: next });
   }
 
   async function savePromptItem(key: string) {
@@ -764,7 +720,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   models={
                     voiceModels == null
                       ? null
-                      : toModelChoices(withSelectedVoiceModel(voiceModels, voiceStats, pick.model))
+                      : toModelChoices(voiceModels, voiceStats)
                   }
                   model={pick.model}
                   effort={pick.effort}
@@ -807,6 +763,18 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
               </label>
               <p className="px-1 pb-1 text-xs text-subtle">关掉「运行记忆」：他只靠人设和今天的对话说话，夜里不整理、不主动找你。</p>
             </div>
+            <div className="flex flex-col gap-2 rounded-md bg-surface-2 px-4 py-3">
+              <ModelPick
+                label="夜里整理用哪个模型"
+                models={voiceModels}
+                stats={nightStats}
+                model={profile.nightModel}
+                effort={profile.nightEffort}
+                timeWord="每次整理"
+                onChange={(model, effort) => persistProfile({ nightModel: model, nightEffort: effort })}
+              />
+              <p className="text-xs text-subtle">最高档最聪明也最慢；一次跑超时，下一次会自动降到「高」。</p>
+            </div>
             <DossierPanel maxChars={profile.dossierMaxChars} onMaxChars={(n) => persistProfile({ dossierMaxChars: n })} />
             <NightPanel />
           </div>
@@ -815,8 +783,17 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-md flex-col gap-3">
             <div className="flex flex-col gap-2 rounded-md bg-surface-2 px-4 py-3">
-              <p className="text-xs text-subtle">白天全部由 Grok 回；夜里你睡着后，Claude（Opus 最高档）整理 dossier。</p>
-              <label className="flex items-center justify-between gap-3">
+              <ModelPick
+                label="白天谁回你"
+                models={voiceModels}
+                stats={voiceStats}
+                model={voiceModel}
+                effort={voiceEffort}
+                timeWord="每句"
+                onChange={(model, effort) => persistPromptModel("voice", model, effort)}
+              />
+              <p className="text-xs text-subtle">选中的模型没回话时，Grok 推理版补上。夜里整理的模型在「记忆」里选。</p>
+              <label className="flex items-center justify-between gap-3 pt-1">
                 <span className="text-sm">回复最长（字，0 = 不限）</span>
                 <input
                   key={profile.replyMaxChars}
@@ -832,54 +809,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
               </label>
               <p className="text-xs text-subtle">写进每一轮的指令里告诉他，程序不截断。0 = 不说。</p>
-              <p className="pt-1 text-sm">Grok 用哪个模型</p>
-              <select
-                value={voiceModel}
-                aria-label="Grok 模型"
-                onChange={(e) => persistPromptModel("voice", e.target.value, voiceEffort)}
-                className="min-h-11 rounded-md bg-surface px-2 text-sm"
-              >
-                {withSelectedVoiceModel(voiceModels ?? [], voiceStats, voiceModel).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.id}
-                    {m.stats?.avgMs != null ? ` · 平均 ${(m.stats.avgMs / 1000).toFixed(1)} 秒` : ""}
-                  </option>
-                ))}
-              </select>
-              <label className="flex items-center justify-between gap-3 pt-1">
-                <span className="text-sm">分开多久后清然来找你时换回 Claude（分钟）</span>
-                <input
-                  key={profile.grokReturnMin}
-                  type="number"
-                  min={5}
-                  max={600}
-                  defaultValue={profile.grokReturnMin}
-                  onBlur={(e) => {
-                    const next = Math.max(5, Math.min(600, Math.round(Number(e.target.value) || 30)));
-                    if (next !== profile.grokReturnMin) persistProfile({ grokReturnMin: next });
-                  }}
-                  className="min-h-11 w-20 rounded-md bg-surface px-2 text-right text-sm tabular-nums"
-                />
-              </label>
             </div>
             <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-3 py-2">
-              <div className="px-1 pb-2">
-                <div className="mb-1 flex items-baseline justify-between gap-3">
-                  <p className="text-sm">上下文最近几条</p>
-                  <p className="text-sm tabular-nums">{historyWindow}</p>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={80}
-                  step={1}
-                  value={historyWindow}
-                  aria-label="上下文长度"
-                  onChange={(e) => commitHistoryWindow(Number(e.target.value))}
-                  className="h-11 w-full accent-accent"
-                />
-                <p className="text-xs text-subtle">今天的对话都带上；超过 200 条先整理进回忆，再从最近 20 条接着带。</p>
-              </div>
               <div className="px-1 pb-2">
                 <div className="mb-1 flex items-baseline justify-between gap-3">
                   <p className="text-sm">温度（越高越有主见、越出人意料）</p>
@@ -899,7 +830,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   }}
                   className="h-11 w-full accent-accent"
                 />
-                <p className="text-xs text-subtle">默认 1.0。只用在 Grok 上（Claude 一定先想再答，不收温度）。</p>
+                <p className="text-xs text-subtle">默认 1.0。只用在 Grok 上（Claude 不收温度）。</p>
               </div>
               <div className="flex flex-col gap-1 px-1 pb-2">
                 <p className="text-sm">人设放在哪</p>

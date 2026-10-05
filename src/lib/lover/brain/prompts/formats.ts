@@ -8,22 +8,10 @@ import { FORMATS } from "./templates.ts";
 const NAMES = {
   gap: "停顿",
   photo: "照片",
-  recall: "想起来的事",
-  recallInsight: "想起来的看懂的",
-  later: "后来",
-  undated: "没有日期",
-  memory: "以前的事",
-  memoryInsight: "以前看懂的",
-  thread: "话题",
-  recallKnows: "想起来时只有别人知道",
-  memoryKnows: "以前的事只有别人知道",
-  nightLine: "夜里整理的一句",
   reportDay: "月报的一天",
   reportLine: "月报的一句",
   reportTimeline: "月报的时间线",
-  grokScene: "亲热",
   innerLine: "心里记着的一句",
-  asleepAfter: "亲热后没再说话",
 } as const;
 
 export type FormatKey = keyof typeof NAMES;

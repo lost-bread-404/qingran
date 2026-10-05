@@ -90,7 +90,8 @@ export function PromptStepEditor({
   const variant = doc?.variants.find((row) => row.id === variantId) ?? doc?.variants[0];
   const dirty = draft !== item.body;
   const versions = (item.versions ?? []).filter((row) => row.hash !== item.hash).slice(0, 5);
-  const hasModel = item.key !== "formats";
+  // The day reply and the night pass pick their models on 回复 and 记忆; only 月报 picks here.
+  const hasModel = item.key === "report";
   const choices: PromptModelChoice[] = models ?? [{ id: model, blurb: "", supportsEffort: effort != null, stats: null }];
   const selected = choices.find((opt) => opt.id === model) ?? choices[0] ?? null;
 

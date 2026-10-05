@@ -11,7 +11,7 @@ import { getDossier, publishMemory } from "./dossier.ts";
 import { isPromptKey } from "./prompts/catalog.ts";
 import { savePrompt } from "./prompts/store.ts";
 import { formatLocal, parseLocalTime } from "./heart.ts";
-import { addMemories, listMemories, syncStory, updateMemory } from "./memory.ts";
+import { addMemories, listMemories, updateMemory } from "./memory.ts";
 import { STATE_KIND, STATE_VERSION, type StateFile, type StateMessage } from "./state-public.ts";
 
 const EXPORT_PAGE = 1000;
@@ -160,9 +160,6 @@ export const brainImportState = createServerFn({ method: "POST" })
         if (isPromptKey(key) && typeof body === "string" && body.trim()) await savePrompt(key, body);
       }
       done.push("指令");
-    }
-    if (state.profile && typeof state.profile === "object") {
-      await syncStory(lockedProfile(await getProfileData()).storyline);
     }
     return { ok: true as const, done };
   });

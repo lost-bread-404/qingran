@@ -4,9 +4,11 @@
 
 原则：人设是清然是谁，上下文是她的脑子。prompt 越短越好：除了「人设」页她写的字和几行材料标题，代码不往 prompt 里加任何一句话。抱怨要改结构或材料，不往 prompt 里加补丁。
 
-## 白天：Grok 回每一句
+## 白天：她选的模型回每一句
 
-每轮发给 Grok（`src/lib/lover/brain/voice/pack.ts`、`pack-build.ts`、模板 `prompts/templates.ts` 的 voice）：
+「设置 → 回复 → 白天谁回你」：Claude 或 Grok 任选一个，加强度；每个模型后面是过去 90 天每句的平均用时。选中的模型没回话时，Grok 推理版补上。Claude 的回复写完一起发、一起念；Opus 5.5 不能关掉思考。
+
+每轮发给它的（`src/lib/lover/brain/voice/pack.ts`、`pack-build.ts`、模板 `prompts/templates.ts` 的 voice）：
 
 1. 身份 + 人设 + 亲密设定（「人设」页，`personaText`）；「其他角色」开着时再接一句「名字：」的演法和他们的人设，关着时一个字不提。
 2. dossier（「清然记着的」，夜里整理的 ≤500 字）。
@@ -19,9 +21,9 @@
 
 安静满 2 小时、而且跨过当地凌晨 5 点，就是睡着了（`src/lib/lover/brain/sleep.ts`）。9/26–10/4 的真实数据里，9 次睡觉全部符合；晚上走开、零点前后回来的 5 次都不算。白天的上下文从睡醒后的第一句开始；夜间整理在睡着满 2 小时且过了 5 点以后跑（cron-job.org 每 5 分钟调 `/api/cron/wake`，回复后也会检查）。
 
-## 夜里：Claude 整理 dossier
+## 夜里：整理 dossier
 
-`src/lib/lover/brain/night.ts`，Claude Opus 5.5、effort max（超时一次后下一次用 high）。读现在的 dossier、这一天和之前一周的完整对话（每句带日期时间）、这一天的｛｝；第一次整理时还读旧回忆库和故事线，收进 dossier，之后不再用。写：
+`src/lib/lover/brain/night.ts`。模型和强度在「设置 → 记忆」选（Claude 或 Grok，附每次整理的平均用时），默认 Claude Opus 5.5 最高档；最高档或很高档超时一次，下一次用 high。读现在的 dossier、这一天和之前一周的完整对话（每句带日期时间）、这一天的｛｝；第一次整理时还读旧回忆库和故事线，收进 dossier，之后不再用。写：
 
 - dossier（≤500 字，清然的口吻）：清然的世界里发生的事（两人之间、清然的生活、身边的人）、Rosie 说的关于她自己的客观情况、答应的事和编过的事、清然对 Rosie 的看法。不写 Rosie 一时的感受，不写对清然的抱怨。每条每晚重新判断，不再影响以后的就删。
 - feedback：她对清然的抱怨，存 `qr_feedback`，「记忆」页只给她看，不进 prompt。
@@ -31,4 +33,8 @@
 
 ## 还在的
 
-主动找她（`reach.ts`，同一份材料）、月报（读每天的 timeline）、｛｝存在 `qr_memories`（source = inner），听力和通话不变。
+主动找她（`reach.ts`，同一份材料、同一个模型）、月报（读每天的 timeline）、｛｝存在 `qr_memories`（source = inner；表里旧的回忆只在第一次夜间整理时读一次，不再检索），听力和通话不变。
+
+## 删掉的（v7）
+
+Claude 分流（engine.ts、〔接〕〔转〕〔回〕、Claude 专用人设）、回忆检索和 embedding（embed.ts、memory-search.ts）、故事线切块、对话折叠、「上下文最近几条」。

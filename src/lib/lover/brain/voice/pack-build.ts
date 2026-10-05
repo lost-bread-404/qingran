@@ -5,51 +5,31 @@ import { modelFacingText } from "../../message-meta.ts";
 import { DEFAULT_FORMATS, fmt, type Formats } from "../prompts/formats.ts";
 import type { TimeFacts } from "../heart.ts";
 import { NEUTRAL_PERSONA } from "../../types.ts";
-import type { Engine } from "./engine.ts";
 
 /**
- * What the reply is given (docs/brain.md「回复看到的」):
- * persona with his intimate side (+ identity) → 清然和 Rosie 现在 → today's talk → 清然此刻想起来的事 → 现在是…
- * → her line.
- * A block whose value is empty is left out.
+ * What the reply is given (docs/brain.md v7): 身份 + 人设 + 亲密设定 → dossier → her day's talk → 现在是… (回复最长,
+ * ｛｝) → her line. A block whose value is empty is left out.
  */
 export type VoicePackParts = {
-  /** The persona as she wrote it. */
+  /** 人设 + 亲密设定 (+ other people with 其他角色 on): personaText. */
   charter: string;
   /** 亲密设定 as she wrote it. */
   intimate: string;
   /** 身份 as she wrote it. */
   identity: string;
-  /** 清然和 Rosie 现在: the short text the night pass rewrites ("" = not injected). */
+  /** The dossier the night pass rewrites ("" = not injected). */
   us: string;
   /** When that text was last written (「10 月 4 日 04:12」), so its words are read as of then. */
   usWhen?: string;
-  /** The moments that came back to him for this line, already written out ("" = none). */
-  recall: string;
   time: TimeFacts;
-  /** His ｛｝ notes of the last 16 hours, one per line. */
+  /** His ｛｝ notes of today (since she last slept), one per line. */
   inner: string;
-  /** The same, without those written while Grok was playing her (what Claude is given). */
-  innerDaily: string;
-  /**
-   * Who these messages are for (docs/claude-grok-routing.md). Claude: no 亲密设定, no notes from a Grok scene, each
-   * stretch Grok played folded into one line, its own instruction (指令 → 每轮回复（Claude）, ends with the handover).
-   * Grok: 指令 → 每轮回复（Grok）, with 亲密设定, ends with handing it back. Missing = Grok.
-   */
-  engine?: Engine;
-  /** Claude plays her day to day and hands sex to Grok (设置 → 回复 → Claude 分流). Off: Grok plays all of her. */
-  routing?: boolean;
-  /** Her persona for Claude day to day, and for Grok in bed (with routing on); `charter` is the one for Grok alone. */
-  charterClaude?: string;
-  charterGrok?: string;
   /** 回复最长: told to him in the prompt, never cut by the program (10/4: the cut left only his first, empty line). */
   maxChars?: number;
   /** 材料的写法 (gaps and photos in the talk). */
   formats: Formats;
   history: StoredMessage[];
   historyWindow: number;
-  /** When he is asked (a stretch Grok played that she left without a word is read as her falling asleep). */
-  nowMs?: number;
   userText: string;
   /** Photos she sent with this line (qr_photos ids). */
   userImages?: string[];
@@ -66,7 +46,7 @@ export const VOICE_STRIPS: VoiceStrip[] = ["none", "memory", "thin"];
 export const VOICE_THIN_HISTORY = 8;
 
 export function stripLabel(strip: VoiceStrip): string {
-  if (strip === "memory") return "去掉了想起来的事和现在的我们";
+  if (strip === "memory") return "去掉了 dossier";
   if (strip === "thin") return "只保留人设、最近 8 条对话和这一句";
   return "未裁剪";
 }
@@ -89,14 +69,6 @@ function gapText(ms: number): string {
   const m = Math.round(ms / 60_000);
   if (m < 60) return `${m} 分钟`;
   return m % 60 ? `${Math.floor(m / 60)} 小时 ${m % 60} 分钟` : `${Math.floor(m / 60)} 小时`;
-}
-
-/**
- * Said or written while Grok was playing her (a stretch it played). A line Grok wrote only because Claude failed is
- * not part of such a stretch: it stays in Claude's talk.
- */
-export function inGrokScene(message: StoredMessage): boolean {
-  return message.meta.scene === "grok";
 }
 
 export function voiceHistoryMessages(
@@ -132,19 +104,15 @@ export function voiceHistoryMessages(
 }
 
 export function voiceVars(parts: VoicePackParts, strip: VoiceStrip = "none"): Record<string, string> {
-  const claude = parts.engine === "claude";
-  const persona = !parts.routing ? parts.charter : claude ? (parts.charterClaude ?? "") : (parts.charterGrok ?? "");
-  const inBed = Boolean(parts.routing) && !claude;
   return {
-    system_prompt: persona.trim() || NEUTRAL_PERSONA,
-    identity: inBed ? "" : parts.identity.trim(),
+    system_prompt: parts.charter.trim() || NEUTRAL_PERSONA,
+    identity: parts.identity.trim(),
     us: strip === "none" ? parts.us.trim() : "",
     us_when: strip === "none" && parts.us.trim() ? (parts.usWhen ?? "") : "",
-    recall: strip === "none" ? parts.recall.trim() : "",
     clock: parts.time.clock,
     last_said: parts.time.lastSaid,
     since_last: parts.time.sinceLast,
-    inner: (claude ? parts.innerDaily : parts.inner).trim(),
+    inner: parts.inner.trim(),
     max_chars: parts.maxChars ? String(parts.maxChars) : "",
     user_text: parts.userText,
     quiet: parts.first?.quiet ?? "",
@@ -210,7 +178,6 @@ export function systemCharter(parts: VoicePackParts): string {
 export type VoiceInputChars = {
   system: number;
   moment: number;
-  story: number;
   history: number;
   user: number;
 };
@@ -220,13 +187,12 @@ export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
   return {
     system: systemCharter(parts).length,
     moment: parts.us.length,
-    story: parts.recall.length,
     history: history.reduce((n, m) => n + m.content.length, 0),
     user: parts.userText.length,
   };
 }
 
 export function formatVoiceInputCharsLine(c: VoiceInputChars): string {
-  return `chars system=${c.system} moment=${c.moment} story=${c.story} history=${c.history} user=${c.user}`;
+  return `chars system=${c.system} moment=${c.moment} history=${c.history} user=${c.user}`;
 }
 

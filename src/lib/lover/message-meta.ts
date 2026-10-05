@@ -26,10 +26,8 @@ export type MessageMeta = {
   unheard?: boolean;
   /** Photos she sent with it (qr_photos ids). */
   images?: string[];
-  /** His reply: who wrote it (docs/claude-grok-routing.md). */
+  /** His reply: who wrote it (Claude or Grok, by the model she picked). */
   engine?: "claude" | "grok";
-  /** Her line: said while Grok was playing her (folded out of what Claude is given). */
-  scene?: "grok";
 };
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
@@ -56,7 +54,6 @@ export function readMeta(raw: unknown): MessageMeta {
   if (m.scanned === true) meta.scanned = true;
   if (m.unheard === true) meta.unheard = true;
   if (m.engine === "claude" || m.engine === "grok") meta.engine = m.engine;
-  if (m.scene === "grok") meta.scene = "grok";
   if (Array.isArray(m.images)) {
     const images = m.images.filter((id): id is string => typeof id === "string" && id.length > 0);
     if (images.length) meta.images = images;

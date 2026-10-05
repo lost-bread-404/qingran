@@ -146,40 +146,22 @@ const VOICE_CONTEXT = contextOf(VOICE_SYSTEM);
 
 /**
  * How the pieces of material are written, one line each: 「名字：写法」. Not sent to a model by itself; the other
- * instructions use these lines when they lay out the talk, the memories and the month.
+ * instructions use these lines when they lay out the talk and the month.
  */
 export const FORMATS = `停顿：（过了 {gap}）
 照片：（发来 {count} 张照片）
-想起来的事：（{when}{knows}）{body}
-想起来的看懂的：（{when}，清然看懂的）{body}
-后来：（后来：{changed}）
-没有日期：以前
-以前的事：[{id}]（{when}{thread}{knows}）{body}
-以前看懂的：[{id}]（{when}，看懂的{thread}{knows}）{body}
-话题：，{thread}
-想起来时只有别人知道：，只有{names}知道，清然不知道
-以前的事只有别人知道：，只有{names}知道
-夜里整理的一句：[{time}] {who}：{text}
 月报的一天：【{day}】
 月报的一句：{who}：{text}
 月报的时间线：{day}：{timeline}
-心里记着的一句：（{when}）{body}
-亲热后没再说话：（亲热完 Rosie 就没再说话，睡过去了或者晕过去了）
-亲热：（两人亲热了一阵）`;
+心里记着的一句：（{when}）{body}`;
 
 const FORMAT_PLACEHOLDERS: PromptPlaceholder[] = [
   ph("gap", "两句话之间隔了多久（「2 小时 10 分钟」）。隔 30 分钟以上才写。"),
   ph("count", "她这一句发了几张照片。"),
-  ph("when", "那件事是哪天（「10 月 1 日」）；没有日期时用「没有日期」那一行。"),
-  ph("body", "那件事或看懂的，原文。"),
-  ph("changed", "这件事后来怎么样了；没有就不写「后来」那一行。"),
-  ph("id", "回忆的编号，夜里整理用它合并同一件事。"),
-  ph("thread", "这件事属于哪个话题；没有话题就不写「话题」那一行。"),
-  ph("knows", "清然不知道、只有别人知道的事，写「只有别人知道」那一行；清然知道就空着。"),
-  ph("names", "知道这件事的别人（「林泽」）。"),
-  ph("time", "这一句是几点说的。"),
-  ph("who", "谁说的：Rosie、清然，或者别人的名字。"),
-  ph("text", "说的话（夜里整理时太长会只留引号里的）。"),
+  ph("when", "他是多久以前写的（「20 分钟前」）。"),
+  ph("body", "他写在｛｝里的原文。"),
+  ph("who", "谁说的：Rosie、清然。"),
+  ph("text", "说的话。"),
   ph("day", "哪一天。"),
   ph("timeline", "那一天的时间线。"),
 ];
