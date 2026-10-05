@@ -38,6 +38,8 @@ const VOICE_SYSTEM = `{identity}
 
 const VOICE_NOW = `现在是{clock}。Rosie 上一次说话是 {last_said}，距现在 {since_last}。
 
+这一条回复不超过 {max_chars} 字（旁白和说的话一起算），想好了再说，把最要紧的说完。
+
 你写在｛｝里的（括号里是多久以前）：
 {inner}`;
 
@@ -123,6 +125,7 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   ph("last_said", "Rosie 上一次说话是几点（主动找她时空着）。"),
   ph("since_last", "那是多久以前。"),
   ph("inner", "他今天写在｛｝里的，一行一条，前面是多久以前写的。没有就整段不发。"),
+  ph("max_chars", "「回复 → 回复最长」的字数；设成 0 时整句不发。"),
   ph("us_when", "dossier 是什么时候整理的（「10 月 4 日 04:12」）。"),
   ph("us", "dossier：每晚整理时重写的一小段（≤500 字）：记着的事，和看见 Rosie 的地方。"),
 ];

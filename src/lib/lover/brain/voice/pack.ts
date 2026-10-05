@@ -191,6 +191,7 @@ export async function gatherVoiceParts(input: {
     inner: innerText,
     innerDaily: innerText,
     usWhen: us?.body.trim() && us.updatedAt ? dateClockText(us.updatedAt, input.timeZone) : "",
+    maxChars: input.profile.replyMaxChars,
     formats,
     history,
     historyWindow: history.length,

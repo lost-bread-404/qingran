@@ -1,6 +1,5 @@
 import WebSocket from "ws";
 import { applyAvailabilityFallback, checkModelAvailability, resolveRoute, VOICE_IO, type Effort } from "./brain/config";
-import { spokenForTts, stripSpeechTags } from "./speech-tags";
 import { shouldFlushSpoken, ttsSpeed } from "./tts";
 import { SpeakerCut, type Cast } from "./cast";
 import { PCM_MIME, speakWhole } from "./speak";
@@ -65,8 +64,6 @@ export type TalkStreamInput = {
   cast?: Cast;
   /** Who writes the words: Grok (xAI, default) or Claude (Anthropic). Either way xAI speaks them. */
   engine?: Engine;
-  /** 设置 → 回复 → 回复最长: the reply ends with the sentence that reaches this many characters (0: no limit). */
-  maxChars?: number;
 };
 
 type Emit = (event: TalkStreamEvent) => void;
@@ -280,20 +277,6 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
    * whole: shown at once and read in one go.
    */
   let held = "";
-  /** The reply reached 回复最长 at the end of a sentence: nothing more is read, shown or spoken. */
-  let capped = false;
-  const max = Math.max(0, data.maxChars ?? 0);
-  /** `out` up to the end of the sentence that brings what she sees to `max` (with the quote or tag closing it). */
-  const capText = (before: string, out: string): string => {
-    if (!max || capped) return capped ? "" : out;
-    for (let i = 0; i < out.length; i += 1) {
-      if (!/[。！？!?…]/.test(out[i]!) || stripSpeechTags(before + out.slice(0, i + 1)).length < max) continue;
-      const tail = /^(?:[。！？!?…”」』）)\]]|<\/[a-z-]+>)*/.exec(out.slice(i + 1))?.[0] ?? "";
-      capped = true;
-      return out.slice(0, i + 1 + tail.length);
-    }
-    return out;
-  };
   /** Claude's usage comes in two parts (prompt at the start, output at the end). */
   let claudeStart: Record<string, unknown> = {};
   let claudeOut = 0;
@@ -321,7 +304,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       return;
     }
     if (claude) held += out;
-    else emitVisible(capText(spoken, out));
+    else emitVisible(out);
   };
 
   const handleClaude = (json: unknown) => {
@@ -392,17 +375,13 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     sseBytes += value.byteLength;
     buf += decoder.decode(value, { stream: true });
     drainBuf(false);
-    if (dropped || capped) {
+    if (dropped) {
       void reader.cancel().catch(() => undefined);
-      if (capped) {
-        finishReason = "stop";
-        otherParts.push(`capped at ${max}`);
-      }
       break;
     }
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  if (!dropped && !capped) {
+  if (!dropped) {
     buf += decoder.decode();
     drainBuf(true);
   }
@@ -410,7 +389,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   if (!dropped) {
     const rest = marks.finish();
     if (claude && marks.mark === "转") dropped = true;
-    else emitVisible(claude ? capText("", held + rest) : capText(spoken, rest));
+    else emitVisible(claude ? held + rest : rest);
   }
   if (dropped) {
     // 〔转〕: like an answer taken back in a call. Nothing was shown or spoken; Grok answers this line.

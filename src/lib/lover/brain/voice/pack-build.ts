@@ -42,6 +42,8 @@ export type VoicePackParts = {
   /** Her persona for Claude day to day, and for Grok in bed (with routing on); `charter` is the one for Grok alone. */
   charterClaude?: string;
   charterGrok?: string;
+  /** 回复最长: told to him in the prompt, never cut by the program (10/4: the cut left only his first, empty line). */
+  maxChars?: number;
   /** 材料的写法 (gaps and photos in the talk). */
   formats: Formats;
   history: StoredMessage[];
@@ -143,6 +145,7 @@ export function voiceVars(parts: VoicePackParts, strip: VoiceStrip = "none"): Re
     last_said: parts.time.lastSaid,
     since_last: parts.time.sinceLast,
     inner: (claude ? parts.innerDaily : parts.inner).trim(),
+    max_chars: parts.maxChars ? String(parts.maxChars) : "",
     user_text: parts.userText,
     quiet: parts.first?.quiet ?? "",
   };

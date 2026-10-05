@@ -175,7 +175,6 @@ export const Route = createFileRoute("/api/talk")({
                   safety,
                   temperature: profile.voiceTemperature,
                   cast,
-                  maxChars: profile.replyMaxChars,
                 },
                 forward,
               );

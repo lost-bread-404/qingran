@@ -831,7 +831,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   className="min-h-11 w-20 rounded-md bg-surface px-2 text-right text-sm tabular-nums"
                 />
               </label>
-              <p className="text-xs text-subtle">到这个字数时，他说完手上这一句就停。</p>
+              <p className="text-xs text-subtle">写进每一轮的指令里告诉他，程序不截断。0 = 不说。</p>
               <p className="pt-1 text-sm">Grok 用哪个模型</p>
               <select
                 value={voiceModel}
