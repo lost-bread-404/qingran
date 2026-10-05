@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   listVoiceChoices,
-  SAMPLE_LINE,
   voiceSample,
   type VoiceChoice,
 } from "@/lib/lover/voice-samples";

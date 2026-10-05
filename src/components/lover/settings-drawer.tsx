@@ -143,6 +143,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   }, [profile.brainOn]);
   const [injectLongterm, setInjectLongterm] = useState(profile.injectLongterm);
   const [voiceTemperature, setVoiceTemperature] = useState(profile.voiceTemperature);
+  const temperatureSave = useRef<number | undefined>(undefined);
   const [intimateDraft, setIntimateDraft] = useState(profile.intimateNotes);
   const [identityDraft, setIdentityDraft] = useState(profile.identity);
   const identityDirty = useRef(false);
@@ -751,7 +752,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
                 <span className="text-sm">回复时带上 dossier</span>
               </label>
-              <p className="px-1 pb-1 text-xs text-subtle">关了就不整理、不主动找你。</p>
             </div>
             <div className="flex flex-col gap-2 rounded-md bg-surface-2 px-4 py-3">
               <ModelPick
@@ -811,12 +811,13 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                   step={0.05}
                   value={voiceTemperature}
                   aria-label="温度"
-                  onChange={(e) => setVoiceTemperature(clampVoiceTemperature(Number(e.target.value)))}
-                  // Saved once when she lets go, not on every step of the drag.
-                  onPointerUp={() => persistProfile({ voiceTemperature })}
-                  onKeyUp={() => persistProfile({ voiceTemperature })}
-                  onBlur={() => {
-                    if (voiceTemperature !== profile.voiceTemperature) persistProfile({ voiceTemperature });
+                  onChange={(e) => {
+                    const next = clampVoiceTemperature(Number(e.target.value));
+                    setVoiceTemperature(next);
+                    // Saved once she stops moving it, not on every step of the drag (on the iPhone the drag can end
+                    // without a pointerup or blur, so those would sometimes not save at all).
+                    window.clearTimeout(temperatureSave.current);
+                    temperatureSave.current = window.setTimeout(() => persistProfile({ voiceTemperature: next }), 400);
                   }}
                   className="h-11 w-full accent-accent"
                 />
