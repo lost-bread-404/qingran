@@ -1,6 +1,6 @@
 import { callModel, type CallModelResult } from "./llm.ts";
 import { now } from "./clock.ts";
-import { clampVoiceEffort, voiceSafetyPick } from "./config.ts";
+import { clampVoiceEffort } from "./config.ts";
 import { isClaudeModel } from "../claude.ts";
 import { appendInnerLog, getMeta, getProfileData, patchBrainLog, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
@@ -128,9 +128,9 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
   });
   const system = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
   const users = messages.filter((m) => m.role !== "system").map((m) => m.content);
-  // Her pick (设置 → 记忆); once the highest effort has run out of time, the next try steps down to high.
+  // Her pick (设置 → 记忆); once it has run out of time, the next try steps down one level (max/xhigh → high → medium).
   const picked = clampVoiceEffort(profile.nightModel, profile.nightEffort);
-  const effort = slow && (picked === "max" || picked === "xhigh") ? "high" : picked;
+  const effort = !slow ? picked : picked === "max" || picked === "xhigh" ? "high" : picked === "high" ? "medium" : picked;
   const ask = (model: string, eff: typeof effort) =>
     callModel("editor", {
       system,
@@ -144,7 +144,8 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
       outputRef: `night:${upto}`,
     });
   // A Claude pick that came back without a dossier last time (it declined): this try is Grok's.
-  const grok = voiceSafetyPick();
+  // The smartest Grok (10/5 she asked for it): grok-4.7, its default effort.
+  const grok = { model: "grok-4.7", effort: "high" as const };
   const viaGrok = isClaudeModel(profile.nightModel) && Boolean(grokNext);
   const t0 = Date.now();
   let result: CallModelResult = viaGrok ? await ask(grok.model, grok.effort) : await ask(profile.nightModel, effort);

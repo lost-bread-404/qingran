@@ -146,3 +146,4 @@
 - 2026-10-05：（她让 Claude 查另一个 AI 的 cleanup）没查出功能 bug。夜里整理的 token 上限 32k → 64k（xhigh / max 时 Claude 想的也算在里面，不够会写不出 dossier）；主动找她那段旁注上面的注释改成和现在的写法一致（看情景判断在不在一块儿）。另记：10/4 的 `0066_state_in_notes.sql` 是 Claude 误带进 0017 的，跑过一次，把 historyWindow 设成了 50；v7 白天给全天对话，这个设置已不用，没有影响。
 - 2026-10-05：（她让 Claude 查 v7 清理后的问题）查到 10/5 凌晨 5 点的夜间整理用 Claude Opus 最高档连着 3 次 finish_reason=refusal（读的是这一天和前一周的完整对话，里面有亲热的部分），没写出 dossier，任务失败、10/4 那天没整理进去，白花约 $1。改成：选的是 Claude 而它没写出 dossier（不是超时）时，同一次马上用 Grok 推理版重做（`night.ts`）。失败的那次任务改回待跑，补整理 10/4。
 - 2026-10-05：补跑 10/4 的夜间整理（直接用 Grok，11 秒成功），但它是在她 10/5 15:08 手改过的 dossier 上重写的，删掉了林泽那条来由和几处细节；已把她手改的那版恢复成现在的 dossier（版本 32，author rosie）。10/4 的 feedback 和时间线照常存下了。
+- 2026-10-05：（她要夜间整理用最聪明的 Grok）夜间整理默认改成 grok-4.7 high（xAI 现在的旗舰；Claude Opus 会拒绝读她亲热的部分）；她没在设置里选过，所以现在就是它。还选 Claude 时，没写出 dossier 就改用 grok-4.7 high。超时一次下一次降一档（max/xhigh → high → medium）。
