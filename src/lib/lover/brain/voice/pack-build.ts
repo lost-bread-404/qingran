@@ -11,10 +11,12 @@ import { NEUTRAL_PERSONA } from "../../types.ts";
  * ｛｝) → her line. A block whose value is empty is left out.
  */
 export type VoicePackParts = {
-  /** 人设 + 亲密设定 (+ other people with 其他角色 on): personaText. */
+  /** 人设 + 亲密设定: personaText. */
   charter: string;
   /** 亲密设定 as she wrote it. */
   intimate: string;
+  /** The other people she wrote, with 其他角色 on (castText); "" when off. */
+  cast?: string;
   /** 身份 as she wrote it. */
   identity: string;
   /** The dossier the night pass rewrites ("" = not injected). */
@@ -107,6 +109,7 @@ export function voiceVars(parts: VoicePackParts, strip: VoiceStrip = "none"): Re
   return {
     system_prompt: parts.charter.trim() || NEUTRAL_PERSONA,
     identity: parts.identity.trim(),
+    characters: (parts.cast ?? "").trim(),
     us: strip === "none" ? parts.us.trim() : "",
     us_when: strip === "none" && parts.us.trim() ? (parts.usWhen ?? "") : "",
     clock: parts.time.clock,

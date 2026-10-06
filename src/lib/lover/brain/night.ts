@@ -5,7 +5,7 @@ import { isClaudeModel } from "../claude.ts";
 import { appendInnerLog, getMeta, getProfileData, patchBrainLog, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
 import { localDay, zonedParts } from "./time.ts";
-import { lockedProfile, personaText } from "../types.ts";
+import { lockedProfile, personaText, castText } from "../types.ts";
 import { fromStored, modelFacingText } from "../message-meta.ts";
 import { parsePromptBody, renderVariant } from "./prompts/doc.ts";
 import { loadPrompt } from "./prompts/store.ts";
@@ -117,7 +117,7 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
   const legacy = legacyDone ? "" : await legacyText(profile.storyline);
   const loaded = await loadPrompt("editor");
   const messages = renderVariant(parsePromptBody("editor", loaded.body), "main", {
-    system_prompt: personaText(profile),
+    system_prompt: [personaText(profile), castText(profile) ? `其他人物：\n\n${castText(profile)}` : ""].filter(Boolean).join("\n\n"),
     identity: ident.identity.trim(),
     us: us.trim(),
     legacy,

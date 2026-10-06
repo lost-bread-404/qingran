@@ -69,25 +69,20 @@ function lockCast(raw: { voiceCast?: string; leadVoice?: string; characters?: un
 }
 
 /**
- * The persona the model is given: 清然's, then everyone else she wrote (「林泽」 and who he is). One model plays them
- * all, so they are always there; whether one of them is in the scene the talk itself says.
+ * The other people she wrote (「【林泽】 who he is」), with 其他角色 on; "" when it is off. How to play them is a line in
+ * the reply instruction (设置 → 高级 → 指令), not here (10/6: she wants to see and edit it).
  */
-export function charterText(profile: Pick<Profile, "systemPrompt" | "characters"> & { castOn?: boolean }, lead = profile.systemPrompt): string {
-  const others = profile.castOn
-    ? profile.characters.filter((c) => c.persona.trim()).map((c) => `【${c.name}】\n${c.persona.trim()}`)
-    : [];
-  return [lead.trim(), others.length ? `${CAST_RULE}\n\n其他人物：\n\n${others.join("\n\n")}` : ""].filter(Boolean).join("\n\n");
+export function castText(profile: Pick<Profile, "characters"> & { castOn?: boolean }): string {
+  if (!profile.castOn) return "";
+  return profile.characters
+    .filter((c) => c.persona.trim())
+    .map((c) => `【${c.name}】\n${c.persona.trim()}`)
+    .join("\n\n");
 }
 
-/** Sent only with 其他角色 on (the one line about playing other people). */
-export const CAST_RULE = "别人出场时另起一段，用「名字：」开头来演他；你只知道你在场时看到、听到的。";
-
-/**
- * Everything the day reply is told about who 清然 is (v7): her persona, then her intimate side, then (其他角色 on)
- * the others. 身份 goes before it in the template.
- */
-export function personaText(profile: Pick<Profile, "systemPrompt" | "intimateNotes" | "characters" | "castOn">, lead = profile.systemPrompt): string {
-  return charterText(profile, [lead.trim(), profile.intimateNotes.trim()].filter(Boolean).join("\n\n"));
+/** 清然's persona as she wrote it, then her intimate side (身份 goes before it in the template). */
+export function personaText(profile: Pick<Profile, "systemPrompt" | "intimateNotes">, lead = profile.systemPrompt): string {
+  return [lead.trim(), profile.intimateNotes.trim()].filter(Boolean).join("\n\n");
 }
 
 export type Profile = {

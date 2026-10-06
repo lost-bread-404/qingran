@@ -1,6 +1,6 @@
 import { timeFacts } from "../heart.ts";
 import { photoNote } from "../../message-meta.ts";
-import { NEUTRAL_PERSONA, personaText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
+import { castText, NEUTRAL_PERSONA, personaText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getMessage, getMeta, listHistoryWindow, upsertMessage } from "../store.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
@@ -174,6 +174,7 @@ export async function gatherVoiceParts(input: {
   const persona = personaText(input.profile, input.charter ?? input.profile.systemPrompt);
   const parts: VoicePackParts = {
     charter: persona,
+    cast: castText(input.profile),
     intimate: input.profile.intimateNotes,
     identity: input.profile.identity,
     us: us?.body.trim() ?? "",

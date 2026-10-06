@@ -21,7 +21,7 @@ const system = (content: string): PromptMessage => ({ role: "system", content })
 const user = (content: string): PromptMessage => ({ role: "user", content });
 const ph = (token: string, meaning: string): PromptPlaceholder => ({ token, meaning });
 
-const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里的人设和亲密设定（其他角色开着时，后面接着其他角色）。");
+const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里清然的人设和亲密设定。");
 
 /**
  * Who is who. Both 清然 and Rosie are 她, so a 我 / 你 / 她 in material nobody is saying out loud can mean either one.
@@ -34,7 +34,10 @@ const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里的人设和亲密�
  */
 const VOICE_SYSTEM = `{identity}
 
-{system_prompt}`;
+{system_prompt}
+
+其他人物出场时另起一段，用「名字：」开头来演他。其他人物：
+{characters}`;
 
 const VOICE_NOW = `现在是{clock}。Rosie 上一次说话是 {last_said}，距现在 {since_last}。
 
@@ -117,6 +120,7 @@ const IDENTITY = ph("identity", "「人设 → 清然 → 身份」里写的。"
 const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   SYSTEM_PROMPT,
   IDENTITY,
+  ph("characters", "「人设」页里其他角色的人设（「【林泽】……」）。其他角色关着时为空，这一段整段不发。"),
   ph(
     "history_messages",
     "对话：她这一天的全部（从她上次睡着以后算起；清空聊天后从清空时算起），隔 30 分钟以上插一行停顿。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息。",
