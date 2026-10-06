@@ -96,6 +96,8 @@ export class SpeakerCut {
   private who = LEAD;
   private head = "";
   private atLineStart = true;
+  /** A name was just taken and nothing of his has been written yet (「**林泽：**」, an empty line, then his paragraph). */
+  private waiting = false;
 
   constructor(private cast: Cast) {
     this.names = namesOf(cast);
@@ -111,6 +113,7 @@ export class SpeakerCut {
     for (const ch of token) {
       if (!this.atLineStart) {
         body += ch;
+        if (ch.trim()) this.waiting = false;
         if (ch === "\n") this.atLineStart = true;
         continue;
       }
@@ -120,7 +123,7 @@ export class SpeakerCut {
         // name is 清然 again (10/5: 清然 went on after 林泽's line without writing 「清然：」 and was read in 林泽's voice).
         body += this.head;
         this.head = "";
-        if (this.who !== LEAD) {
+        if (this.who !== LEAD && !this.waiting) {
           out.push(this.part(body));
           body = "";
           this.who = LEAD;
@@ -134,7 +137,9 @@ export class SpeakerCut {
           if (body) out.push(this.part(body));
           body = "";
           this.who = own.who;
+          this.waiting = true;
         } else {
+          if (this.head.trim()) this.waiting = false;
           body += this.head;
         }
         this.head = "";
@@ -147,11 +152,13 @@ export class SpeakerCut {
         body = "";
         this.who = label.who;
         body = this.head.slice(label.length);
+        this.waiting = !body.trim();
         this.head = "";
         this.atLineStart = false;
         continue;
       }
       if (label || mayBeLabel(this.head, this.names)) continue;
+      if (this.head.trim()) this.waiting = false;
       body += this.head;
       this.head = "";
       this.atLineStart = false;
