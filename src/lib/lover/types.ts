@@ -80,6 +80,12 @@ export function castText(profile: Pick<Profile, "characters"> & { castOn?: boole
     .join("\n\n");
 }
 
+/** For the night pass: 清然's persona, then the other people she wrote (with 其他角色 on). */
+export function personaWithCast(profile: Pick<Profile, "systemPrompt" | "intimateNotes" | "characters"> & { castOn?: boolean }): string {
+  const cast = castText(profile);
+  return [personaText(profile), cast ? `其他人物：\n\n${cast}` : ""].filter(Boolean).join("\n\n");
+}
+
 /** 清然's persona as she wrote it, then her intimate side (身份 goes before it in the template). */
 export function personaText(profile: Pick<Profile, "systemPrompt" | "intimateNotes">, lead = profile.systemPrompt): string {
   return [lead.trim(), profile.intimateNotes.trim()].filter(Boolean).join("\n\n");

@@ -21,7 +21,7 @@ const system = (content: string): PromptMessage => ({ role: "system", content })
 const user = (content: string): PromptMessage => ({ role: "user", content });
 const ph = (token: string, meaning: string): PromptPlaceholder => ({ token, meaning });
 
-const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里清然的人设和亲密设定。");
+const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里清然的人设和亲密设定（夜里整理时，其他角色开着还接着「其他人物：」和他们的人设）。");
 
 /**
  * Who is who. Both 清然 and Rosie are 她, so a 我 / 你 / 她 in material nobody is saying out loud can mean either one.

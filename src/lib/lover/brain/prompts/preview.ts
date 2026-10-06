@@ -1,4 +1,4 @@
-import { lockedProfile, personaText, castText } from "../../types.ts";
+import { lockedProfile, personaWithCast } from "../../types.ts";
 import { now } from "../clock.ts";
 import { getMeta, getProfileData } from "../store.ts";
 import { resolveTz } from "../tz.ts";
@@ -48,7 +48,7 @@ async function editorSlots(): Promise<Record<string, string>> {
   const [us, profileData] = await Promise.all([dossierTextForModel(), getProfileData()]);
   const profile = lockedProfile(profileData);
   return {
-    system_prompt: [personaText(profile), castText(profile) ? `其他人物：\n\n${castText(profile)}` : ""].filter(Boolean).join("\n\n"),
+    system_prompt: personaWithCast(profile),
     identity: profile.identity.trim(),
     us: us.trim(),
     legacy: "",
