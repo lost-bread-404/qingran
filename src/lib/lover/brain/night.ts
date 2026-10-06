@@ -33,7 +33,7 @@ const WEEK_MAX_CHARS = 250_000;
 const NIGHT_UPTO = "night:upto";
 /** Set when the old memory library and storyline were folded into the dossier (done once). */
 const LEGACY_FOLDED = "night:legacy-folded";
-/** Set when the highest effort ran out of time: the next try uses high. */
+/** Set when her pick ran out of time: the next try steps its effort down one level. */
 const NIGHT_SLOW = "night:slow";
 /** Set when Claude came back without a dossier too late to ask Grok in the same run: the next try is Grok's. */
 const NIGHT_GROK = "night:grok";
@@ -152,7 +152,7 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
   let dossier = result.ok ? tag(result.text, "dossier") : null;
   // Claude declines the explicit parts of her day (10/5: three refusals at 05:00, the day was lost). Grok reads the
   // same material: at once while there is time left in this run (one job has about 280 s), else on the next try.
-  // A timeout is left to the retry (it steps down to high).
+  // A timeout is left to the retry (it steps the effort down one level).
   const claudeDeclined = !dossier && !viaGrok && isClaudeModel(profile.nightModel) && result.failKind !== "timeout";
   if (claudeDeclined && Date.now() - t0 < GROK_NOW_MS) {
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
@@ -162,7 +162,7 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
     await setMark(NIGHT_GROK, "1", at);
   }
   if (!dossier) {
-    if (result.failKind === "timeout" && !slow && isClaudeModel(result.model)) await setMark(NIGHT_SLOW, "1", at);
+    if (result.failKind === "timeout" && !slow && result.model === profile.nightModel) await setMark(NIGHT_SLOW, "1", at);
     await appendInnerLog({ turnSeq: 0, data: { kind: "night", upto, error: result.failKind ?? "no-dossier" }, model: result.model, ms: result.ms });
     await patchBrainLog(result.logId, { outputText: result.text || null, outputRef: null });
     throw new Error(`night:${result.failKind ?? "no-dossier"}`);
