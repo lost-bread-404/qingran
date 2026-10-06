@@ -92,6 +92,8 @@ export function PromptStepEditor({
   const versions = (item.versions ?? []).filter((row) => row.hash !== item.hash).slice(0, 5);
   // The day reply and the night pass pick their models on 回复 and 记忆; only 月报 picks here.
   const hasModel = item.key === "report";
+  // Every step that is sent to a model can show what would go out (材料的写法 is only pieces of the others).
+  const canPreview = item.key !== "formats";
   const choices: PromptModelChoice[] = models ?? [{ id: model, blurb: "", supportsEffort: effort != null, stats: null }];
   const selected = choices.find((opt) => opt.id === model) ?? choices[0] ?? null;
 
@@ -247,21 +249,6 @@ export function PromptStepEditor({
           <Textarea value={draft} onChange={(event) => onDraft(event.target.value)} className="min-h-40 font-mono text-sm" />
         )}
 
-        {item.placeholders.length ? (
-          <ul className="flex flex-col gap-1 text-xs text-subtle">
-            {item.placeholders.map((row) => (
-              <li key={row.token}>
-                <span className="font-mono text-fg">{`{${row.token}}`}</span> {row.meaning}
-              </li>
-            ))}
-            <li>
-              {hasModel
-                ? "一段（空行隔开）里的 {…} 都是空的，这一段连标题一起不发。"
-                : "一行一种。写法里的 {…} 都是空的，这一条不写；整行删掉会用回默认的写法。"}
-            </li>
-          </ul>
-        ) : null}
-
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" disabled={busy || !dirty} onClick={onSave}>
             {busy ? "记下…" : "记下"}
@@ -269,7 +256,7 @@ export function PromptStepEditor({
           <Button type="button" size="sm" variant="outline" disabled={busy || !(item.custom || item.updatedAt != null)} onClick={onRestore}>
             恢复默认
           </Button>
-          {hasModel ? (
+          {canPreview ? (
             <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => void showPreview()}>
               {loading ? "在读…" : "看发出去的样子"}
             </Button>
