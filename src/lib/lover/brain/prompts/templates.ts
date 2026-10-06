@@ -39,7 +39,9 @@ const VOICE_SYSTEM = `{identity}
 其他人物出场时另起一段，用「名字：」开头来演他。其他人物：
 {characters}`;
 
-const VOICE_NOW = `现在是{clock}。我上一次说话是 {last_said}，距现在 {since_last}。
+const VOICE_NOW = `现在是{clock}。
+
+我上一次说话是 {last_said}，距现在 {since_last}。
 
 这一条回复不超过 {max_chars} 字（旁白和说的话一起算），想好了再说，把最要紧的说完。
 
@@ -82,6 +84,7 @@ const EDITOR_SYSTEM = `你在帮清然整理她心里记着的东西。清然是
 不写进 dossier：Rosie 某一刻的感受和想法（第二天就变了）；每天都有的抱、哄、撒娇（写了清然会照着重复）；Rosie 对清然的抱怨（进 feedback）。
 现在的 dossier 每一条都重新判断：它以后还会改变清然的想法或做法吗？会就留下（需要就改写）；不会了（溃疡好了、事情了结了、看法被推翻了）就删掉。字数不够时，先删最不影响以后的。
 2. feedback：Rosie 对清然本身的抱怨和不满（嫌她重复、空话、听不懂、太黏、乱安排等，「Rosie 讨厌清然重复」这种也在这里），一条一行，写清楚当时清然做了什么、Rosie 说了什么。只给 Rosie 看，不进 dossier。没有就空着。
+feedback 和 timeline 只给 Rosie 看，用名字写（「Rosie」「清然」），不用「我」「你」。
 3. timeline：今天 Rosie 的时间线，一小段（「9:15 醒来，10:00–12:30 学习，……0:40 睡着」）。推不出来写「不清楚」。
 
 只根据材料，不编造。只输出下面的格式，别的什么都不写：
@@ -131,7 +134,7 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   ph("inner", "他今天写在｛｝里的，一行一条，前面是多久以前写的。没有就整段不发。"),
   ph("max_chars", "「回复 → 回复最长」的字数；设成 0 时整句不发。"),
   ph("us_when", "dossier 是什么时候整理的（「10 月 4 日 04:12」）。"),
-  ph("us", "dossier：每晚整理时重写的一小段（≤500 字）：记着的事，和看见 Rosie 的地方。"),
+  ph("us", "dossier：每晚整理时重写的一小段（≤500 字）：记着的事，和【你看见的我】。"),
 ];
 
 /**
