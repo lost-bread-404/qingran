@@ -3,7 +3,7 @@ import type { Profile } from "./types";
 
 /**
  * Other people in the scene. One model plays everyone; a block that starts with 「林泽：」 is 林泽 until another
- * name starts a block (「清然：」 goes back to him). Without a name it is 清然. Each person's block (his actions,
+ * name starts a block (「清然：」 goes back to him) or the paragraph ends (an empty line). Without a name it is 清然. Each person's block (his actions,
  * what he sees, what he says, in his own first person) is read in his voice; 清然 is Eve.
  * Any short name at the start of a line followed by a colon starts a block (a waiter nobody named in advance too);
  * 「我说：」「他说：」 never do. Someone she added (设置 → 人设) is read in the voice she picked for him; anyone else in
@@ -115,6 +115,18 @@ export class SpeakerCut {
         continue;
       }
       this.head += ch;
+      if (ch === "\n" && !this.head.slice(0, -1).trim()) {
+        // An empty line ends a paragraph. Another person's block is one paragraph: what comes after it without a
+        // name is 清然 again (10/5: 清然 went on after 林泽's line without writing 「清然：」 and was read in 林泽's voice).
+        body += this.head;
+        this.head = "";
+        if (this.who !== LEAD) {
+          out.push(this.part(body));
+          body = "";
+          this.who = LEAD;
+        }
+        continue;
+      }
       if (ch === "\n") {
         // 「林泽：」 alone on its line: his block starts on the next line.
         const own = labelOf(this.head.slice(0, -1), this.names);
