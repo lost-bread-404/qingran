@@ -26,7 +26,7 @@ export function isVoiceEffort(value: unknown): value is Exclude<VoiceEffort, nul
 
 /** The night pass (设置 → 记忆): Claude Opus at its highest effort unless she picks otherwise. */
 export const DEFAULT_NIGHT_MODEL = "grok-4.7";
-export const DEFAULT_NIGHT_EFFORT: VoiceEffort = "high";
+export const DEFAULT_NIGHT_EFFORT: VoiceEffort = "medium";
 
 /** Someone besides 清然 (林泽): how his lines sound and who he is. */
 export type Character = { name: string; voice: string; persona: string };
