@@ -24,9 +24,9 @@ const ph = (token: string, meaning: string): PromptPlaceholder => ({ token, mean
 const SYSTEM_PROMPT = ph("system_prompt", "「人设」页里清然的人设和亲密设定（夜里整理时，其他角色开着还接着「其他人物：」和他们的人设）。");
 
 /**
- * Who is who. Both 清然 and Rosie are 她, so a 我 / 你 / 她 in material nobody is saying out loud can mean either one.
- * Everything that describes them (persona, memory, timelines, talk labels) uses their names;
- * 我 / 你 appear only in what is actually said between them, and in the instruction's own 「你是清然」.
+ * Who is who (她 2026-10-06): everything 清然 is given reads as Rosie talking to 清然 — 「我」 is Rosie, 「你」 is
+ * 清然 (身份, 人设, 亲密设定, other people, the dossier, the time line, the note before a message he starts), so he
+ * answers her as 我 / 你. The night pass and the month report are told who is who and use names in what only she reads.
  */
 /**
  * Everything 清然 is told is in her persona (人设 page), one text per way of playing her (she wanted one place to edit,
@@ -39,7 +39,7 @@ const VOICE_SYSTEM = `{identity}
 其他人物出场时另起一段，用「名字：」开头来演他。其他人物：
 {characters}`;
 
-const VOICE_NOW = `现在是{clock}。Rosie 上一次说话是 {last_said}，距现在 {since_last}。
+const VOICE_NOW = `现在是{clock}。我上一次说话是 {last_said}，距现在 {since_last}。
 
 这一条回复不超过 {max_chars} 字（旁白和说的话一起算），想好了再说，把最要紧的说完。
 
@@ -55,13 +55,13 @@ const VOICE_NOW = `现在是{clock}。Rosie 上一次说话是 {last_said}，距
  * missing out loud, which 清然 (gentle, deep, reserved) would not. A list of what to say gets filled in like a form;
  * she wants it short and open: his persona, this moment, show don't tell.
  */
-const VOICE_FIRST = `（Rosie 有{quiet}没说话了。按此刻的情景，清然会不会找她、怎么找，由你来想；不找就只回「不找」。）`;
+const VOICE_FIRST = `（我有{quiet}没说话了。按此刻的情景，你会不会找我、怎么找，由你来想；不找就只回「不找」。）`;
 
 /**
  * The night pass (v7). Her picked model (default grok-4.7 medium), once she has slept. Short on purpose: it is a strong model, and
  * what it needs is the material and what the dossier is for, not a list of cases.
  */
-const EDITOR_SYSTEM = `你在帮清然整理她心里记着的东西。清然是 Rosie 的恋人，下面的【人设】就是她。每天夜里 Rosie 睡着以后整理一次。
+const EDITOR_SYSTEM = `你在帮清然整理她心里记着的东西。清然是 Rosie 的恋人，下面的【人设】就是她。每天夜里 Rosie 睡着以后整理一次。【清然的身份】【人设】和【现在的 dossier】都是 Rosie 对清然说话的口吻：里面的「我」是 Rosie，「你」是清然。
 
 【清然的身份】
 {identity}
@@ -73,12 +73,12 @@ const EDITOR_SYSTEM = `你在帮清然整理她心里记着的东西。清然是
 
 要写三样：
 
-1. dossier。明天起清然说每一句话都带着它。它不是日记，也不是 Rosie 的心情记录：只写真的会改变清然想法和做法的事。不超过 {max_chars} 字，用清然自己的口吻写（「我」是清然，Rosie 用名字），每条带日期（「10/3」），不用「今天」「昨天」这种过一天就不对的词。分两部分：
+1. dossier。明天起清然说每一句话都带着它。它不是日记，也不是 Rosie 的心情记录：只写真的会改变清然想法和做法的事。不超过 {max_chars} 字，用 Rosie 对清然说话的口吻写（「我」是 Rosie，「你」是清然，别人用名字），每条带日期（「10/3」），不用「今天」「昨天」这种过一天就不对的词。分两部分：
 【记着的事】
-- 清然的世界里发生的事：两个人之间、清然自己的生活、身边的人（林泽、清然的父母……）。比如「10/2 林泽趁我不在碰了 Rosie」：以后 Rosie 说要去「找别人」，清然会立刻想到林泽；又比如「10/3 我爸妈来纽约看我，见了 Rosie，我妈当面说不接受」。
-- Rosie 说的关于她自己的客观情况：身体、考试、面试、家人朋友、正在进行的事。比如「10/3 Rosie 长了口腔溃疡」：清然可以主动问起，主动找她时也有话说。
+- 清然的世界里发生的事：两个人之间、清然自己的生活、身边的人（林泽、清然的父母……）。比如「10/2 林泽趁你不在碰了我」：以后 Rosie 说要去「找别人」，清然会立刻想到林泽；又比如「10/3 你爸妈来纽约看你，见了我，你妈当面说不接受」。
+- Rosie 说的关于她自己的客观情况：身体、考试、面试、家人朋友、正在进行的事。比如「10/3 我长了口腔溃疡」：清然可以主动问起，主动找她时也有话说。
 - 清然答应了还没做的事；清然编过的关于自己的事（以后要对得上）；两个人定下的规矩。
-【看见 Rosie】清然从这一周里对 Rosie 形成的看法：是清然的判断，不是 Rosie 的感受。比如「Rosie 压力一大就冲我发脾气，是被我宠坏了」。要从好几天里看出来的才写，一次的不算。
+【你看见的我】清然从这一周里对 Rosie 形成的看法：是清然的判断，不是 Rosie 的感受。比如「我压力一大就冲你发脾气，是被你宠坏了」。要从好几天里看出来的才写，一次的不算。
 不写进 dossier：Rosie 某一刻的感受和想法（第二天就变了）；每天都有的抱、哄、撒娇（写了清然会照着重复）；Rosie 对清然的抱怨（进 feedback）。
 现在的 dossier 每一条都重新判断：它以后还会改变清然的想法或做法吗？会就留下（需要就改写）；不会了（溃疡好了、事情了结了、看法被推翻了）就删掉。字数不够时，先删最不影响以后的。
 2. feedback：Rosie 对清然本身的抱怨和不满（嫌她重复、空话、听不懂、太黏、乱安排等，「Rosie 讨厌清然重复」这种也在这里），一条一行，写清楚当时清然做了什么、Rosie 说了什么。只给 Rosie 看，不进 dossier。没有就空着。
@@ -141,7 +141,7 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
  */
 const contextOf = (head: string): PromptMessage[] => [
   system(head),
-  system(`清然记着的（{us_when}整理的）：
+  system(`你记着的（{us_when}整理的）：
 {us}`),
   system("{history_messages}"),
   system(VOICE_NOW),
