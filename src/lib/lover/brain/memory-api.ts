@@ -13,7 +13,7 @@ export const brainGetFeedback = createServerFn({ method: "GET" }).handler(async 
 
 /**
  * 「现在整理一次」: the dossier is rewritten from the day so far (the first time, the old memories and the storyline
- * are folded in too). Runs in the background: Claude at its highest effort takes a few minutes.
+ * are folded in too). Runs in the background: it can take a minute or two.
  */
 export const brainRunNightNow = createServerFn({ method: "POST" }).handler(async () => {
   const [{ enqueue, drainJobs }, { getProfileData }, { lockedProfile }, { runInBackground }, { LONG_DRAIN_MS }] = await Promise.all([

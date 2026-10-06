@@ -55,7 +55,7 @@ const VOICE_NOW = `现在是{clock}。Rosie 上一次说话是 {last_said}，距
 const VOICE_FIRST = `（Rosie 有{quiet}没说话了。按此刻的情景，清然会不会找她、怎么找，由你来想；不找就只回「不找」。）`;
 
 /**
- * The night pass (v7). Claude at its highest effort, once she has slept. Short on purpose: it is a strong model, and
+ * The night pass (v7). Her picked model (default grok-4.7 medium), once she has slept. Short on purpose: it is a strong model, and
  * what it needs is the material and what the dossier is for, not a list of cases.
  */
 const EDITOR_SYSTEM = `你在帮清然整理她心里记着的东西。清然是 Rosie 的恋人，下面的【人设】就是她。每天夜里 Rosie 睡着以后整理一次。

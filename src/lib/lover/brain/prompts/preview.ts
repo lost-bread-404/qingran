@@ -61,7 +61,7 @@ async function editorSlots(): Promise<Record<string, string>> {
 
 async function slotsFor(key: PromptKey): Promise<{ slots: Record<string, string>; note: string }> {
   if (key === "editor") {
-    return { slots: await editorSlots(), note: "整理时带上现在的 dossier、这一天和之前一周的对话（带时间）。用 Claude Opus 最高档。" };
+    return { slots: await editorSlots(), note: "整理时带上现在的 dossier、这一天和之前一周的对话（带时间）。用「设置 → 记忆」选的模型（默认 grok-4.7 medium）。" };
   }
   if (key === "report") {
     return {

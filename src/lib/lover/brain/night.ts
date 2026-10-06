@@ -17,7 +17,7 @@ import { addFeedback, getMark, listMemories, setMark } from "./memory.ts";
 import { dayStart, lastSleepAfter } from "./sleep.ts";
 
 /**
- * The night pass (docs/brain.md v7). Once she has slept, Claude (highest effort) reads yesterday's dossier, the
+ * The night pass (docs/brain.md v7). Once she has slept, the model she picked (default grok-4.7 medium) reads yesterday's dossier, the
  * whole day she just had and the week before it, every line with its time, and writes:
  * - the new dossier (≤ 500 characters): what still changes how 清然 thinks and acts, and how 清然 sees Rosie;
  * - feedback: Rosie's complaints about 清然, for her only (qr_feedback), never shown to 清然;

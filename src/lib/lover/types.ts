@@ -24,7 +24,7 @@ export function isVoiceEffort(value: unknown): value is Exclude<VoiceEffort, nul
   return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
 }
 
-/** The night pass (设置 → 记忆): Claude Opus at its highest effort unless she picks otherwise. */
+/** The night pass (设置 → 记忆): grok-4.7 medium unless she picks otherwise (10/5: Claude declines her intimate days). */
 export const DEFAULT_NIGHT_MODEL = "grok-4.7";
 export const DEFAULT_NIGHT_EFFORT: VoiceEffort = "medium";
 
