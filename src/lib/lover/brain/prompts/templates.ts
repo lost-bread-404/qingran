@@ -55,9 +55,12 @@ const VOICE_NOW = `现在是{clock}。
  * four 「小猫，我在呢，姐姐一直抱着你」 on 10/2–10/3 (where they left off was cuddling), one 15 minutes into the
  * meeting she had said she was going to. Then 「我在实验室……很想你昨晚埋在我颈窝的样子。现在想我了吗？」 (10/3): says the
  * missing out loud, which 清然 (gentle, deep, reserved) would not. A list of what to say gets filled in like a form;
- * she wants it short and open: his persona, this moment, show don't tell.
+ * she wants it short and open: his persona, this moment, show don't tell. The together-or-apart half was cut on 10/4
+ * to keep it short and 10/6 it was put in her voice (「我有…没说话了」, Rosie speaking while asleep); on 10/7 she fell
+ * asleep in his arms and at midnight he asked whether she was still studying. So: how long since her last line, as a
+ * fact rather than her talking now, and together → let her be, apart → maybe a message.
  */
-const VOICE_FIRST = `（我有{quiet}没说话了。按此刻的情景，你会不会找我、怎么找，由你来想；不找就只回「不找」。）`;
+const VOICE_FIRST = `（离我上一句话已经{quiet}。我们此刻在不在一块儿，看对话里的情景：还在一块儿（比如我在你怀里睡着了），就不打扰我；不在一块儿，你会不会给我发一条消息、发什么，由你来想。不找就只回「不找」。）`;
 
 /**
  * The night pass (v7). Her picked model (default grok-4.7 medium), once she has slept. Short on purpose: it is a strong model, and
