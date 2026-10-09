@@ -8,9 +8,11 @@ import { runInBackground } from "@/lib/lover/brain/wait-until";
 async function handle(request: Request): Promise<Response> {
   const denied = cronGate(request);
   if (denied) return denied;
+  const t0 = Date.now();
   const result = await wakeOnce();
-  // The night pass (and anything else queued) runs after the response.
-  await runInBackground(() => drainJobs(LONG_DRAIN_MS));
+  // The night pass (and anything else queued) runs after the response, in what is left of the function's time: a
+  // message he starts can take a thinking model a while, and a job that no longer fits waits for the next wake.
+  await runInBackground(() => drainJobs(Math.max(0, LONG_DRAIN_MS - (Date.now() - t0))));
   return Response.json(result);
 }
 

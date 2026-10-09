@@ -27,6 +27,11 @@ export function isVoiceEffort(value: unknown): value is Exclude<VoiceEffort, nul
 /** The night pass (设置 → 记忆): grok-4.7 medium unless she picks otherwise (10/5: Claude declines her intimate days). */
 export const DEFAULT_NIGHT_MODEL = "grok-4.7";
 export const DEFAULT_NIGHT_EFFORT: VoiceEffort = "medium";
+/** Messages he starts himself: a thinking model (she, 10/9). There is no hurry, and the non-thinking one woke her
+ * every night and asked whether she was still studying hours after she had gone; 4.20 reasoning said 「不找」 while she
+ * slept (10/5). */
+export const DEFAULT_REACH_MODEL = "grok-4.20-0309-reasoning";
+export const DEFAULT_REACH_EFFORT: VoiceEffort = null;
 
 /** Someone besides 清然 (林泽): how his lines sound and who he is. */
 export type Character = { name: string; voice: string; persona: string };
@@ -104,6 +109,8 @@ export type Profile = {
   /** The night pass's model (Claude or Grok) and effort (设置 → 记忆). */
   nightModel: string;
   nightEffort: VoiceEffort;
+  reachModel: string;
+  reachEffort: VoiceEffort;
   /**
    * The longest a reply may run (characters she sees; 0 = no limit). The reply stops at the end of the sentence that
    * reaches it (10/4: long replies made her drift off and are not 清然, and his long replies in the talk made the
@@ -218,6 +225,8 @@ export const DEFAULT_PROFILE: Profile = {
   voiceEffort: DEFAULT_VOICE_EFFORT,
   nightModel: DEFAULT_NIGHT_MODEL,
   nightEffort: DEFAULT_NIGHT_EFFORT,
+  reachModel: DEFAULT_REACH_MODEL,
+  reachEffort: DEFAULT_REACH_EFFORT,
   replyMaxChars: 80,
   voiceTemperature: VOICE_TEMPERATURE,
   silenceMs: SILENCE_MS,
@@ -266,6 +275,8 @@ type LooseProfile = Partial<Profile> & {
   voiceEffort?: string | null;
   nightModel?: string;
   nightEffort?: string | null;
+  reachModel?: string;
+  reachEffort?: string | null;
   replyMaxChars?: number;
   voiceTemperature?: number;
   silenceMs?: number;
@@ -314,6 +325,8 @@ export function lockedProfile(input?: unknown): Profile {
     voiceEffort: pickVoiceEffort(raw),
     nightModel: typeof raw.nightModel === "string" && raw.nightModel.trim() ? raw.nightModel.trim().slice(0, 80) : DEFAULT_NIGHT_MODEL,
     nightEffort: isVoiceEffort(raw.nightEffort) || raw.nightEffort === null ? raw.nightEffort : DEFAULT_NIGHT_EFFORT,
+    reachModel: typeof raw.reachModel === "string" && raw.reachModel.trim() ? raw.reachModel.trim().slice(0, 80) : DEFAULT_REACH_MODEL,
+    reachEffort: isVoiceEffort(raw.reachEffort) || raw.reachEffort === null ? raw.reachEffort : DEFAULT_REACH_EFFORT,
     replyMaxChars:
       typeof raw.replyMaxChars === "number" && Number.isFinite(raw.replyMaxChars) ? Math.max(0, Math.min(2000, Math.round(raw.replyMaxChars))) : 80,
     voiceTemperature: clampVoiceTemperature(raw.voiceTemperature),

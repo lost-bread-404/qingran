@@ -14,7 +14,7 @@ export function effortsOf(models: ModelOption[], model: string): VoiceEffort[] {
 
 /**
  * One model (Claude or Grok) and how hard it thinks, with how long it has taken so far.
- * Used for the day reply (设置 → 回复) and the night pass (设置 → 记忆).
+ * Used for the day reply (设置 → 回复), a message he starts (设置 → 主动消息) and the night pass (设置 → 记忆).
  */
 export function ModelPick({
   label,

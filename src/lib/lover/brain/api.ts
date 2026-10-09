@@ -59,19 +59,20 @@ export const brainRunDue = createServerFn({ method: "POST" })
 export const brainJobStatus = createServerFn({ method: "GET" }).handler(async () => listJobStatus());
 
 /**
- * The models she can pick (设置 → 回复 for the day reply, 设置 → 记忆 for the night pass): Claude and Grok, each
+ * The models she can pick (设置 → 回复 for the day reply, 设置 → 主动消息 for a message he starts, 设置 → 记忆 for the night pass): Claude and Grok, each
  * with its effort levels and how long it has taken (day: per reply; night: per run).
  */
 export const brainListVoiceModels = createServerFn({ method: "GET" }).handler(async () => {
-  const [catalog, stats, nightStats] = await Promise.all([
+  const [catalog, stats, nightStats, reachStats] = await Promise.all([
     listVoiceCatalog(process.env.XAI_API_KEY),
     voiceModelStatsLast7d("voice").catch(() => []),
     voiceModelStatsLast7d("editor").catch(() => []),
+    voiceModelStatsLast7d("reach").catch(() => []),
   ]);
   const ids = [...CLAUDE_MODELS, ...catalog.map((m) => m.id)];
   const blurb = new Map<string, string>([...catalog.map((m) => [m.id, m.blurb] as const), ...Object.entries(CLAUDE_MODEL_BLURBS)]);
   const models = ids.map((id) => ({ id, blurb: blurb.get(id) ?? "", efforts: voiceEffortsFor(id) }));
-  return { models, stats, nightStats };
+  return { models, stats, nightStats, reachStats };
 });
 
 export const brainListLogs = createServerFn({ method: "POST" })

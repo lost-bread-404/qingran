@@ -705,8 +705,8 @@ function isEmptyVoiceLog(row: { ok: boolean; note: string | null; error: string 
   return /空回复|\bempty\b/.test(`${row.note ?? ""}\n${row.error ?? ""}`);
 }
 
-/** Average time per model over the last 90 days: the day reply ("voice") or the night pass ("editor"). */
-export async function voiceModelStatsLast7d(route: "voice" | "editor" = "voice"): Promise<VoiceModelStats[]> {
+/** Average time per model over the last 90 days: the day reply ("voice"), a message he starts ("reach") or the night pass ("editor"). */
+export async function voiceModelStatsLast7d(route: "voice" | "reach" | "editor" = "voice"): Promise<VoiceModelStats[]> {
   const db = await getSql();
   const since = now() - 90 * 86_400_000;
   const rows = await db.query<{
@@ -715,7 +715,11 @@ export async function voiceModelStatsLast7d(route: "voice" | "editor" = "voice")
     ok: unknown;
     note: string | null;
     error: string | null;
-  }>(`select model, ms, ok, note, error from brain_log where route = $1 and at >= $2`, [route, since]);
+  }>(
+    `select model, ms, ok, note, error from brain_log where route = $1 and at >= $2
+       and (case when $3 then output_ref like 'first:%' else output_ref is null or output_ref not like 'first:%' end)`,
+    [route === "reach" ? "voice" : route, since, route === "reach"],
+  );
   const by = new Map<string, { n: number; ms: number[]; ttft: number[]; empty: number }>();
   for (const row of rows) {
     const model = (row.model ?? "").trim();

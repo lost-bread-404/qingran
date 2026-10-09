@@ -37,6 +37,8 @@ const PATCH_KEYS = [
   "voiceEffort",
   "nightModel",
   "nightEffort",
+  "reachModel",
+  "reachEffort",
   "replyMaxChars",
   "voiceTemperature",
   "silenceMs",

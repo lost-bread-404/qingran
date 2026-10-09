@@ -41,6 +41,7 @@
 | `othersVoice` | 没写成角色的人的声线（默认 `eve`）。旧的 `voiceCast`（「林泽 lux」一行一个）读的时候还认 |
 | `brainOn` | 是否运行记忆（回忆、夜里整理、主动找她） |
 | `voiceModel` | 回复模型 id |
+| `reachModel` / `reachEffort` | 主动找她用的模型和思考强度（默认 grok-4.20-0309-reasoning） |
 | `historyWindow` | 回复至少看几条（0–80，默认 20）；今天的对话总会全带上 |
 | `dossierMaxChars` | 「清然和 Rosie 现在」的字数上限（500–3000，默认 1500） |
 

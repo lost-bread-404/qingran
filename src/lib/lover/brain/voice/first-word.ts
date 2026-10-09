@@ -52,7 +52,8 @@ export async function speakFirst(input: {
     first: { quiet: input.lastUserAt ? quietText(input.nowMs - input.lastUserAt) : "很久" },
   });
   const messages = buildVoiceMessages(parts, "none");
-  const primary = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
+  // Its own model (设置 → 主动消息): no one is waiting, so a thinking one has time to work out where she is now.
+  const primary = resolveVoiceChat(profile.reachModel, profile.reachEffort);
   const picks: VoiceModelPick[] = [primary];
   const safety = voiceSafetyPick();
   if (safety.model !== primary.model || safety.effort !== primary.effort) picks.push(safety);

@@ -134,6 +134,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [voiceModels, setVoiceModels] = useState<ModelOption[] | null>(null);
   const [voiceStats, setVoiceStats] = useState<ModelStat[]>([]);
   const [nightStats, setNightStats] = useState<ModelStat[]>([]);
+  const [reachStats, setReachStats] = useState<ModelStat[]>([]);
   const [promptModels, setPromptModels] = useState(profile.promptModels);
   const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
   const [brainOn, setBrainOn] = useState(profile.brainOn);
@@ -191,6 +192,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         setVoiceModels(res.models);
         setVoiceStats(res.stats ?? []);
         setNightStats(res.nightStats ?? []);
+        setReachStats(res.reachStats ?? []);
       })
       .catch(() => setVoiceModels([]));
     // Snapshot the open profile once. Later saves must not jump back to the first page.
@@ -856,7 +858,18 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
         </div>
       ) : page === "reach" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto w-full max-w-md">
+          <div className="mx-auto flex w-full max-w-md flex-col gap-3">
+            <div className="flex flex-col gap-2 rounded-md bg-surface-2 px-4 py-3">
+              <ModelPick
+                label="主动找你用哪个模型"
+                models={voiceModels}
+                stats={reachStats}
+                model={profile.reachModel}
+                effort={profile.reachEffort}
+                timeWord="每次"
+                onChange={(model, effort) => persistProfile({ reachModel: model, reachEffort: effort })}
+              />
+            </div>
             <ReachPanel />
           </div>
         </div>
