@@ -53,6 +53,8 @@ export type CallModelInput = {
   /** Replay comparison. When set, this model is used instead of the route default. */
   model?: string | null;
   effort?: Effort;
+  /** With `model`: how long that model may take (replay gives it what the live reply would). */
+  timeoutMs?: number;
   /** Sampling temperature; unset keeps the model default. */
   temperature?: number;
 };
@@ -187,6 +189,7 @@ export async function callModel(route: Route, input: CallModelInput): Promise<Ca
       ...resolved,
       model: input.model,
       effort: input.effort === undefined ? resolved.effort : input.effort,
+      timeoutMs: input.timeoutMs ?? resolved.timeoutMs,
     };
   }
   const fail = (note: string): CallModelResult => ({

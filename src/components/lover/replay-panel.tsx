@@ -7,7 +7,8 @@ import {
   brainListReplayTargets,
   brainReplayCompare,
 } from "@/lib/lover/brain/life-api";
-import type { Profile } from "@/lib/lover/types";
+import type { Profile, VoiceEffort } from "@/lib/lover/types";
+import { ModelPick, type ModelOption, type ModelStat } from "@/components/lover/model-pick";
 
 type Target = { id: string; text: string; createdAt: number };
 type Side = {
@@ -18,13 +19,17 @@ type Side = {
   placement: string;
 };
 
-export function ReplayPanel({ profile }: { profile: Profile }) {
+/**
+ * The same line of hers answered again: A is what she uses now, B another persona, place or model (any Claude or Grok,
+ * picked like 设置 → 回复), so she can see how another model takes a moment she set up.
+ */
+export function ReplayPanel({ profile, models, stats }: { profile: Profile; models: ModelOption[] | null; stats: ModelStat[] }) {
   const [targets, setTargets] = useState<Target[]>([]);
   const [userMsgId, setUserMsgId] = useState("");
   const [persona, setPersona] = useState("");
   const [placement, setPlacement] = useState<Profile["personaPlacement"]>(profile.personaPlacement);
   const [model, setModel] = useState(profile.voiceModel);
-  const [effort, setEffort] = useState<NonNullable<Profile["voiceEffort"]>>(profile.voiceEffort ?? "low");
+  const [effort, setEffort] = useState<VoiceEffort>(profile.voiceEffort);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [a, setA] = useState<Side | null>(null);
@@ -91,7 +96,7 @@ export function ReplayPanel({ profile }: { profile: Profile }) {
           {targets.length === 0 ? <option value="">还没有</option> : null}
           {targets.map((row) => (
             <option key={row.id} value={row.id}>
-              {row.text.slice(0, 42) || "（空）"}
+              {clock(row.createdAt)} {row.text.slice(0, 40) || "（空）"}
             </option>
           ))}
         </select>
@@ -114,35 +119,26 @@ export function ReplayPanel({ profile }: { profile: Profile }) {
           </label>
         ))}
       </div>
-      <label className="flex flex-col gap-1">
-        <span className="text-sm">B 的模型</span>
-        <input
-          className="h-11 rounded-md bg-surface-2 px-3 text-sm"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
+      <div className="rounded-md bg-surface-2 px-3 py-3">
+        <ModelPick
+          label="B 用哪个模型"
+          models={models}
+          stats={stats}
+          model={model}
+          effort={effort}
+          timeWord="每句"
+          onChange={(nextModel, nextEffort) => {
+            setModel(nextModel);
+            setEffort(nextEffort);
+          }}
         />
-      </label>
-      <label className="flex flex-col gap-1">
-        <span className="text-sm">B 的 effort</span>
-        <select
-          className="h-11 rounded-md bg-surface-2 px-2 text-sm"
-          value={effort ?? "low"}
-          onChange={(e) =>
-            setEffort(e.target.value === "high" || e.target.value === "medium" || e.target.value === "none" ? e.target.value : "low")
-          }
-        >
-          <option value="none">none（只有 grok-4.3）</option>
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
-        </select>
-      </label>
+      </div>
       <Button type="button" disabled={busy || !userMsgId} onClick={() => void compare()}>
         {busy ? "在对比…" : "对比"}
       </Button>
       {a && b ? (
-        <div className="grid grid-cols-2 gap-2">
-          <SideCard title="A 当前" side={a} open={openInner} />
+        <div className="flex flex-col gap-2">
+          <SideCard title="A 现在用的" side={a} open={openInner} />
           <SideCard title="B" side={b} open={openInner} />
         </div>
       ) : null}
@@ -169,6 +165,11 @@ export function ReplayPanel({ profile }: { profile: Profile }) {
       ) : null}
     </div>
   );
+}
+
+function clock(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 function SideCard({ title, side, open }: { title: string; side: Side; open: boolean }) {

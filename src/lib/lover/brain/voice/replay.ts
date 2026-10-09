@@ -4,7 +4,7 @@ import { collapseReplyVariants } from "../../pair-messages.ts";
 import { lockedProfile, voiceInjectFromProfile, type Profile } from "../../types.ts";
 import { asModelInput, callModel, type CallModelResult } from "../llm.ts";
 import { now } from "../clock.ts";
-import { clampVoiceEffort, type Effort } from "../config.ts";
+import { resolveVoiceChat, type Effort } from "../config.ts";
 import { resolveTz } from "../tz.ts";
 import { gatherVoiceParts } from "./pack.ts";
 import {
@@ -29,7 +29,7 @@ export type ReplaySide = {
 
 type Complete = typeof callModel;
 
-export async function listReplayTargets(limit = 20): Promise<Array<{ id: string; text: string; createdAt: number }>> {
+export async function listReplayTargets(limit = 60): Promise<Array<{ id: string; text: string; createdAt: number }>> {
   const rows = await listRecentMessages(240);
   return rows
     .filter((row) => row.role === "user" && row.kind !== "system_notice")
@@ -66,6 +66,12 @@ export async function replayMessages(opts: {
   return { messages, userText: user.text };
 }
 
+function emptyReason(raw: unknown): string {
+  const r = (raw ?? {}) as { stop_reason?: unknown; incomplete_details?: { reason?: unknown } | null };
+  const why = r.stop_reason ?? r.incomplete_details?.reason;
+  return typeof why === "string" ? why : "空回复";
+}
+
 function sideFrom(result: CallModelResult, placement: Profile["personaPlacement"]): ReplaySide {
   const braces = new BraceCut();
   const speech = braces.push(result.text || "").trim();
@@ -73,7 +79,8 @@ function sideFrom(result: CallModelResult, placement: Profile["personaPlacement"
   return {
     speech,
     innerJson: braces.text().trim() || null,
-    error: result.ok ? null : result.failKind || "error",
+    // A Claude refusal comes back as 200 with no text: say why instead of an empty card.
+    error: !result.ok ? result.failKind || "error" : speech ? null : `没有正文（${emptyReason(result.raw)}）`,
     model: result.model,
     placement,
   };
@@ -100,18 +107,23 @@ export async function runReplay(opts: {
       profile,
     }),
   ]);
+  // Each side gets an effort its model takes (grok-4.3 「不想」 is none, which other models reject) and the time the
+  // live reply would give it (Claude max may think for minutes).
+  const a = resolveVoiceChat(profile.voiceModel, profile.voiceEffort);
+  const b = resolveVoiceChat(opts.bModel || profile.voiceModel, opts.bEffort);
   const [aResult, bResult] = await Promise.all([
     complete("replay", {
       ...asModelInput(aPack.messages),
-      model: profile.voiceModel,
-      effort: clampVoiceEffort(profile.voiceModel, profile.voiceEffort),
+      model: a.model,
+      effort: a.effort,
+      timeoutMs: a.timeoutMs,
       promptKey: "replay",
     }),
     complete("replay", {
       ...asModelInput(bPack.messages),
-      // Each side gets an effort its model takes (grok-4.3 「不想」 is none, which other models reject).
-      model: opts.bModel || profile.voiceModel,
-      effort: clampVoiceEffort(opts.bModel || profile.voiceModel, opts.bEffort),
+      model: b.model,
+      effort: b.effort,
+      timeoutMs: b.timeoutMs,
       promptKey: "replay",
     }),
   ]);

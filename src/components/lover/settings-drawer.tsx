@@ -1110,9 +1110,9 @@ Apple: zh-CN · continuous · interimResults · maxAlternatives 3`}
               </div>
             </details>
             <details className="rounded-md bg-surface-2 px-3 py-2">
-              <summary className="min-h-11 cursor-pointer text-sm">重放对比（同一句换个人设再生成一次）</summary>
+              <summary className="min-h-11 cursor-pointer text-sm">重放对比（同一句换个人设或模型再回一次）</summary>
               <div className="mt-2">
-                <ReplayPanel profile={profile} />
+                <ReplayPanel profile={profile} models={voiceModels} stats={voiceStats} />
               </div>
             </details>
           </div>

@@ -51,7 +51,7 @@ export const brainListManualEdits = createServerFn({ method: "GET" }).handler(as
 });
 
 export const brainListReplayTargets = createServerFn({ method: "GET" }).handler(async () => {
-  return listReplayTargets(20);
+  return listReplayTargets(60);
 });
 
 export const brainReplayCompare = createServerFn({ method: "POST" })
@@ -63,8 +63,15 @@ export const brainReplayCompare = createServerFn({ method: "POST" })
     effort?: string | null;
   }) => input)
   .handler(async ({ data }) => {
+    // Whatever the picker offers (Claude goes up to max); replay clamps it to what the model takes.
     const effort: Effort =
-      data.effort === "low" || data.effort === "medium" || data.effort === "high" || data.effort === "none" || data.effort === null
+      data.effort === "none" ||
+      data.effort === "low" ||
+      data.effort === "medium" ||
+      data.effort === "high" ||
+      data.effort === "xhigh" ||
+      data.effort === "max" ||
+      data.effort === null
         ? data.effort
         : "low";
     return runReplay({
