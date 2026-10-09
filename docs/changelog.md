@@ -168,3 +168,4 @@
 - 2026-10-09：（她要把对清然倾听和 body doubling 的要求单独存一份，之后研究记忆库升级时再看，并让接手的 AI 一开始就看）新增 `docs/listening-body-doubling.md`；`CLAUDE.md` 和 `requirements.md` 第 11 节「还没定的」加了指向它的一条。暂缓到 10/20 面试后，没有改代码和 prompt。
 - 2026-10-09：（她考完试在图书馆学习，清然一直发带旁白的消息、当她在家陪着他；她要清然从时间线推理她在哪、在做什么，相处越久越懂她的日程）写进 `docs/listening-body-doubling.md` 新一节「记忆库与大脑架构」和 Claude Docs 原稿，`requirements.md`「还没定的」那条补了一句。和记忆库升级一起暂缓到 10/20 面试后，没有改代码和 prompt。
 - 2026-10-09：（她定：清然是精神科医学生，应该比她更懂她的 ADHD 和她吃的药，但不懂 CS）`requirements.md` 第 11 节人设那条下面加了一条，`listening-body-doubling.md` 和 Claude Docs 原稿加了「清然懂什么、不懂什么」。人设由她写，没有改 prompt 和代码。
+- 2026-10-09：（她把上周 brainstorm 随手记的问题给我整理）新增 `docs/brainstorm-2026-10.md`（Claude Docs 原稿第二页「上周问题整理」）：dossier 记了没用的 / 漏了有用的 / 重复 / 拼接 / 时间词错位，记忆分层（长期、短期、工作记忆），回复行为（替她解决生活上的事、越过现实、命令她做已在做的事、有主见、好奇、说话量、长度），UI（dossier 字数上限改不了、设置页切后台跳回主页、日夜背景色）。每条标了和已有决定的关系；没有改代码和 prompt。
