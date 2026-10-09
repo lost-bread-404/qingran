@@ -4,7 +4,7 @@ import { now } from "./clock.ts";
 import { enqueue, runJobsNow } from "./jobs.ts";
 import { LONG_DRAIN_MS, listVoiceCatalog, voiceEffortsFor } from "./config.ts";
 import { runInBackground } from "./wait-until.ts";
-import { appendBrainLog, getMeta, listBrainLog, listJobStatus, listReports, voiceModelStatsLast7d } from "./store.ts";
+import { getMeta, listBrainLog, listJobStatus, listReports, voiceModelStatsLast7d } from "./store.ts";
 import type { JobType } from "./types.ts";
 import { resolveTz } from "./tz.ts";
 
@@ -85,21 +85,6 @@ export const brainListLogs = createServerFn({ method: "POST" })
       from: data.from ?? null,
       to: data.to ?? null,
     });
-  });
-
-export const brainNoteCallStuck = createServerFn({ method: "POST" })
-  .validator((input: { phase: string; deaf?: boolean }) => input)
-  .handler(async ({ data }) => {
-    const phase = String(data.phase || "unknown").slice(0, 40);
-    const note = `状态卡住已恢复 phase=${phase}${data.deaf ? " deaf" : ""}`;
-    await appendBrainLog({
-      step: "call:stuck",
-      ok: true,
-      note,
-      route: "voice",
-      raw: note,
-    });
-    return { ok: true as const };
   });
 
 export const brainGetTurnTrace = createServerFn({ method: "POST" })

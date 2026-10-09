@@ -33,7 +33,7 @@
 
 ## 还在的
 
-主动找她（`reach.ts`，同一份材料，模型单独选：设置 → 主动消息，默认 grok-4.20 reasoning，没人等着，先想清楚此刻她大概在做什么、在不在一块儿）、月报（读每天的 timeline）、｛｝存在 `qr_memories`（source = inner；表里旧的回忆只在第一次夜间整理时读一次，不再检索），听力和通话不变。
+主动找她（`reach.ts`，同一份材料，模型单独选：设置 → 主动消息，默认 grok-4.20 reasoning，没人等着，先想清楚此刻她大概在做什么、在不在一块儿）、月报（读每天的 timeline）、｛｝存在 `qr_memories`（source = inner；表里旧的回忆只在第一次夜间整理时读一次，不再检索）。听力和通话 2026-10-06 重做了（只用 xAI 流式识别，见 requirements.md 第 7 节、`src/lib/lover/ear.ts`、外壳 `Voice.swift`），只决定她说了什么、一句什么时候完，不碰回复的材料。
 
 ## 删掉的（v7）
 

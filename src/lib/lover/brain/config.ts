@@ -128,8 +128,6 @@ export function clampDossierMaxChars(value: unknown, fallback = DOSSIER_MAX_CHAR
 
 
 export const SESSION_GAP_MS = 30 * 60_000;
-/** Voice clips kept when label mode is off. Older files are deleted; messages stay. */
-export const RECENT_CLIP_KEEP = 20;
 
 
 export const JOB_MAX_ATTEMPTS = 3;

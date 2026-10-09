@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import { VOICE_IO } from "./brain/config";
 import { ttsRequestBody } from "./tts";
 import { xaiCreds } from "./xai-auth";
-import { assertLab } from "./hearing/store";
+import { assertLab } from "./lab";
 import { TONE_CASES } from "./tone-cases";
 
 /**

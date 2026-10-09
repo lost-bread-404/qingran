@@ -1,4 +1,3 @@
-import { UNRECOGNIZED_TEXT } from "./hearing/heard.ts";
 import { type ChatMessage } from "./types.ts";
 
 export type ChatPair = {
@@ -97,10 +96,9 @@ export function sortConversation(messages: ChatMessage[]): ChatMessage[] {
   });
 }
 
+/** Old rows: a sound that was kept but never answered (not her voice). */
 export function skipsQingran(msg: ChatMessage): boolean {
-  if (msg.role !== "user") return false;
-  if (msg.kind === "unheard") return true;
-  return msg.text.trim() === UNRECOGNIZED_TEXT;
+  return msg.role === "user" && (msg.kind === "unheard" || Boolean(msg.nightNoise));
 }
 
 /** Lay out turns in time order. Replies to the same user message stay on one page stack. */
@@ -114,8 +112,9 @@ export function pairMessages(messages: ChatMessage[]): ChatPair[] {
       continue;
     }
     if (msg.role === "user") {
+      if (skipsQingran(msg)) continue;
       pairs.push({ user: msg });
-      if (!skipsQingran(msg)) openById.set(msg.id, pairs.length - 1);
+      openById.set(msg.id, pairs.length - 1);
       continue;
     }
     const idx = msg.replyTo ? openById.get(msg.replyTo) : undefined;
@@ -129,6 +128,17 @@ export function pairMessages(messages: ChatMessage[]): ChatPair[] {
     if (msg.text.trim()) pairs.push({ assistant: msg, replies: [msg] });
   }
   return pairs;
+}
+
+/** The talk up to a message, the message, and what came after it. */
+export function sliceAfterMessage<T extends { id: string }>(messages: T[], id: string) {
+  const idx = messages.findIndex((m) => m.id === id);
+  if (idx < 0) return null;
+  return {
+    history: messages.slice(0, idx),
+    current: messages[idx]!,
+    removed: messages.slice(idx + 1),
+  };
 }
 
 export function dropIncompleteReplies(

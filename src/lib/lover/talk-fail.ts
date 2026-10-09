@@ -186,22 +186,6 @@ export function logTalkTurn(log: TalkTurnLog) {
   console.error(formatTalkTurnLog(log));
 }
 
-export function formatTalkTrace(trace: {
-  status?: number | null;
-  finishReason?: string | null;
-  ms?: number;
-  ttftMs?: number | null;
-}): string {
-  return [
-    trace.status != null ? `status ${trace.status}` : null,
-    trace.finishReason ? `finish_reason=${trace.finishReason}` : null,
-    trace.ttftMs != null ? `首字 ${trace.ttftMs}ms` : null,
-    trace.ms != null ? `${trace.ms}ms` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 export function firstLine(text: string | null | undefined): string {
   return (text ?? "").trim().split(/\r?\n/, 1)[0] ?? "";
 }

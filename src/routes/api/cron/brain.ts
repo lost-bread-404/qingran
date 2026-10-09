@@ -7,8 +7,6 @@ import { drainJobs } from "@/lib/lover/brain/jobs";
 import { countPendingJobs, getMeta } from "@/lib/lover/brain/store";
 import { runRetention } from "@/lib/lover/brain/retention";
 import { resolveTz } from "@/lib/lover/brain/tz";
-import { getSql } from "@/lib/db";
-import { maybeRebuildLexicon } from "@/lib/lover/hearing/persist";
 
 export const Route = createFileRoute("/api/cron/brain")({
   server: {
@@ -26,11 +24,6 @@ export const Route = createFileRoute("/api/cron/brain")({
         await enqueueReportIfDue(now(), tz);
         const ran = await drainJobs(LONG_DRAIN_MS);
         await runRetention();
-        try {
-          await maybeRebuildLexicon(await getSql());
-        } catch (err) {
-          console.error("[cron] lexicon rebuild", err);
-        }
         const pending = await countPendingJobs();
         return Response.json({ ok: true, ran, pending });
       },

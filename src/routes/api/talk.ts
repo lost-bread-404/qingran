@@ -10,6 +10,7 @@ import { runVoiceWithFallback, formatVoiceLogNote } from "@/lib/lover/brain/voic
 import { recordVoiceTurn } from "@/lib/lover/brain/voice-log";
 import { syncTalkTimeZone } from "@/lib/lover/brain/log-refs";
 import { talkRateHit } from "@/lib/lover/brain/spend/rate";
+import { recordSttSpend } from "@/lib/lover/brain/spend/check";
 import { parseCookie, sha256Hex } from "@/lib/auth-lite/session";
 import { newId } from "@/lib/lover/storage";
 import { formatVoiceInjectLine, type Profile } from "@/lib/lover/types";
@@ -34,7 +35,23 @@ type TalkBody = {
   images?: string[];
   /** The phone's round: her earlier short messages before this one, each kept as its own message. */
   earlier?: { id?: string; text?: string; at?: number }[];
+  /**
+   * Her line was spoken: held or in a call, how long after she stopped its words were in (ms), and how many seconds
+   * of her voice went to xAI's recognizer since the last turn (its cost is entered here).
+   */
+  voice?: { mode?: string; ms?: number; sec?: number };
 };
+
+function voiceOf(raw: TalkBody["voice"]): { mode: "hold" | "call"; ms?: number; sec: number } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const ms = Number(raw.ms);
+  const sec = Number(raw.sec);
+  return {
+    mode: raw.mode === "call" ? "call" : "hold",
+    ...(Number.isFinite(ms) && ms >= 0 ? { ms: Math.round(ms) } : {}),
+    sec: Number.isFinite(sec) && sec > 0 ? Math.min(sec, 6 * 3600) : 0,
+  };
+}
 
 export const Route = createFileRoute("/api/talk")({
   server: {
@@ -55,6 +72,8 @@ export const Route = createFileRoute("/api/talk")({
         }
 
         const timeZone = await syncTalkTimeZone(body.timeZone);
+        const heardBy = voiceOf(body.voice);
+        if (heardBy?.sec) void recordSttSpend(heardBy.sec, true).catch(() => undefined);
 
         const encoder = new TextEncoder();
         // The phone dropped this request (she went on before his voice started): nothing more is sent, and writing
@@ -240,8 +259,8 @@ export const Route = createFileRoute("/api/talk")({
                 userCreatedAt,
                 userMsgId,
                 localDay: localDay(userCreatedAt, timeZone),
-                ttsChars: streamResult.ttsChars,
                 paidBy: streamResult.paidBy,
+                voice: heardBy ? { mode: heardBy.mode, ms: heardBy.ms } : undefined,
                 finishReason: streamResult.finishReason,
                 effort: streamResult.effort == null ? null : String(streamResult.effort),
                 personaMissing: resolved.personaMissing,

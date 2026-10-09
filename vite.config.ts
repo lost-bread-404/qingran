@@ -71,6 +71,8 @@ export default defineConfig(({ command, isPreview }) => ({
             // server/: the password gate (middleware/00-auth.ts) and the login / logout routes.
             // Nitro v3 defaults serverDir to false, so removing this silently turns the gate off.
             serverDir: "./server",
+            // The browser's way to xAI's recognizer (server/routes/api/listen.ts) is a WebSocket.
+            features: { websocket: true },
             // Hobby Fluid 上限 300s。createServerFn 与 SSR 打进同一条
             // Vercel Function，waitUntil 的长 drain 需要整条 function 都是 300s。
             // 不要用 functionRules 给 cron 单独设：Nitro 会整包复制一份

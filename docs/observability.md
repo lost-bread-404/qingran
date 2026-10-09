@@ -23,12 +23,19 @@
 
 | Route | `refs` | 输出 |
 |---|---|---|
-| `voice` | 给了他什么：charterHash、longtermHash、historyIds、clockText、userMsgId、timeZone、injectMemory、historyWindow、personaPlacement；想起了什么：pickedIds、queryScores、recallBy（按意思 / 按字面）、recalled（每件前 200 字）；这一轮怎么样：localDay、packMs、dbFirstMs、ttftMs、firstAudioMs、personaMissing；`note` 末尾列出这一轮带上的往事（全部，或按这句找到的几件）和他之前心里想的｛｝（2026-10-04 起，在「高级 → 记录」点开一条的「备注」里看）；谁来演：engine（这一轮最后是谁回的）、mark（〔接〕/〔转〕/〔回〕/无）、modeBefore、modeAfter、autoReturn（是不是因为隔太久换回 Claude）。Claude 写了〔转〕被丢掉、或者没回上改由 Grok 回的那次 Claude 调用另记一条（`step = voice:claude-…`，`note` 写着为什么），也能点开看发了什么、回了什么 | `output_ref = message:<replyId>`（有索引；她点大拇指的回复从这里找到那一轮） |
+| `voice` | 给了他什么：charterHash、longtermHash、historyIds、clockText、userMsgId、timeZone、injectMemory、historyWindow、personaPlacement；想起了什么：pickedIds、queryScores、recallBy（按意思 / 按字面）、recalled（每件前 200 字）；这一轮怎么样：localDay、packMs、dbFirstMs、ttftMs、firstAudioMs、personaMissing、voice（她这句是说的，见下面「听力」）；`note` 末尾列出这一轮带上的往事（全部，或按这句找到的几件）和他之前心里想的｛｝（2026-10-04 起，在「高级 → 记录」点开一条的「备注」里看）；谁来演：engine（这一轮最后是谁回的）、mark（〔接〕/〔转〕/〔回〕/无）、modeBefore、modeAfter、autoReturn（是不是因为隔太久换回 Claude）。Claude 写了〔转〕被丢掉、或者没回上改由 Grok 回的那次 Claude 调用另记一条（`step = voice:claude-…`，`note` 写着为什么），也能点开看发了什么、回了什么 | `output_ref = message:<replyId>`（有索引；她点大拇指的回复从这里找到那一轮） |
 | 低频（editor / report） | — | 存完整 `input_system` / `input_user` / `output_text` |
 
 所有 route 的完整 messages 另写入 `brain_log_raw`（发给 Claude 的那次存的是换成 Anthropic 格式之前的 messages，字一样）。设置 → 记录页点开某一条，分区显示输入（按 messages 段折叠）、输出、参数与耗时，并可复制全部。
 
 `code_version` 为 `VERCEL_GIT_COMMIT_SHA`，本地为 `dev`。
+
+## 听力
+
+- 每轮那一行的 `refs.voice`：`mode` 是 `hold`（按住说话）或 `call`（通话）；`ms` 是按住说话松开到字齐用了多少毫秒。打字的没有这一项。
+- 识别的钱：她的声音送给 xAI 多少秒，网页和外壳数着，跟这一轮一起交给 `/api/talk` 记账（设置 → 高级 → 费用）；流式连不上、整段交给 `/api/stt` 读的那次自己记账。
+- 外壳的电话和按住说话：开麦、切到后台、重连、失败都写进 `brain_log`（`step = 'native-call'`，`note` 以 `voice fg` / `voice bg` 开头：在前台 / 在后台）。
+- 识别错在哪：她改过的字在 `qingran_message_edits`（改之前的原文）。
 
 ## 看当时发了什么
 

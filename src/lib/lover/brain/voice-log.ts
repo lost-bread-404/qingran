@@ -1,5 +1,5 @@
 import { appendBrainLog } from "./store.ts";
-import { recordLlmSpend, recordTtsSpend } from "./spend/check.ts";
+import { recordLlmSpend } from "./spend/check.ts";
 import { parseUsage, settleLlmCost, type TokenUsage } from "./usage.ts";
 import { codeVersion, maybeWriteRawLog } from "./log-refs.ts";
 import type { HotContext } from "./voice/pack.ts";
@@ -18,7 +18,6 @@ export async function recordVoiceTurn(opts: {
   userCreatedAt: number;
   userMsgId: string;
   localDay: string;
-  ttsChars?: number;
   /** Who paid for this turn (SuperGrok subscription or API key). */
   paidBy?: "sub" | "api";
   finishReason?: string | null;
@@ -27,6 +26,8 @@ export async function recordVoiceTurn(opts: {
   personaMissing?: boolean;
   /** What was really sent; default: the pack's. */
   messages?: Array<{ role: string; content: string }>;
+  /** Her line was spoken: held or in a call, and how long after she stopped its words were in. */
+  voice?: { mode: "hold" | "call"; ms?: number };
 }): Promise<number | null> {
   const usage: TokenUsage =
     opts.usage && typeof opts.usage === "object" && "tokensIn" in (opts.usage as object)
@@ -74,6 +75,7 @@ export async function recordVoiceTurn(opts: {
       dbFirstMs: opts.ctx.dbFirstMs,
       ttftMs: opts.ttftMs,
       firstAudioMs: opts.firstAudioMs,
+      ...(opts.voice ? { voice: opts.voice } : {}),
       ...(opts.personaMissing ? { personaMissing: true } : {}),
     },
     outputRef,
@@ -91,6 +93,6 @@ export async function recordVoiceTurn(opts: {
     logId,
     paidBy: opts.paidBy,
   });
-  if (opts.ttsChars) await recordTtsSpend(opts.ttsChars, opts.userCreatedAt, opts.paidBy);
+  // His voice is entered where it is made (each xAI voice call records its own characters), not again here.
   return logId;
 }

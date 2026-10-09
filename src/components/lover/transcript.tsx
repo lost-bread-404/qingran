@@ -1,12 +1,11 @@
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Pencil, ThumbsDown, ThumbsUp, Volume2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Pencil, ThumbsDown, ThumbsUp, Volume2 } from "lucide-react";
 import { photoSrc } from "@/lib/lover/photo-client";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { stripSoundTags } from "@/lib/lover/message-meta";
 import { pairMessages } from "@/lib/lover/pair-messages";
-import { stripAcousticTags } from "@/lib/lover/hearing/tags";
-import { formatTalkTrace } from "@/lib/lover/talk-fail";
 import type { ChatMessage } from "@/lib/lover/types";
 
 const PIN_PX = 96;
@@ -22,24 +21,20 @@ type Props = {
   statusLine: string;
   thinking?: boolean;
   keyboardPad?: number;
+  /** What she is saying right now (held, or in a call), shown as her line in the making; null: nothing. */
+  liveLine?: string | null;
   editingId?: string | null;
   editDraft?: string;
-  debugHearing?: boolean;
   onPlay?: (id: string, text: string) => void;
   onEditStart?: (id: string) => void;
   onEditDraft?: (text: string) => void;
   onEditCancel?: () => void;
   onEditSave?: () => void;
-  onConfirmStart?: (id: string) => void;
-  onConfirmQuick?: (id: string) => void;
-  onUndoConfirm?: (id: string) => void;
-  undoConfirmId?: string | null;
   onPraiseReply?: (assistantId: string, replyToId?: string) => void;
   /** Her thumbs-down: opens 差在哪 (tags and a note) for this reply. */
   onFaultReply?: (assistantId: string, replyToId?: string) => void;
   praisedIds?: ReadonlySet<string>;
   onSelectReply?: (userId: string, replyId: string) => void;
-  onNoiseReply?: (id: string) => void;
 };
 
 function nearBottom(el: HTMLElement): boolean {
@@ -57,23 +52,18 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     statusLine,
     thinking,
     keyboardPad = 0,
+    liveLine = null,
     editingId,
     editDraft,
-    debugHearing,
     onPlay,
     onEditStart,
     onEditDraft,
     onEditCancel,
     onEditSave,
-    onConfirmStart,
-    onConfirmQuick,
-    onUndoConfirm,
-    undoConfirmId,
     onPraiseReply,
     onFaultReply,
     praisedIds,
     onSelectReply,
-    onNoiseReply,
   },
   ref,
 ) {
@@ -111,7 +101,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     const el = scrollerRef.current;
     if (!el || !pinRef.current || editingId) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, thinking, editingId]);
+  }, [messages, thinking, editingId, liveLine]);
 
   useEffect(() => {
     if (!editingId) return;
@@ -133,7 +123,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     window.setTimeout(place, 280);
   }, [editingId]);
 
-  if (messages.length === 0 && !thinking && !statusLine) {
+  if (messages.length === 0 && !thinking && !statusLine && liveLine == null) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
         <p className="font-display text-4xl font-medium tracking-tight text-fg">
@@ -179,7 +169,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                     ref={editorRef}
                     autoFocus
                     enterKeyHint="done"
-                    value={editDraft ?? stripAcousticTags(pair.user.text)}
+                    value={editDraft ?? stripSoundTags(pair.user.text)}
                     onChange={(e) => onEditDraft?.(e.target.value)}
                     className="min-h-28 w-full text-left"
                   />
@@ -197,18 +187,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                   </div>
                 </div>
               ) : (
-                <UserBubble
-                  user={pair.user}
-                  editable
-                  debugHearing={debugHearing}
-                  onEditStart={onEditStart}
-                  onConfirmStart={onConfirmStart}
-                  onConfirmQuick={onConfirmQuick}
-                  onUndoConfirm={onUndoConfirm}
-                  undoConfirmId={undoConfirmId}
-                  onNoiseReply={onNoiseReply}
-                  onPhotoLoad={followIfPinned}
-                />
+                <UserBubble user={pair.user} onEditStart={onEditStart} onPhotoLoad={followIfPinned} />
               )
             ) : null}
             {(() => {
@@ -327,11 +306,16 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
               </div>
               );
             })()}
-            {debugHearing && pair.assistant?.talkTrace ? (
-              <p className="self-start text-[10px] text-subtle">{formatTalkTrace(pair.assistant.talkTrace)}</p>
-            ) : null}
           </div>
         ))}
+        {liveLine != null ? (
+          <p
+            aria-live="polite"
+            className="max-w-[min(20rem,85%)] self-end whitespace-pre-wrap break-words rounded-2xl border border-dashed border-subtle/40 px-3.5 py-2 text-sm leading-relaxed text-muted"
+          >
+            {liveLine || "…"}
+          </p>
+        ) : null}
         {thinking ? (
           <div className="self-start h-1.5 w-10 overflow-hidden rounded-full bg-surface-2">
             <div className="h-full w-full animate-pulse rounded-full bg-accent/70" />
@@ -358,165 +342,46 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
 
 function UserBubble({
   user,
-  editable,
-  debugHearing,
   onEditStart,
-  onConfirmStart,
-  onConfirmQuick,
-  onUndoConfirm,
-  undoConfirmId,
-  onNoiseReply,
   onPhotoLoad,
 }: {
   user: ChatMessage;
-  editable: boolean;
-  debugHearing?: boolean;
   onEditStart?: (id: string) => void;
-  onConfirmStart?: (id: string) => void;
-  onConfirmQuick?: (id: string) => void;
-  onUndoConfirm?: (id: string) => void;
-  undoConfirmId?: string | null;
-  onNoiseReply?: (id: string) => void;
   onPhotoLoad?: () => void;
 }) {
-  const canConfirm = Boolean(debugHearing && user.voiceTurnId && onConfirmStart);
-  const canMishear = Boolean(!debugHearing && user.voiceTurnId && onConfirmStart);
-  const labeled = user.hearingGold === "confirmed";
-  const showUndo = Boolean(canConfirm && labeled && undoConfirmId === user.id && onUndoConfirm);
-  const holdRef = useRef<number | null>(null);
-  function clearHold() {
-    if (holdRef.current != null) window.clearTimeout(holdRef.current);
-    holdRef.current = null;
-  }
-  function openMishear() {
-    if (!user.voiceTurnId || !onConfirmStart) return;
-    onConfirmStart(user.id);
-  }
-  if (user.nightNoise) {
-    return (
-      <div className="flex justify-end">
+  const text = stripSoundTags(user.text);
+  return (
+    <div className="flex items-end justify-end gap-2">
+      {onEditStart ? (
         <button
           type="button"
-          aria-label="让清然补一次回复"
-          onClick={() => onNoiseReply?.(user.id)}
-          className="min-h-8 rounded-full bg-surface-2 px-2.5 py-1 text-[11px] leading-none text-subtle transition-colors duration-150 hover:text-fg"
+          aria-label="改这句话"
+          onClick={() => onEditStart(user.id)}
+          className="mb-1 shrink-0 text-subtle transition-colors duration-150 hover:text-fg"
         >
-          一声响动
+          <Pencil className="size-3.5" />
         </button>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex items-end justify-end gap-2">
-        {!canConfirm && editable && onEditStart ? (
-          <button
-            type="button"
-            aria-label="改这句话"
-            onClick={() => onEditStart(user.id)}
-            className="mb-1 shrink-0 text-subtle transition-colors duration-150 hover:text-fg"
-          >
-            <Pencil className="size-3.5" />
-          </button>
-        ) : null}
-        {canMishear ? (
-          <button
-            type="button"
-            aria-label="听错了"
-            onClick={openMishear}
-            className="mb-1 shrink-0 text-xs text-subtle transition-colors duration-150 hover:text-fg"
-          >
-            听错了
-          </button>
-        ) : null}
-        <div
-          className="relative flex max-w-[min(20rem,85%)] flex-col items-end"
-          onContextMenu={(event) => {
-            if (!user.voiceTurnId || !onConfirmStart) return;
-            event.preventDefault();
-            openMishear();
-          }}
-          onPointerDown={() => {
-            if (!user.voiceTurnId || !onConfirmStart) return;
-            clearHold();
-            holdRef.current = window.setTimeout(openMishear, 550);
-          }}
-          onPointerUp={clearHold}
-          onPointerLeave={clearHold}
-          onPointerCancel={clearHold}
-        >
-          {labeled ? (
-            <span
-              className="absolute -right-1 -top-1 size-2 rounded-full bg-emerald-500"
-              aria-label="已标注"
-            />
-          ) : null}
-          {user.images?.length ? (
-            <div className="mb-1 flex flex-wrap justify-end gap-1.5">
-              {user.images.map((id) => (
-                <img
-                  key={id}
-                  src={photoSrc(id)}
-                  alt="照片"
-                  onLoad={onPhotoLoad}
-                  className="max-h-60 max-w-full rounded-2xl object-cover"
-                />
-              ))}
-            </div>
-          ) : null}
-          {stripAcousticTags(user.text).trim() ? (
-            <p className="whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
-              {stripAcousticTags(user.text)}
-            </p>
-          ) : null}
-          {debugHearing && (user.hearingTiming || user.injectLine) ? (
-            <p className="text-[10px] text-subtle">
-              {user.hearingTiming
-                ? [
-                    user.hearingTiming.hearMs != null ? `说完→识别完 ${user.hearingTiming.hearMs}ms` : null,
-                    user.hearingTiming.grokMs != null ? `识别完→字 ${user.hearingTiming.grokMs}ms` : null,
-                    user.hearingTiming.ttftMs != null ? `首字 ${user.hearingTiming.ttftMs}ms` : null,
-                    user.hearingTiming.ttsMs != null ? `→出声 ${user.hearingTiming.ttsMs}ms` : null,
-                    user.hearingTiming.engine ?? null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-                : null}
-              {user.injectLine ? <span className="mt-0.5 block">{user.injectLine}</span> : null}
-            </p>
-          ) : null}
-        </div>
-      </div>
-      {canConfirm ? (
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="确认正确"
-            onClick={() => onConfirmQuick?.(user.id)}
-            className="grid size-8 place-items-center rounded-md text-subtle transition-colors duration-150 hover:text-fg"
-          >
-            <Check className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            aria-label="打开标注"
-            onClick={() => onConfirmStart?.(user.id)}
-            className="grid size-8 place-items-center rounded-md text-subtle transition-colors duration-150 hover:text-fg"
-          >
-            <Pencil className="size-3.5" />
-          </button>
-          {showUndo ? (
-            <button
-              type="button"
-              aria-label="撤销标注"
-              onClick={() => onUndoConfirm?.(user.id)}
-              className="min-h-8 rounded-md px-2 text-xs text-muted"
-            >
-              撤销
-            </button>
-          ) : null}
-        </div>
       ) : null}
+      <div className="flex max-w-[min(20rem,85%)] flex-col items-end">
+        {user.images?.length ? (
+          <div className="mb-1 flex flex-wrap justify-end gap-1.5">
+            {user.images.map((id) => (
+              <img
+                key={id}
+                src={photoSrc(id)}
+                alt="照片"
+                onLoad={onPhotoLoad}
+                className="max-h-60 max-w-full rounded-2xl object-cover"
+              />
+            ))}
+          </div>
+        ) : null}
+        {text.trim() ? (
+          <p className="whitespace-pre-wrap break-words rounded-2xl bg-surface-2 px-3.5 py-2 text-sm leading-relaxed text-fg">
+            {text}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

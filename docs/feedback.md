@@ -71,7 +71,7 @@ where f.rating = 'down' order by f.created_at desc limit 30;
 | 不走心、听不懂她、套公式 | 人设；回忆里有没有对应的「看懂的」（`kind = 'insight'`） |
 | 记错事、提起不该提的旧事 | `qr_memories` 里那一件（改正文，或删掉）；`qr_dossier`（「清然和 Rosie 现在」，改之前在 `qr_dossier_versions` 留一版） |
 | 乱安排、逼她做事 | 人设里鼓励学习那几句；回忆里那条「不喜欢被安排」还在不在 |
-| 听力：切断她、说完了还在听、听错 | 不在这里，看 `brain_log` 里 `step = 'stt'` 的那一行（`note` 里写着每句是怎么结束的），代码在 `ios/Qingran/Qingran/NativeCall.swift`、`src/routes/api/stt.ts` |
+| 听力：切断她、说完了还在听、听错 | 不在这里。听错的字看她改过的 `qingran_message_edits`，加进「设置 → 声音和听力 → 容易听错的词」；电话里切得太早或等太久，是「通话时停多久算说完」和 xAI 的参数（`src/lib/lover/ear.ts`）；外壳出的问题看 `brain_log` 里 `step = 'native-call'` 的几行（[observability.md](observability.md)「听力」）。代码：网页 `src/lib/lover/voice/`、`src/hooks/use-hold.ts`，外壳 `ios/Qingran/Qingran/Voice.swift`、`Ear.swift` |
 
 改好以后，确认已经不会再发生的那几条可以留着（以后对照用），不要删。
 

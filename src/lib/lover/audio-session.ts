@@ -1,18 +1,4 @@
-import { isNativeShell } from "./native-shell.ts";
-import { logCallAudio } from "./call-audio-log.ts";
-
-export function audioContextNeedsResume(state: string) {
-  return state === "suspended" || state === "interrupted";
-}
-
-export function isInterruptedState(state?: string | null) {
-  if (!state) return false;
-  return state === "interrupted" || state.startsWith("interrupted");
-}
-
-export function sessionIsActive(state?: string | null) {
-  return state === "active";
-}
+/** The page's audio and the app going to the background (iOS pauses a hidden page). */
 
 export function pageIsHidden() {
   if (typeof document === "undefined") return false;
@@ -23,7 +9,7 @@ export function pageIsHidden() {
   return false;
 }
 
-export function isStandalonePwa() {
+function isStandalonePwa() {
   if (typeof window === "undefined" || typeof navigator === "undefined") return false;
   const nav = navigator as Navigator & { standalone?: boolean };
   if (nav.standalone) return true;
@@ -34,89 +20,10 @@ export function isStandalonePwa() {
   }
 }
 
-export type AudioSessionKind = "listen" | "speak" | "yield";
-
-export function sessionTypeFor(kind: AudioSessionKind) {
-  if (kind === "yield") return "ambient";
-  // A live call stays play-and-record even while she is speaking,
-  // so iOS treats it like a phone call instead of mixing us away.
-  return "play-and-record";
-}
-
-/** iOS clicks and ducks if we write audioSession.type even to the same value. */
-export function sessionTypeIfChanged(
-  current: string | undefined | null,
-  kind: AudioSessionKind,
-): string | null {
-  const next = sessionTypeFor(kind);
-  if (kind === "yield") {
-    if (!current || current === "ambient" || current === "auto") return null;
-    return next;
-  }
-  if (current === next) return null;
-  return next;
-}
-
-
-export function micTrackUsable(track: { readyState: string; muted: boolean }) {
-  return track.readyState === "live";
-}
-
-export function micStreamUsable(
-  stream: {
-    active: boolean;
-    getAudioTracks: () => Array<{ readyState: string; muted: boolean }>;
-  } | null,
-) {
-  if (!stream?.active) return false;
-  return stream.getAudioTracks().some(micTrackUsable);
-}
-
-type NavAudioSession = {
-  type: string;
-  state?: string;
-  addEventListener?: (type: string, fn: () => void) => void;
-  removeEventListener?: (type: string, fn: () => void) => void;
-};
-
-export function getAudioSession(): NavAudioSession | null {
-  if (typeof navigator === "undefined") return null;
-  return (navigator as Navigator & { audioSession?: NavAudioSession }).audioSession ?? null;
-}
-
-export function setAudioSessionKind(kind: AudioSessionKind) {
-  if (isNativeShell()) return;
-  const session = getAudioSession();
-  if (!session) return;
-  const next = sessionTypeIfChanged(session.type, kind);
-  if (!next) return;
-  try {
-    logCallAudio(`audioSession.type ${session.type || "∅"}→${next}`);
-    session.type = next;
-    if (kind === "yield") {
-      try {
-        session.type = "auto";
-      } catch {
-        /* keep ambient */
-      }
-    }
-  } catch {
-    /* older WebKit */
-  }
-}
-
-export function claimListenSession() {
-  setAudioSessionKind("listen");
-}
-
-export function yieldAudioSession() {
-  setAudioSessionKind("yield");
-}
-
 export async function resumeAudioContext(ctx: AudioContext): Promise<boolean> {
-  if ((ctx.state as string) === "closed") return false;
-  if (audioContextNeedsResume(ctx.state)) {
-    logCallAudio(`AudioContext.resume ${ctx.state}`);
+  const state = ctx.state as string;
+  if (state === "closed") return false;
+  if (state === "suspended" || state === "interrupted") {
     try {
       await ctx.resume();
     } catch {
@@ -126,76 +33,18 @@ export async function resumeAudioContext(ctx: AudioContext): Promise<boolean> {
   return ctx.state === "running";
 }
 
-export function watchAudioContext(ctx: AudioContext, label = "AudioContext") {
-  logCallAudio(`${label}.create ${ctx.state}`);
-  ctx.addEventListener("statechange", () => {
-    logCallAudio(`${label}.state ${ctx.state}`);
-  });
-}
-
-export function closeAudioContext(ctx: AudioContext | null, label = "AudioContext") {
-  if (!ctx) return;
-  const state = ctx.state as string;
-  if (state === "closed") return;
-  logCallAudio(`${label}.close ${state}`);
-  try {
-    void ctx.close();
-  } catch {
-    /* ignore */
-  }
-}
-
-export function listenAudioSession(handlers: {
-  onInterrupted?: () => void;
-  onActive?: () => void;
-}) {
-  const session = getAudioSession();
-  if (!session?.addEventListener) return () => undefined;
-  const onState = () => {
-    if (isInterruptedState(session.state)) handlers.onInterrupted?.();
-    else if (sessionIsActive(session.state)) handlers.onActive?.();
-  };
-  session.addEventListener("statechange", onState);
-  return () => session.removeEventListener?.("statechange", onState);
-}
-
-export type LifecyclePhase = "foreground" | "background" | null;
-
-export function createAppLifecycleGate(startHidden: boolean) {
-  let inBackground = startHidden;
-  return {
-    get inBackground() {
-      return inBackground;
-    },
-    notify(hiddenNow: boolean): LifecyclePhase {
-      if (hiddenNow === inBackground) return null;
-      inBackground = hiddenNow;
-      return hiddenNow ? "background" : "foreground";
-    },
-  };
-}
-
-export function listenAppLifecycle(handlers: {
-  onForeground?: () => void;
-  onBackground?: () => void;
-}) {
+export function listenAppLifecycle(handlers: { onForeground?: () => void; onBackground?: () => void }) {
   if (typeof document === "undefined") return () => undefined;
-
-  const gate = createAppLifecycleGate(pageIsHidden());
-
-  const emit = (phase: LifecyclePhase) => {
-    if (phase === "background") handlers.onBackground?.();
-    if (phase === "foreground") handlers.onForeground?.();
+  let inBackground = pageIsHidden();
+  const notify = (hidden: boolean) => {
+    if (hidden === inBackground) return;
+    inBackground = hidden;
+    if (hidden) handlers.onBackground?.();
+    else handlers.onForeground?.();
   };
-
-  const goBackground = () => emit(gate.notify(true));
-  const goForeground = () => emit(gate.notify(false));
-
-  const onVisibility = () => {
-    if (pageIsHidden()) goBackground();
-    else goForeground();
-  };
-
+  const goBackground = () => notify(true);
+  const goForeground = () => notify(false);
+  const onVisibility = () => notify(pageIsHidden());
   const onBlur = () => {
     if (pageIsHidden() || isStandalonePwa()) goBackground();
   };

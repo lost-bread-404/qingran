@@ -2,7 +2,6 @@ export const LOG_ROUTE_FILTERS = [
   ["voice", "回复"],
   ["editor", "夜里整理"],
   ["report", "月报"],
-  ["hear", "听力"],
   ["manual", "手改"],
 ] as const;
 

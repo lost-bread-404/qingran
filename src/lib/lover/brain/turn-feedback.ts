@@ -3,15 +3,15 @@ import { clampReplyDownTags, type ReplyDownTag } from "../reply-feedback.ts";
 import { fromPgArray, pgTextArray } from "./store.ts";
 
 /**
- * Her thumbs-up on a reply (docs/feedback.md). What that turn was given and recalled is in its brain_log row
- * (`output_ref = 'message:<reply id>'`, `refs.recalled`); the reply itself is the message.
+ * Her thumbs-up or thumbs-down on a reply (docs/feedback.md). What that turn was given and recalled is in its
+ * brain_log row (`output_ref = 'message:<reply id>'`, `refs.recalled`); the reply itself is the message.
  */
 export type TurnFeedbackRow = {
   id: string;
   messageId: string;
   rating: "up" | "down";
   note: string;
-  /** Only on old down-votes (the「差在哪」tags, before 2026-10-02). */
+  /** The「差在哪」tags of a thumbs-down. */
   tags: ReplyDownTag[];
   createdAt: string;
   reply: string;

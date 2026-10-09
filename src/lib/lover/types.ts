@@ -1,17 +1,12 @@
-import { DEFAULT_HEARING_PROVIDER, type HearingProviderId, lockSttKeyterms } from "./hearing/config.ts";
-import type { AcousticTags } from "./hearing/tags.ts";
-import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
-import { DEFAULT_HEARING_SENSE, lockHearingSense, type HearingSense } from "./hearing/sense.ts";
-import { SILENCE_MS } from "./vad.ts";
+import { CALL_WAIT_DEFAULT, clampCallWait, lockKeyterms } from "./ear.ts";
 import { clampHistoryWindow, clampDossierMaxChars, clampVoiceTemperature, HISTORY_WINDOW, VOICE_TEMPERATURE } from "./brain/config.ts";
 import { lockPromptModels, type PromptModelPick } from "./brain/prompts/models.ts";
 import type { PromptKey } from "./brain/prompts/catalog.ts";
 
-export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio, clampDossierMaxChars, clampVoiceTemperature };
-export type { HearingSense };
+export { clampHistoryWindow, clampDossierMaxChars, clampVoiceTemperature };
 
 export type VoiceId = "eve";
-export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
+export type SessionStatus = "idle" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "unheard" | "proactive" | "system_notice";
 /** Grok: low / medium / high; Claude also xhigh / max. */
 export type VoiceEffort = "low" | "medium" | "high" | "xhigh" | "max" | null;
@@ -101,9 +96,6 @@ export type Profile = {
   muted: boolean;
   voiceSpeed: number;
   memoryCursor: string;
-  hearingProvider: HearingProviderId;
-  captureAudio: boolean;
-  debugHearing: boolean;
   voiceModel: string;
   voiceEffort: VoiceEffort;
   /** The night pass's model (Claude or Grok) and effort (设置 → 记忆). */
@@ -119,24 +111,15 @@ export type Profile = {
   replyMaxChars: number;
   /** Temperature of the reply (and of his messages first). 0–2, default 1.0. */
   voiceTemperature: number;
-  /** Pause that ends a turn, milliseconds. 800–3000, default 1500. */
+  /** In a call, the longest pause before her line ends however unfinished it sounds (ms, 800–3000, default 2000). */
   silenceMs: number;
   /** 清然和 Rosie 现在 and the moments that come back to him, in the voice prompt. */
   injectLongterm: boolean;
   /** At least this many recent messages in the voice prompt (it gets all of today's talk), and the archive slide-out window. 0–80. */
   historyWindow: number;
-  /** Kept for older profiles. Voice input no longer has a night switch; the pitch gate is always on. */
-  nightMode: boolean;
-  /** Voiced-frame share below this is noise, day and night. 0–1, default 0.3. */
-  nightVoicedMin: number;
-  /** Clips shorter than this are noise, day and night. Milliseconds, default 300. */
-  nightMinMs: number;
-  /** Hearing sensitivity page. Source of truth for VAD, end-wait, noise gate, and tone marks. */
-  hearingSense: HearingSense;
   /** Per-instruction chat model. Missing keys keep the code default. */
   promptModels: Partial<Record<PromptKey, PromptModelPick>>;
-  /** Leftover audio-LLM instruction. Live hearing is xAI + Apple and does not send this. */
-  /** Fixed words sent to xAI as keyterm. Recent dialogue terms are added on top. */
+  /** Words xAI's recognizer should lean toward (容易听错的词). Only hers: nothing is added from the talk. */
   sttKeyterms: string[];
   /** Cap on 清然和 Rosie 现在. 500–3000, default 1500. */
   dossierMaxChars: number;
@@ -181,33 +164,14 @@ export type ChatMessage = {
   createdAt: number;
   kind?: MessageKind;
   scanned?: boolean;
-  voiceTurnId?: string;
   replyTo?: string;
   /** Which sibling reply stays in the thread. Other replies to the same user message are pages. */
   activeReply?: string;
-  predictedTags?: AcousticTags;
-  hearingGold?: "unconfirmed" | "confirmed";
-  hearingTiming?: {
-    hearMs?: number;
-    grokMs?: number;
-    ttsMs?: number;
-    ttftMs?: number;
-    engine?: string;
-  };
-  /** What this voice turn actually injected. Session-only debug caption. */
-  injectLine?: string;
-  /** Kept the clip and skipped the reply because it was not human voice. Tap to ask for one. */
+  /** Old rows (before 2026-10-06): a sound in the night that was kept and never answered. Not shown, not given to him. */
   nightNoise?: boolean;
   /** Photos she sent with this line (ids in qr_photos, shown from /api/photo). */
   images?: string[];
   interrupted?: boolean;
-  talkTrace?: {
-    status?: number | null;
-    finishReason?: string | null;
-    ms?: number;
-    chars?: number;
-    ttftMs?: number;
-  };
 };
 
 /** Used only when nothing is saved. Not a character. */
@@ -218,9 +182,6 @@ export const DEFAULT_PROFILE: Profile = {
   muted: false,
   voiceSpeed: 1,
   memoryCursor: "",
-  hearingProvider: DEFAULT_HEARING_PROVIDER,
-  captureAudio: true,
-  debugHearing: true,
   voiceModel: DEFAULT_VOICE_MODEL,
   voiceEffort: DEFAULT_VOICE_EFFORT,
   nightModel: DEFAULT_NIGHT_MODEL,
@@ -229,15 +190,11 @@ export const DEFAULT_PROFILE: Profile = {
   reachEffort: DEFAULT_REACH_EFFORT,
   replyMaxChars: 80,
   voiceTemperature: VOICE_TEMPERATURE,
-  silenceMs: SILENCE_MS,
+  silenceMs: CALL_WAIT_DEFAULT,
   injectLongterm: true,
   historyWindow: HISTORY_WINDOW,
-  nightMode: true,
-  nightVoicedMin: NIGHT_VOICED_MIN,
-  nightMinMs: NIGHT_MIN_MS,
-  hearingSense: DEFAULT_HEARING_SENSE,
   promptModels: {},
-  sttKeyterms: lockSttKeyterms(undefined),
+  sttKeyterms: lockKeyterms(undefined),
   dossierMaxChars: 1500,
   identity: "",
   rhythm: "",
@@ -267,9 +224,6 @@ type LooseProfile = Partial<Profile> & {
   voiceSpeed?: number;
   softVoice?: boolean;
   memoryCursor?: string;
-  hearingProvider?: string;
-  captureAudio?: boolean;
-  debugHearing?: boolean;
   voiceChat?: string;
   voiceModel?: string;
   voiceEffort?: string | null;
@@ -282,10 +236,8 @@ type LooseProfile = Partial<Profile> & {
   silenceMs?: number;
   injectLongterm?: boolean;
   historyWindow?: number;
-  nightMode?: boolean;
-  nightVoicedMin?: number;
-  nightMinMs?: number;
-  hearingSense?: unknown;
+  /** Before 2026-10-06 her call pause lived here (endWaitMs). */
+  hearingSense?: { endWaitMs?: unknown };
   promptModels?: unknown;
   sttKeyterms?: unknown;
   dossierMaxChars?: number;
@@ -308,19 +260,11 @@ type LooseProfile = Partial<Profile> & {
 
 export function lockedProfile(input?: unknown): Profile {
   const raw = (input && typeof input === "object" ? input : {}) as LooseProfile;
-  const hearingSense = lockHearingSense(raw.hearingSense, {
-    endWaitMs: raw.silenceMs,
-    voicedMin: raw.nightVoicedMin,
-    noiseMinMs: raw.nightMinMs,
-  });
   return {
     systemPrompt: pickSystemPrompt(raw).slice(0, 16_000),
     muted: Boolean(raw.muted),
     voiceSpeed: pickVoiceSpeed(raw),
     memoryCursor: typeof raw.memoryCursor === "string" ? raw.memoryCursor : "",
-    hearingProvider: DEFAULT_HEARING_PROVIDER,
-    debugHearing: raw.debugHearing !== false,
-    captureAudio: raw.debugHearing !== false,
     voiceModel: pickVoiceModel(raw),
     voiceEffort: pickVoiceEffort(raw),
     nightModel: typeof raw.nightModel === "string" && raw.nightModel.trim() ? raw.nightModel.trim().slice(0, 80) : DEFAULT_NIGHT_MODEL,
@@ -330,15 +274,11 @@ export function lockedProfile(input?: unknown): Profile {
     replyMaxChars:
       typeof raw.replyMaxChars === "number" && Number.isFinite(raw.replyMaxChars) ? Math.max(0, Math.min(2000, Math.round(raw.replyMaxChars))) : 80,
     voiceTemperature: clampVoiceTemperature(raw.voiceTemperature),
-    silenceMs: hearingSense.endWaitMs,
+    silenceMs: clampCallWait(raw.silenceMs ?? raw.hearingSense?.endWaitMs),
     injectLongterm: raw.injectLongterm !== false,
     historyWindow: clampHistoryWindow(raw.historyWindow),
-    nightMode: raw.nightMode !== false,
-    nightVoicedMin: hearingSense.voicedMin,
-    nightMinMs: hearingSense.noiseMinMs,
-    hearingSense,
     promptModels: lockPromptModels(raw.promptModels),
-    sttKeyterms: lockSttKeyterms(raw.sttKeyterms),
+    sttKeyterms: lockKeyterms(raw.sttKeyterms),
     dossierMaxChars: clampDossierMaxChars(raw.dossierMaxChars),
     identity: typeof raw.identity === "string" ? raw.identity.slice(0, 2000) : "",
     rhythm: typeof raw.rhythm === "string" ? raw.rhythm.slice(0, 500) : "",
@@ -377,11 +317,6 @@ export function voiceInjectFromProfile(profile: {
 
 export function formatVoiceInjectLine(flags: VoiceInjectFlags): string {
   return `回忆：${flags.memory ? "开" : "关"} · 历史：至少 ${flags.history}`;
-}
-
-export function parseVoiceInjectLine(note: string | null | undefined): string | null {
-  const text = note ?? "";
-  return text.match(/回忆：[开关] · 历史：至少 \d{1,2}/)?.[0] ?? null;
 }
 
 export function applyMemoryCursor(messages: ChatMessage[], cursor: string): ChatMessage[] {

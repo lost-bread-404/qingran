@@ -2,7 +2,6 @@ import { BookOpen, ImagePlus, Settings, Volume2, VolumeX, X } from "lucide-react
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { CallButton } from "@/components/lover/call-button";
-import { ConfirmTurn } from "@/components/lover/confirm-turn";
 import { FlagReply } from "@/components/lover/flag-reply";
 import { MicButton } from "@/components/lover/mic-button";
 import { SettingsDrawer } from "@/components/lover/settings-drawer";
@@ -10,14 +9,29 @@ import { Transcript, type TranscriptHandle } from "@/components/lover/transcript
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useCall } from "@/hooks/use-call";
+import { useHold, type Held } from "@/hooks/use-hold";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
-import { useVoiceInput } from "@/hooks/use-voice-input";
 import { base64ToBytes, blobToBase64, concatBytes } from "@/lib/lover/audio";
-import { collapseReplyVariants, dropIncompleteReplies, skipsQingran, unselectedReplyIds } from "@/lib/lover/pair-messages";
-import { planInterruptQingran } from "@/lib/lover/interrupt";
+import { listenAppLifecycle } from "@/lib/lover/audio-session";
+import { warmBrain } from "@/lib/lover/brain/warm-client";
+import { flagQingranReply } from "@/lib/lover/brain/turn-feedback-fn";
+import { stripSoundTags } from "@/lib/lover/message-meta";
+import {
+  listenNative,
+  nativeAddToCall,
+  nativeInterruptCall,
+  nativePlayClip,
+  nativeSpeakTurn,
+  nativeSpeakerStop,
+  nativeTalkTurn,
+  shellHolds,
+  type VoiceNote,
+} from "@/lib/lover/native-shell";
+import { collapseReplyVariants, dropIncompleteReplies, sliceAfterMessage, unselectedReplyIds } from "@/lib/lover/pair-messages";
+import { shrinkPhoto } from "@/lib/lover/photo-client";
 import {
   enqueuePlayback,
-  getPlaybackElement,
+  isRawPcm,
   kickAudio,
   playMp3Bytes,
   resumeAudio,
@@ -25,9 +39,8 @@ import {
   stopPlayback,
   unlockPlayback,
   whenPlaybackIdle,
-  isPlaybackActive,
-  isRawPcm,
 } from "@/lib/lover/playback";
+import { registerNativePush } from "@/lib/lover/push-client";
 import {
   appendRoomMessage,
   clearRoomMessages,
@@ -39,50 +52,13 @@ import {
   updateRoomMessage,
   uploadPhoto,
 } from "@/lib/lover/room";
-import { registerNativePush } from "@/lib/lover/push-client";
-import { nativeAddToCall, nativeCallPlan, nativeInterruptCall, nativePlayClip, nativeTalkTurn, nativeSpeakTurn, nativeSpeakerStop } from "@/lib/lover/native-shell";
 import { speakAsLover } from "@/lib/lover/server";
 import { stripSpeechTags } from "@/lib/lover/speech-tags";
-import { buildHearingContext, extractContextKeyterms, lastDialogueTurns, mergeKeyterms, stripHearingMarkup } from "@/lib/lover/hearing/context";
-import { extractTfIdfTerms } from "@/lib/lover/hearing/keyterms";
-import { detectAudioRoute } from "@/lib/lover/hearing/route";
-import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
 import { newId } from "@/lib/lover/storage";
-import { shrinkPhoto } from "@/lib/lover/photo-client";
-import { listenAppLifecycle } from "@/lib/lover/audio-session";
 import { streamTalk } from "@/lib/lover/talk-client";
-import { warmBrain } from "@/lib/lover/brain/warm-client";
-import { brainNoteCallStuck } from "@/lib/lover/brain/api";
 import { classifyTalkException, TALK_FAIL, talkExceptionHint } from "@/lib/lover/talk-fail";
-import { getHearingSession, setHearingSession } from "@/lib/lover/hearing/session";
-import { stripAcousticTags } from "@/lib/lover/hearing/tags";
-import { engineLineFromHeard } from "@/lib/lover/hearing/select";
-import { installAudioTrace } from "@/lib/lover/call-audio-log";
-import {
-  confirmHearingClip,
-  flagQingranReply,
-  getHearingClipLabel,
-  getHearingTurnAudio,
-  patchHearingFinalText,
-  patchHearingReplyId,
-  patchHearingTurn,
-  unlabelHearingByTurn,
-} from "@/lib/lover/hearing/store";
-import { clipSaveBanner, UNRECOGNIZED_TEXT, voiceTurnIdForMessage, type HeardUtterance } from "@/lib/lover/hearing/heard";
-import { nightNoiseReplyText } from "@/lib/lover/hearing/night-voice";
-import { micActionForConfirmPanel, planOpenConfirmPanel, shouldAutoSpeakReply } from "@/lib/lover/hearing/confirm-call";
-import { planConfirmSave, sliceAfterMessage } from "@/lib/lover/hearing/confirm-resend";
-import type { AcousticTags, TagKey } from "@/lib/lover/hearing/tags";
-import { POST_QINGRAN_MS } from "@/lib/lover/vad";
-import {
-  DEFAULT_PROFILE,
-  formatVoiceInjectLine,
-  lockedProfile,
-  voiceInjectFromProfile,
-  type ChatMessage,
-  type Profile,
-  type SessionStatus,
-} from "@/lib/lover/types";
+import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
+import { DEFAULT_PROFILE, lockedProfile, type ChatMessage, type Profile, type SessionStatus } from "@/lib/lover/types";
 import type { FieldRevs } from "@/lib/lover/profile-patch";
 import { cn } from "@/lib/utils";
 
@@ -92,12 +68,29 @@ const MAX_PHOTOS = 4;
 function lastUserSay(messages: ChatMessage[]): ChatMessage | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
-    if (msg?.role === "user") {
-      return msg;
-    }
+    if (msg?.role === "user") return msg;
   }
   return null;
 }
+
+/**
+ * Her spoken lines not yet answered aloud, and the answer being written for them (requirements 第 7 节「一轮一轮」).
+ * Until his voice starts, a new line of hers drops that answer and he answers all of them again; once he is heard
+ * (or read, when he is muted) the round is over.
+ */
+type Round = { lines: ChatMessage[]; replyId: string | null };
+
+/** His voice that came while she was saying a line; `done` once his whole reply is in. */
+type HeldVoice = { turn: number; chunks: Array<{ bytes: Uint8Array<ArrayBuffer>; mime: string }>; done: boolean };
+
+type SendOpts = {
+  history?: ChatMessage[];
+  existingUser?: ChatMessage;
+  keepReplies?: boolean;
+  images?: string[];
+  /** A line she said (or typed in a call): asked as a round, with her earlier lines of it. */
+  round?: { earlier: ChatMessage[]; voice?: VoiceNote };
+};
 
 export function VoiceRoom() {
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
@@ -106,6 +99,10 @@ export function VoiceRoom() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [status, setStatus] = useState<SessionStatus>("idle");
+  /** Where the shell's own turn is (a line she held, or one it speaks): thinking, speaking, idle. */
+  const [shellPhase, setShellPhase] = useState("idle");
+  const shellPhaseRef = useRef("idle");
+  shellPhaseRef.current = shellPhase;
   const [draft, setDraft] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
   /** Photos she is about to send: shown from `preview`, uploaded as soon as picked (`id` once saved). */
@@ -116,54 +113,73 @@ export function VoiceRoom() {
   const [banner, setBanner] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
-  const [confirmId, setConfirmId] = useState<string | null>(null);
-  const [confirmBusy, setConfirmBusy] = useState(false);
   const busyRef = useRef(false);
   const turnRef = useRef(0);
+  const statusRef = useRef<SessionStatus>("idle");
   const profileRef = useRef(profile);
   const chatRef = useRef<ChatMessage[]>([]);
   const userWriteRef = useRef<Promise<unknown>>(Promise.resolve());
   const settingsOpenRef = useRef(false);
-  const holdingRef = useRef(false);
-  const finishingHoldRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const pendingIdsRef = useRef(new Set<string>());
   const inflightRef = useRef<{ id: string; createdAt: number; text: string } | null>(null);
   const speakingIdRef = useRef<string | null>(null);
-  const callActiveRef = useRef(false);
-  const hearRef = useRef<() => void>(() => undefined);
-  const deafenRef = useRef<() => void>(() => undefined);
+  const skipAutoPlayRef = useRef(false);
   const spokenCacheRef = useRef(new Map<string, { bytes: Uint8Array<ArrayBuffer>; mimeType: string }>());
   const transcriptRef = useRef<TranscriptHandle>(null);
   const viewport = useVisualViewportHeight();
-  const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
-  const [confirmError, setConfirmError] = useState<string | null>(null);
-  const [confirmAudioUrl, setConfirmAudioUrl] = useState<string | null>(null);
-  const [confirmClipNote, setConfirmClipNote] = useState<string | null>(null);
-  const confirmWasOpenRef = useRef(false);
-  const confirmOpenRef = useRef(false);
-  const skipAutoPlayRef = useRef(false);
-  const statusRef = useRef<SessionStatus>("idle");
-  const editingRef = useRef(false);
-  const [undoConfirmId, setUndoConfirmId] = useState<string | null>(null);
-  const undoTimerRef = useRef(0);
-  const [confirmPredicted, setConfirmPredicted] = useState<AcousticTags | null>(null);
-  const [confirmGoldTags, setConfirmGoldTags] = useState<Partial<AcousticTags> | null>(null);
-  const [confirmNoise, setConfirmNoise] = useState(false);
-  const [confirmMismatch, setConfirmMismatch] = useState(false);
-  const [confirmNote, setConfirmNote] = useState("");
-  const [confirmDraft, setConfirmDraft] = useState("");
-  const [confirmStt, setConfirmStt] = useState("");
-  const [praiseBusy, setPraiseBusy] = useState(false);
+  const roundRef = useRef<Round>({ lines: [], replyId: null });
+  /** His voice for the current turn has started. */
+  const voiceOnRef = useRef(false);
+  /** She is saying a line (holding, its words still coming in, or mid-line in a call): his voice waits for it. */
+  const herLineRef = useRef(false);
+  const heldRef = useRef<HeldVoice | null>(null);
+  /** Typed (or said) in a browser call while he was speaking: sent when he is done. */
+  const queuedRef = useRef<Array<{ text: string; voice?: VoiceNote }>>([]);
+  /** Tapped while she was saying a line in a browser call: goes on its end. */
+  const suffixRef = useRef("");
+  const sayLineRef = useRef<(text: string, voice?: VoiceNote) => Promise<void>>(async () => undefined);
+  const heardRef = useRef<(held: Held) => void>(() => undefined);
+  const liveRef = useRef<(text: string) => void>(() => undefined);
   /** The reply her thumbs-down is on, while 差在哪 is open. */
   const [faultTarget, setFaultTarget] = useState<{ messageId: string; replyTo?: string; trigger: string; reply: string } | null>(null);
   const [faultBusy, setFaultBusy] = useState(false);
   const [faultError, setFaultError] = useState<string | null>(null);
+  const [praiseBusy, setPraiseBusy] = useState(false);
   const [praisedIds, setPraisedIds] = useState<ReadonlySet<string>>(() => new Set());
+
+  const hold = useHold({
+    keyterms: profile.sttKeyterms,
+    muted: profile.muted,
+    onHeard: (held) => heardRef.current(held),
+    onError: (message) => setBanner(message),
+  });
+  /** She is holding, or the words of a line she let go of are still coming (outside the shell). */
+  const holdActive = hold.active;
+  const call = useCall({
+    wait: profile.silenceMs,
+    keyterms: profile.sttKeyterms,
+    onLine: (text) => void sayLineRef.current(text, { mode: "call" }),
+    onLive: (text) => liveRef.current(text),
+    onError: (message) => setBanner(message),
+  });
+  const callRef = useRef(call);
+  callRef.current = call;
+  statusRef.current = status;
 
   useEffect(() => {
     warmBrain();
   }, []);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+  useEffect(() => {
+    chatRef.current = messages;
+  }, [messages]);
+  useEffect(() => {
+    settingsOpenRef.current = settingsOpen;
+  }, [settingsOpen]);
 
   const persistUser = (updated: ChatMessage) => {
     userWriteRef.current = userWriteRef.current
@@ -171,44 +187,6 @@ export function VoiceRoom() {
       .then(() => updateRoomMessage({ data: updated }));
     return userWriteRef.current;
   };
-
-  const replyPick = messages
-    .filter((m) => m.role === "user" && m.activeReply)
-    .map((m) => `${m.id}:${m.activeReply}`)
-    .join(",");
-
-  useEffect(() => {
-    profileRef.current = profile;
-    const contextTurns = collapseReplyVariants(messages)
-      .filter((m) => m.kind !== "system_notice" && !skipsQingran(m))
-      .map((m) => ({ role: m.role, text: m.text }));
-    const context = buildHearingContext(contextTurns);
-    const extraKeyterms = mergeKeyterms(
-      extractTfIdfTerms([{ text: profile.systemPrompt }], 50),
-      extractContextKeyterms(context, 50),
-    );
-    setHearingSession({
-      provider: "xai",
-      capture: profile.debugHearing,
-      debugHearing: profile.debugHearing,
-      mode: callActiveRef.current ? "call" : "text",
-      context,
-      extraKeyterms,
-      contextBefore: lastDialogueTurns(contextTurns),
-      systemPrompt: profile.systemPrompt,
-      silenceMs: profile.silenceMs,
-      nightVoicedMin: profile.nightVoicedMin,
-      nightMinMs: profile.nightMinMs,
-      sense: profile.hearingSense,
-      sttKeyterms: profile.sttKeyterms,
-    });
-  }, [profile, messages.length, replyPick, status]);
-  useEffect(() => {
-    chatRef.current = messages;
-  }, [messages]);
-  useEffect(() => {
-    settingsOpenRef.current = settingsOpen;
-  }, [settingsOpen]);
 
   useEffect(() => {
     const lock = () => {
@@ -262,20 +240,26 @@ export function VoiceRoom() {
       setRevs(revsRef.current);
       setMessages(room.messages);
     };
+    // Not while he is answering or she is mid-round (here or in the shell): the server does not have it yet, and
+    // replacing the screen with its copy would drop what is being written.
+    const midTurn = () =>
+      busyRef.current ||
+      pendingIdsRef.current.size > 0 ||
+      roundRef.current.replyId !== null ||
+      herLineRef.current ||
+      shellPhaseRef.current === "thinking" ||
+      shellPhaseRef.current === "speaking";
     const reload = () => {
-      // Not while he is answering: the server does not have the reply yet, and replacing the screen with its copy
-      // dropped the reply being written and put the last one back (an edited line showed his old answer until reload).
-      if (busyRef.current || pendingIdsRef.current.size) return;
+      if (midTurn()) return;
       void loadRoom()
         .then((room) => {
-          if (busyRef.current || pendingIdsRef.current.size) return;
+          if (midTurn()) return;
           applyRoom(room);
         })
         .catch(() => undefined);
     };
     const onToken = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
-      void registerNativePush(detail);
+      void registerNativePush((event as CustomEvent).detail);
     };
     const onVisible = () => {
       if (document.visibilityState === "visible") reload();
@@ -284,65 +268,56 @@ export function VoiceRoom() {
     window.addEventListener("qingran-push", reload);
     window.addEventListener("focus", reload);
     document.addEventListener("visibilitychange", onVisible);
-    const onNativeCall = (event: Event) => {
-      const detail = (event as CustomEvent<{ type?: string; id?: string; text?: string; at?: number; replyTo?: string }>).detail;
-      if (!detail?.type || !detail.id) return;
-      if (detail.type === "heard" && detail.text) {
-        const id = detail.id;
-        const text = detail.text;
-        const at = detail.at || Date.now();
+    // The shell's own turns (its calls, and lines she held in it): her lines, his words, and answers taken back.
+    const stopNative = listenNative((event) => {
+      if (event.type === "heard" && event.id && event.text) {
+        const { id, text } = event;
+        const at = event.at || Date.now();
         // Each line of her round is its own message; the same id again only replaces its text.
         setMessages((prev) =>
           prev.some((m) => m.id === id)
             ? prev.map((m) => (m.id === id ? { ...m, text } : m))
-            : [...prev, { id, role: "user", text, createdAt: at }],
+            : [...prev, { id, role: "user", text, createdAt: at, kind: "say" }],
         );
-      } else if (detail.type === "retract") {
-        // She went on before his voice started (or tapped him, hung up): the answer is dropped; the round is asked again under a new id.
-        const id = detail.id;
+      } else if (event.type === "retract" && event.id) {
+        // She went on before his voice started (or tapped him, hung up): the answer is dropped; the round is asked
+        // again under a new id. It may already be saved (its request finished while held): she never heard it.
+        const id = event.id;
         setMessages((prev) => prev.filter((m) => m.id !== id));
-        // It may already be saved (its request finished while held): she never heard it, so it is not kept.
         void deleteRoomMessages({ data: { ids: [id] } }).catch(() => undefined);
-      } else if (detail.type === "speakFail" && detail.text) {
-        setBanner(detail.text);
-      } else if (detail.type === "reply" && detail.text) {
-        const id = detail.id;
-        const text = detail.text;
-        const replyTo = detail.replyTo;
+      } else if (event.type === "speakFail" && event.text) {
+        setBanner(event.text);
+      } else if (event.type === "error" && event.text) {
+        setBanner(event.text);
+      } else if (event.type === "reply" && event.id && event.text) {
+        const { id, text, replyTo } = event;
         setMessages((prev) => {
           const index = prev.findIndex((m) => m.id === id);
           if (index >= 0) {
             const next = prev.slice();
-            next[index] = { ...next[index], text };
+            next[index] = { ...next[index]!, text };
             return next;
           }
           return [...prev, { id, role: "assistant", text, createdAt: Date.now(), replyTo }];
         });
+      } else if (event.type === "phase") {
+        setShellPhase(event.phase);
       }
-    };
-    window.addEventListener("qingran-native-call", onNativeCall);
+    });
     return () => {
       window.removeEventListener("qingran-push-token", onToken);
       window.removeEventListener("qingran-push", reload);
       window.removeEventListener("focus", reload);
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("qingran-native-call", onNativeCall);
-    };
-  }, []);
-
-  useEffect(() => {
-    installAudioTrace();
-    return () => {
-      if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+      stopNative();
     };
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
     const timer = window.setInterval(() => {
-      if (busyRef.current || settingsOpenRef.current || holdingRef.current || callActiveRef.current) {
-        return;
-      }
+      if (busyRef.current || settingsOpenRef.current || herLineRef.current || callRef.current.active) return;
+      if (roundRef.current.replyId) return;
       void loadRoom().then((room) => {
         if ("loadFailed" in room && room.loadFailed) return;
         setMessages((prev) => (room.messages.length > prev.length ? room.messages : prev));
@@ -351,29 +326,116 @@ export function VoiceRoom() {
     return () => window.clearInterval(timer);
   }, [hydrated]);
 
-  useEffect(() => {
-    const stopLife = listenAppLifecycle({
-      onBackground: () => {
-        if (callActiveRef.current) return;
-        stopPlayback();
-        turnRef.current += 1;
-        busyRef.current = false;
-        setStatus((s) => (s === "speaking" || s === "thinking" ? "idle" : s));
-      },
-    });
-    return () => {
-      stopLife();
-    };
+  useEffect(
+    () =>
+      listenAppLifecycle({
+        onBackground: () => {
+          // The page stops in the background; a browser call goes on only while the page is open.
+          if (callRef.current.active) return;
+          stopPlayback();
+          turnRef.current += 1;
+          busyRef.current = false;
+          voiceOnRef.current = false;
+          heldRef.current = null;
+          // His answer still being written is left to finish and be saved (it shows when she is back); what she says
+          // next is a new round.
+          roundRef.current = { lines: [], replyId: null };
+          setStatus((s) => (s === "speaking" || s === "thinking" ? "idle" : s));
+        },
+      }),
+    [],
+  );
+
+  /** His voice is over (or was stopped): a browser call listens again, and a line she typed meanwhile goes now. */
+  const afterHim = useCallback(() => {
+    voiceOnRef.current = false;
+    callRef.current.deaf(false);
+    const next = queuedRef.current.shift();
+    if (next) void sayLineRef.current(next.text, next.voice);
   }, []);
 
-  function resumeCallListen(turn: number) {
-    if (!callActiveRef.current) return;
-    window.setTimeout(() => {
-      if (!callActiveRef.current || turn !== turnRef.current) return;
-      if (confirmOpenRef.current) return;
-      hearRef.current();
-    }, POST_QINGRAN_MS);
-  }
+  /** His voice for this turn starts: the round is answered, and a browser call stops sending her mic. */
+  const voiceStarts = useCallback(() => {
+    if (voiceOnRef.current) return;
+    voiceOnRef.current = true;
+    roundRef.current = { lines: [], replyId: null };
+    setStatus("speaking");
+    callRef.current.deaf(true);
+  }, []);
+
+  /**
+   * Her line turned out to have no words (or she dropped it): his voice that waited for it goes on, unless she is
+   * already holding the next one (or its words are still coming).
+   */
+  const releaseVoice = useCallback(() => {
+    herLineRef.current = holdActive();
+    if (herLineRef.current) return;
+    const held = heldRef.current;
+    if (!held) return;
+    heldRef.current = null;
+    if (held.turn !== turnRef.current) return;
+    voiceStarts();
+    for (const chunk of held.chunks) enqueuePlayback(chunk.bytes, chunk.mime);
+    if (!held.done) return;
+    sealPlayback();
+    // His request is over already, so nothing else waits for this voice to end.
+    void whenPlaybackIdle().then(() => {
+      if (held.turn !== turnRef.current) return;
+      setStatus((s) => (s === "speaking" ? "idle" : s));
+      afterHim();
+    });
+  }, [afterHim, holdActive, voiceStarts]);
+
+  /** His answer to her round, not heard yet, is dropped (she went on): off the screen, and not kept. */
+  const retractReply = useCallback((id: string) => {
+    turnRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    heldRef.current = null;
+    busyRef.current = false;
+    pendingIdsRef.current.delete(id);
+    if (inflightRef.current?.id === id) inflightRef.current = null;
+    if (speakingIdRef.current === id) speakingIdRef.current = null;
+    roundRef.current.replyId = null;
+    chatRef.current = chatRef.current.filter((m) => m.id !== id);
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+    void deleteRoomMessages({ data: { ids: [id] } }).catch(() => undefined);
+  }, []);
+
+  /**
+   * She stopped him (tapped him, or started talking over him). What she already heard of his reply is kept; a reply
+   * he was only thinking for her round is dropped, and her lines wait for what she says next.
+   */
+  const stopHim = useCallback(() => {
+    const round = roundRef.current;
+    if (round.replyId && !voiceOnRef.current) {
+      retractReply(round.replyId);
+      setStatus("idle");
+      return;
+    }
+    const id = speakingIdRef.current ?? inflightRef.current?.id;
+    turnRef.current += 1;
+    // Once his voice has started, his request is left to finish so his whole reply is saved; before that it stops.
+    if (!voiceOnRef.current) abortRef.current?.abort();
+    abortRef.current = null;
+    stopPlayback();
+    heldRef.current = null;
+    busyRef.current = false;
+    setStatus("idle");
+    const target =
+      (id ? chatRef.current.find((m) => m.id === id) : undefined) ??
+      [...chatRef.current].reverse().find((m) => m.role === "assistant");
+    if (target?.role === "assistant" && target.text.trim()) {
+      pendingIdsRef.current.delete(target.id);
+      const updated: ChatMessage = { ...target, interrupted: true };
+      chatRef.current = chatRef.current.map((m) => (m.id === updated.id ? updated : m));
+      setMessages(chatRef.current);
+      void updateRoomMessage({ data: updated }).catch(() => undefined);
+    }
+    inflightRef.current = null;
+    speakingIdRef.current = null;
+    afterHim();
+  }, [afterHim, retractReply]);
 
   /** His voice for one line: the clip already heard if it covers the line, otherwise spoken again. */
   const clipFor = useCallback(async (id: string, speech: string) => {
@@ -383,65 +445,56 @@ export function VoiceRoom() {
       clip = undefined;
     }
     if (clip) return clip;
-    const spoken = await speakAsLover({
-      data: { text: speech, speed: profileRef.current.voiceSpeed },
-    });
+    const spoken = await speakAsLover({ data: { text: speech, speed: profileRef.current.voiceSpeed } });
     if (!spoken.ok) return null;
     clip = { bytes: base64ToBytes(spoken.audioBase64), mimeType: spoken.mimeType };
     spokenCacheRef.current.set(id, clip);
     return clip;
   }, []);
 
-  const playFull = useCallback(async (id: string, speech: string, turn: number) => {
-    // During the iPhone shell's call the shell owns the speaker and the mic: a clip played here would be heard as her,
-    // so the line is handed to the shell to speak. Shells built before 2026-10-01 cannot, and nothing plays.
-    if (callActiveRef.current && nativeCallPlan().callStart === "startNativeCall") {
+  /** She pressed play on one of his lines (or his streamed voice did not cover the reply). */
+  const playFull = useCallback(
+    async (id: string, speech: string, turn: number) => {
       if (profileRef.current.muted) return;
-      if (!nativePlayClip(null)) {
-        setBanner("电话里重播要重新用 Xcode 装一次；挂断后可以直接点。");
+      // In the shell's call the shell owns the speaker and the mic: the line is handed to it to speak.
+      if (callRef.current.active && callRef.current.shell) {
+        const clip = await clipFor(id, speech);
+        if (!clip || !isRawPcm(clip.bytes, clip.mimeType)) return;
+        if (!nativePlayClip({ audio: await blobToBase64(new Blob([clip.bytes])), mime: clip.mimeType })) {
+          setBanner("电话里重播要重新用 Xcode 装一次；挂断后可以直接点。");
+        }
         return;
       }
-      const clip = await clipFor(id, speech);
-      if (!clip || !callActiveRef.current || !isRawPcm(clip.bytes, clip.mimeType)) return;
-      nativePlayClip({ audio: await blobToBase64(new Blob([clip.bytes])), mime: clip.mimeType });
-      return;
-    }
-    if (profileRef.current.muted) {
-      resumeCallListen(turn);
-      return;
-    }
-    speakingIdRef.current = id;
-    stopPlayback();
-    nativeSpeakerStop();
-    setStatus("speaking");
-    void unlockPlayback();
-    void resumeAudio();
-    if (callActiveRef.current) deafenRef.current();
-    let released = false;
-    try {
-      const clip = await clipFor(id, speech);
-      if (!clip || turn !== turnRef.current) return;
-      const ok = await playMp3Bytes(clip.bytes, clip.mimeType);
-      if (turn !== turnRef.current) return;
-      if (speakingIdRef.current === id) speakingIdRef.current = null;
-      if (!ok) setBanner("声音被浏览器拦住了，点喇叭再听。");
-      setStatus((s) => (s === "speaking" ? "idle" : s));
-      resumeCallListen(turn);
-      released = true;
-    } finally {
-      if (!released && turn === turnRef.current && callActiveRef.current) {
-        if (speakingIdRef.current === id) speakingIdRef.current = null;
-        setStatus((s) => (s === "speaking" ? "idle" : s));
-        resumeCallListen(turn);
+      speakingIdRef.current = id;
+      stopPlayback();
+      nativeSpeakerStop();
+      setStatus("speaking");
+      void unlockPlayback();
+      void resumeAudio();
+      voiceOnRef.current = true;
+      callRef.current.deaf(true);
+      try {
+        const clip = await clipFor(id, speech);
+        if (!clip || turn !== turnRef.current) return;
+        const ok = await playMp3Bytes(clip.bytes, clip.mimeType);
+        if (turn !== turnRef.current) return;
+        if (!ok) setBanner("声音被浏览器拦住了，点喇叭再听。");
+      } finally {
+        if (turn === turnRef.current) {
+          if (speakingIdRef.current === id) speakingIdRef.current = null;
+          setStatus((s) => (s === "speaking" ? "idle" : s));
+          afterHim();
+        }
       }
-    }
-  }, [clipFor]);
+    },
+    [afterHim, clipFor],
+  );
 
   const cycleVoiceSpeed = () => {
     const next = nextVoiceRate(profileRef.current.voiceSpeed);
-    const profile = lockedProfile({ ...profileRef.current, voiceSpeed: next.speed });
-    profileRef.current = profile;
-    setProfile(profile);
+    const updated = lockedProfile({ ...profileRef.current, voiceSpeed: next.speed });
+    profileRef.current = updated;
+    setProfile(updated);
     spokenCacheRef.current.clear();
     void saveProfilePatch({ data: { patch: { voiceSpeed: next.speed } } })
       .then((result) => {
@@ -450,109 +503,59 @@ export function VoiceRoom() {
         setRevs(result.revs);
       })
       .catch(() => undefined);
-    if (status !== "speaking" && status !== "thinking") return;
+    if (status !== "speaking" || callRef.current.shell) return;
+    // What he is saying now is said again at the new speed (his reply is complete or nearly).
     const live = inflightRef.current;
     const last = [...chatRef.current].reverse().find((m) => m.role === "assistant");
     const speech = (live?.text || last?.text || "").trim();
     const id = live?.id || last?.id;
     if (!speech || !id) return;
-    abortRef.current?.abort();
-    busyRef.current = false;
     const turn = ++turnRef.current;
+    busyRef.current = false;
     void playFull(id, speech, turn);
   };
 
-  useEffect(() => {
-    void detectAudioRoute().then((route) => setHearingSession({ audioRoute: route }));
-  }, [hydrated]);
+  /** Pages of replies she did not keep are dropped before she says something new. */
+  const commitChoice = useCallback(async () => {
+    const base = dropIncompleteReplies(chatRef.current, pendingIdsRef.current);
+    const dropIds = unselectedReplyIds(base);
+    if (!dropIds.length) {
+      chatRef.current = base;
+      return;
+    }
+    const drop = new Set(dropIds);
+    chatRef.current = base.filter((m) => !drop.has(m.id));
+    setMessages(chatRef.current);
+    await deleteRoomMessages({ data: { ids: dropIds } });
+  }, []);
 
   const sendTurn = useCallback(
-    async (
-      sayRaw: string,
-      opts?: {
-        history?: ChatMessage[];
-        existingUser?: ChatMessage;
-        keepReplies?: boolean;
-        voiceTurnId?: string;
-        skipQingran?: boolean;
-        nightNoise?: boolean;
-        endpointFired?: number;
-        sttDoneAt?: number;
-        predictedTags?: AcousticTags;
-        engine?: string;
-        images?: string[];
-      },
-    ) => {
-      const tagged = sayRaw.trim();
-      if (!tagged && !(opts?.images ?? opts?.existingUser?.images)?.length) return;
-      if ((opts?.skipQingran || opts?.nightNoise) && !getHearingSession().debugHearing) {
-        if (callActiveRef.current) hearRef.current();
-        return;
-      }
-      const say = stripHearingMarkup(tagged).trim() || tagged;
+    async (sayRaw: string, opts: SendOpts = {}) => {
+      const say = sayRaw.trim();
+      const images = opts.images ?? opts.existingUser?.images;
+      if (!say && !images?.length) return;
       const at = Date.now();
-      const injectLine = formatVoiceInjectLine(voiceInjectFromProfile(profileRef.current));
-      const sttDoneAt = opts?.sttDoneAt ?? at;
-      const hearMs =
-        opts?.endpointFired && sttDoneAt >= opts.endpointFired ? sttDoneAt - opts.endpointFired : undefined;
-      const userMsg: ChatMessage = opts?.existingUser ?? {
+      const userMsg: ChatMessage = opts.existingUser ?? {
         id: newId(),
         role: "user",
         text: say,
         createdAt: at,
-        kind: opts?.skipQingran ? "unheard" : "say",
-        nightNoise: opts?.nightNoise || undefined,
-        voiceTurnId: opts?.voiceTurnId,
-        predictedTags: opts?.predictedTags,
-        hearingGold: opts?.voiceTurnId ? "unconfirmed" : undefined,
-        hearingTiming:
-          hearMs != null || opts?.engine
-            ? { hearMs, engine: opts?.engine }
-            : undefined,
-        injectLine,
-        images: opts?.images?.length ? opts.images : undefined,
+        kind: "say",
+        images: images?.length ? images : undefined,
       };
-      if (opts?.existingUser && (hearMs != null || opts?.engine)) {
-        userMsg.hearingTiming = { ...userMsg.hearingTiming, hearMs, engine: opts.engine ?? userMsg.hearingTiming?.engine };
-      }
-      userMsg.injectLine = injectLine;
-      const commitChoice = async () => {
-        const base = dropIncompleteReplies(chatRef.current, pendingIdsRef.current);
-        const dropIds = unselectedReplyIds(base);
-        if (!dropIds.length) {
-          chatRef.current = base;
-          return;
-        }
-        const drop = new Set(dropIds);
-        chatRef.current = base.filter((m) => !drop.has(m.id));
-        setMessages(chatRef.current);
-        await deleteRoomMessages({ data: { ids: dropIds } });
-      };
-      if (opts?.skipQingran) {
-        await commitChoice();
-        chatRef.current = [...chatRef.current, userMsg];
-        setMessages(chatRef.current);
-        setBanner(null);
-        void appendRoomMessage({ data: userMsg });
-        if (opts.voiceTurnId) {
-          void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: "" } });
-        }
-        if (callActiveRef.current) hearRef.current();
-        return;
-      }
-      if (!opts?.existingUser && busyRef.current) return;
-      if (!opts?.existingUser) await commitChoice();
+      if (!opts.existingUser && busyRef.current) return;
+      if (!opts.existingUser) await commitChoice();
       const turn = ++turnRef.current;
       busyRef.current = true;
+      voiceOnRef.current = false;
+      heldRef.current = null;
       skipAutoPlayRef.current = false;
       stopPlayback();
-      if (callActiveRef.current) deafenRef.current();
       setBanner(null);
       setEditingId(null);
-      voice.setError(null);
 
-      const sourceHistory = opts?.history ?? chatRef.current;
-      const siblingFloor = (opts?.keepReplies ? sourceHistory : []).reduce(
+      const sourceHistory = opts.history ?? chatRef.current;
+      const siblingFloor = (opts.keepReplies ? sourceHistory : []).reduce(
         (max, message) => (message.replyTo === userMsg.id ? Math.max(max, message.createdAt) : max),
         userMsg.createdAt || at,
       );
@@ -563,7 +566,7 @@ export function VoiceRoom() {
         createdAt: Math.max(Date.now(), siblingFloor + 1),
         replyTo: userMsg.id,
       };
-      if (opts?.existingUser && opts.keepReplies) {
+      if (opts.existingUser && opts.keepReplies) {
         const shownUser: ChatMessage = { ...userMsg, activeReply: reply.id };
         setMessages((prev) => {
           const has = prev.some((m) => m.id === shownUser.id);
@@ -575,57 +578,86 @@ export function VoiceRoom() {
           return withReply;
         });
         void persistUser(shownUser);
-      } else if (opts?.existingUser) {
+      } else if (opts.existingUser) {
         setMessages((prev) => {
           const idx = prev.findIndex((m) => m.id === userMsg.id);
-          if (idx < 0) return [...(opts.history ?? sourceHistory), userMsg, reply];
-          return [...prev.slice(0, idx), userMsg, reply];
+          const next = idx < 0 ? [...(opts.history ?? sourceHistory), userMsg, reply] : [...prev.slice(0, idx), userMsg, reply];
+          chatRef.current = next;
+          return next;
         });
       } else {
         chatRef.current = [...chatRef.current, userMsg, reply];
         setMessages(chatRef.current);
         void appendRoomMessage({ data: userMsg });
       }
+      if (opts.round) roundRef.current.replyId = reply.id;
       pendingIdsRef.current.add(reply.id);
       inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text: "" };
       speakingIdRef.current = reply.id;
       setStatus("thinking");
       void kickAudio();
-      if (opts?.voiceTurnId) {
-        void patchHearingFinalText({ data: { turnId: opts.voiceTurnId, finalText: tagged } });
-        void patchHearingReplyId({ data: { turnId: opts.voiceTurnId, replyMessageId: reply.id } });
-      }
-      const stampTiming = (partial: { grokMs?: number; ttsMs?: number; ttftMs?: number }) => {
-        if (!profileRef.current.debugHearing) return;
-        const next = { ...userMsg.hearingTiming, ...partial };
-        userMsg.hearingTiming = next;
-        setMessages((prev) => prev.map((m) => (m.id === userMsg.id ? { ...m, hearingTiming: next } : m)));
+
+      const earlier = opts.round?.earlier.map((m) => ({ id: m.id, text: m.text, at: m.createdAt }));
+      const turnInput = {
+        text: say,
+        userMsgId: userMsg.id,
+        userCreatedAt: userMsg.createdAt || at,
+        replyId: reply.id,
+        replyCreatedAt: reply.createdAt,
       };
+      const handedOff = () => {
+        pendingIdsRef.current.delete(reply.id);
+        if (inflightRef.current?.id === reply.id) inflightRef.current = null;
+        speakingIdRef.current = null;
+        busyRef.current = false;
+        // The shell answers it; whether she heard it is the shell's to know, so the round is over here.
+        if (opts.round) roundRef.current = { lines: [], replyId: null };
+        setStatus("idle");
+      };
+      // The shell's call runs this turn; its reply fills this message as it streams, and its phases drive the status.
+      if (callRef.current.active && callRef.current.shell && nativeTalkTurn(turnInput)) {
+        handedOff();
+        return;
+      }
+      // Outside a call the shell asks and speaks this turn, so it goes on when she leaves the app.
+      if (
+        !callRef.current.active &&
+        !profileRef.current.muted &&
+        // No round here: the shell stops a turn when the next one comes, and what she heard of it must stay saved.
+        nativeSpeakTurn({
+          ...turnInput,
+          images: userMsg.images,
+          voice: opts.round?.voice,
+          profile: { voiceSpeed: profileRef.current.voiceSpeed, muted: false },
+        })
+      ) {
+        handedOff();
+        return;
+      }
+      // In the shell's call only the shell may make a sound (a voice played by the page would be heard as her).
+      const pageQuiet = callRef.current.active && callRef.current.shell;
+      if (pageQuiet) setBanner("电话里改过的话，回复只有文字：要用 Xcode 重新装一次 App 才有声音。");
 
       let full = "";
-      let gotAudio = false;
+      let answered = false;
+      /** His streamed voice did not cover the reply: it is spoken again in one piece, whose end ends his turn. */
+      let replaying = false;
       const clips: Uint8Array<ArrayBuffer>[] = [];
       let clipMime = "audio/pcm;rate=24000";
       let persistAt = 0;
       let paintHandle = 0;
       let latestDisplay = "";
-      let grokDone = 0;
-      let ttsFirst = 0;
-      const hearingTurnId = getHearingSession().lastTurnId;
       const persistReply = (text: string) => {
         inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
       };
       const flushPaint = () => {
         paintHandle = 0;
         const display = latestDisplay;
-        setMessages((prev) =>
-          prev.map((m) => (m.id === reply.id ? { ...m, text: display } : m)),
-        );
+        setMessages((prev) => prev.map((m) => (m.id === reply.id ? { ...m, text: display } : m)));
       };
       const paintText = (text: string, force = false) => {
-        const display = stripSpeechTags(text);
+        latestDisplay = stripSpeechTags(text);
         inflightRef.current = { id: reply.id, createdAt: reply.createdAt, text };
-        latestDisplay = display;
         if (force) {
           if (paintHandle) cancelAnimationFrame(paintHandle);
           paintHandle = 0;
@@ -640,80 +672,42 @@ export function VoiceRoom() {
           persistReply(text);
         }
       };
-      if (
-        callActiveRef.current &&
-        nativeTalkTurn({
-          text: tagged,
-          userMsgId: userMsg.id,
-          userCreatedAt: userMsg.createdAt || at,
-          replyId: reply.id,
-          replyCreatedAt: reply.createdAt,
-        })
-      ) {
-        // The shell's call runs this turn; its reply fills this message as it streams, and its phases drive the status.
-        pendingIdsRef.current.delete(reply.id);
-        if (inflightRef.current?.id === reply.id) inflightRef.current = null;
-        speakingIdRef.current = null;
-        busyRef.current = false;
-        setStatus("idle");
-        return;
-      }
-      if (
-        !callActiveRef.current &&
-        !profileRef.current.muted &&
-        nativeSpeakTurn({
-          text: tagged,
-          userMsgId: userMsg.id,
-          userCreatedAt: userMsg.createdAt || at,
-          replyId: reply.id,
-          replyCreatedAt: reply.createdAt,
-          images: userMsg.images,
-          profile: { voiceSpeed: profileRef.current.voiceSpeed, muted: false },
-        })
-      ) {
-        // Outside a call the shell asks and speaks this turn, so it goes on when she leaves the app; its words fill
-        // this message as they come (`reply`).
-        pendingIdsRef.current.delete(reply.id);
-        if (inflightRef.current?.id === reply.id) inflightRef.current = null;
-        speakingIdRef.current = null;
-        busyRef.current = false;
-        setStatus("idle");
-        return;
-      }
-      // In the shell's call only the shell may make a sound: a voice played by the page goes into the shell's mic and
-      // comes back as her line. An old shell that cannot run this turn gets the words, without his voice.
-      const pageQuiet = callActiveRef.current && nativeCallPlan().callStart === "startNativeCall";
-      if (pageQuiet) setBanner("电话里改过的话，回复只有文字：要用 Xcode 重新装一次 App 才有声音。");
+      /** His voice: played, or kept back while she is saying something. */
+      const voice = (bytes: Uint8Array<ArrayBuffer>, mime: string) => {
+        if (herLineRef.current && !voiceOnRef.current) {
+          const kept = heldRef.current;
+          const held: HeldVoice = kept && kept.turn === turn ? kept : { turn, chunks: [], done: false };
+          held.chunks.push({ bytes, mime });
+          heldRef.current = held;
+          return;
+        }
+        voiceStarts();
+        enqueuePlayback(bytes, mime);
+      };
       try {
         const ac = new AbortController();
         abortRef.current = ac;
         await streamTalk(
           {
-            text: tagged,
-            userMsgId: userMsg.id,
-            userCreatedAt: userMsg.createdAt || at,
-            replyId: reply.id,
-            replyCreatedAt: reply.createdAt,
+            ...turnInput,
             images: userMsg.images,
             profile: lockedProfile(profileRef.current),
             nowMs: Date.now(),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+            earlier,
+            voice: opts.round?.voice
+              ? { ...opts.round.voice, sec: opts.round.voice.mode === "call" ? callRef.current.takeSeconds() : opts.round.voice.sec }
+              : undefined,
           },
           (event) => {
             if (turn !== turnRef.current) return;
-            if (event.t === "timing" && event.k === "ttft_ms") {
-              stampTiming({ ttftMs: event.ms });
-              return;
-            }
             if (event.t === "text") {
-              if (userMsg.hearingTiming?.grokMs == null) stampTiming({ grokMs: Date.now() - sttDoneAt });
               full += event.d;
               paintText(full);
               return;
             }
             if (event.t === "text_end") {
               full = event.speech || full;
-              grokDone = Date.now();
               paintText(full, true);
               void kickAudio();
               return;
@@ -721,83 +715,46 @@ export function VoiceRoom() {
             if (event.t === "done") {
               full = event.speech || full;
               paintText(full, true);
-              persistReply(full);
               pendingIdsRef.current.delete(reply.id);
               if (inflightRef.current?.id === reply.id) inflightRef.current = null;
               const display = stripSpeechTags(full);
-              const talkTrace = {
-                status: event.status ?? null,
-                finishReason: event.finishReason ?? null,
-                ms: event.ms,
-                chars: event.chars,
-                ttftMs: event.ttftMs ?? userMsg.hearingTiming?.ttftMs,
-              };
-              const finalMsg = { ...reply, text: display, talkTrace };
-              setMessages((prev) => prev.map((m) => (m.id === reply.id ? finalMsg : m)));
-              if (!display.trim()) setBanner(TALK_FAIL.empty);
-              if (turn === turnRef.current) sealPlayback();
-              if (turn !== turnRef.current) return;
+              answered = Boolean(display.trim());
+              setMessages((prev) => prev.map((m) => (m.id === reply.id ? { ...reply, text: display } : m)));
+              if (!answered) setBanner(TALK_FAIL.empty);
+              if (heldRef.current?.turn === turn) heldRef.current.done = true;
+              else sealPlayback();
               if (clips.length && streamAudioCovers(clips, display)) {
-                spokenCacheRef.current.set(reply.id, {
-                  bytes: concatBytes(clips),
-                  mimeType: clipMime,
-                });
+                spokenCacheRef.current.set(reply.id, { bytes: concatBytes(clips), mimeType: clipMime });
               } else {
                 spokenCacheRef.current.delete(reply.id);
-                if (display && !pageQuiet && shouldAutoSpeakReply({
-                  muted: profileRef.current.muted,
-                  skipAutoPlay: skipAutoPlayRef.current,
-                })) {
+                // His voice did not come through whole: the reply is spoken again in one piece.
+                if (answered && !pageQuiet && !profileRef.current.muted && !skipAutoPlayRef.current && !herLineRef.current) {
+                  replaying = true;
                   void playFull(reply.id, full, turn);
                 }
               }
               return;
             }
-            if (turn !== turnRef.current) return;
             if (event.t === "audio") {
-              if (pageQuiet || !shouldAutoSpeakReply({
-                muted: profileRef.current.muted,
-                skipAutoPlay: skipAutoPlayRef.current,
-              })) return;
+              if (pageQuiet || profileRef.current.muted || skipAutoPlayRef.current) return;
               if (event.replace) {
                 stopPlayback();
                 clips.length = 0;
+                if (heldRef.current?.turn === turn) heldRef.current.chunks = [];
                 void unlockPlayback();
                 void resumeAudio();
               }
-              gotAudio = true;
-              if (!ttsFirst) {
-                ttsFirst = Date.now();
-                if (userMsg.hearingTiming?.ttsMs == null) stampTiming({ ttsMs: ttsFirst - sttDoneAt });
-              }
-              setStatus("speaking");
               const bytes = base64ToBytes(event.b);
               clips.push(bytes);
               clipMime = event.m;
-              enqueuePlayback(bytes, event.m);
-            } else if (event.t === "err") {
+              voice(bytes, event.m);
+              return;
+            }
+            if (event.t === "err") {
               persistReply(full);
-              setBanner(
-                event.code === "spend_breaker"
-                  ? "今日（或本月）费用异常，已暂停。可在设置中确认后继续。"
-                  : event.m,
-              );
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === reply.id
-                    ? {
-                        ...m,
-                        talkTrace: {
-                          status: event.status ?? null,
-                          finishReason: event.finishReason ?? null,
-                          ms: event.ms,
-                          chars: event.chars,
-                        },
-                      }
-                    : m,
-                ),
-              );
+              setBanner(event.code === "spend_breaker" ? "今日（或本月）费用异常，已暂停。可在设置中确认后继续。" : event.m);
               if (event.tts) {
+                // His words are fine, only his voice failed: she reads this one.
                 skipAutoPlayRef.current = true;
                 return;
               }
@@ -816,227 +773,162 @@ export function VoiceRoom() {
         setBanner(talkExceptionHint(classifyTalkException(err).kind));
         setStatus("error");
       } finally {
-        if (hearingTurnId) {
-          void patchHearingTurn({
-            data: {
-              id: hearingTurnId,
-              grok_done: grokDone || undefined,
-              tts_first_audio: ttsFirst || undefined,
-              cold_start_ms: getHearingSession().coldStartMs ?? undefined,
-            },
-          });
-        }
         pendingIdsRef.current.delete(reply.id);
         if (turn === turnRef.current) {
           busyRef.current = false;
-          if (gotAudio) {
+          if (opts.round && roundRef.current.replyId === reply.id) {
+            // Answered in words only (no voice came): she has read it, so the round is over. Failed: her lines
+            // stay and go with what she says next.
+            if (answered && !heldRef.current) roundRef.current = { lines: [], replyId: null };
+            else if (!answered) roundRef.current.replyId = null;
+          }
+          if (replaying) {
+            // Spoken again in one piece (playFull): the end of that lets her be heard again.
+          } else if (voiceOnRef.current) {
+            // All of his voice is in: the player is told so, and his turn ends when it has played.
+            sealPlayback();
             await whenPlaybackIdle();
             if (turn === turnRef.current) {
               setStatus("idle");
-              resumeCallListen(turn);
+              afterHim();
             }
-          } else {
+          } else if (!heldRef.current) {
             setStatus((s) => (s === "thinking" || s === "speaking" ? "idle" : s));
-            resumeCallListen(turn);
           }
         }
       }
     },
-    [playFull, voice.setError],
+    [afterHim, commitChoice, playFull, voiceStarts],
   );
 
-  const call = useCall({
-    prompt: profile.systemPrompt,
-    isGenerating: () => statusRef.current === "thinking" || busyRef.current,
-    isLabeling: () => confirmOpenRef.current || editingRef.current,
-    onStuck: ({ phase, deaf }) => {
-      setStatus((s) => (s === "speaking" || s === "thinking" ? "idle" : s));
-      const prev = getHearingSession().floorQuietAt;
-      if (!Number.isFinite(prev)) setHearingSession({ floorQuietAt: performance.now() });
-      void brainNoteCallStuck({ data: { phase, deaf } });
-    },
-    onUtterance: async (heard: HeardUtterance) => {
-      if (heard.saveError) setBanner(clipSaveBanner(heard.saveError));
-      await sendTurn(heard.text, {
-        voiceTurnId: voiceTurnIdForMessage(heard),
-        skipQingran: heard.skipQingran,
-        nightNoise: heard.nightNoise,
-        endpointFired: heard.endpointFired,
-        sttDoneAt: heard.sttDoneAt,
-        predictedTags: heard.predictedTags,
-        engine: engineLineFromHeard(heard),
-      });
-    },
-  });
-
-  statusRef.current = status;
-  editingRef.current = Boolean(editingId);
-
-  useEffect(() => {
-    callActiveRef.current = call.active;
-    hearRef.current = call.hear;
-    deafenRef.current = call.deafen;
-    setHearingSession({ mode: call.active ? "call" : "text" });
-    if (call.active) {
-      void detectAudioRoute().then((route) => setHearingSession({ audioRoute: route }));
-    }
-  }, [call.active, call.hear, call.deafen]);
-
-  useEffect(() => {
-    const open = Boolean(confirmId);
-    confirmOpenRef.current = open;
-    const action = micActionForConfirmPanel({
-      panelOpen: open,
-      wasOpen: confirmWasOpenRef.current,
-      callActive: call.active,
-      qingranSpeaking: isPlaybackActive() || status === "thinking" || busyRef.current,
-    });
-    confirmWasOpenRef.current = open;
-    if (action === "deafen") call.deafen();
-    else if (action === "hear") call.hear();
-  }, [confirmId, call.active, call.deafen, call.hear, status]);
-
-  useEffect(() => {
-    if (status === "speaking") {
-      setHearingSession({ floorQuietAt: Number.POSITIVE_INFINITY });
-      return;
-    }
-    const prev = getHearingSession().floorQuietAt;
-    if (!Number.isFinite(prev)) setHearingSession({ floorQuietAt: performance.now() });
-  }, [status]);
-
-  useEffect(() => {
-    if (!confirmId) {
-      setConfirmClipNote(null);
-      setConfirmAudioUrl((url) => {
-        if (url) URL.revokeObjectURL(url);
-        return null;
-      });
-      return;
-    }
-    const msg = chatRef.current.find((m) => m.id === confirmId);
-    if (!msg?.voiceTurnId) return;
-    let revoked = false;
-    let url: string | null = null;
-    setConfirmClipNote(null);
-    setConfirmPredicted(msg.predictedTags ?? null);
-    setConfirmGoldTags(null);
-    setConfirmNoise(false);
-    setConfirmMismatch(false);
-    setConfirmNote("");
-    setConfirmDraft(msg.text);
-    setConfirmStt(msg.text);
-    void getHearingTurnAudio({ data: { turnId: msg.voiceTurnId } }).then((result) => {
-      if (revoked) return;
-      if (!result.ok) {
-        setConfirmClipNote(result.error);
+  /** A line she said (held, or in a browser call), or typed during a browser call: it joins her round. */
+  const sayLine = useCallback(
+    async (text: string, voice?: VoiceNote) => {
+      const said = (text.trim() + suffixRef.current).trim();
+      suffixRef.current = "";
+      if (!said) {
+        releaseVoice();
         return;
       }
-      const bytes = Uint8Array.from(atob(result.audioBase64), (c) => c.charCodeAt(0));
-      url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
-      setConfirmClipNote(null);
-      setConfirmAudioUrl(url);
-    });
-    void getHearingClipLabel({ data: { turnId: msg.voiceTurnId } }).then((result) => {
-      if (!result.ok || revoked) return;
-      if (result.predictedTags) setConfirmPredicted(result.predictedTags);
-      setConfirmGoldTags(result.goldTags);
-      setConfirmNoise(Boolean(result.noiseOnly));
-      setConfirmMismatch(Boolean(result.literalMismatch));
-      setConfirmNote(result.toneNote ?? "");
-      if (result.xaiText) setConfirmStt(result.xaiText);
-      if (result.goldText) setConfirmDraft(result.goldText);
-      else if (result.xaiText && msg.text === UNRECOGNIZED_TEXT) setConfirmDraft(result.xaiText);
-    });
-    return () => {
-      revoked = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [confirmId]);
-
-  const finishHold = useCallback(async () => {
-    if (finishingHoldRef.current) return;
-    finishingHoldRef.current = true;
-    try {
-      stopPlayback();
-      const heard = await voice.stop();
-      stopPlayback();
-      const el = getPlaybackElement();
-      el.muted = false;
-      setStatus("idle");
-      if (heard.saveError) setBanner(clipSaveBanner(heard.saveError));
-      if (heard.text) {
-        void sendTurn(heard.text, {
-          voiceTurnId: voiceTurnIdForMessage(heard),
-          skipQingran: heard.skipQingran,
-          nightNoise: heard.nightNoise,
-          endpointFired: heard.endpointFired,
-          sttDoneAt: heard.sttDoneAt,
-          predictedTags: heard.predictedTags,
-          engine: engineLineFromHeard(heard),
-        });
+      // She may already be holding the next line: then his answer to this one waits for it too.
+      herLineRef.current = holdActive();
+      if (voiceOnRef.current && statusRef.current === "speaking") {
+        // He is speaking (only a line typed meanwhile gets here): it goes when he is done, as the next round.
+        queuedRef.current.push({ text: said, voice });
+        return;
       }
-    } finally {
-      finishingHoldRef.current = false;
-    }
-  }, [sendTurn, voice]);
+      const round = roundRef.current;
+      if (round.replyId) retractReply(round.replyId);
+      else if (!round.lines.length) await commitChoice();
+      const line: ChatMessage = { id: newId(), role: "user", text: said, createdAt: Date.now(), kind: "say" };
+      roundRef.current.lines.push(line);
+      chatRef.current = [...chatRef.current, line];
+      setMessages(chatRef.current);
+      await sendTurn(said, { existingUser: line, round: { earlier: roundRef.current.lines.slice(0, -1), voice } });
+    },
+    [commitChoice, holdActive, releaseVoice, retractReply, sendTurn],
+  );
+  sayLineRef.current = sayLine;
 
-  const holdStart = useCallback(async () => {
-    if (callActiveRef.current || holdingRef.current || finishingHoldRef.current) return;
-    if (voice.status === "transcribing") return;
-    if (status === "thinking" || status === "speaking") return;
-    holdingRef.current = true;
-    const starting = voice.start();
+  heardRef.current = (held: Held) => {
+    if (held.text.trim()) void sayLine(held.text, held.voice);
+    else releaseVoice();
+  };
+
+  liveRef.current = (text: string) => {
+    if (text) herLineRef.current = true;
+    else releaseVoice();
+  };
+
+  /** Her press: what he is saying stops; what he is still thinking waits to see if her line has words. */
+  function holdStart() {
+    if (callRef.current.active) return;
+    setBanner(null);
+    setComposerOpen(false);
+    setEditingId(null);
     try {
       window.scrollTo(0, 0);
     } catch {
       /* ignore */
     }
-    abortRef.current = null;
-    turnRef.current += 1;
-    busyRef.current = false;
-    setEditingId(null);
-    setComposerOpen(false);
     void unlockPlayback();
-    if (!holdingRef.current) return;
-    stopPlayback();
-    nativeSpeakerStop();
-    const el = getPlaybackElement();
-    el.muted = true;
-    setBanner(null);
-    setStatus("recording");
-    await starting;
-    if (!holdingRef.current) await finishHold();
-  }, [finishHold, status, voice]);
+    if (!shellHolds()) {
+      if (voiceOnRef.current || statusRef.current === "speaking") stopHim();
+      // A typed line he is still thinking about is not part of a round: stopped, as when she taps him.
+      else if (busyRef.current && !roundRef.current.replyId) stopHim();
+      herLineRef.current = true;
+      // An older iPhone shell speaking a typed line.
+      nativeSpeakerStop();
+    } else if (!busyRef.current) {
+      // A line of his she is replaying on the page.
+      stopPlayback();
+    }
+    hold.start();
+  }
 
-  const holdEnd = useCallback(() => {
-    holdingRef.current = false;
-    void finishHold();
-  }, [finishHold]);
+  function holdEnd() {
+    hold.end();
+  }
+
+  function holdCancel() {
+    hold.cancel();
+    if (!shellHolds()) releaseVoice();
+  }
 
   async function toggleCall() {
     if (call.active) {
+      if (!call.shell) {
+        // An answer he was still thinking for her round (or whose voice waited for her) is dropped: she hung up
+        // before hearing it. Done before the call stops, whose end of her line would otherwise let that voice play.
+        const round = roundRef.current;
+        if (round.replyId && !voiceOnRef.current) retractReply(round.replyId);
+        heldRef.current = null;
+        roundRef.current = { lines: [], replyId: null };
+      }
       call.hangup();
-      stopPlayback();
-      turnRef.current += 1;
-      busyRef.current = false;
-      setStatus("idle");
+      setShellPhase("idle");
+      if (!call.shell) {
+        stopPlayback();
+        turnRef.current += 1;
+        busyRef.current = false;
+        voiceOnRef.current = false;
+        heldRef.current = null;
+        herLineRef.current = false;
+        queuedRef.current = [];
+        suffixRef.current = "";
+        setStatus("idle");
+      }
       return;
     }
-    if (voice.status === "recording") voice.cancel();
+    if (hold.holding) hold.cancel();
+    // He stops first (as when she taps him), so his voice is never in the room while the call listens.
+    if (busyRef.current || voiceOnRef.current) stopHim();
     stopPlayback();
+    nativeSpeakerStop();
     setComposerOpen(false);
     setEditingId(null);
     setBanner(null);
     await call.start();
   }
 
+  /** A browser call: a phrase beside the hang-up button goes on the end of what she is saying, or on its own. */
+  function tapPhrase(text: string) {
+    if (!text) return;
+    if (call.shell) {
+      nativeAddToCall(text, true);
+      return;
+    }
+    if (herLineRef.current) suffixRef.current += text;
+    else void sayLine(text);
+  }
+
   async function submitComposer() {
     const say = draft.trim();
     if (!say && !photos.length) return;
-    // In the shell's call a typed line joins her round, like a line she said; it waits while he is speaking.
+    // In a call a typed line joins her round, like a line she said; it waits while he is speaking.
     // (Photos are not sent during a call: the photo button is hidden then.)
-    if (call.active && say && nativeAddToCall(say)) {
+    if (call.active && say && (!call.shell || nativeAddToCall(say))) {
+      if (!call.shell) void sayLine(say);
       setDraft("");
       setComposerOpen(false);
       return;
@@ -1051,6 +943,8 @@ export function VoiceRoom() {
     setDraft("");
     setPhotos([]);
     setComposerOpen(false);
+    // A typed line is its own turn: lines of hers left from a round that failed are in the talk already.
+    roundRef.current = { lines: [], replyId: null };
     await sendTurn(say, { images });
   }
 
@@ -1073,18 +967,10 @@ export function VoiceRoom() {
         setPhotos((prev) => prev.map((p) => (p.key === key ? { ...p, id: saved.id } : p)));
       } catch (err) {
         setPhotos((prev) => prev.filter((p) => p.key !== key));
-        setBanner(err instanceof Error && /[\u4e00-\u9fff]/.test(err.message) ? err.message : "照片没传上去，再试一次。");
+        setBanner(err instanceof Error && /[一-鿿]/.test(err.message) ? err.message : "照片没传上去，再试一次。");
       }
     }
     setPhotoBusy(false);
-  }
-
-  async function replyToNoise(id: string) {
-    const current = chatRef.current.find((m) => m.id === id);
-    if (!current?.nightNoise) return;
-    const text = nightNoiseReplyText(current.text);
-    const updated: ChatMessage = { ...current, text, kind: "say", nightNoise: false };
-    await replayFrom(updated);
   }
 
   async function saveEdit() {
@@ -1096,11 +982,11 @@ export function VoiceRoom() {
     const current = chatRef.current.find((m) => m.id === editingId && m.role === "user");
     const text = editDraft.trim();
     if (!current || (!text && !current.images?.length)) return;
-    if (text === stripAcousticTags(current.text).trim()) {
+    if (text === stripSoundTags(current.text).trim()) {
       setEditingId(null);
-      if (call.active) call.hear();
       return;
     }
+    roundRef.current = { lines: [], replyId: null };
     if (current.id !== lastUserSay(chatRef.current)?.id) {
       await branchFrom(current, text);
       return;
@@ -1113,11 +999,7 @@ export function VoiceRoom() {
     chatRef.current = next;
     setMessages(next);
     await persistUser(updated);
-    await sendTurn(updated.text, {
-      existingUser: updated,
-      keepReplies: true,
-      voiceTurnId: updated.voiceTurnId,
-    });
+    await sendTurn(updated.text, { existingUser: updated, keepReplies: true });
   }
 
   /**
@@ -1163,8 +1045,6 @@ export function VoiceRoom() {
       nightNoise: undefined,
       activeReply: undefined,
       scanned: undefined,
-      // The words changed, so what was heard is no longer confirmed for them.
-      hearingGold: original.voiceTurnId ? "unconfirmed" : undefined,
     };
     chatRef.current = [...sliced.history, said];
     setMessages(chatRef.current);
@@ -1175,14 +1055,9 @@ export function VoiceRoom() {
     } catch (err) {
       busyRef.current = false;
       setBanner(err instanceof Error ? err.message : String(err));
-      if (call.active) call.hear();
       return;
     }
-    await sendTurn(said.text, {
-      history: sliced.history,
-      existingUser: said,
-      voiceTurnId: said.voiceTurnId,
-    });
+    await sendTurn(said.text, { history: sliced.history, existingUser: said });
   }
 
   function selectReply(userId: string, replyId: string) {
@@ -1198,151 +1073,6 @@ export function VoiceRoom() {
     void persistUser(updated);
   }
 
-  async function replayFrom(updated: ChatMessage) {
-    abortRef.current?.abort();
-    stopPlayback();
-    busyRef.current = true;
-    const sliced = sliceAfterMessage(chatRef.current, updated.id);
-    if (!sliced) {
-      busyRef.current = false;
-      return;
-    }
-    setMessages([...sliced.history, updated]);
-    // Written before he is asked, so what he sees is the talk up to this line.
-    await Promise.all([
-      updateRoomMessage({ data: updated }),
-      sliced.removed.length ? deleteRoomMessages({ data: { ids: sliced.removed.map((m) => m.id) } }) : null,
-    ]).catch(() => undefined);
-    await sendTurn(updated.text, {
-      history: sliced.history,
-      existingUser: updated,
-      voiceTurnId: updated.voiceTurnId,
-    });
-  }
-
-  async function saveConfirm(input: {
-    goldText: string;
-    source: "confirmed" | "edited";
-    noiseOnly: boolean;
-    literalMismatch: boolean;
-    toneNote: string;
-    goldTags: Partial<AcousticTags>;
-    tagsTouched: TagKey[];
-  }) {
-    const msg = chatRef.current.find((m) => m.id === confirmId);
-    if (!msg?.voiceTurnId) {
-      confirmOpenRef.current = false;
-      setConfirmId(null);
-      return;
-    }
-    setConfirmBusy(true);
-    setConfirmError(null);
-    try {
-      const result = await confirmHearingClip({
-        data: {
-          turnId: msg.voiceTurnId,
-          goldText: input.goldText,
-          goldSource: input.source,
-          noiseOnly: input.noiseOnly,
-          literalMismatch: input.literalMismatch,
-          toneNote: input.toneNote,
-          goldTags: input.goldTags,
-          tagsTouched: input.tagsTouched,
-        },
-      });
-      if (!result.ok) {
-        setConfirmError(result.error);
-        return;
-      }
-      const plan = planConfirmSave(chatRef.current, msg, {
-        goldText: input.goldText,
-        noiseOnly: input.noiseOnly,
-        events: input.goldTags.events,
-      });
-      const updated: ChatMessage = { ...plan.updated, hearingGold: "confirmed" };
-      confirmOpenRef.current = false;
-      setConfirmId(null);
-      if (plan.shouldResend) {
-        void replayFrom(updated);
-      } else {
-        if (plan.removed.length) {
-          abortRef.current?.abort();
-          abortRef.current = null;
-          turnRef.current += 1;
-          busyRef.current = false;
-          stopPlayback();
-          setStatus("idle");
-          inflightRef.current = null;
-          speakingIdRef.current = null;
-          void deleteRoomMessages({ data: { ids: plan.removed.map((m) => m.id) } });
-        }
-        void updateRoomMessage({ data: updated });
-        setMessages((prev) => {
-          const drop = new Set(plan.removed.map((m) => m.id));
-          return prev.filter((m) => !drop.has(m.id)).map((m) => (m.id === msg.id ? updated : m));
-        });
-      }
-    } catch (err) {
-      setConfirmError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setConfirmBusy(false);
-    }
-  }
-
-  async function saveConfirmQuick(id: string) {
-    const msg = chatRef.current.find((m) => m.id === id);
-    if (!msg?.voiceTurnId) return;
-    setBanner(null);
-    try {
-      const result = await confirmHearingClip({
-        data: {
-          turnId: msg.voiceTurnId,
-          goldText: msg.text,
-          goldSource: "confirmed",
-        },
-      });
-      if (!result.ok) {
-        setBanner(result.error);
-        return;
-      }
-      const updated: ChatMessage = { ...msg, hearingGold: "confirmed" };
-      void updateRoomMessage({ data: updated });
-      setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
-      armUndo(id);
-    } catch (err) {
-      setBanner(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  function armUndo(id: string) {
-    setUndoConfirmId(id);
-    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
-    undoTimerRef.current = window.setTimeout(() => {
-      setUndoConfirmId((cur) => (cur === id ? null : cur));
-      undoTimerRef.current = 0;
-    }, 5000);
-  }
-
-  async function undoConfirm(id: string) {
-    const msg = chatRef.current.find((m) => m.id === id);
-    if (!msg?.voiceTurnId) return;
-    try {
-      const result = await unlabelHearingByTurn({ data: { turnId: msg.voiceTurnId } });
-      if (!result.ok) {
-        setBanner(result.error);
-        return;
-      }
-      if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
-      undoTimerRef.current = 0;
-      setUndoConfirmId(null);
-      const updated: ChatMessage = { ...msg, hearingGold: "unconfirmed" };
-      void updateRoomMessage({ data: updated });
-      setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
-    } catch (err) {
-      setBanner(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   /** Her thumbs-down with 差在哪 (turn_feedback, rating down). Complaints she says to him in the chat go to qr_feedback at night. */
   async function faultReply(note: string, tags: string[]): Promise<void> {
     if (!faultTarget) return;
@@ -1350,7 +1080,7 @@ export function VoiceRoom() {
     setFaultError(null);
     try {
       const result = await flagQingranReply({
-        data: { messageId: faultTarget.messageId, replyToMessageId: faultTarget.replyTo, note, rating: "down", tags },
+        data: { messageId: faultTarget.messageId, note, rating: "down", tags },
       });
       if (result.ok) setFaultTarget(null);
       else setFaultError(result.error);
@@ -1362,12 +1092,10 @@ export function VoiceRoom() {
   }
 
   /** Her thumbs-up: this reply was good (turn_feedback, rating up). */
-  async function praiseReply(messageId: string, replyTo?: string): Promise<boolean> {
+  async function praiseReply(messageId: string): Promise<boolean> {
     setPraiseBusy(true);
     try {
-      const result = await flagQingranReply({
-        data: { messageId, replyToMessageId: replyTo, note: "", rating: "up", tags: [] },
-      });
+      const result = await flagQingranReply({ data: { messageId, note: "", rating: "up", tags: [] } });
       if (!result.ok) setBanner(result.error);
       return result.ok;
     } catch (err) {
@@ -1378,60 +1106,40 @@ export function VoiceRoom() {
     }
   }
 
+  /** She tapped him. */
   function interruptQingran() {
-    if (call.active && nativeCallPlan().callStart === "startNativeCall") {
-      if (call.phase === "thinking" || call.phase === "speaking") nativeInterruptCall();
+    // The shell's own turns (its call, and lines she held in it) are stopped by the shell.
+    if ((call.active && call.shell) || (shellHolds() && shellPhase !== "idle")) {
+      nativeInterruptCall();
       return;
     }
-    const plan = planInterruptQingran({
-      speakingOrThinking: status === "speaking" || status === "thinking",
-      callActive: call.active,
-    });
-    if (!plan) return;
-    turnRef.current += 1;
-    abortRef.current?.abort();
-    abortRef.current = null;
-    if (plan.stopPlayback) stopPlayback();
-    busyRef.current = false;
-    setStatus("idle");
-    const id = speakingIdRef.current ?? inflightRef.current?.id;
-    const target =
-      (id ? chatRef.current.find((m) => m.id === id) : undefined) ??
-      [...chatRef.current].reverse().find((m) => m.role === "assistant");
-    if (plan.markInterrupted && target?.role === "assistant") {
-      pendingIdsRef.current.delete(target.id);
-      const updated: ChatMessage = { ...target, interrupted: true };
-      chatRef.current = chatRef.current.map((m) => (m.id === updated.id ? updated : m));
-      setMessages(chatRef.current);
-      void updateRoomMessage({ data: updated });
-    }
-    inflightRef.current = null;
-    speakingIdRef.current = null;
-    if (plan.hear) call.hear();
+    nativeSpeakerStop();
+    if (status !== "speaking" && status !== "thinking") return;
+    stopHim();
   }
 
-  const recording = voice.status === "recording";
-  const transcribing = voice.status === "transcribing";
-  // In the shell's call she can type, and tap a phrase on either side of the hang-up button (shells from 2026-10-02).
-  const callAdds = call.active && nativeAddToCall(null);
-  const composing = composerOpen && !recording && (!call.active || callAdds);
-  // In the iPhone shell's call the shell does everything, so its phase alone says where the call is.
-  const shellCall = call.active && nativeCallPlan().callStart === "startNativeCall";
+  const shellBusy = !call.active && shellHolds() && (shellPhase === "thinking" || shellPhase === "speaking");
+  const thinkingNow = call.active && call.shell ? call.phase === "thinking" : status === "thinking" || (shellBusy && shellPhase === "thinking");
+  const speakingNow = call.active && call.shell ? call.phase === "speaking" : status === "speaking" || (shellBusy && shellPhase === "speaking");
+  // In the shell's call she can type, and tap a phrase on either side of the hang-up button.
+  const callAdds = call.active && (!call.shell || nativeAddToCall(null));
+  const composing = composerOpen && !hold.holding && (!call.active || callAdds);
+  const liveLine = hold.holding || hold.finishing ? hold.live : call.active && call.live ? call.live : null;
   const statusLine = call.active
-    ? call.phase === "speaking-you"
-      ? `在听你 · ${call.listenSec} 秒`
-      : call.phase === "transcribing"
-        ? "听你说的话"
-        : call.phase === "thinking" || (!shellCall && status === "thinking")
-          ? "她在想"
-          : call.phase === "speaking" || (!shellCall && status === "speaking")
-            ? "清然在说"
-            : shellCall
-              ? "你说，说完停两秒"
-              : `你说，说完停两秒 · phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
-    : status === "thinking"
-      ? "正在想"
-      : "";
+    ? call.live
+      ? ""
+      : thinkingNow
+        ? "她在想"
+        : speakingNow
+          ? "清然在说"
+          : call.shell && call.phase === "transcribing"
+            ? "听你说的话"
+            : "你说，我在听"
+    : hold.holding
+      ? ""
+      : thinkingNow
+        ? "正在想"
+        : "";
 
   return (
     <div
@@ -1446,7 +1154,7 @@ export function VoiceRoom() {
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <button
               type="button"
-              aria-label={status === "speaking" || status === "thinking" ? "打断清然" : "清然"}
+              aria-label={speakingNow || thinkingNow ? "打断清然" : "清然"}
               className="grid size-11 shrink-0 place-items-center"
               onClick={(e) => {
                 e.stopPropagation();
@@ -1456,16 +1164,12 @@ export function VoiceRoom() {
               <div
                 className={cn(
                   "lamp-orb size-10 rounded-full",
-                  status === "idle" && !recording && !call.active && "lamp-breathe",
+                  status === "idle" && !hold.holding && !call.active && !shellBusy && "lamp-breathe",
                 )}
                 aria-hidden
               />
             </button>
-            <button
-              type="button"
-              aria-label="往上看更早的对话"
-              className="min-w-0 flex-1 text-left"
-            >
+            <button type="button" aria-label="往上看更早的对话" className="min-w-0 flex-1 text-left">
               <p className="font-display text-lg font-medium leading-tight tracking-tight">清然</p>
               <p className="text-xs text-subtle">{call.active ? "通话中" : "在"}</p>
             </button>
@@ -1484,10 +1188,7 @@ export function VoiceRoom() {
               variant="ghost"
               size="sm"
               aria-label={`语速 ${snapVoiceRate(profile.voiceSpeed).label}，点一下换一档`}
-              className={cn(
-                "text-xs",
-                snapVoiceRate(profile.voiceSpeed).id !== "normal" && "text-live",
-              )}
+              className={cn("text-xs", snapVoiceRate(profile.voiceSpeed).id !== "normal" && "text-live")}
               onClick={cycleVoiceSpeed}
             >
               {snapVoiceRate(profile.voiceSpeed).label}
@@ -1512,12 +1213,7 @@ export function VoiceRoom() {
             >
               {profile.muted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="设置"
-              onClick={() => setSettingsOpen(true)}
-            >
+            <Button variant="ghost" size="icon" aria-label="设置" onClick={() => setSettingsOpen(true)}>
               <Settings className="size-5" />
             </Button>
           </div>
@@ -1525,21 +1221,19 @@ export function VoiceRoom() {
 
         {composing ? (
           <div className="flex min-h-0 flex-1 flex-col px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
-            {(banner || voice.error) && (
-              <p className="mb-2 text-center text-sm text-live">{banner || voice.error}</p>
-            )}
+            {banner ? <p className="mb-2 text-center text-sm text-live">{banner}</p> : null}
             <Textarea
               autoFocus
               enterKeyHint="send"
               value={draft}
               onChange={(e) => {
-                stopPlayback();
+                if (!call.active) stopPlayback();
                 setDraft(e.target.value);
                 keepCaretVisible(e.currentTarget);
               }}
               onSelect={(e) => keepCaretVisible(e.currentTarget)}
               onFocus={(e) => {
-                stopPlayback();
+                if (!call.active) stopPlayback();
                 const box = e.currentTarget;
                 window.setTimeout(() => {
                   window.scrollTo(0, 0);
@@ -1591,15 +1285,15 @@ export function VoiceRoom() {
                   收起
                 </button>
                 {call.active ? null : (
-                <button
-                  type="button"
-                  aria-label="发照片"
-                  disabled={photoBusy || photos.length >= MAX_PHOTOS}
-                  onClick={() => photoInputRef.current?.click()}
-                  className="grid size-11 place-items-center text-muted transition-colors duration-150 hover:text-fg disabled:opacity-30"
-                >
-                  <ImagePlus className="size-5" />
-                </button>
+                  <button
+                    type="button"
+                    aria-label="发照片"
+                    disabled={photoBusy || photos.length >= MAX_PHOTOS}
+                    onClick={() => photoInputRef.current?.click()}
+                    className="grid size-11 place-items-center text-muted transition-colors duration-150 hover:text-fg disabled:opacity-30"
+                  >
+                    <ImagePlus className="size-5" />
+                  </button>
                 )}
               </div>
               <Button type="button" size="pill" onClick={() => void submitComposer()}>
@@ -1614,12 +1308,14 @@ export function VoiceRoom() {
               messages={messages}
               partnerName="清然"
               statusLine={statusLine}
-              thinking={status === "thinking" || transcribing || call.phase === "transcribing" || call.phase === "thinking"}
+              thinking={thinkingNow}
+              liveLine={liveLine}
               editingId={editingId}
               editDraft={editDraft}
-              debugHearing={profile.debugHearing}
               onPlay={(id, text) => {
                 void unlockPlayback();
+                // What he is saying or still thinking stops first, as when she taps him: only this line is heard.
+                if (busyRef.current || voiceOnRef.current) stopHim();
                 void playFull(id, text, turnRef.current);
               }}
               onEditStart={(id) => {
@@ -1628,14 +1324,12 @@ export function VoiceRoom() {
                 // One of his replies: only the editor opens, with the words and voice tags as stored (the page
                 // keeps a fresh reply without its tags). A reply not saved yet (still coming) cannot be changed.
                 if (msg.role === "assistant") {
-                  const leavingHers = chatRef.current.some((m) => m.id === editingId && m.role === "user");
                   void readRoomMessage({ data: { id } })
                     .then((stored) => {
                       if (!stored) {
                         setBanner("他这句还没说完，说完再改。");
                         return;
                       }
-                      if (leavingHers && call.active) call.hear();
                       const next = chatRef.current.map((m) => (m.id === id ? { ...m, text: stored.text } : m));
                       chatRef.current = next;
                       setMessages(next);
@@ -1647,47 +1341,21 @@ export function VoiceRoom() {
                   return;
                 }
                 // Changing her last line takes back his answer to it now. An earlier line only opens the editor:
-                // what he is saying goes on until she saves (in a call the mic still stops while she types).
-                if (id === lastUserSay(chatRef.current)?.id || call.active) {
-                  stopPlayback();
-                  abortRef.current?.abort();
-                  turnRef.current += 1;
-                  busyRef.current = false;
-                  if (call.active) call.deafen();
-                  setStatus("idle");
-                }
+                // what he is saying goes on until she saves.
+                if (id === lastUserSay(chatRef.current)?.id && (status === "thinking" || status === "speaking")) stopHim();
                 setEditingId(id);
-                setEditDraft(stripAcousticTags(msg.text));
+                setEditDraft(stripSoundTags(msg.text));
                 setComposerOpen(false);
               }}
               onEditDraft={setEditDraft}
-              onEditCancel={() => {
-                const wasHers = chatRef.current.some((m) => m.id === editingId && m.role === "user");
-                setEditingId(null);
-                if (wasHers && call.active) call.hear();
-              }}
+              onEditCancel={() => setEditingId(null)}
               onEditSave={() => void saveEdit()}
               onSelectReply={selectReply}
-              onConfirmStart={(id) => {
-                const plan = planOpenConfirmPanel();
-                skipAutoPlayRef.current = plan.skipAutoPlay;
-                confirmOpenRef.current = true;
-                if (plan.stopPlayback) {
-                  stopPlayback();
-                  setStatus((s) => (s === "speaking" ? "idle" : s));
-                }
-                setConfirmError(null);
-                setConfirmId(id);
-              }}
-              onConfirmQuick={(id) => void saveConfirmQuick(id)}
-              onUndoConfirm={(id) => void undoConfirm(id)}
-              undoConfirmId={undoConfirmId}
-              onNoiseReply={(id) => void replyToNoise(id)}
               praisedIds={praisedIds}
-              onPraiseReply={(assistantId, replyToId) => {
+              onPraiseReply={(assistantId) => {
                 if (praiseBusy || praisedIds.has(assistantId)) return;
                 setPraisedIds((prev) => new Set(prev).add(assistantId));
-                void praiseReply(assistantId, replyToId).then((ok) => {
+                void praiseReply(assistantId).then((ok) => {
                   if (ok) return;
                   setPraisedIds((prev) => {
                     const next = new Set(prev);
@@ -1705,90 +1373,41 @@ export function VoiceRoom() {
             />
 
             {editingId ? null : (
-            <footer className="relative z-10 shrink-0 bg-bg px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2">
-              {(banner || voice.error || call.error) && (
-                <p className="mb-3 text-center text-sm text-live">
-                  {banner || voice.error || call.error}
-                </p>
-              )}
-              {call.active || recording ? (
-                <VolumeMeter
-                  level={call.active ? call.level : voice.level}
-                  threshold={call.active ? call.threshold : voice.threshold}
-                />
-              ) : null}
-              <div className="flex flex-col items-center gap-3">
-                {call.active ? (
-                  <div className="flex w-full items-center justify-center">
-                    {callAdds ? <TapPhrase text={profile.tapLeft} /> : null}
-                    <CallButton active onClick={() => void toggleCall()} />
-                    {callAdds ? <TapPhrase text={profile.tapRight} /> : null}
-                  </div>
-                ) : (
-                  <div className="flex items-end gap-7">
-                    <MicButton
-                      recording={recording}
-                      busy={transcribing || status === "thinking"}
-                      level={voice.level}
-                      disabled={transcribing}
-                      onHoldStart={() => void holdStart()}
-                      onHoldEnd={holdEnd}
-                    />
-                    <CallButton
-                      active={false}
-                      disabled={recording || transcribing || status === "thinking"}
-                      onClick={() => void toggleCall()}
-                    />
-                  </div>
-                )}
-                <p className="min-h-4 max-w-xs text-center text-xs text-subtle">
-                  {call.active
-                    ? status === "speaking"
-                      ? `点按钮挂断 · phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
-                      : call.phase === "speaking-you"
-                        ? `在听 ${call.listenSec} 秒 · phase ${call.phase} · 音量 ${call.rms.toFixed(3)} / 保持 ${call.hold.toFixed(3)} · 底噪 ${call.noiseFloor.toFixed(3)}`
-                        : `phase ${call.phase}${call.deaf ? " · 麦关" : ""} · 底噪 ${call.noiseFloor.toFixed(3)}`
-                    : recording
-                      ? voice.interim.trim() || "松开发送"
-                      : transcribing
-                        ? "听你说的话"
-                        : "按住说话，或者打电话"}
-                </p>
-                {call.active && !callAdds ? null : (
-                  <button
-                    type="button"
-                    className="text-xs text-muted underline-offset-4 hover:underline"
-                    onClick={() => setComposerOpen(true)}
-                  >
-                    打字
-                  </button>
-                )}
-              </div>
-            </footer>
+              <footer className="relative z-10 shrink-0 bg-bg px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2">
+                {banner ? <p className="mb-3 text-center text-sm text-live">{banner}</p> : null}
+                <div className="flex flex-col items-center gap-3">
+                  {call.active ? (
+                    <div className="flex w-full items-center justify-center">
+                      {callAdds ? <TapPhrase text={profile.tapLeft} onTap={tapPhrase} /> : null}
+                      <CallButton active onClick={() => void toggleCall()} />
+                      {callAdds ? <TapPhrase text={profile.tapRight} onTap={tapPhrase} /> : null}
+                    </div>
+                  ) : (
+                    <div className="flex w-full items-center gap-3">
+                      <MicButton
+                        busy={hold.finishing}
+                        level={hold.level}
+                        onHoldStart={holdStart}
+                        onHoldEnd={holdEnd}
+                        onHoldCancel={holdCancel}
+                      />
+                      <CallButton active={false} disabled={hold.holding} onClick={() => void toggleCall()} />
+                    </div>
+                  )}
+                  {call.active && !callAdds ? null : (
+                    <button
+                      type="button"
+                      className="text-xs text-muted underline-offset-4 hover:underline"
+                      onClick={() => setComposerOpen(true)}
+                    >
+                      打字
+                    </button>
+                  )}
+                </div>
+              </footer>
             )}
           </>
         )}
-
-        <ConfirmTurn
-          open={Boolean(confirmId)}
-          sttText={confirmStt}
-          initialDraft={confirmDraft}
-          audioUrl={confirmAudioUrl}
-          clipNote={confirmClipNote}
-          busy={confirmBusy}
-          error={confirmError}
-          initialPredicted={confirmPredicted}
-          initialGoldTags={confirmGoldTags}
-          initialNoise={confirmNoise}
-          initialLiteralMismatch={confirmMismatch}
-          initialToneNote={confirmNote}
-          onClose={() => {
-            confirmOpenRef.current = false;
-            setConfirmId(null);
-            setConfirmError(null);
-          }}
-          onConfirm={(input) => void saveConfirm(input)}
-        />
 
         <FlagReply
           open={Boolean(faultTarget)}
@@ -1837,6 +1456,7 @@ export function VoiceRoom() {
           }}
           onClearChat={() => {
             setMessages([]);
+            roundRef.current = { lines: [], replyId: null };
             const next = lockedProfile({ ...profileRef.current, memoryCursor: "" });
             profileRef.current = next;
             setProfile(next);
@@ -1858,33 +1478,14 @@ function streamAudioCovers(chunks: Array<Uint8Array>, display: string) {
   return sec >= Math.max(1, chars / 6.5);
 }
 
-function VolumeMeter({ level, threshold }: { level: number; threshold: number }) {
-  return (
-    <div
-      className="relative mb-3 h-1.5 w-full max-w-[12rem] overflow-hidden rounded-full bg-surface-2"
-      aria-label="音量"
-    >
-      <div
-        className="h-full rounded-full bg-accent transition-[width] duration-75"
-        style={{ width: `${Math.min(100, Math.max(0, level * 100))}%` }}
-      />
-      <div
-        className="absolute top-0 h-full w-0.5 bg-live"
-        style={{ left: `${Math.min(100, Math.max(0, threshold * 100))}%` }}
-        aria-label="阈值"
-      />
-    </div>
-  );
-}
-
 /** The space beside the hang-up button: a tap adds her phrase to what she is saying (or sends it on its own). */
-function TapPhrase({ text }: { text: string }) {
+function TapPhrase({ text, onTap }: { text: string; onTap: (text: string) => void }) {
   return (
     <button
       type="button"
       disabled={!text}
       className="flex h-24 min-w-0 flex-1 items-center justify-center rounded-2xl px-2 text-sm text-subtle select-none active:bg-surface-2"
-      onClick={() => nativeAddToCall(text, true)}
+      onClick={() => onTap(text)}
     >
       <span className="truncate">{text}</span>
     </button>

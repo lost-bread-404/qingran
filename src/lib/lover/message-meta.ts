@@ -1,4 +1,3 @@
-import { parseAcousticTags, stripAcousticTags, type AcousticTags } from "./hearing/tags.ts";
 import { DEFAULT_FORMATS, fmt, type Formats } from "./brain/prompts/formats.ts";
 import type { ChatMessage, MessageKind } from "./types";
 
@@ -10,19 +9,13 @@ export type MessageMeta = {
   replyTo?: string;
   /** Her line with several replies: the page she picked. */
   activeReply?: string;
-  /** Her spoken line: the recording it came from. */
-  voiceTurnId?: string;
-  /** She confirmed what was heard. */
-  hearingGold?: "confirmed";
-  /** How her voice sounded, as the phone guessed: "length.contour.voice.events". */
-  predicted?: string;
   /** She stopped him while he was saying it. */
   interrupted?: boolean;
-  /** A sound in the night that was not her voice (kept, not answered). */
+  /** Old rows: a sound in the night that was not her voice (kept, not answered). */
   nightNoise?: boolean;
   /** Folded into his memory already. */
   scanned?: boolean;
-  /** A line he did not answer (not her voice). */
+  /** Old rows: a line he did not answer (not her voice). */
   unheard?: boolean;
   /** Photos she sent with it (qr_photos ids). */
   images?: string[];
@@ -46,9 +39,6 @@ export function readMeta(raw: unknown): MessageMeta {
   const meta: MessageMeta = {};
   if (str(m.replyTo)) meta.replyTo = str(m.replyTo);
   if (str(m.activeReply)) meta.activeReply = str(m.activeReply);
-  if (str(m.voiceTurnId)) meta.voiceTurnId = str(m.voiceTurnId);
-  if (m.hearingGold === "confirmed") meta.hearingGold = "confirmed";
-  if (str(m.predicted)) meta.predicted = str(m.predicted);
   if (m.interrupted === true) meta.interrupted = true;
   if (m.nightNoise === true) meta.nightNoise = true;
   if (m.scanned === true) meta.scanned = true;
@@ -59,17 +49,6 @@ export function readMeta(raw: unknown): MessageMeta {
     if (images.length) meta.images = images;
   }
   return meta;
-}
-
-function predictedOf(tags: AcousticTags | undefined): string | undefined {
-  if (!tags) return undefined;
-  return `${tags.length ?? ""}.${tags.contour ?? ""}.${tags.voice ?? ""}.${tags.events?.join("+") ?? ""}`;
-}
-
-function tagsOf(predicted: string | undefined): AcousticTags | undefined {
-  if (!predicted) return undefined;
-  const [length, contour, voice, event] = predicted.split(".");
-  return parseAcousticTags({ length, contour, voice, event }) ?? undefined;
 }
 
 /**
@@ -89,9 +68,6 @@ export function metaOfChat(msg: ChatMessage): MessageMeta {
   return readMeta({
     replyTo: msg.replyTo,
     activeReply: msg.activeReply,
-    voiceTurnId: msg.voiceTurnId,
-    hearingGold: msg.voiceTurnId && msg.hearingGold === "confirmed" ? "confirmed" : undefined,
-    predicted: predictedOf(msg.predictedTags),
     interrupted: msg.interrupted,
     nightNoise: msg.nightNoise,
     scanned: msg.scanned,
@@ -124,26 +100,27 @@ export function chatFromRow(row: {
     createdAt: Number(row.created_at),
     kind,
     scanned: meta.scanned,
-    voiceTurnId: meta.voiceTurnId,
-    hearingGold: meta.voiceTurnId ? (meta.hearingGold ?? "unconfirmed") : undefined,
     replyTo: meta.replyTo,
     activeReply: meta.activeReply,
-    predictedTags: tagsOf(meta.predicted),
     interrupted: meta.interrupted,
     nightNoise: meta.nightNoise,
     images: meta.images,
   };
 }
 
-/** What the words say about photos she sent with them (the model may also see the photos themselves). */
 /** The 「照片」 line of 材料的写法, when she sent photos. */
 export function photoNote(count: number, f: Formats = DEFAULT_FORMATS): string {
   return count ? fmt(f, "photo", { count }) : "";
 }
 
-/** A message as the models read it: her words without hearing marks, with a note when she sent photos. */
+/** A message as the models read it: her words (old rows may still carry 〔…〕 sound tags), with a note when she sent photos. */
 export function modelFacingText(msg: { text: string; meta?: MessageMeta }, f: Formats = DEFAULT_FORMATS): string {
-  return `${photoNote(msg.meta?.images?.length ?? 0, f)}${stripAcousticTags(msg.text).trim()}`;
+  return `${photoNote(msg.meta?.images?.length ?? 0, f)}${stripSoundTags(msg.text).trim()}`;
+}
+
+/** Old rows: 〔…〕 tags an earlier hearing wrote about how her voice sounded. */
+export function stripSoundTags(text: string): string {
+  return text.replace(/〔[^〕]*〕/g, "");
 }
 
 /**
@@ -161,15 +138,10 @@ export function parseLegacyBody(body: string): { text: string; meta: MessageMeta
     else if (tok === "夜噪") raw.nightNoise = true;
     else if (tok === "断") raw.interrupted = true;
     else if (tok === "已扫") raw.scanned = true;
-    else if (tok.startsWith("听:") && tok.endsWith(":金")) {
-      raw.voiceTurnId = tok.slice(2, -2);
-      raw.hearingGold = "confirmed";
-    } else if (tok.startsWith("听:")) raw.voiceTurnId = tok.slice(2);
-    else if (tok.startsWith("气:")) raw.predicted = tok.slice(2);
     else if (tok.startsWith("回:")) raw.replyTo = tok.slice(2);
     else if (tok === "未听") raw.unheard = true;
     else if (tok.startsWith("图:")) raw.images = tok.slice(2).split(",").filter(Boolean);
-    else if (tok !== "走向" && tok !== "设定") break;
+    else if (!tok.startsWith("听:") && !tok.startsWith("气:") && tok !== "走向" && tok !== "设定") break;
     text = text.slice(hit[0].length);
   }
   return { text, meta: readMeta(raw) };

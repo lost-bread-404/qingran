@@ -26,7 +26,7 @@
 | `memories` | 数组 | 除故事线切出来的以外，全部换掉 | 一件一件的回忆，见下。文件里出现过的日子算已经整理过，夜里整理不会再写一遍 |
 | `days` | 数组 `{day, timeline}` | 全部换掉 | 每天 Rosie 的时间线，`day` 形如 `"2026-09-25"`。月报从这里算 |
 | `prompts` | 对象 `{key: 正文}` | 只覆盖写了的键 | 自定义指令。key 是 `voice`、`editor`、`report`、`formats`（材料的写法）。一般不用写，用代码里的默认 |
-| `messages` | 数组 | 加上 / 按 id 更新 | `{id?, role: "user"｜"assistant", text, at, kind?, forgotten?, meta?}`。`text` 只有说的话；`meta` 是其余知道的事（回的是哪一句 `replyTo`、选的页 `activeReply`、录音 `voiceTurnId`、照片 `images`、谁写的 `engine`、是不是 Grok 那段 `scene` 等，见 `src/lib/lover/message-meta.ts`）。`kind` 默认 `"say"`，主动消息是 `"proactive"`。2026-10-02 以前导出的文件，这些写在 `text` 前面的 ⟦…⟧ 里，导入时照样读得懂。照片本身在 `qr_photos`，不在导出文件里 |
+| `messages` | 数组 | 加上 / 按 id 更新 | `{id?, role: "user"｜"assistant", text, at, kind?, forgotten?, meta?}`。`text` 只有说的话；`meta` 是其余知道的事（回的是哪一句 `replyTo`、选的页 `activeReply`、照片 `images`、谁写的 `engine`、是不是 Grok 那段 `scene` 等，见 `src/lib/lover/message-meta.ts`）。`kind` 默认 `"say"`，主动消息是 `"proactive"`。2026-10-02 以前导出的文件，这些写在 `text` 前面的 ⟦…⟧ 里，导入时照样读得懂。照片本身在 `qr_photos`，不在导出文件里 |
 
 ### `profile` 里常用的键
 
@@ -44,8 +44,10 @@
 | `reachModel` / `reachEffort` | 主动找她用的模型和思考强度（默认 grok-4.20-0309-reasoning） |
 | `historyWindow` | 回复至少看几条（0–80，默认 20）；今天的对话总会全带上 |
 | `dossierMaxChars` | 「清然和 Rosie 现在」的字数上限（500–3000，默认 1500） |
+| `silenceMs` | 通话时她没说完最多停多久算说完（毫秒，800–3000，默认 2000） |
+| `sttKeyterms` | 容易听错的词，字符串数组（最多 100 个，默认 `["清然", "姐姐", "小猫", "Rosie", "林泽"]`） |
 
-导出的文件里 `profile` 是完整的设置（含听力参数等），初始化文件只需要写想改的键。
+导出的文件里 `profile` 是完整的设置（含声音和听力的设置），初始化文件只需要写想改的键。
 
 ## `memories` 怎么写
 

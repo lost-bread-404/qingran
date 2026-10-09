@@ -38,6 +38,10 @@ export default async function authMiddleware(
     });
   }
 
+  // The recognizer's WebSocket checks the login in its own upgrade hook (server/routes/api/listen.ts): a refusal from
+  // here would not stop the upgrade, the socket would just open without hooks.
+  if (path === "/api/listen" && event.req.headers.get("upgrade")?.toLowerCase() === "websocket") return next();
+
   const token = parseCookie(event.req.headers.get("cookie"));
   const cookieValid = verifySession(token, password);
   const decision = classifyRequest(method, path, event.req.headers.get("accept"), cookieValid);

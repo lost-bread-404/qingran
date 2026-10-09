@@ -1,3 +1,4 @@
+import type { VoiceNote } from "./native-shell";
 import type { Profile } from "./types";
 import { xaiFailHint } from "./xai-error";
 import { onUnauthorized } from "@/lib/auth-lite/on-unauthorized";
@@ -39,6 +40,13 @@ export type TalkClientInput = {
   timeZone?: string;
   /** Photos sent with this line (qr_photos ids). */
   images?: string[];
+  /**
+   * A spoken turn is a round (see /api/talk): her earlier lines not yet answered aloud, kept as their own messages
+   * before this one. Its answer is not kept if the page drops it before she hears it.
+   */
+  earlier?: Array<{ id: string; text: string; at: number }>;
+  /** Held or in a call, and what xAI heard for it (its cost is entered by the server). */
+  voice?: VoiceNote;
 };
 
 export async function streamTalk(
@@ -114,7 +122,9 @@ export async function streamTalk(
         onEvent(event);
       }
       if (finished) {
-        void reader.read().then(async function drain(next): Promise<void> {
+        // His voice can still be coming after his words are done: the call resolves once all of it is in (so the
+        // caller knows when he has finished speaking), or after a while if the server never closes the stream.
+        const drained = reader.read().then(async function drain(next): Promise<void> {
           if (next.done) return;
           buf += decoder.decode(next.value, { stream: true });
           const chunks = buf.split("\n\n");
@@ -133,6 +143,7 @@ export async function streamTalk(
           }
           return reader.read().then(drain);
         });
+        await Promise.race([drained.catch(() => undefined), new Promise((resolve) => window.setTimeout(resolve, 15_000))]);
         return;
       }
     }

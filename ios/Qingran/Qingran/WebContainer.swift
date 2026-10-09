@@ -67,12 +67,15 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     CallEngine.shared.onSystemHangup = { [weak self] in
       self?.postHangupEvent()
     }
-    NativePipeline.shared.onHangup = { [weak self] in
+    Voice.shared.onHangup = { [weak self] in
       self?.postHangupEvent()
     }
-    NativePipeline.shared.prepare(params: nil) { [weak self] detail in
+    Voice.shared.attach { [weak self] detail in
       self?.postNativeCall(detail)
     }
+    // Made here, on the main thread (haptics need it).
+    _ = Cues.shared
+    Voice.shared.wake()
 
     wv.load(URLRequest(url: startURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 45))
 
@@ -89,6 +92,8 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       queue: .main
     ) { [weak self] _ in
       self?.replayHangupIfNeeded()
+      // A press to talk connects at once with a ticket fetched ahead.
+      Voice.shared.wake()
     }
     tokenObserver = NotificationCenter.default.addObserver(
       forName: .qingranPushToken,
@@ -137,47 +142,31 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       return
     }
     switch type {
-    case "startCall":
-      CallEngine.shared.startCall()
-    case "endCall":
-      CallEngine.shared.endCallFromWeb()
-    case "prepareAudio":
-      CallEngine.shared.prepareAudioSession()
     case "startNativeCall":
-      let params = (message.body as? [String: Any])?["params"] as? [String: Any]
-      NativePipeline.shared.prepare(params: params) { [weak self] detail in
-        self?.postNativeCall(detail)
-      }
       CallEngine.shared.beginNativeCall()
     case "endNativeCall":
       CallEngine.shared.endCallFromWeb()
-    case "interruptNativeCall":
-      NativePipeline.shared.interrupt()
-    case "talkNativeCall":
-      if let body = message.body as? [String: Any],
-         let text = body["text"] as? String,
-         let userId = body["userMsgId"] as? String,
-         let replyId = body["replyId"] as? String {
-        let userAt = (body["userCreatedAt"] as? NSNumber)?.intValue ?? Int(Date().timeIntervalSince1970 * 1000)
-        let replyAt = (body["replyCreatedAt"] as? NSNumber)?.intValue ?? userAt
-        NativePipeline.shared.talkFromPage(text: text, userId: userId, userAt: userAt, replyId: replyId, replyAt: replyAt)
+    case "interruptNativeCall", "stopSpeaker":
+      Voice.shared.interrupt()
+    case "talkNativeCall", "speakTurn":
+      // A turn the page started (typed, edited, re-asked): the shell asks and speaks it, in a call or not.
+      if let body = message.body as? [String: Any] {
+        Voice.shared.talkFromPage(body)
       }
     case "addNativeCall":
       if let body = message.body as? [String: Any], let text = body["text"] as? String {
-        NativePipeline.shared.addFromPage(text, attach: body["attach"] as? Bool ?? false)
+        Voice.shared.addFromPage(text, attach: body["attach"] as? Bool ?? false)
       }
     case "playNativeCall":
       if let body = message.body as? [String: Any], let audio = body["audio"] as? String {
-        NativePipeline.shared.playFromPage(audio, mime: body["mime"] as? String ?? "")
+        Voice.shared.playFromPage(audio, mime: body["mime"] as? String ?? "")
       }
-    case "speakTurn":
-      if let body = message.body as? [String: Any] {
-        NativeSpeaker.shared.talk(body) { [weak self] detail in
-          self?.postNativeCall(detail)
-        }
-      }
-    case "stopSpeaker":
-      NativeSpeaker.shared.stop()
+    case "holdStart":
+      Voice.shared.holdStart(muted: (message.body as? [String: Any])?["muted"] as? Bool ?? false)
+    case "holdEnd":
+      Voice.shared.holdEnd()
+    case "holdCancel":
+      Voice.shared.holdCancel()
     case "keepAwake":
       var on = false
       if let body = message.body as? [String: Any], let flag = body["on"] as? Bool {
@@ -276,8 +265,8 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
   }
 
   private func reloadIfIdle() {
-    // Never tear down a live call just to pick up a web deploy.
-    guard !CallEngine.shared.inCall else { return }
+    // Never tear down a live call, or a line she held and his answer to it, just to pick up a web deploy.
+    guard !CallEngine.shared.inCall, !Voice.shared.busyNow else { return }
     failed = false
     webView.reloadFromOrigin()
   }
@@ -313,11 +302,8 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     window.QingranNative = {
       present: true,
       nativeCall: 2,
-      speaker: 1,
-      startCall: function () { post('startCall'); },
-      endCall: function () { post('endCall'); },
-      prepareAudio: function () { post('prepareAudio'); },
-      startNativeCall: function (params) { post('startNativeCall', { params: params || {} }); },
+      voice: 3,
+      startNativeCall: function () { post('startNativeCall'); },
       endNativeCall: function () { post('endNativeCall'); },
       interruptNativeCall: function () { post('interruptNativeCall'); },
       talkNativeCall: function (turn) { post('talkNativeCall', turn || {}); },
@@ -325,7 +311,10 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
       addNativeCall: function (text, attach) { post('addNativeCall', { text: String(text || ''), attach: !!attach }); },
       keepAwake: function (on) { post('keepAwake', { on: !!on }); },
       speakTurn: function (turn) { post('speakTurn', turn || {}); },
-      stopSpeaker: function () { post('stopSpeaker'); }
+      stopSpeaker: function () { post('stopSpeaker'); },
+      holdStart: function (opts) { post('holdStart', { muted: !!(opts && opts.muted) }); },
+      holdEnd: function () { post('holdEnd'); },
+      holdCancel: function () { post('holdCancel'); }
     };
   })();
   """

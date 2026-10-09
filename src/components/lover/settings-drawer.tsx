@@ -1,12 +1,10 @@
+import { useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { keepCaretVisible, useVisualViewportHeight } from "@/hooks/use-visual-viewport";
-import { HEARING, STT_KEYTERMS, DEFAULT_XAI_VAD_THRESHOLD, lockSttKeyterms } from "@/lib/lover/hearing/config";
-import { RECENT_CLIP_KEEP } from "@/lib/lover/brain/config";
-import { formatCallAudioLogLines, subscribeCallAudioLog } from "@/lib/lover/call-audio-log";
+import { CALL_WAIT_MAX, CALL_WAIT_MIN, DEFAULT_KEYTERMS, clampCallWait, lockKeyterms } from "@/lib/lover/ear";
 import {
   brainGetCallLog,
   brainGetDbSize,
@@ -20,7 +18,6 @@ import {
 import type { BrainLogRow } from "@/lib/lover/brain/types";
 import { formatDbBytes, LOG_ROUTE_FILTERS, messagesText } from "@/lib/lover/call-log-view";
 import { FullText, PromptStepEditor, type PromptEditorItem, type PromptModelChoice } from "@/components/lover/prompt-step-editor";
-import { HearingSensePanel } from "@/components/lover/hearing-sense-panel";
 import { StatePanel } from "@/components/lover/state-panel";
 import { LogoutButton } from "@/components/lover/logout-button";
 import { DossierPanel } from "@/components/lover/dossier-panel";
@@ -39,9 +36,8 @@ import {
   ReachPanel,
   SettingsLink,
 } from "@/components/lover/settings-life";
-import { applyHearingTier, hearingTierOf, HEARING_TIER_BLURB } from "@/lib/lover/hearing/sense";
 import { nextVoiceRate, snapVoiceRate } from "@/lib/lover/tts";
-import { clampVoiceTemperature, type HearingSense, type Profile, type VoiceEffort } from "@/lib/lover/types";
+import { clampVoiceTemperature, type Profile, type VoiceEffort } from "@/lib/lover/types";
 import { defaultPromptModel } from "@/lib/lover/brain/prompts/models";
 import { cn } from "@/lib/utils";
 
@@ -55,7 +51,6 @@ type Page =
   | "data"
   | "advanced"
   | "prompts"
-  | "hearing"
   | "log"
   | "spend";
 
@@ -95,36 +90,10 @@ type Props = {
   onClearChat: () => void;
 };
 
-function LabelModeSwitch({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <label className="flex items-start gap-3 rounded-md bg-surface-2 px-3 py-3">
-      <input
-        type="checkbox"
-        className="mt-1"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      <span>
-        <span className="block text-sm">标注模式</span>
-        <span className="block text-xs text-subtle">
-          打开后每一句都存成 clip。关掉时仍保留最近 {RECENT_CLIP_KEEP} 条语音，消息上可以点「听错了」改正。更早的只删录音，不删聊天。
-        </span>
-      </span>
-    </label>
-  );
-}
-
 export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = null, onPatch, onApply, onClearChat }: Props) {
+  const navigate = useNavigate();
   const [draft, setDraft] = useState(profile.systemPrompt);
   const personaDirty = useRef(false);
-  const [debugHearing, setDebugHearing] = useState(profile.debugHearing);
-  const [labPassword, setLabPassword] = useState("");
   const [page, setPage] = useState<Page>("home");
   const [openPrompt, setOpenPrompt] = useState<string | null>(null);
   const [log, setLog] = useState<BrainLogRow[]>([]);
@@ -136,7 +105,8 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   const [nightStats, setNightStats] = useState<ModelStat[]>([]);
   const [reachStats, setReachStats] = useState<ModelStat[]>([]);
   const [promptModels, setPromptModels] = useState(profile.promptModels);
-  const [sense, setSense] = useState<HearingSense>(profile.hearingSense);
+  const [callWait, setCallWait] = useState(profile.silenceMs);
+  const callWaitSave = useRef<number | undefined>(undefined);
   const [brainOn, setBrainOn] = useState(profile.brainOn);
   const voiceChoices = useVoiceChoices(open);
   useEffect(() => {
@@ -170,17 +140,15 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
   useEffect(() => {
     if (!open) return;
     if (!personaDirty.current) setDraft(profile.systemPrompt);
-    setDebugHearing(profile.debugHearing);
     setVoiceModel(profile.voiceModel);
     setVoiceEffort(profile.voiceEffort);
     setPromptModels(profile.promptModels);
-    setSense(profile.hearingSense);
+    setCallWait(profile.silenceMs);
     setInjectLongterm(profile.injectLongterm);
     setVoiceTemperature(profile.voiceTemperature);
     if (!intimateDirty.current) setIntimateDraft(profile.intimateNotes);
     if (!identityDirty.current) setIdentityDraft(profile.identity);
     setKeytermDraft(profile.sttKeyterms.join("\n"));
-    setLabPassword(typeof sessionStorage !== "undefined" ? sessionStorage.getItem("qingran-hearing-lab") ?? "" : "");
     setPage("home");
     setPromptItems([]);
     setPromptDrafts({});
@@ -301,16 +269,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     delete fast.identity;
     if (Object.keys(fast).length) onPatch(fast);
     void commitProfile(patch);
-  }
-
-  function commitSense(next: HearingSense) {
-    setSense(next);
-    persistProfile({
-      hearingSense: next,
-      silenceMs: next.endWaitMs,
-      nightVoicedMin: next.voicedMin,
-      nightMinMs: next.noiseMinMs,
-    });
   }
 
   function persistPromptModel(key: string, nextModel: string, nextEffort: VoiceEffort) {
@@ -505,11 +463,9 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
     data: "数据",
     advanced: "高级",
     prompts: "指令",
-    hearing: "听力参数",
     log: "记录",
     spend: "费用",
   };
-  const tier = hearingTierOf(sense);
 
   return (
     <div
@@ -525,7 +481,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             const active = document.activeElement;
             if (active instanceof HTMLElement) active.blur();
             if (page === "home") onOpenChange(false);
-            else setPage(page === "prompts" || page === "hearing" || page === "log" || page === "spend" ? "advanced" : "home");
+            else setPage(page === "prompts" || page === "log" || page === "spend" ? "advanced" : "home");
           }}
           className="grid size-11 place-items-center rounded-md text-muted"
         >
@@ -548,7 +504,7 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             <SettingsLink label="记忆" hint="dossier、夜里整理、你的抱怨" onClick={() => setPage("heart")} />
             <SettingsLink label="回复" hint="模型、长度、温度" onClick={() => setPage("reply")} />
             <SettingsLink label="主动消息" hint="开关、记录" onClick={() => setPage("reach")} />
-            <SettingsLink label="声音和听力" hint="语速、通话" onClick={() => setPage("sound")} />
+            <SettingsLink label="声音和听力" hint="语速、通话、听错的词" onClick={() => setPage("sound")} />
             <SettingsLink label="数据" hint="导出、导入、清空、退出" onClick={() => setPage("data")} />
             <SettingsLink label="高级" hint="调试用" onClick={() => setPage("advanced")} />
           </div>
@@ -559,7 +515,14 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             <SettingsLink label="指令" hint="原文和模型" onClick={() => setPage("prompts")} />
             <SettingsLink label="记录" hint="调用、改动、重放" onClick={() => setPage("log")} />
             <SettingsLink label="费用" onClick={() => setPage("spend")} />
-            <SettingsLink label="听力参数" onClick={() => setPage("hearing")} />
+            <SettingsLink
+              label="实验室"
+              hint="反馈、Eve 语气标签"
+              onClick={() => {
+                onOpenChange(false);
+                void navigate({ to: "/lab" });
+              }}
+            />
           </div>
         </div>
       ) : page === "who" ? (
@@ -905,38 +868,55 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
                 />
               </label>
             ))}
-            <LabelModeSwitch
-              checked={debugHearing}
-              onChange={(next) => {
-                setDebugHearing(next);
-                persistProfile({ debugHearing: next, captureAudio: next });
-              }}
-            />
-            <div className="flex flex-col gap-2">
-              <p className="text-sm">听力灵敏度</p>
-              {(["low", "mid", "high"] as const).map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => commitSense(applyHearingTier(sense, id))}
-                  className={cn(
-                    "rounded-md px-3 py-3 text-left",
-                    tier === id ? "bg-accent text-accent-fg" : "bg-surface-2",
-                  )}
-                >
-                  <span className="block text-sm">{id === "low" ? "低" : id === "mid" ? "中" : "高"}</span>
-                  <span className="block text-xs opacity-80">{HEARING_TIER_BLURB[id]}</span>
-                </button>
-              ))}
-              {tier === "custom" ? (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">自定义</span>
-                  <button type="button" className="text-sm text-muted" onClick={() => commitSense(applyHearingTier(sense, "mid"))}>
-                    恢复为 中
-                  </button>
-                </div>
-              ) : null}
+            <div className="flex flex-col gap-1 rounded-md bg-surface-2 px-4 py-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-sm">通话时停多久算说完</p>
+                <p className="text-sm tabular-nums">{(callWait / 1000).toFixed(1)} 秒</p>
+              </div>
+              <input
+                type="range"
+                min={CALL_WAIT_MIN}
+                max={CALL_WAIT_MAX}
+                step={100}
+                value={callWait}
+                aria-label="通话时停多久算说完"
+                onChange={(e) => {
+                  const next = clampCallWait(Number(e.target.value));
+                  setCallWait(next);
+                  window.clearTimeout(callWaitSave.current);
+                  callWaitSave.current = window.setTimeout(() => persistProfile({ silenceMs: next }), 400);
+                }}
+                className="h-11 w-full accent-accent"
+              />
+              <p className="text-xs text-subtle">听得出说完了就不等；没说完时最多等这么久。</p>
             </div>
+            <section className="flex flex-col gap-2 rounded-md bg-surface-2 px-4 py-3">
+              <label className="text-sm" htmlFor="stt-keyterms">
+                容易听错的词（一行一个）
+              </label>
+              <Textarea
+                id="stt-keyterms"
+                value={keytermDraft}
+                onChange={(e) => setKeytermDraft(e.target.value)}
+                onBlur={() => {
+                  const next = lockKeyterms(keytermDraft.split("\n"));
+                  setKeytermDraft(next.join("\n"));
+                  if (next.join("\n") !== profile.sttKeyterms.join("\n")) persistProfile({ sttKeyterms: next });
+                }}
+                className="min-h-32 text-sm leading-relaxed"
+              />
+              <button
+                type="button"
+                className="h-11 self-start text-sm text-muted"
+                onClick={() => {
+                  const next = [...DEFAULT_KEYTERMS];
+                  setKeytermDraft(next.join("\n"));
+                  persistProfile({ sttKeyterms: next });
+                }}
+              >
+                恢复默认
+              </button>
+            </section>
           </div>
         </div>
       ) : page === "data" ? (
@@ -973,73 +953,6 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
       ) : page === "spend" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <BrainSpendPage />
-        </div>
-      ) : page === "hearing" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto flex w-full max-w-md flex-col gap-5">
-            <details className="rounded-md bg-surface-2 px-3 py-2">
-              <summary className="min-h-11 cursor-pointer text-sm">具体参数</summary>
-            <HearingSensePanel
-              sense={sense}
-              labPassword={labPassword}
-              onLabPassword={(next) => {
-                setLabPassword(next);
-                try {
-                  sessionStorage.setItem("qingran-hearing-lab", next);
-                } catch {
-                  /* private mode */
-                }
-              }}
-              onChange={commitSense}
-            />
-            </details>
-            <section className="flex flex-col gap-2 rounded-md bg-surface-2 px-3 py-3">
-              <label className="text-sm" htmlFor="stt-keyterms">
-                发给 xAI 的 keyterm
-              </label>
-              <Textarea
-                id="stt-keyterms"
-                value={keytermDraft}
-                onChange={(e) => setKeytermDraft(e.target.value)}
-                onBlur={() => {
-                  const next = lockSttKeyterms(keytermDraft.split("\n"));
-                  setKeytermDraft(next.join("\n"));
-                  persistProfile({ sttKeyterms: next });
-                }}
-                className="min-h-40 font-mono text-sm leading-relaxed"
-              />
-              <button
-                type="button"
-                className="h-11 self-start text-sm text-muted"
-                onClick={() => {
-                  const next = [...STT_KEYTERMS];
-                  setKeytermDraft(next.join("\n"));
-                  persistProfile({ sttKeyterms: next });
-                }}
-              >
-                恢复默认词
-              </button>
-              <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-subtle">
-{`xAI: model ${HEARING.xai.model} · filler_words true · vad_threshold ${DEFAULT_XAI_VAD_THRESHOLD}
-Apple: zh-CN · continuous · interimResults · maxAlternatives 3`}
-              </pre>
-            </section>
-            <LabelModeSwitch
-              checked={debugHearing}
-              onChange={(next) => {
-                setDebugHearing(next);
-                persistProfile({ debugHearing: next, captureAudio: next });
-              }}
-            />
-            <Link
-              to="/lab"
-              className="flex min-h-11 items-center justify-center rounded-md bg-surface-2 px-3 text-sm"
-              onClick={() => onOpenChange(false)}
-            >
-              打开标注页
-            </Link>
-            {debugHearing ? <AudioTracePanel /> : null}
-          </div>
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] [touch-action:pan-y]">
@@ -1181,20 +1094,4 @@ function logFinishReason(row: BrainLogRow): string {
     }
   }
   return "";
-}
-
-function AudioTracePanel() {
-  const [lines, setLines] = useState(() => formatCallAudioLogLines());
-  useEffect(() => {
-    setLines(formatCallAudioLogLines());
-    return subscribeCallAudioLog(() => setLines(formatCallAudioLogLines()));
-  }, []);
-  return (
-    <div>
-      <p className="mb-2 text-sm">音频日志</p>
-      <pre className="max-h-52 overflow-y-auto whitespace-pre-wrap rounded-md bg-surface-2 px-3 py-2 text-[11px] leading-relaxed text-muted">
-        {lines || "还没有。切一次后台再回来，看这里。"}
-      </pre>
-    </div>
-  );
 }

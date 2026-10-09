@@ -1,4 +1,4 @@
-import { closeAudioContext, pageIsHidden, resumeAudioContext, setAudioSessionKind, watchAudioContext } from "@/lib/lover/audio-session";
+import { pageIsHidden, resumeAudioContext } from "@/lib/lover/audio-session";
 
 const SILENCE =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
@@ -42,9 +42,8 @@ function getCtx(): AudioContext | null {
   if (!Ctor) return null;
   if (ctx && (ctx.state as string) === "closed") ctx = null;
   if (!ctx) {
-    if (pageIsHidden() && !holdPlaying && !isSpeaking()) return null;
+    if (pageIsHidden() && !isSpeaking()) return null;
     ctx = new Ctor();
-    watchAudioContext(ctx, "playback");
   }
   return ctx;
 }
@@ -103,19 +102,12 @@ function playElementOnce(el: HTMLAudioElement) {
   });
 }
 
-function releaseElement(el: HTMLAudioElement | null) {
-  if (!el) return;
-  try {
-    el.dataset.qingranOn = "";
-    el.pause();
-  } catch {
-    /* ignore */
-  }
-}
-
 function replaceCtx() {
-  stopGraphKeepalive();
-  closeAudioContext(ctx, "playback");
+  try {
+    if (ctx && (ctx.state as string) !== "closed") void ctx.close();
+  } catch {
+    /* already closed */
+  }
   ctx = null;
   masterIn = null;
   masterGain = null;
@@ -124,7 +116,6 @@ function replaceCtx() {
   const Ctor = typeof window === "undefined" ? null : audioCtor();
   if (!Ctor) return null;
   ctx = new Ctor();
-  watchAudioContext(ctx, "playback");
   return ctx;
 }
 
@@ -214,7 +205,7 @@ function prepSpeak() {
 }
 
 export async function unlockPlayback() {
-  if (pageIsHidden() && !holdPlaying && !isSpeaking()) return;
+  if (pageIsHidden() && !isSpeaking()) return;
   const audioCtx = getCtx();
   try {
     if (audioCtx) await audioCtx.resume();
@@ -250,201 +241,13 @@ export function stopPlayback() {
   wakeIdle();
 }
 
-let holdPlaying = false;
-let graphKeepalive: AudioBufferSourceNode | null = null;
-let graphKeepaliveCtx: AudioContext | null = null;
-
-function startGraphKeepalive(audioCtx: AudioContext) {
-  if (graphKeepalive && graphKeepaliveCtx === audioCtx) return;
-  stopGraphKeepalive();
-  const frames = Math.max(audioCtx.sampleRate, Math.floor(audioCtx.sampleRate * 2));
-  const buffer = audioCtx.createBuffer(1, frames, audioCtx.sampleRate);
-  const data = buffer.getChannelData(0);
-  const amp = 1 / 32768;
-  for (let i = 0; i < data.length; i += 1) data[i] = i & 1 ? amp : -amp;
-  const src = audioCtx.createBufferSource();
-  src.buffer = buffer;
-  src.loop = true;
-  src.connect(getOutput(audioCtx));
-  src.onended = () => {
-    if (graphKeepalive === src) {
-      graphKeepalive = null;
-      graphKeepaliveCtx = null;
-    }
-    if (holdPlaying && !pageIsHidden()) {
-      const next = getCtx();
-      if (next) startGraphKeepalive(next);
-    }
-  };
-  src.start();
-  graphKeepalive = src;
-  graphKeepaliveCtx = audioCtx;
-}
-
-function stopGraphKeepalive() {
-  const src = graphKeepalive;
-  graphKeepalive = null;
-  graphKeepaliveCtx = null;
-  if (!src) return;
-  src.onended = null;
-  try {
-    src.stop();
-  } catch {
-    /* ignore */
-  }
-  try {
-    src.disconnect();
-  } catch {
-    /* ignore */
-  }
-}
-
-function claimMediaSession() {
-  const session = navigator.mediaSession;
-  if (!session) return;
-  try {
-    session.metadata = new MediaMetadata({
-      title: "清然",
-      artist: "通话中",
-    });
-    session.playbackState = "playing";
-    try {
-      session.setActionHandler("pause", () => undefined);
-      session.setActionHandler("stop", () => undefined);
-    } catch {
-      /* older WebKit */
-    }
-  } catch {
-    /* older WebKit */
-  }
-}
-
-function releaseMediaSession() {
-  const session = navigator.mediaSession;
-  if (!session) return;
-  try {
-    session.playbackState = "none";
-    session.metadata = null;
-  } catch {
-    /* ignore */
-  }
-}
-
-
-let holdUrl: string | null = null;
-
-function getHoldElement(): HTMLAudioElement {
-  const existing = document.getElementById("qingran-hold") as HTMLAudioElement | null;
-  if (existing) return existing;
-  const el = document.createElement("audio");
-  el.id = "qingran-hold";
-  el.setAttribute("playsinline", "true");
-  el.setAttribute("webkit-playsinline", "true");
-  el.preload = "auto";
-  el.loop = true;
-  el.style.display = "none";
-  document.body.appendChild(el);
-  return el;
-}
-
-function quietLoopUrl() {
-  if (holdUrl) return holdUrl;
-  const rate = 8000;
-  const seconds = 12;
-  const n = rate * seconds;
-  const dataSize = n * 2;
-  const buf = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buf);
-  const write = (offset: number, str: string) => {
-    for (let i = 0; i < str.length; i += 1) view.setUint8(offset + i, str.charCodeAt(i));
-  };
-  write(0, "RIFF");
-  view.setUint32(4, 36 + dataSize, true);
-  write(8, "WAVE");
-  write(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, rate, true);
-  view.setUint32(28, rate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  write(36, "data");
-  view.setUint32(40, dataSize, true);
-  for (let i = 0; i < n; i += 1) {
-    view.setInt16(44 + i * 2, i & 1 ? 1 : -1, true);
-  }
-  holdUrl = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
-  return holdUrl;
-}
-
-function playHoldOnce() {
-  if (pageIsHidden()) return;
-  const el = getHoldElement();
-  try {
-    el.loop = true;
-    el.muted = false;
-    if (el.volume !== 0.01) el.volume = 0.01;
-    if (!el.src) el.src = quietLoopUrl();
-    playElementOnce(el);
-  } catch {
-    /* ignore */
-  }
-}
-
-export function startCallHold() {
-  holdPlaying = true;
-  setAudioSessionKind("listen");
-  claimMediaSession();
-  playHoldOnce();
-  const audioCtx = getCtx();
-  if (audioCtx) {
-    startGraphKeepalive(audioCtx);
-    armVoiceElement(audioCtx);
-  }
-}
-
-export function stopCallHold() {
-  holdPlaying = false;
-  releaseMediaSession();
-  stopGraphKeepalive();
-  try {
-    releaseElement(document.getElementById("qingran-hold") as HTMLAudioElement | null);
-    releaseElement(document.getElementById("qingran-voice") as HTMLAudioElement | null);
-  } catch {
-    /* ignore */
-  }
-}
-
-export function keepPlaybackAlive() {
-  if (!holdPlaying) return;
-  if (pageIsHidden()) return;
-  const audioCtx = getCtx();
-  if (audioCtx && audioContextNeedsResumeLocal(audioCtx.state)) {
-    try {
-      void audioCtx.resume();
-    } catch {
-      /* ignore */
-    }
-  }
-  playHoldOnce();
-  if (audioCtx) {
-    startGraphKeepalive(audioCtx);
-    try {
-      armVoiceElement(audioCtx);
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
 function isSpeaking() {
   return liveSources.size > 0 || inFlight > 0 || (startedClock && !ended) || sampleQueue.length > 0;
 }
 
 
 export async function resumeAudio() {
-  if (pageIsHidden() && !holdPlaying && !isSpeaking()) return;
+  if (pageIsHidden() && !isSpeaking()) return;
   let audioCtx = getCtx();
   if (!audioCtx) return;
   let ok = false;
@@ -645,11 +448,6 @@ function softenTail(gen: number) {
   const tail = Math.max(1, Math.floor(PCM_RATE * 0.22));
   const silence = audioCtx.createBuffer(1, tail, PCM_RATE);
   scheduleBuffer(silence, audioCtx, gen);
-}
-
-function audioContextNeedsResumeLocal(state: AudioContextState) {
-  const value = state as string;
-  return value === "suspended" || value === "interrupted";
 }
 
 function scheduleBuffer(buffer: AudioBuffer, audioCtx: AudioContext, gen: number) {

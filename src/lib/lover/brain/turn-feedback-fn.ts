@@ -1,16 +1,29 @@
 import { createServerFn } from "@tanstack/react-start";
+import { assertLab } from "../lab.ts";
+import { newId } from "../storage.ts";
 
-function labSecret(): string {
-  if (process.env.HEARING_LAB_PASSWORD) return process.env.HEARING_LAB_PASSWORD;
-  if (!process.env.DATABASE_URL) return "qingran";
-  return "";
-}
+/** Her thumbs-up, or thumbs-down with 差在哪, on one of his replies (`turn_feedback`, docs/feedback.md). */
+export const flagQingranReply = createServerFn({ method: "POST" })
+  .validator((input: { messageId: string; note: string; rating?: "up" | "down"; tags?: string[] }) => input)
+  .handler(async ({ data }) => {
+    try {
+      const { insertTurnFeedback } = await import("./turn-feedback.ts");
+      const rating = data.rating === "up" ? "up" : "down";
+      await insertTurnFeedback({
+        id: newId(),
+        turnId: data.messageId,
+        messageId: String(data.messageId),
+        rating,
+        note: String(data.note ?? "").trim().slice(0, 200),
+        tags: rating === "up" ? [] : data.tags,
+      });
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
-function assertLab(password: string) {
-  const secret = labSecret();
-  if (!secret || password !== secret) throw new Error("lab-locked");
-}
-
+/** The lab's 反馈 page. */
 export const listTurnFeedbackFn = createServerFn({ method: "POST" })
   .validator((input: { password: string }) => input)
   .handler(async ({ data }) => {
