@@ -218,7 +218,29 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
               const page = Math.max(0, replies.findIndex((reply) => reply.id === shown.id));
               return (
               <div className="flex max-w-[min(22rem,92%)] flex-col gap-6 self-start">
-                {shown.text.trim() ? (
+                {editingId === shown.id ? (
+                  <div className="flex w-[min(22rem,92vw)] flex-col items-end gap-2">
+                    <Textarea
+                      ref={editorRef}
+                      autoFocus
+                      value={editDraft ?? shown.text}
+                      onChange={(e) => onEditDraft?.(e.target.value)}
+                      className="min-h-40 w-full text-left"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="text-xs text-muted underline-offset-4 hover:underline"
+                        onClick={onEditCancel}
+                      >
+                        取消
+                      </button>
+                      <Button type="button" size="pill" onClick={onEditSave}>
+                        保存
+                      </Button>
+                    </div>
+                  </div>
+                ) : shown.text.trim() ? (
                 <div className="flex items-start gap-2">
                   {!shown.replyTo && shown.createdAt > lastUserAt ? (
                     <span aria-label="还没回" className="mt-3 size-2 shrink-0 rounded-full bg-live" />
@@ -236,6 +258,16 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
                       className="grid size-11 shrink-0 place-items-center text-subtle transition-colors duration-150 hover:text-fg"
                     >
                       <Volume2 className="size-4" />
+                    </button>
+                  ) : null}
+                  {onEditStart ? (
+                    <button
+                      type="button"
+                      aria-label="改他这句话"
+                      onClick={() => onEditStart(shown.id)}
+                      className="-ml-3 grid size-11 shrink-0 place-items-center text-subtle transition-colors duration-150 hover:text-fg"
+                    >
+                      <Pencil className="size-3.5" />
                     </button>
                   ) : null}
                 </div>

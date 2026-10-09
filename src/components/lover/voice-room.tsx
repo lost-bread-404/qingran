@@ -33,6 +33,7 @@ import {
   clearRoomMessages,
   deleteRoomMessages,
   loadRoom,
+  readRoomMessage,
   saveProfilePatch,
   updateRoomMessage,
   uploadPhoto,
@@ -1086,6 +1087,11 @@ export function VoiceRoom() {
   }
 
   async function saveEdit() {
+    const his = chatRef.current.find((m) => m.id === editingId && m.role === "assistant");
+    if (his) {
+      await saveHisEdit(his);
+      return;
+    }
     const current = chatRef.current.find((m) => m.id === editingId && m.role === "user");
     const text = editDraft.trim();
     if (!current || (!text && !current.images?.length)) return;
@@ -1111,6 +1117,27 @@ export function VoiceRoom() {
       keepReplies: true,
       voiceTurnId: updated.voiceTurnId,
     });
+  }
+
+  /**
+   * She corrected one of his replies (a wrong word, a voice tag he got wrong and keeps copying). It is saved in place:
+   * nothing is answered again, and from now on he sees, and his voice reads, what she wrote. The old text is kept in
+   * the message's edit history.
+   */
+  async function saveHisEdit(his: ChatMessage) {
+    const text = editDraft.trim();
+    setEditingId(null);
+    if (!text || text === his.text.trim()) return;
+    const updated: ChatMessage = { ...his, text };
+    const next = chatRef.current.map((m) => (m.id === his.id ? updated : m));
+    chatRef.current = next;
+    setMessages(next);
+    spokenCacheRef.current.delete(his.id);
+    try {
+      await updateRoomMessage({ data: updated });
+    } catch (err) {
+      setBanner(err instanceof Error ? err.message : String(err));
+    }
   }
 
   /**
@@ -1597,6 +1624,27 @@ export function VoiceRoom() {
               onEditStart={(id) => {
                 const msg = messages.find((m) => m.id === id);
                 if (!msg) return;
+                // One of his replies: only the editor opens, with the words and voice tags as stored (the page
+                // keeps a fresh reply without its tags). A reply not saved yet (still coming) cannot be changed.
+                if (msg.role === "assistant") {
+                  const leavingHers = chatRef.current.some((m) => m.id === editingId && m.role === "user");
+                  void readRoomMessage({ data: { id } })
+                    .then((stored) => {
+                      if (!stored) {
+                        setBanner("他这句还没说完，说完再改。");
+                        return;
+                      }
+                      if (leavingHers && call.active) call.hear();
+                      const next = chatRef.current.map((m) => (m.id === id ? { ...m, text: stored.text } : m));
+                      chatRef.current = next;
+                      setMessages(next);
+                      setEditingId(id);
+                      setEditDraft(stored.text);
+                      setComposerOpen(false);
+                    })
+                    .catch((err) => setBanner(err instanceof Error ? err.message : String(err)));
+                  return;
+                }
                 // Changing her last line takes back his answer to it now. An earlier line only opens the editor:
                 // what he is saying goes on until she saves (in a call the mic still stops while she types).
                 if (id === lastUserSay(chatRef.current)?.id || call.active) {
@@ -1613,8 +1661,9 @@ export function VoiceRoom() {
               }}
               onEditDraft={setEditDraft}
               onEditCancel={() => {
+                const wasHers = chatRef.current.some((m) => m.id === editingId && m.role === "user");
                 setEditingId(null);
-                if (call.active) call.hear();
+                if (wasHers && call.active) call.hear();
               }}
               onEditSave={() => void saveEdit()}
               onSelectReply={selectReply}

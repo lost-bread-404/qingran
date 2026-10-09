@@ -138,6 +138,15 @@ export const clearRoomMessages = createServerFn({ method: "POST" }).handler(
   },
 );
 
+/** One message as stored: his replies with the voice tags the page leaves out of what it shows. Null until saved. */
+export const readRoomMessage = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => ({ id: String(input?.id ?? "") }))
+  .handler(async ({ data }) => {
+    const { getMessage } = await import("./brain/store");
+    const msg = await getMessage(data.id);
+    return msg ? { text: msg.text } : null;
+  });
+
 export const updateRoomMessage = createServerFn({ method: "POST" })
   .validator((input: ChatMessage) => input)
   .handler(async ({ data }) => {
