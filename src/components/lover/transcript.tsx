@@ -14,6 +14,8 @@ const PAGE_UP_SCREENS = 3;
 
 export type TranscriptHandle = {
   pageUp: () => void;
+  /** She is at the bottom of the talk (not reading back). */
+  pinned: () => boolean;
 };
 
 type Props = {
@@ -99,7 +101,7 @@ export const Transcript = forwardRef<TranscriptHandle, Props>(function Transcrip
     el.scrollTo({ top: Math.max(0, el.scrollTop - step), behavior: scrollBehavior() });
   };
 
-  useImperativeHandle(ref, () => ({ pageUp }), []);
+  useImperativeHandle(ref, () => ({ pageUp, pinned: () => pinRef.current }), []);
 
   /** A photo finished loading and made the talk taller: stay at the bottom if she was there. */
   const followIfPinned = () => {

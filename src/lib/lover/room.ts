@@ -21,6 +21,7 @@ type Room = {
   profile: Profile;
   revs: FieldRevs;
   messages: ChatMessage[];
+  build?: string;
 };
 
 const EMPTY_ROOM: Room = {
@@ -67,6 +68,8 @@ export const loadRoom = createServerFn({ method: "GET" }).handler(async () => {
     return {
       profile,
       revs: saved.revs,
+      /** The deploy this came from: the page reloads itself onto a new one when she is at the bottom of the chat. */
+      build: process.env.VERCEL_GIT_COMMIT_SHA || "dev",
       messages: sortConversation(
         applyMemoryCursor(
           messages.reverse().map((m) => chatFromRow(m)),

@@ -275,11 +275,20 @@ final class QingranWebController: UIViewController, WKNavigationDelegate, WKUIDe
     showFail(error.localizedDescription)
   }
 
+  /**
+   * Coming back to the app keeps the page as she left it (settings page, place in the chat; she asked 10/9: every
+   * return reloaded it and dropped her at the bottom). The page picks up a web deploy by itself when she is back at the
+   * bottom of the chat. Only a page that never loaded, or whose content process was killed, is loaded again.
+   */
   private func reloadIfIdle() {
-    // Never tear down a live call just to pick up a web deploy.
     guard !CallEngine.shared.inCall else { return }
+    guard failed || webView.url == nil else { return }
     failed = false
     webView.reloadFromOrigin()
+  }
+
+  func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+    webView.reload()
   }
 
   private func showFail(_ detail: String) {

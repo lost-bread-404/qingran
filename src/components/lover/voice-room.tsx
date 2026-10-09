@@ -135,6 +135,26 @@ export function VoiceRoom() {
   const deafenRef = useRef<() => void>(() => undefined);
   const spokenCacheRef = useRef(new Map<string, { bytes: Uint8Array<ArrayBuffer>; mimeType: string }>());
   const transcriptRef = useRef<TranscriptHandle>(null);
+  /**
+   * The deploy this page came from. Coming back to the app no longer reloads it (she keeps her place, 10/9); a new
+   * deploy is picked up here instead, only when nothing would be lost: settings closed, nothing being said or answered,
+   * and she is at the bottom of the talk.
+   */
+  const buildRef = useRef<string | null>(null);
+  const newBuildRef = useRef(false);
+  /** Only the plain chat is on screen: nothing half-written, no line being edited, no panel or dialog open. */
+  const plainChatRef = useRef(true);
+  const noteBuild = (build?: string) => {
+    if (build && !buildRef.current) buildRef.current = build;
+    if (build && buildRef.current && build !== buildRef.current) newBuildRef.current = true;
+    if (!newBuildRef.current) return;
+    if (settingsOpenRef.current || busyRef.current || holdingRef.current || callActiveRef.current) return;
+    if (pendingIdsRef.current.size || !plainChatRef.current || transcriptRef.current?.pinned() !== true) return;
+    // Not while she is typing anywhere (the draft would be lost).
+    const active = document.activeElement;
+    if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) return;
+    window.location.reload();
+  };
   const viewport = useVisualViewportHeight();
   const voice = useVoiceInput({ lang: "zh-CN", prompt: profile.systemPrompt });
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -157,6 +177,7 @@ export function VoiceRoom() {
   const [praiseBusy, setPraiseBusy] = useState(false);
   /** The reply her thumbs-down is on, while 差在哪 is open. */
   const [faultTarget, setFaultTarget] = useState<{ messageId: string; replyTo?: string; trigger: string; reply: string } | null>(null);
+  plainChatRef.current = !composerOpen && !draft.trim() && photos.length === 0 && !editingId && !confirmId && !faultTarget;
   const [faultBusy, setFaultBusy] = useState(false);
   const [faultError, setFaultError] = useState<string | null>(null);
   const [praisedIds, setPraisedIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -241,6 +262,7 @@ export function VoiceRoom() {
         revsRef.current = room.revs ?? { systemPrompt: 0, intimateNotes: 0, identity: 0 };
         setRevs(revsRef.current);
         setMessages(room.messages);
+        buildRef.current = room.build ?? null;
         setHydrated(true);
       })
       .catch(() => {
@@ -261,6 +283,7 @@ export function VoiceRoom() {
       setProfile(next);
       setRevs(revsRef.current);
       setMessages(room.messages);
+      noteBuild(room.build);
     };
     const reload = () => {
       // Not while he is answering: the server does not have the reply yet, and replacing the screen with its copy
@@ -346,6 +369,7 @@ export function VoiceRoom() {
       void loadRoom().then((room) => {
         if ("loadFailed" in room && room.loadFailed) return;
         setMessages((prev) => (room.messages.length > prev.length ? room.messages : prev));
+        noteBuild(room.build);
       });
     }, 15000);
     return () => window.clearInterval(timer);
