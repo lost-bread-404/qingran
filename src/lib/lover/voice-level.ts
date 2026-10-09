@@ -1,18 +1,24 @@
 /**
- * His voice at one loudness. xAI speaks each piece of a reply (and each reply) with its own level, so a quiet line can
- * follow a loud one. Every 20 ms of 16-bit PCM is measured; the gain follows how loud his voice has been (quickly at the
- * start of a reply; after that faster when he gets louder than when he gets softer) toward one target, moves smoothly from frame to frame, and a soft limit keeps peaks
- * from clipping. Silence between words is not measured, so it is not pulled up.
+ * His voice at one overall loudness, with the light and shade he asks for kept. xAI reads each reply (and each piece of
+ * one) at its own level; every 20 ms of 16-bit PCM is measured and the gain follows how loud he has been over the last
+ * few seconds, within ±4 dB of as read. A <whisper> or <soft> line, or a [laugh], is a change of a second or two, so it
+ * stays quieter or louder than the lines around it; a whole reply read too quiet or too loud is brought toward one
+ * level. Silence between words is not measured, and a soft limit keeps peaks from clipping.
  */
 const FRAME = 480; // 20 ms at 24 kHz
 const TARGET = 0.12; // RMS of voiced frames, ≈ −18 dBFS
 const GATE = 0.012; // below this a frame is the gap between words
-const GAIN_MIN = 0.5;
-const GAIN_MAX = 3;
+const GAIN_MIN = 0.6;
+const GAIN_MAX = 1.6;
+/** How far back "how loud he has been" looks: long against a tagged line, short against a whole reply. */
+const LEVEL_MS = 3000;
+const A = 1 - Math.exp(-20 / LEVEL_MS);
+/** The first second and a half of a reply is averaged as it comes, so a short reply is levelled from its start. */
+const OPENING_FRAMES = 75;
 const KNEE = 0.85;
 
 export class VoiceLeveler {
-  private level = 0;
+  private level = TARGET;
   private voiced = 0;
   private gain = 1;
   private carry: Buffer | null = null;
@@ -41,12 +47,9 @@ export class VoiceLeveler {
       const rms = Math.sqrt(sum / Math.max(1, end - start));
       const from = this.gain;
       if (rms >= GATE) {
-        // A louder line is caught within about 0.2 s; a softer one is lifted over about half a second.
-        const a = this.voiced < 10 ? 0.35 : rms > this.level ? 0.12 : 0.04;
-        this.level = this.level ? this.level + (rms - this.level) * a : rms;
         this.voiced += 1;
-        const want = Math.min(GAIN_MAX, Math.max(GAIN_MIN, TARGET / this.level));
-        this.gain += (want - this.gain) * (this.voiced <= 10 ? 0.5 : 0.15);
+        this.level += (rms - this.level) * (this.voiced <= OPENING_FRAMES ? 1 / this.voiced : A);
+        this.gain = Math.min(GAIN_MAX, Math.max(GAIN_MIN, TARGET / this.level));
       }
       const span = Math.max(1, end - start);
       for (let i = start; i < end; i++) {

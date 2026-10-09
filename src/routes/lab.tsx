@@ -850,7 +850,7 @@ function isEmotion(value: string | null | undefined): value is CueEmotion {
   return typeof value === "string" && (EMOTIONS as readonly string[]).includes(value);
 }
 
-/** 语气标签有没有用：同一句话八种读法，听一听、看音量和 xAI 听到的字。 */
+/** 语气标签有没有用：同一句话十种读法，听一听、看音量和 xAI 听到的字。 */
 function ToneCheck({ password }: { password: string }) {
   const [rows, setRows] = useState<ToneResult[] | null>(null);
   const [busy, setBusy] = useState(false);

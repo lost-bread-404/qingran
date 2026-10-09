@@ -6,7 +6,7 @@ import { xaiCreds } from "./xai-auth";
 import { assertLab } from "./hearing/store";
 
 /**
- * Does Eve act on speech tags? The same line read eight ways, over the one-shot HTTP voice and over the live
+ * Does Eve act on speech tags? The same line read ten ways, over the one-shot HTTP voice and over the live
  * WebSocket voice split the way a reply is split while it streams. Each comes back with its length, how loud the
  * voiced part is, and what xAI hears in it (a tag read out as a word shows up there).
  */
@@ -20,11 +20,13 @@ const CASES: ToneCase[] = [
   { id: "http_plain", how: "整句一次读，没有标签", mode: "http", parts: [LINE_A + LINE_B] },
   { id: "http_whisper", how: "整句一次读，<whisper>", mode: "http", parts: [`<whisper>${LINE_A}${LINE_B}</whisper>`] },
   { id: "http_laugh", how: "整句一次读，[laugh]", mode: "http", parts: [`[laugh] ${LINE_A}${LINE_B}`] },
+  { id: "http_soft", how: "整句一次读，<soft>", mode: "http", parts: [`<soft>${LINE_A}${LINE_B}</soft>`] },
   { id: "ws_plain", how: "边写边读，没有标签", mode: "ws", parts: [LINE_A, LINE_B] },
   { id: "ws_whisper_one", how: "边写边读，<whisper> 一批送完", mode: "ws", parts: [`<whisper>${LINE_A}${LINE_B}</whisper>`] },
   { id: "ws_whisper_split", how: "边写边读，<whisper> 在句号处切开（和现在一样）", mode: "ws", parts: [`<whisper>${LINE_A}`, `${LINE_B}</whisper>`] },
   { id: "ws_whisper_midtag", how: "边写边读，标签本身被切开", mode: "ws", parts: ["<whis", `per>${LINE_A}${LINE_B}</whisper>`] },
   { id: "ws_laugh", how: "边写边读，[laugh]", mode: "ws", parts: [`[laugh] ${LINE_A}`, LINE_B] },
+  { id: "ws_soft_split", how: "边写边读，<soft> 在句号处切开（和现在一样）", mode: "ws", parts: [`<soft>${LINE_A}`, `${LINE_B}</soft>`] },
 ];
 
 export type ToneResult = {
