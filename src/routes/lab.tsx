@@ -31,7 +31,8 @@ import type { HearingScore, ScoreWindow, WorstClip } from "@/lib/lover/hearing/s
 import type { AcousticTags } from "@/lib/lover/hearing/tags";
 import { countReplyDownTags, type ReplyDownTag } from "@/lib/lover/reply-feedback";
 import { cn } from "@/lib/utils";
-import { checkSpeechTags, type ToneResult } from "@/lib/lover/tone-check";
+import { checkSpeechTag, type ToneResult } from "@/lib/lover/tone-check";
+import { TONE_CASES } from "@/lib/lover/tone-cases";
 
 export const Route = createFileRoute("/lab")({ component: HearingLabPage });
 
@@ -850,55 +851,56 @@ function isEmotion(value: string | null | undefined): value is CueEmotion {
   return typeof value === "string" && (EMOTIONS as readonly string[]).includes(value);
 }
 
-/** 语气标签有没有用：同一句话十种读法，听一听、看音量和 xAI 听到的字。 */
+/** 语气标签有没有用：xAI 列出的每个标签，同一句话，点哪个读哪个，听一听、看音量和 xAI 听到的字。 */
 function ToneCheck({ password }: { password: string }) {
-  const [rows, setRows] = useState<ToneResult[] | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<Record<string, ToneResult>>({});
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const read = async (id: string) => {
+    setBusy(id);
+    setError(null);
+    try {
+      const r = await checkSpeechTag({ data: { password, id } });
+      setRows((prev) => ({ ...prev, [id]: r }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
   return (
     <section className="rounded-md bg-surface-2 px-3 py-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">Eve 语气标签</h2>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              setRows(await checkSpeechTags({ data: { password } }));
-            } catch (err) {
-              setError(err instanceof Error ? err.message : String(err));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {busy ? "在读…" : "试一下"}
-        </Button>
-      </div>
+      <h2 className="mb-2 text-sm font-medium">Eve 语气标签</h2>
       {error ? <p className="text-sm text-live">{error}</p> : null}
-      {rows ? (
-        <ul className="flex flex-col gap-3">
-          {rows.map((r) => (
-            <li key={r.id} className="text-xs">
-              <p className="text-sm">{r.how}</p>
-              <p className="text-subtle">送出去：{r.sent}</p>
-              {r.error ? (
-                <p className="text-live">{r.error}</p>
-              ) : (
-                <>
-                  <p className="text-subtle">
-                    {r.sec} 秒（有声 {r.voicedSec} 秒）· 音量 {r.loudness} · 听到：{r.heard}
-                  </p>
-                  {r.wav ? <audio controls preload="none" src={`data:audio/wav;base64,${r.wav}`} className="mt-1 w-full" /> : null}
-                </>
-              )}
+      <ul className="flex flex-col gap-3">
+        {TONE_CASES.map((c) => {
+          const r = rows[c.id];
+          return (
+            <li key={c.id} className="text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm">{c.how}</p>
+                <Button type="button" variant="outline" disabled={busy !== null} onClick={() => void read(c.id)}>
+                  {busy === c.id ? "在读…" : r ? "再读" : "读"}
+                </Button>
+              </div>
+              {r ? (
+                r.error ? (
+                  <p className="text-live">{r.error}</p>
+                ) : (
+                  <>
+                    <p className="text-subtle">
+                      {r.sec} 秒（有声 {r.voicedSec} 秒）· 音量 {r.loudness} · 听到：{r.heard}
+                    </p>
+                    {r.wav ? (
+                      <audio controls autoPlay preload="none" src={`data:audio/wav;base64,${r.wav}`} className="mt-1 w-full" />
+                    ) : null}
+                  </>
+                )
+              ) : null}
             </li>
-          ))}
-        </ul>
-      ) : null}
+          );
+        })}
+      </ul>
     </section>
   );
 }

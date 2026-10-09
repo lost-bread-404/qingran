@@ -4,30 +4,14 @@ import { VOICE_IO } from "./brain/config";
 import { ttsRequestBody } from "./tts";
 import { xaiCreds } from "./xai-auth";
 import { assertLab } from "./hearing/store";
+import { TONE_CASES } from "./tone-cases";
 
 /**
- * Does Eve act on speech tags? The same line read ten ways, over the one-shot HTTP voice and over the live
- * WebSocket voice split the way a reply is split while it streams. Each comes back with its length, how loud the
- * voiced part is, and what xAI hears in it (a tag read out as a word shows up there).
+ * Does Eve act on a speech tag? One case from tone-cases.ts read over the one-shot HTTP voice or the live WebSocket
+ * voice, back with its length, how loud the voiced part is, and what xAI hears in it (a tag read out as a word shows up
+ * there). One case per call, so the page reads the one she taps.
  */
-const LINE_A = "姐姐抱着你，哪儿都不去。";
-const LINE_B = "睡吧。";
 const RATE = VOICE_IO.sampleRate;
-
-type ToneCase = { id: string; how: string; mode: "http" | "ws"; parts: string[] };
-
-const CASES: ToneCase[] = [
-  { id: "http_plain", how: "整句一次读，没有标签", mode: "http", parts: [LINE_A + LINE_B] },
-  { id: "http_whisper", how: "整句一次读，<whisper>", mode: "http", parts: [`<whisper>${LINE_A}${LINE_B}</whisper>`] },
-  { id: "http_laugh", how: "整句一次读，[laugh]", mode: "http", parts: [`[laugh] ${LINE_A}${LINE_B}`] },
-  { id: "http_soft", how: "整句一次读，<soft>", mode: "http", parts: [`<soft>${LINE_A}${LINE_B}</soft>`] },
-  { id: "ws_plain", how: "边写边读，没有标签", mode: "ws", parts: [LINE_A, LINE_B] },
-  { id: "ws_whisper_one", how: "边写边读，<whisper> 一批送完", mode: "ws", parts: [`<whisper>${LINE_A}${LINE_B}</whisper>`] },
-  { id: "ws_whisper_split", how: "边写边读，<whisper> 在句号处切开（和现在一样）", mode: "ws", parts: [`<whisper>${LINE_A}`, `${LINE_B}</whisper>`] },
-  { id: "ws_whisper_midtag", how: "边写边读，标签本身被切开", mode: "ws", parts: ["<whis", `per>${LINE_A}${LINE_B}</whisper>`] },
-  { id: "ws_laugh", how: "边写边读，[laugh]", mode: "ws", parts: [`[laugh] ${LINE_A}`, LINE_B] },
-  { id: "ws_soft_split", how: "边写边读，<soft> 在句号处切开（和现在一样）", mode: "ws", parts: [`<soft>${LINE_A}`, `${LINE_B}</soft>`] },
-];
 
 export type ToneResult = {
   id: string;
@@ -143,21 +127,19 @@ async function hear(token: string, pcm: Buffer): Promise<string> {
   return body.text || body.transcript || "";
 }
 
-export const checkSpeechTags = createServerFn({ method: "POST" })
-  .validator((input: { password: string }) => input)
-  .handler(async ({ data }): Promise<ToneResult[]> => {
+export const checkSpeechTag = createServerFn({ method: "POST" })
+  .validator((input: { password: string; id: string }) => input)
+  .handler(async ({ data }): Promise<ToneResult> => {
     assertLab(data.password);
+    const c = TONE_CASES.find((x) => x.id === data.id);
+    if (!c) throw new Error("没有这个标签");
     const cred = (await xaiCreds())[0];
     if (!cred) throw new Error("没有 xAI 凭证");
-    return Promise.all(
-      CASES.map(async (c): Promise<ToneResult> => {
-        const sent = c.parts.join(" ┃ ");
-        try {
-          const pcm = c.mode === "http" ? await readOnce(cred.token, c.parts[0]) : await readLive(cred.token, c.parts);
-          return { id: c.id, how: c.how, sent, ...measure(pcm), heard: await hear(cred.token, pcm), wav: wav(pcm).toString("base64"), error: null };
-        } catch (err) {
-          return { id: c.id, how: c.how, sent, sec: 0, voicedSec: 0, loudness: 0, heard: "", wav: null, error: String(err) };
-        }
-      }),
-    );
+    const sent = c.parts.join(" ┃ ");
+    try {
+      const pcm = c.mode === "http" ? await readOnce(cred.token, c.parts[0]!) : await readLive(cred.token, c.parts);
+      return { id: c.id, how: c.how, sent, ...measure(pcm), heard: await hear(cred.token, pcm), wav: wav(pcm).toString("base64"), error: null };
+    } catch (err) {
+      return { id: c.id, how: c.how, sent, sec: 0, voicedSec: 0, loudness: 0, heard: "", wav: null, error: String(err) };
+    }
   });
