@@ -74,6 +74,8 @@
 
 v7 去掉了 Claude 分流、回忆库和 embedding 检索、今天对话折叠进记忆；下面是当时的说明，留作参考。
 
+- **Claude 分流为什么放弃**（她 2026-10-09 说明的真正原因）：和 Grok 亲热一段之后回到 Claude，Claude 说话牛头不对马嘴。Claude 看到的那一段只剩一行「（两人亲热了一阵）」，中间发生的事（比如亲热时吵了架、她喊停、他认了错、她还没原谅）全丢了，它不知道两人现在是什么状态，就说出戏的话。教训：交回 Claude 时要给的是这一段之后两人处在什么状态，不是一句「亲热了一阵」。
+
 
 需求总表见 [requirements.md](requirements.md)，检验用的一天见 [day-example.md](day-example.md)，导入导出格式见 [state-format.md](state-format.md)。
 
