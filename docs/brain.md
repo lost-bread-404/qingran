@@ -23,7 +23,7 @@
 
 ## 夜里：整理 dossier
 
-`src/lib/lover/brain/night.ts`。模型和强度在「设置 → 记忆」选（Claude 或 Grok，附每次整理的平均用时），默认 grok-4.7 medium（她 2026-10-05 定的：Claude 会拒绝读她亲热的部分；按任务选的：xAI 最聪明的模型读 6–9 万字的中文对话、判断记什么，medium 的思考够用，high 在这么长的输入上可能接近 250 秒的上限）；超时一次，下一次降一档（max/xhigh → high → medium → low）。选的是 Claude 而它没写出 dossier 时，改用 grok-4.7 medium 整理：Claude 30 秒内就回了就在同一次里做，否则下一次重试直接用 Grok（`night:grok` 标记）（10/5 凌晨 Claude 连着拒了 3 次，10/4 那天没整理进去）。读现在的 dossier、这一天和之前一周的完整对话（每句带日期时间）、这一天的｛｝；第一次整理时还读旧回忆库和故事线，收进 dossier，之后不再用。写：
+`src/lib/lover/brain/night.ts`。模型和强度在「设置 → 记忆」选（Claude 或 Grok，附每次整理的平均用时），默认 grok-4.7 medium（她 2026-10-05 定的；当时以为 Claude 会拒绝读她亲热的部分，其实拒的是最高档 max：10/4 23:26 Opus high 读完 8.8 万 tokens 带亲热的一天正常写出 dossier，10/5 max 连拒 3 次，10/9 同一句重放 xhigh 正常、max 拒绝；按任务选的：xAI 最聪明的模型读 6–9 万字的中文对话、判断记什么，medium 的思考够用，high 在这么长的输入上可能接近 250 秒的上限）；超时一次，下一次降一档（max/xhigh → high → medium → low）。选的是 Claude 而它没写出 dossier 时，改用 grok-4.7 medium 整理：Claude 30 秒内就回了就在同一次里做，否则下一次重试直接用 Grok（`night:grok` 标记）（10/5 凌晨 Claude 连着拒了 3 次，10/4 那天没整理进去）。读现在的 dossier、这一天和之前一周的完整对话（每句带日期时间）、这一天的｛｝；第一次整理时还读旧回忆库和故事线，收进 dossier，之后不再用。写：
 
 - dossier（字数上限在设置 → 记忆，200–5000，默认 500；Rosie 对清然说话的口吻：「我」是 Rosie，「你」是清然；她 2026-10-06 定的）：清然的世界里发生的事（两人之间、清然的生活、身边的人）、Rosie 说的关于她自己的客观情况、答应的事和编过的事、清然对 Rosie 的看法。不写 Rosie 一时的感受，不写对清然的抱怨。每条每晚重新判断，不再影响以后的就删。
 - feedback：她对清然的抱怨，存 `qr_feedback`，「记忆」页只给她看，不进 prompt。

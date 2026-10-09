@@ -151,7 +151,8 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
   const t0 = Date.now();
   let result: CallModelResult = viaGrok ? await ask(grok.model, grok.effort) : await ask(profile.nightModel, effort);
   let dossier = result.ok ? tag(result.text, "dossier") : null;
-  // Claude declines the explicit parts of her day (10/5: three refusals at 05:00, the day was lost). Grok reads the
+  // Claude declined three times at 05:00 on 10/5 and the day was lost. It was Opus at max: high read the same kind of
+  // day fine on 10/4, and on 10/9 the same replay line came back at xhigh and was refused at max. Grok reads the
   // same material: at once while there is time left in this run (one job has about 280 s), else on the next try.
   // A timeout is left to the retry (it steps the effort down one level).
   const claudeDeclined = !dossier && !viaGrok && isClaudeModel(profile.nightModel) && result.failKind !== "timeout";
