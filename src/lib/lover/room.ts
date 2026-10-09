@@ -147,6 +147,29 @@ export const readRoomMessage = createServerFn({ method: "POST" })
     return msg ? { text: msg.text } : null;
   });
 
+/**
+ * She corrected one of his replies: saved in place, and counted as a thumbs-down on it (turn_feedback, rating down)
+ * whose note holds the reply before and after, so a review sees what he got wrong and what she wanted.
+ */
+export const correctHisReply = createServerFn({ method: "POST" })
+  .validator((input: ChatMessage) => input)
+  .handler(async ({ data }) => {
+    const { getMessage, updateMessage } = await import("./brain/store");
+    const { insertTurnFeedback } = await import("./brain/turn-feedback");
+    const before = (await getMessage(data.id))?.text ?? "";
+    await updateMessage(data.id, data.text, metaOfChat(data));
+    if (before && before !== data.text) {
+      await insertTurnFeedback({
+        id: `edit-${Date.now()}-${data.id}`,
+        turnId: data.id,
+        messageId: data.id,
+        rating: "down",
+        note: `她改了这条回复。\n改之前：${before}\n改之后：${data.text}`,
+      });
+    }
+    return { ok: true as const };
+  });
+
 export const updateRoomMessage = createServerFn({ method: "POST" })
   .validator((input: ChatMessage) => input)
   .handler(async ({ data }) => {

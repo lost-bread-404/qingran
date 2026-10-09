@@ -680,7 +680,7 @@ function HearingLabPage() {
                                   : "差"}{" "}
                               · {row.createdAt}
                             </p>
-                            {row.note ? <p className="mt-1 text-sm">{row.note}</p> : null}
+                            {row.note ? <p className="mt-1 whitespace-pre-wrap text-sm">{row.note}</p> : null}
                             {replyText ? (
                               <p className="mt-1 line-clamp-2 text-sm text-muted">{replyText}</p>
                             ) : null}

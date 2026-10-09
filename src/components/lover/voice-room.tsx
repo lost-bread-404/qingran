@@ -32,6 +32,7 @@ import {
   appendRoomMessage,
   clearRoomMessages,
   deleteRoomMessages,
+  correctHisReply,
   loadRoom,
   readRoomMessage,
   saveProfilePatch,
@@ -1122,7 +1123,7 @@ export function VoiceRoom() {
   /**
    * She corrected one of his replies (a wrong word, a voice tag he got wrong and keeps copying). It is saved in place:
    * nothing is answered again, and from now on he sees, and his voice reads, what she wrote. The old text is kept in
-   * the message's edit history.
+   * the message's edit history, and the correction counts as a thumbs-down holding before and after.
    */
   async function saveHisEdit(his: ChatMessage) {
     const text = editDraft.trim();
@@ -1134,7 +1135,7 @@ export function VoiceRoom() {
     setMessages(next);
     spokenCacheRef.current.delete(his.id);
     try {
-      await updateRoomMessage({ data: updated });
+      await correctHisReply({ data: updated });
     } catch (err) {
       setBanner(err instanceof Error ? err.message : String(err));
     }
