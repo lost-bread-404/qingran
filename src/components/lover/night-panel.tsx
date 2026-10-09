@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { brainGetFeedback, brainRunNightNow } from "@/lib/lover/brain/memory-api";
+import { brainGetFeedback } from "@/lib/lover/brain/memory-api";
 
 type Item = { id: number; day: string; body: string };
 
-/** 记忆: rewrite the dossier now, and her complaints the night pass found (for her only; 清然 never sees them). */
+/** 记忆: her complaints the night pass found (for her only; 清然 never sees them). 「现在整理一次」 is in the dossier panel. */
 export function NightPanel() {
   const [items, setItems] = useState<Item[] | null>(null);
-  const [note, setNote] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     void brainGetFeedback()
@@ -18,21 +15,6 @@ export function NightPanel() {
 
   return (
     <div className="flex flex-col gap-3">
-      <Button
-        variant="outline"
-        disabled={busy}
-        onClick={() => {
-          setBusy(true);
-          setNote(null);
-          void brainRunNightNow()
-            .then((res) => setNote(res.ok ? "开始整理了，几分钟后回来刷新 dossier。" : res.error))
-            .catch(() => setNote("没开始，再试一次。"))
-            .finally(() => setBusy(false));
-        }}
-      >
-        现在整理一次 dossier
-      </Button>
-      {note ? <p className="text-xs text-subtle">{note}</p> : null}
       <p className="pt-2 text-sm">你的抱怨（只有你看得到）</p>
       {items == null ? (
         <p className="text-xs text-subtle">正在读…</p>

@@ -25,6 +25,14 @@ export const brainRunNightNow = createServerFn({ method: "POST" }).handler(async
   ]);
   if (!lockedProfile(await getProfileData()).brainOn) return { ok: false as const, error: "记忆暂停着（设置里「运行记忆」关了）。" };
   const at = now();
+  // The run reads the day since she last slept; with nothing said since, it would quietly do nothing.
+  const [{ dayStart, messageTimes }, { getMeta }, { resolveTz }] = await Promise.all([
+    import("./sleep.ts"),
+    import("./store.ts"),
+    import("./tz.ts"),
+  ]);
+  const from = await dayStart(at, resolveTz((await getMeta()).timeZone));
+  if (!(await messageTimes(from, at + 1)).length) return { ok: false as const, error: "你睡醒以后还没说过话，没有新的可以整理。" };
   await enqueue("night", `night-now:${at}`, { v: 7, upto: at, dossierOnly: true });
   await runInBackground(() => drainJobs(LONG_DRAIN_MS));
   return { ok: true as const };

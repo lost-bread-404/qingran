@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import {
   brainRollbackDossier,
   brainSaveDossier,
 } from "@/lib/lover/brain/dossier-api";
+import { brainRunNightNow } from "@/lib/lover/brain/memory-api";
 import type { DossierRow, DossierVersion } from "@/lib/lover/brain/dossier";
 import { clampDossierMaxChars, DOSSIER_MAX_CHARS_MAX, DOSSIER_MAX_CHARS_MIN } from "@/lib/lover/types";
 
@@ -47,6 +48,12 @@ export function DossierPanel({ maxChars, onMaxChars, footer }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [maxDraft, setMaxDraft] = useState(String(maxChars));
+  const [runNote, setRunNote] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const bodyRef = useRef("");
+  const rowRef = useRef<DossierRow | null>(null);
+  bodyRef.current = body;
+  rowRef.current = row;
 
   function apply(next: { row: DossierRow; versions: DossierVersion[] }) {
     setRow(next.row);
@@ -87,6 +94,52 @@ export function DossierPanel({ maxChars, onMaxChars, footer }: Props) {
     }
   }
 
+  /**
+   * 「现在整理一次」 (she asked for it here, 10/9: it sat under the whole version history where she never found it): the
+   * night pass on the day so far, in the background; the page looks every 20 s and shows the new version when it lands.
+   */
+  async function runNow() {
+    const started = Date.now();
+    setRunning(true);
+    setRunNote(null);
+    try {
+      const res = await brainRunNightNow();
+      if (!res.ok) {
+        setRunNote(res.error);
+        setRunning(false);
+        return;
+      }
+    } catch {
+      setRunNote("没开始，再试一次。");
+      setRunning(false);
+      return;
+    }
+    setRunNote("在整理，几分钟后会自动换成新的。");
+    for (let i = 0; i < 18; i += 1) {
+      await new Promise((r) => setTimeout(r, 20_000));
+      try {
+        const res = await brainGetDossier();
+        // Only the night pass's version counts (her own save or a rollback in the meantime is not it).
+        if (!res.versions.some((v) => v.author === "night" && v.createdAt >= started - 60_000)) continue;
+        // What she is typing stays; the new version is in the history below.
+        const editing = bodyRef.current !== (rowRef.current?.body ?? "");
+        if (editing) {
+          setVersions(res.versions);
+          setRunNote(`整理好了（版本 ${res.row.version}），你正在改，没替换；在下面的版本历史里。`);
+        } else {
+          apply(res);
+          setRunNote(`整理好了（版本 ${res.row.version}）。`);
+        }
+        setRunning(false);
+        return;
+      } catch {
+        /* try again on the next look */
+      }
+    }
+    setRunNote("六分钟还没好，晚点回来看。");
+    setRunning(false);
+  }
+
   async function rollback(id: number) {
     setBusy(`roll-${id}`);
     setError(null);
@@ -110,6 +163,10 @@ export function DossierPanel({ maxChars, onMaxChars, footer }: Props) {
           {" · "}
           上次整理 {fmtTime(row?.updatedAt ?? 0)}
         </p>
+        <Button type="button" variant="outline" disabled={running} onClick={() => void runNow()}>
+          {running ? "在整理…" : "现在整理一次"}
+        </Button>
+        {runNote ? <p className="text-xs text-subtle">{runNote}</p> : null}
         <Textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
