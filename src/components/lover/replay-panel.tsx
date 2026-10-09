@@ -4,6 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   brainAdoptPersona,
   brainListPersonaVersions,
+  brainListReplayDays,
   brainListReplayTargets,
   brainReplayCompare,
 } from "@/lib/lover/brain/life-api";
@@ -26,6 +27,9 @@ type Side = {
 export function ReplayPanel({ profile, models, stats }: { profile: Profile; models: ModelOption[] | null; stats: ModelStat[] }) {
   const [targets, setTargets] = useState<Target[]>([]);
   const [userMsgId, setUserMsgId] = useState("");
+  /** "" = the most recent lines; otherwise one day (also before 清空聊天). */
+  const [day, setDay] = useState("");
+  const [days, setDays] = useState<Array<{ day: string; count: number }>>([]);
   const [persona, setPersona] = useState("");
   const [placement, setPlacement] = useState<Profile["personaPlacement"]>(profile.personaPlacement);
   const [model, setModel] = useState(profile.voiceModel);
@@ -38,13 +42,29 @@ export function ReplayPanel({ profile, models, stats }: { profile: Profile; mode
   const [versions, setVersions] = useState<Array<{ hash: string; body: string; at: number }>>([]);
 
   useEffect(() => {
-    void brainListReplayTargets()
+    let cancelled = false;
+    setTargets([]);
+    setUserMsgId("");
+    void brainListReplayTargets({ data: { day: day || null } })
       .then((rows) => {
+        if (cancelled) return;
+        setError(null);
         const list = rows as Target[];
         setTargets(list);
-        setUserMsgId((cur) => cur || list[0]?.id || "");
+        setUserMsgId(list[0]?.id || "");
       })
-      .catch(() => setError("最近的话没读出来。"));
+      .catch(() => {
+        if (!cancelled) setError("这一天的话没读出来。");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [day]);
+
+  useEffect(() => {
+    void brainListReplayDays()
+      .then((rows) => setDays(rows))
+      .catch(() => undefined);
     void brainListPersonaVersions()
       .then((rows) => setVersions(rows as Array<{ hash: string; body: string; at: number }>))
       .catch(() => undefined);
@@ -86,6 +106,17 @@ export function ReplayPanel({ profile, models, stats }: { profile: Profile; mode
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4">
       {error ? <p className="text-sm text-live">{error}</p> : null}
+      <label className="flex flex-col gap-1">
+        <span className="text-sm">哪一天</span>
+        <select className="h-11 rounded-md bg-surface-2 px-2 text-sm" value={day} onChange={(e) => setDay(e.target.value)}>
+          <option value="">最近 60 句</option>
+          {days.map((row) => (
+            <option key={row.day} value={row.day}>
+              {row.day}（{row.count} 句）
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="flex flex-col gap-1">
         <span className="text-sm">哪一句</span>
         <select

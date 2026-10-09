@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { getSql } from "../../../db.ts";
 import { collapseReplyVariants } from "../../pair-messages.ts";
-import { lockedProfile, voiceInjectFromProfile, type Profile } from "../../types.ts";
+import { lockedProfile, type Profile } from "../../types.ts";
 import { asModelInput, callModel, type CallModelResult } from "../llm.ts";
 import { now } from "../clock.ts";
 import { resolveVoiceChat, type Effort } from "../config.ts";
 import { resolveTz } from "../tz.ts";
-import { gatherVoiceParts } from "./pack.ts";
+import { gatherVoiceParts, TODAY_MAX } from "./pack.ts";
+import { dayStart } from "../sleep.ts";
 import {
   getMessage,
   getMeta,
@@ -14,6 +15,8 @@ import {
   getProfilePrompt,
   listHistoryWindow,
   listRecentMessages,
+  listReplayDays,
+  listUserLinesOfDay,
 } from "../store.ts";
 import { BraceCut } from "./brace-cut.ts";
 import { applyProfilePatch } from "../../profile-patch.ts";
@@ -29,7 +32,11 @@ export type ReplaySide = {
 
 type Complete = typeof callModel;
 
-export async function listReplayTargets(limit = 60): Promise<Array<{ id: string; text: string; createdAt: number }>> {
+export { listReplayDays };
+
+/** Her lines to replay: one day's (any day, also before 清空聊天), or the most recent ones. */
+export async function listReplayTargets(limit = 60, day?: string | null): Promise<Array<{ id: string; text: string; createdAt: number }>> {
+  if (day) return listUserLinesOfDay(day);
   const rows = await listRecentMessages(240);
   return rows
     .filter((row) => row.role === "user" && row.kind !== "system_notice")
@@ -48,21 +55,25 @@ export async function replayMessages(opts: {
   const user = await getMessage(opts.userMsgId);
   if (!user || user.role !== "user") throw new Error("找不到这句");
   const nowMs = opts.nowMs ?? now();
-  const inject = voiceInjectFromProfile(opts.profile);
   const meta = await getMeta();
   const tz = resolveTz(meta.timeZone);
-  // As it was when she said it: the talk before her line, the time then, his notes then.
+  // As it was when she said it, the same as a live reply: her whole day up to that line (from when she last slept,
+  // also before a 清空聊天 that came later), the time then, his notes then.
+  const at = user.createdAt || nowMs;
+  const history = Promise.all([listHistoryWindow(user.id, TODAY_MAX, at, false), dayStart(at, tz)]).then(([rows, start]) =>
+    collapseReplyVariants(rows.filter((m) => m.createdAt >= start)),
+  );
   const { parts } = await gatherVoiceParts({
     profile: opts.profile,
-    nowMs: user.createdAt || nowMs,
+    nowMs: at,
     timeZone: tz,
-    history: listHistoryWindow(user.id, inject.history, user.createdAt).then(collapseReplyVariants),
+    history,
     userText: user.text,
     lastSaidBefore: user.createdAt,
     charter: opts.charter,
     placement: opts.placement,
   });
-  const messages = buildVoiceMessages({ ...parts, historyWindow: inject.history });
+  const messages = buildVoiceMessages(parts);
   return { messages, userText: user.text };
 }
 

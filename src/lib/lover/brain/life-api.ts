@@ -3,7 +3,7 @@ import { now } from "./clock.ts";
 import { wakeOnce } from "./reach.ts";
 import { sendApns } from "../push/apns.ts";
 import type { Effort } from "./config.ts";
-import { adoptPersona, listPersonaVersions, listReplayTargets, runReplay } from "./voice/replay.ts";
+import { adoptPersona, listPersonaVersions, listReplayDays, listReplayTargets, runReplay } from "./voice/replay.ts";
 import {
   getReach,
   insertManualEdit,
@@ -50,9 +50,14 @@ export const brainListManualEdits = createServerFn({ method: "GET" }).handler(as
   return rows.map((row) => JSON.parse(JSON.stringify(row)));
 });
 
-export const brainListReplayTargets = createServerFn({ method: "GET" }).handler(async () => {
-  return listReplayTargets(60);
-});
+export const brainListReplayTargets = createServerFn({ method: "POST" })
+  .validator((input: { day?: string | null } | undefined) => input ?? {})
+  .handler(async ({ data }) => {
+    const day = typeof data.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.day) ? data.day : null;
+    return listReplayTargets(60, day);
+  });
+
+export const brainListReplayDays = createServerFn({ method: "GET" }).handler(async () => listReplayDays());
 
 export const brainReplayCompare = createServerFn({ method: "POST" })
   .validator((input: {

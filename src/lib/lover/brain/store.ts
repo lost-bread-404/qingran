@@ -211,21 +211,25 @@ export async function listHistoryWindow(
   excludeId: string | null,
   limit = HISTORY_WINDOW,
   beforeCreatedAt: number | null = null,
+  /** false = a 清空聊天 only counts if it came before `beforeCreatedAt` (replaying a line from before she cleared). */
+  sinceCleared = true,
 ): Promise<StoredMessage[]> {
   if (limit <= 0) return [];
   const db = await getSql();
-  const fetchN = Math.min(limit + 32, 240);
+  // Room for the whole day the reply is given (TODAY_MAX); a cap of 240 used to cut long days short.
+  const fetchN = limit + 32;
   const rows = await db.query<Record<string, unknown>>(
     `select id, role, body, meta, created_at, kind, archived_at, session_id, local_day
      from qingran_messages
      where ($1::text is null or id <> $1)
        and forgotten_at is null
        and kind is distinct from 'system_notice'
-       and created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
+       and (created_at > coalesce((select room_cleared_at from qingran_profile where id = 1), 0)
+            or (not $4 and $3::bigint is not null and coalesce((select room_cleared_at from qingran_profile where id = 1), 0) >= $3))
        and ($3::bigint is null or created_at < $3)
      order by created_at desc, id desc
      limit $2`,
-    [excludeId, fetchN, beforeCreatedAt],
+    [excludeId, fetchN, beforeCreatedAt, sinceCleared],
   );
   return collapseReplyVariants(rows.map(rowMessage).reverse())
     .filter((message) => {
@@ -233,6 +237,30 @@ export async function listHistoryWindow(
       return message.meta.replyTo !== excludeId;
     })
     .slice(-limit);
+}
+
+/** 重放对比: the days that have lines of hers, newest first, with how many. */
+export async function listReplayDays(limit = 45): Promise<Array<{ day: string; count: number }>> {
+  const db = await getSql();
+  const rows = await db.query<{ day: string; n: number | string }>(
+    `select local_day as day, count(*) as n from qingran_messages
+     where role = 'user' and forgotten_at is null and kind is distinct from 'system_notice' and local_day is not null
+     group by local_day order by local_day desc limit $1`,
+    [limit],
+  );
+  return rows.map((r) => ({ day: String(r.day), count: Number(r.n) || 0 }));
+}
+
+/** Her lines on one day (local_day), in order. */
+export async function listUserLinesOfDay(day: string): Promise<Array<{ id: string; text: string; createdAt: number }>> {
+  const db = await getSql();
+  const rows = await db.query<{ id: string; body: string; created_at: number | string }>(
+    `select id, body, created_at from qingran_messages
+     where role = 'user' and forgotten_at is null and kind is distinct from 'system_notice' and local_day = $1
+     order by created_at asc`,
+    [day],
+  );
+  return rows.map((r) => ({ id: String(r.id), text: String(r.body ?? "").slice(0, 160), createdAt: Number(r.created_at) }));
 }
 
 export async function getMessage(id: string): Promise<StoredMessage | null> {
