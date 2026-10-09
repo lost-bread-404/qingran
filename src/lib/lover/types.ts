@@ -3,11 +3,20 @@ import type { AcousticTags } from "./hearing/tags.ts";
 import { clampNightMinMs, clampNightVoicedRatio, NIGHT_MIN_MS, NIGHT_VOICED_MIN } from "./hearing/night-voice.ts";
 import { DEFAULT_HEARING_SENSE, lockHearingSense, type HearingSense } from "./hearing/sense.ts";
 import { SILENCE_MS } from "./vad.ts";
-import { clampHistoryWindow, clampDossierMaxChars, clampVoiceTemperature, HISTORY_WINDOW, VOICE_TEMPERATURE } from "./brain/config.ts";
+import {
+  clampHistoryWindow,
+  clampDossierMaxChars,
+  clampVoiceTemperature,
+  DOSSIER_MAX_CHARS,
+  DOSSIER_MAX_CHARS_MAX,
+  DOSSIER_MAX_CHARS_MIN,
+  HISTORY_WINDOW,
+  VOICE_TEMPERATURE,
+} from "./brain/config.ts";
 import { lockPromptModels, type PromptModelPick } from "./brain/prompts/models.ts";
 import type { PromptKey } from "./brain/prompts/catalog.ts";
 
-export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio, clampDossierMaxChars, clampVoiceTemperature };
+export { clampHistoryWindow, clampNightMinMs, clampNightVoicedRatio, clampDossierMaxChars, clampVoiceTemperature, DOSSIER_MAX_CHARS_MAX, DOSSIER_MAX_CHARS_MIN };
 export type { HearingSense };
 
 export type VoiceId = "eve";
@@ -238,7 +247,7 @@ export const DEFAULT_PROFILE: Profile = {
   hearingSense: DEFAULT_HEARING_SENSE,
   promptModels: {},
   sttKeyterms: lockSttKeyterms(undefined),
-  dossierMaxChars: 1500,
+  dossierMaxChars: DOSSIER_MAX_CHARS,
   identity: "",
   rhythm: "",
   diaryEnabled: false,

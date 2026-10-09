@@ -8,7 +8,7 @@ import {
   brainSaveDossier,
 } from "@/lib/lover/brain/dossier-api";
 import type { DossierRow, DossierVersion } from "@/lib/lover/brain/dossier";
-import { clampDossierMaxChars } from "@/lib/lover/types";
+import { clampDossierMaxChars, DOSSIER_MAX_CHARS_MAX, DOSSIER_MAX_CHARS_MIN } from "@/lib/lover/types";
 
 function fmtTime(ms: number): string {
   if (!ms) return "还没有";
@@ -119,11 +119,11 @@ export function DossierPanel({ maxChars, onMaxChars, footer }: Props) {
           aria-label="清然和 Rosie 现在"
         />
         <label className="flex flex-col gap-2">
-          <span className="text-xs text-subtle">字数上限（500–3000）</span>
+          <span className="text-xs text-subtle">字数上限（{DOSSIER_MAX_CHARS_MIN}–{DOSSIER_MAX_CHARS_MAX}）</span>
           <Input
             type="number"
-            min={500}
-            max={3000}
+            min={DOSSIER_MAX_CHARS_MIN}
+            max={DOSSIER_MAX_CHARS_MAX}
             value={maxDraft}
             onChange={(e) => setMaxDraft(e.target.value)}
             onBlur={() => {

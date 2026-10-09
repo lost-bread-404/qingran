@@ -43,7 +43,7 @@
 | `voiceModel` | 回复模型 id |
 | `reachModel` / `reachEffort` | 主动找她用的模型和思考强度（默认 grok-4.20-0309-reasoning） |
 | `historyWindow` | 回复至少看几条（0–80，默认 20）；今天的对话总会全带上 |
-| `dossierMaxChars` | 「清然和 Rosie 现在」的字数上限（500–3000，默认 1500） |
+| `dossierMaxChars` | dossier 的字数上限（200–5000，默认 500） |
 
 导出的文件里 `profile` 是完整的设置（含听力参数等），初始化文件只需要写想改的键。
 

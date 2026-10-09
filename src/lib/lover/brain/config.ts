@@ -115,10 +115,11 @@ export function clampVoiceTemperature(value: unknown, fallback = VOICE_TEMPERATU
   if (!Number.isFinite(n)) return fallback;
   return Math.max(VOICE_TEMPERATURE_MIN, Math.min(VOICE_TEMPERATURE_MAX, Math.round(n * 20) / 20));
 }
-/** The dossier (v7): at most 500 characters, only what still changes how 清然 thinks and acts. */
+/** The dossier (v7): 500 characters by default (she can set 200–5000), only what still changes how 清然 thinks and acts. */
 export const DOSSIER_MAX_CHARS = 500;
 export const DOSSIER_MAX_CHARS_MIN = 200;
-export const DOSSIER_MAX_CHARS_MAX = 500;
+/** She sets it (设置 → 记忆); v7 had capped it at 500 while the page said 500–3000, so nothing she typed took (10/9). */
+export const DOSSIER_MAX_CHARS_MAX = 5000;
 
 export function clampDossierMaxChars(value: unknown, fallback = DOSSIER_MAX_CHARS): number {
   const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;

@@ -139,7 +139,7 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   ph("inner", "他今天写在｛｝里的，一行一条，前面是多久以前写的。没有就整段不发。"),
   ph("max_chars", "「回复 → 回复最长」的字数；设成 0 时整句不发。"),
   ph("us_when", "dossier 是什么时候整理的（「10 月 4 日 04:12」）。"),
-  ph("us", "dossier：每晚整理时重写的一小段（≤500 字）：记着的事，和【你看见的我】。"),
+  ph("us", "dossier：每晚整理时重写的一小段（字数上限在 设置 → 记忆）：记着的事，和【你看见的我】。"),
 ];
 
 /**
@@ -206,7 +206,7 @@ export const PROMPT_TEMPLATES: Record<string, PromptVariantTemplate[]> = {
         ph("week", "这一天之前一周的对话，一句一行，前面是日期和时间。"),
         ph("today", "她这一天（上次睡着以后到这次睡着）的对话，一句一行，前面是日期和时间。"),
         ph("inner", "清然这一天写在｛｝里的。"),
-        ph("max_chars", "dossier 的字数上限（500）。"),
+        ph("max_chars", "dossier 的字数上限（设置 → 记忆，默认 500）。"),
       ],
       messages: [
         system(EDITOR_SYSTEM),
