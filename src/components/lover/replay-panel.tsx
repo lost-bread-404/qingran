@@ -127,8 +127,11 @@ export function ReplayPanel({ profile }: { profile: Profile }) {
         <select
           className="h-11 rounded-md bg-surface-2 px-2 text-sm"
           value={effort ?? "low"}
-          onChange={(e) => setEffort(e.target.value === "high" || e.target.value === "medium" ? e.target.value : "low")}
+          onChange={(e) =>
+            setEffort(e.target.value === "high" || e.target.value === "medium" || e.target.value === "none" ? e.target.value : "low")
+          }
         >
+          <option value="none">none（只有 grok-4.3）</option>
           <option value="low">low</option>
           <option value="medium">medium</option>
           <option value="high">high</option>

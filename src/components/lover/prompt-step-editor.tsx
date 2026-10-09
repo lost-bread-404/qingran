@@ -26,7 +26,7 @@ export type PromptModelChoice = {
 
 function effortForModel(model: PromptModelChoice, current: VoiceEffort): VoiceEffort {
   if (!model.supportsEffort) return null;
-  return current === "low" || current === "medium" || current === "high" ? current : "low";
+  return current === "none" || current === "low" || current === "medium" || current === "high" ? current : "low";
 }
 
 export type PromptEditorItem = {

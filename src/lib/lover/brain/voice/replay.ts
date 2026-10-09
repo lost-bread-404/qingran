@@ -4,7 +4,7 @@ import { collapseReplyVariants } from "../../pair-messages.ts";
 import { lockedProfile, voiceInjectFromProfile, type Profile } from "../../types.ts";
 import { asModelInput, callModel, type CallModelResult } from "../llm.ts";
 import { now } from "../clock.ts";
-import type { Effort } from "../config.ts";
+import { clampVoiceEffort, type Effort } from "../config.ts";
 import { resolveTz } from "../tz.ts";
 import { gatherVoiceParts } from "./pack.ts";
 import {
@@ -104,13 +104,14 @@ export async function runReplay(opts: {
     complete("replay", {
       ...asModelInput(aPack.messages),
       model: profile.voiceModel,
-      effort: profile.voiceEffort,
+      effort: clampVoiceEffort(profile.voiceModel, profile.voiceEffort),
       promptKey: "replay",
     }),
     complete("replay", {
       ...asModelInput(bPack.messages),
+      // Each side gets an effort its model takes (grok-4.3 「不想」 is none, which other models reject).
       model: opts.bModel || profile.voiceModel,
-      effort: opts.bEffort,
+      effort: clampVoiceEffort(opts.bModel || profile.voiceModel, opts.bEffort),
       promptKey: "replay",
     }),
   ]);

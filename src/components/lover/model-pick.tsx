@@ -9,7 +9,9 @@ const EFFORT_LABEL: Record<string, string> = { none: "不想", low: "低", mediu
 export function effortsOf(models: ModelOption[], model: string): VoiceEffort[] {
   const found = models.find((m) => m.id === model);
   const list = found ? found.efforts : model.startsWith("claude-") ? ["low", "medium", "high", "xhigh", "max"] : ["low", "medium", "high"];
-  return list.filter((e): e is Exclude<VoiceEffort, null> => e === "low" || e === "medium" || e === "high" || e === "xhigh" || e === "max");
+  return list.filter(
+    (e): e is Exclude<VoiceEffort, null> => e === "none" || e === "low" || e === "medium" || e === "high" || e === "xhigh" || e === "max",
+  );
 }
 
 /**

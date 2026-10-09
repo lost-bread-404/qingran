@@ -13,15 +13,15 @@ export type { HearingSense };
 export type VoiceId = "eve";
 export type SessionStatus = "idle" | "recording" | "thinking" | "speaking" | "error";
 export type MessageKind = "say" | "unheard" | "proactive" | "system_notice";
-/** Grok: low / medium / high; Claude also xhigh / max. */
-export type VoiceEffort = "low" | "medium" | "high" | "xhigh" | "max" | null;
+/** Grok: low / medium / high (grok-4.3 also none: no thinking at all); Claude also xhigh / max. */
+export type VoiceEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max" | null;
 
 export const DEFAULT_VOICE_MODEL = "grok-4.20-0309-reasoning";
 export const DEFAULT_VOICE_EFFORT: VoiceEffort = "low";
 export const VOICE_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
 
 export function isVoiceEffort(value: unknown): value is Exclude<VoiceEffort, null> {
-  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
+  return value === "none" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
 }
 
 /** The night pass (设置 → 记忆): grok-4.7 medium unless she picks otherwise (10/5: Claude declines her intimate days). */
