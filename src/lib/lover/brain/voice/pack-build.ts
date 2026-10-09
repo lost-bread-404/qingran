@@ -5,6 +5,7 @@ import { modelFacingText } from "../../message-meta.ts";
 import { DEFAULT_FORMATS, fmt, type Formats } from "../prompts/formats.ts";
 import type { TimeFacts } from "../heart.ts";
 import { NEUTRAL_PERSONA } from "../../types.ts";
+import { clockOf } from "../time.ts";
 
 /**
  * What the reply is given (docs/brain.md v7): 身份 + 人设 + 亲密设定 → dossier → her day's talk → 现在是… (回复最长,
@@ -24,6 +25,8 @@ export type VoicePackParts = {
   /** When that text was last written (「10 月 4 日 04:12」), so its words are read as of then. */
   usWhen?: string;
   time: TimeFacts;
+  /** Her time zone: the talk says what time it started and what time it went on after each pause. */
+  timeZone?: string;
   /** His ｛｝ notes of today (since she last slept), one per line. */
   inner: string;
   /** 回复最长: told to him in the prompt, never cut by the program (10/4: the cut left only his first, empty line). */
@@ -77,13 +80,16 @@ export function voiceHistoryMessages(
   history: StoredMessage[],
   limit = HISTORY_WINDOW,
   f: Formats = DEFAULT_FORMATS,
+  timeZone?: string,
 ): VoiceChatMessage[] {
   if (limit <= 0) return [];
   const rows = history.filter((message) => !message.meta.nightNoise).slice(-limit);
   const out: VoiceChatMessage[] = [];
   rows.forEach((message, i) => {
+    // Clock times (10/9): with only 「过了 2 小时」 he could not tell that her class had started hours ago.
+    const time = timeZone ? clockOf(message.createdAt, timeZone) : "";
     const gap = i > 0 ? message.createdAt - rows[i - 1]!.createdAt : 0;
-    const mark = gap >= GAP_MARK_MS ? fmt(f, "gap", { gap: gapText(gap) }) : "";
+    const mark = gap >= GAP_MARK_MS ? fmt(f, "gap", { gap: gapText(gap), time }) : "";
     if (mark.trim()) out.push({ role: "system", content: mark });
     const images = message.role === "user" ? message.meta.images : undefined;
     const prev = out[out.length - 1];
@@ -126,7 +132,7 @@ export function buildVoiceMessages(parts: VoicePackParts, strip: VoiceStrip = "n
   const variant = parts.first ? "first" : "main";
   const template = variantMessages(parsePromptBody("voice", parts.voiceTemplate), variant);
   const historyLimit = strip === "thin" ? Math.min(VOICE_THIN_HISTORY, parts.historyWindow) : parts.historyWindow;
-  const talk = voiceHistoryMessages(parts.history, historyLimit, parts.formats);
+  const talk = voiceHistoryMessages(parts.history, historyLimit, parts.formats, parts.timeZone);
   const vars = voiceVars(parts, strip);
   // What she said just before this line in the same breath (her round) goes into the same message as it.
   const lead = !parts.first && talk[talk.length - 1]?.role === "user" && !talk[talk.length - 1]!.images?.length ? talk.pop()! : null;
@@ -186,7 +192,7 @@ export type VoiceInputChars = {
 };
 
 export function voiceInputChars(parts: VoicePackParts): VoiceInputChars {
-  const history = voiceHistoryMessages(parts.history, parts.historyWindow);
+  const history = voiceHistoryMessages(parts.history, parts.historyWindow, undefined, parts.timeZone);
   return {
     system: systemCharter(parts).length,
     moment: parts.us.length,

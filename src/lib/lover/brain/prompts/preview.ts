@@ -34,7 +34,7 @@ async function voicePreview(body: string | undefined, variantId: string): Promis
   });
   const withDraft = { ...parts, engine: "grok" as const, voiceTemplate: body ?? parts.voiceTemplate };
   const historyText =
-    voiceHistoryMessages(parts.history, parts.history.length, parts.formats)
+    voiceHistoryMessages(parts.history, parts.history.length, parts.formats, parts.timeZone)
       .map((message) => `${message.role}：${message.content}`)
       .join("\n") || "（没有对话）";
   return {

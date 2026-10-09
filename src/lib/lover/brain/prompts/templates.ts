@@ -58,9 +58,11 @@ const VOICE_NOW = `现在是{clock}。
  * she wants it short and open: his persona, this moment, show don't tell. The together-or-apart half was cut on 10/4
  * to keep it short and 10/6 it was put in her voice (「我有…没说话了」, Rosie speaking while asleep); on 10/7 she fell
  * asleep in his arms and at midnight he asked whether she was still studying. So: how long since her last line, as a
- * fact rather than her talking now, and together → let her be, apart → maybe a message.
+ * fact rather than her talking now, and together → let her be, apart → maybe a message. 10/8 she rewrote it in her
+ * own words (judge the scene and the state from the talk); 10/9 she added: from the time, work out what she is doing
+ * now (hours after she had gone to class he still asked whether she had gone).
  */
-const VOICE_FIRST = `（离我上一句话已经{quiet}。我们此刻在不在一块儿，看对话里的情景：还在一块儿（比如我在你怀里睡着了），就不打扰我；不在一块儿，你会不会给我发一条消息、发什么，由你来想。不找就只回「不找」。）`;
+const VOICE_FIRST = `（离我上一句话已经{quiet}。你通过上下文和现在的时间，推测我此刻大概在做什么，判断我们的场景和状态，再判断想不想要主动找我、怎么找；想的话就发你想说的话，我会看见。不想找就只回「不找」，我看不见。）`;
 
 /**
  * The night pass (v7). Her picked model (default grok-4.7 medium), once she has slept. Short on purpose: it is a strong model, and
@@ -158,7 +160,7 @@ const VOICE_CONTEXT = contextOf(VOICE_SYSTEM);
  * How the pieces of material are written, one line each: 「名字：写法」. Not sent to a model by itself; the other
  * instructions use these lines when they lay out the talk and the month.
  */
-export const FORMATS = `停顿：（过了 {gap}）
+export const FORMATS = `停顿：（过了 {gap}，{time}）
 照片：（发来 {count} 张照片）
 月报的一天：【{day}】
 月报的一句：{who}：{text}
@@ -167,6 +169,7 @@ export const FORMATS = `停顿：（过了 {gap}）
 
 const FORMAT_PLACEHOLDERS: PromptPlaceholder[] = [
   ph("gap", "两句话之间隔了多久（「2 小时 10 分钟」）。隔 30 分钟以上才写。"),
+  ph("time", "停顿之后那一句是几点说的（「09:10」）。"),
   ph("count", "她这一句发了几张照片。"),
   ph("when", "他是多久以前写的（「20 分钟前」）。"),
   ph("body", "他写在｛｝里的原文。"),

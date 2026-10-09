@@ -179,6 +179,7 @@ export async function gatherVoiceParts(input: {
     identity: input.profile.identity,
     us: us?.body.trim() ?? "",
     time,
+    timeZone: input.timeZone,
     inner: innerText,
     usWhen: us?.body.trim() && us.updatedAt ? dateClockText(us.updatedAt, input.timeZone) : "",
     maxChars: input.profile.replyMaxChars,
