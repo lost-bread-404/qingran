@@ -1048,6 +1048,30 @@ Apple: zh-CN · continuous · interimResults · maxAlternatives 3`}
               占用 {formatDbBytes(dbSize?.totalBytes ?? null)}
               {dbSize?.limitMb ? ` / ${dbSize.limitMb} MB` : ""}
             </p>
+            {/* Above the call list, which only grows (she, 10/9: at the bottom she had to scroll forever). */}
+            <details className="rounded-md bg-surface-2 px-3 py-2">
+              <summary className="min-h-11 cursor-pointer text-sm">重放对比（同一句换个人设或模型再回一次）</summary>
+              <div className="mt-2">
+                <ReplayPanel profile={profile} models={voiceModels} stats={voiceStats} />
+              </div>
+            </details>
+            <details className="rounded-md bg-surface-2 px-3 py-2">
+              <summary className="min-h-11 cursor-pointer text-sm">改动记录（人设、亲密设定、身份）</summary>
+              <div className="mt-2">
+                <ProfileHistory
+                onRestored={(next, nextRevs, field) => {
+                  if (field === "systemPrompt") personaDirty.current = false;
+                  if (field === "intimateNotes") intimateDirty.current = false;
+                  if (field === "identity") identityDirty.current = false;
+                  revsRef.current = nextRevs;
+                  rememberLoaded(next);
+                  onApply(next, nextRevs);
+                  setConflict(null);
+                  flashSaved();
+                }}
+                />
+              </div>
+            </details>
             <div className="flex flex-wrap gap-2">
               {([[null, "全部"], ...LOG_ROUTE_FILTERS] as Array<[string | null, string]>).map(([id, label]) => (
                 <button
@@ -1092,29 +1116,6 @@ Apple: zh-CN · continuous · interimResults · maxAlternatives 3`}
                 );
               })
             )}
-            <details className="mt-4 rounded-md bg-surface-2 px-3 py-2">
-              <summary className="min-h-11 cursor-pointer text-sm">改动记录（人设、亲密设定、身份）</summary>
-              <div className="mt-2">
-                <ProfileHistory
-                onRestored={(next, nextRevs, field) => {
-                  if (field === "systemPrompt") personaDirty.current = false;
-                  if (field === "intimateNotes") intimateDirty.current = false;
-                  if (field === "identity") identityDirty.current = false;
-                  revsRef.current = nextRevs;
-                  rememberLoaded(next);
-                  onApply(next, nextRevs);
-                  setConflict(null);
-                  flashSaved();
-                }}
-                />
-              </div>
-            </details>
-            <details className="rounded-md bg-surface-2 px-3 py-2">
-              <summary className="min-h-11 cursor-pointer text-sm">重放对比（同一句换个人设或模型再回一次）</summary>
-              <div className="mt-2">
-                <ReplayPanel profile={profile} models={voiceModels} stats={voiceStats} />
-              </div>
-            </details>
           </div>
         </div>
       )}
