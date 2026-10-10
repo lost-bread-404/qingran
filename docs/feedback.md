@@ -69,7 +69,7 @@ where f.rating = 'down' order by f.created_at desc limit 30;
 | 他重复同一套话、同一套哄法 | 回忆里是不是存了「怎么哄」的细节（`qr_memories`，删掉）；prompt 结尾有没有把他框住的指令（`templates.ts` 的 `VOICE_*`） |
 | 太凶 / 不该亲热的时候往床上带 | 人设和亲密设定（数据库 `qingran_profile.data` 的 `systemPrompt`、`intimateNotes`，改之前存一份到 `qr_profile_versions`）；｛｝心里话是不是又进了回忆（`memory.ts` 不该召回 `source = 'inner'`） |
 | 不走心、听不懂她、套公式 | 人设；回忆里有没有对应的「看懂的」（`kind = 'insight'`） |
-| 记错事、提起不该提的旧事 | `qr_memories` 里那一件（改正文，或删掉）；`qr_dossier`（「清然和 Rosie 现在」，改之前在 `qr_dossier_versions` 留一版） |
+| 记错事、提起不该提的旧事 | `qr_memories` 里那一件（改正文，或删掉）；`qr_dossier`（dossier，清然自己记的，改之前在 `qr_dossier_versions` 留一版） |
 | 乱安排、逼她做事 | 人设里鼓励学习那几句；回忆里那条「不喜欢被安排」还在不在 |
 | 听力：切断她、说完了还在听、听错 | 不在这里，看 `brain_log` 里 `step = 'stt'` 的那一行（`note` 里写着每句是怎么结束的），代码在 `ios/Qingran/Qingran/NativeCall.swift`、`src/routes/api/stt.ts` |
 
