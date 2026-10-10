@@ -28,8 +28,10 @@ export type VoicePackParts = {
   time: TimeFacts;
   /** Her time zone: the talk says what time it started and what time it went on after each pause. */
   timeZone?: string;
-  /** His ｛｝ notes of today (since she last slept), one per line. */
+  /** His ｛｝ notes of today (since she last slept), one per line ("" with 心里话 off). */
   inner: string;
+  /** How to use ｛｝ (innerRulesText): "" with 心里话 off. */
+  innerRules?: string;
   /** 回复最长: told to him in the prompt, never cut by the program (10/4: the cut left only his first, empty line). */
   maxChars?: number;
   /** 材料的写法 (gaps and photos in the talk). */
@@ -119,6 +121,7 @@ export function voiceVars(parts: VoicePackParts, strip: VoiceStrip = "none"): Re
     system_prompt: parts.charter.trim() || NEUTRAL_PERSONA,
     identity: parts.identity.trim(),
     characters: (parts.cast ?? "").trim(),
+    inner_rules: (parts.innerRules ?? "").trim(),
     us: strip === "none" ? parts.us.trim() : "",
     us_when: strip === "none" && parts.us.trim() ? (parts.usWhen ?? "") : "",
     clock: parts.time.clock,

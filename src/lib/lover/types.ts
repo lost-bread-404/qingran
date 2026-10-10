@@ -82,6 +82,15 @@ function lockCast(raw: { voiceCast?: string; leadVoice?: string; characters?: un
   };
 }
 
+/** 心里话 as it was in her 人设 until 10/10 (shown when she first turns it on). */
+export const DEFAULT_INNER_RULES =
+  "｛｝里只写同时满足三点的东西：上下文里没有；你得记住但不能立刻说出来；之后的对话用得上。比如游戏里选好的答案和底牌。不满足就不写，大多数回复没有｛｝。我看不到｛｝，之后每轮都会给你看。";
+
+/** How to use ｛｝ with 心里话 on; "" when it is off (the template paragraph is then not sent). */
+export function innerRulesText(profile: Pick<Profile, "innerOn" | "innerRules">): string {
+  return profile.innerOn ? profile.innerRules.trim() : "";
+}
+
 /**
  * The other people she wrote (「【林泽】 who he is」), with 其他角色 on; "" when it is off. How to play them is a line in
  * the reply instruction (设置 → 高级 → 指令), not here (10/6: she wants to see and edit it).
@@ -174,6 +183,13 @@ export type Profile = {
    * about them is sent and every line is read in 清然's voice (v7, 10/4).
    */
   castOn: boolean;
+  /**
+   * 心里话 on (人设 page): `innerRules` (how to use ｛｝) goes into the reply and what he wrote in ｛｝ today comes back
+   * to him each turn. Off: not a word about ｛｝ is sent and nothing he puts in ｛｝ is kept (10/10).
+   */
+  innerOn: boolean;
+  /** How to use ｛｝, as she wrote it (moved out of her 人设 on 10/10). */
+  innerRules: string;
   /** With the persona as the first message: his line right after it (a fixed line, no model call). */
   personaAck: string;
   /** In a call, what tapping the space left / right of the hang-up button adds to what she says (empty: nothing). */
@@ -259,6 +275,8 @@ export const DEFAULT_PROFILE: Profile = {
   characters: [],
   othersVoice: "eve",
   castOn: false,
+  innerOn: false,
+  innerRules: DEFAULT_INNER_RULES,
   personaAck: "嗯。",
   tapLeft: "嗯～",
   tapRight: "哼",
@@ -310,6 +328,8 @@ type LooseProfile = Partial<Profile> & {
   characters?: unknown;
   othersVoice?: string;
   castOn?: boolean;
+  innerOn?: boolean;
+  innerRules?: string;
   personaAck?: string;
   tapLeft?: string;
   tapRight?: string;
@@ -360,6 +380,8 @@ export function lockedProfile(input?: unknown): Profile {
     // 清然 is always eve (v7).
     leadVoice: "eve",
     castOn: raw.castOn === true,
+    innerOn: raw.innerOn === true,
+    innerRules: typeof raw.innerRules === "string" ? raw.innerRules.slice(0, 4000) : DEFAULT_INNER_RULES,
     personaAck: typeof raw.personaAck === "string" && raw.personaAck.trim() ? raw.personaAck.trim().slice(0, 200) : "嗯。",
     tapLeft: typeof raw.tapLeft === "string" ? raw.tapLeft.trim().slice(0, 200) : "嗯～",
     tapRight: typeof raw.tapRight === "string" ? raw.tapRight.trim().slice(0, 200) : "哼",

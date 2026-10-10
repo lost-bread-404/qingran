@@ -62,6 +62,8 @@ const PATCH_KEYS = [
   "characters",
   "othersVoice",
   "castOn",
+  "innerOn",
+  "innerRules",
   "personaAck",
   "tapLeft",
   "tapRight",

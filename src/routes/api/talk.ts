@@ -255,7 +255,7 @@ export const Route = createFileRoute("/api/talk")({
                   injectLine: formatVoiceInjectLine(ctx.inject),
                 }),
               });
-              if (!failed && !superseded && streamResult.innerNotes) {
+              if (!failed && !superseded && profile.innerOn && streamResult.innerNotes) {
                 const { keepInner } = await import("@/lib/lover/brain/memory");
                 await keepInner(streamResult.innerNotes, nowMs, timeZone);
               }

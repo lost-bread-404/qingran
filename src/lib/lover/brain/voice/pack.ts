@@ -1,6 +1,6 @@
 import { timeFacts } from "../heart.ts";
 import { photoNote } from "../../message-meta.ts";
-import { castText, NEUTRAL_PERSONA, personaText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
+import { castText, innerRulesText, NEUTRAL_PERSONA, personaText, voiceInjectFromProfile, type Profile, type VoiceInjectFlags } from "../../types.ts";
 import { rememberBlock, rememberCharter, type VoiceRefs } from "../log-refs.ts";
 import { getMessage, getMeta, listHistoryWindow, upsertMessage } from "../store.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
@@ -180,7 +180,8 @@ export async function gatherVoiceParts(input: {
     us: us?.body.trim() ?? "",
     time,
     timeZone: input.timeZone,
-    inner: innerText,
+    inner: input.profile.innerOn ? innerText : "",
+    innerRules: innerRulesText(input.profile),
     usWhen: us?.body.trim() && us.updatedAt ? dateClockText(us.updatedAt, input.timeZone) : "",
     maxChars: input.profile.replyMaxChars,
     formats,

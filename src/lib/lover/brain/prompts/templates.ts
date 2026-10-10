@@ -36,6 +36,8 @@ const VOICE_SYSTEM = `{identity}
 
 {system_prompt}
 
+{inner_rules}
+
 其他人物出场时另起一段，用「名字：」开头来演他。其他人物：
 {characters}`;
 
@@ -129,6 +131,7 @@ const VOICE_PLACEHOLDERS: PromptPlaceholder[] = [
   SYSTEM_PROMPT,
   IDENTITY,
   ph("characters", "「人设」页里其他角色的人设（「【林泽】……」）。其他角色关着时为空，这一段整段不发。"),
+  ph("inner_rules", "「人设」页「心里话」里写的｛｝怎么用。心里话关着时为空，这一段整段不发，｛｝也不再给他看。"),
   ph(
     "history_messages",
     "对话：她这一天的全部（从她上次睡着以后算起；清空聊天后从清空时算起），隔 30 分钟以上插一行停顿。这条消息的内容必须恰好是 {history_messages}，发送时换成真实的 user/assistant 消息。",

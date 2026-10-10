@@ -674,6 +674,15 @@ export function SettingsDrawer({ open, onOpenChange, profile, revs, callPhase = 
             ) : (
               <p className="text-xs text-subtle">关着时，所有话都用清然的声音。</p>
             )}
+            <label className="flex min-h-11 items-center justify-between gap-3">
+              <span className="font-display text-lg">心里话</span>
+              <input type="checkbox" checked={profile.innerOn} onChange={(e) => persistProfile({ innerOn: e.target.checked })} />
+            </label>
+            {profile.innerOn ? (
+              <InnerRulesBox value={profile.innerRules} onSave={(innerRules) => persistProfile({ innerRules })} />
+            ) : (
+              <p className="text-xs text-subtle">关着时不告诉他｛｝，他写了也不记。</p>
+            )}
             <VoicePanel inCall={callPhase != null} />
           </div>
         </div>
@@ -1197,5 +1206,31 @@ function AudioTracePanel() {
         {lines || "还没有。切一次后台再回来，看这里。"}
       </pre>
     </div>
+  );
+}
+
+/** 心里话: how he uses ｛｝, saved when she leaves the box. */
+function InnerRulesBox({ value, onSave }: { value: string; onSave: (next: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const editing = useRef(false);
+  useEffect(() => {
+    if (!editing.current) setDraft(value);
+  }, [value]);
+  return (
+    <Textarea
+      value={draft}
+      onFocus={() => {
+        editing.current = true;
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        editing.current = false;
+        const next = draft.trim();
+        if (next !== value.trim()) onSave(next);
+      }}
+      maxLength={4000}
+      className="min-h-28 resize-none leading-relaxed"
+      placeholder="｛｝怎么用。空着就什么都不说。"
+    />
   );
 }

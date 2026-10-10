@@ -79,7 +79,7 @@ export async function speakFirst(input: {
     braces.finish();
     const engine = engineOf(result.model);
     if (PASS.test(text)) return { text: "", passed: true, model: result.model, ms: result.ms, reason: null, engine };
-    if (text) await keepInner(braces.text(), input.nowMs, input.timeZone);
+    if (text && profile.innerOn) await keepInner(braces.text(), input.nowMs, input.timeZone);
     if (text) return { text: text.slice(0, 2000), passed: false, model: result.model, ms: result.ms, reason: null, engine };
   }
   return { text: "", passed: false, model: last.model, ms: last.ms, reason: "模型没有回话", engine: engineOf(last.model) };
