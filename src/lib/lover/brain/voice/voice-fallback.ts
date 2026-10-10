@@ -5,7 +5,18 @@ import { classifyTalkException, isRetryableEmptyTalk, TALK_FAIL, talkExceptionHi
 import { buildVoiceMessages, VOICE_STRIPS, type VoicePackParts, type VoiceStrip } from "./pack-build.ts";
 import type { VoiceChatMessage } from "../types.ts";
 import { formatVoiceLogNote, type VoiceAttemptNote, type VoiceModelFallbackNote } from "./voice-log-note.ts";
-import { sameVoicePick, type VoiceModelPick } from "../config.ts";
+import { sameVoicePick, voiceBusyPick, type VoiceModelPick } from "../config.ts";
+
+/**
+ * xAI at capacity (10/10 14:00: 「The model is currently at capacity」 four times in two seconds, each answered with a
+ * beep): the request is fine, so taking out the dossier or the talk does nothing. Wait and ask again, then ask a
+ * model with its own capacity (grok-4.3 「不想」), then once more after a longer wait.
+ */
+const BUSY_STEPS: Array<{ waitMs: number; other: boolean }> = [
+  { waitMs: 800, other: false },
+  { waitMs: 0, other: true },
+  { waitMs: 2500, other: false },
+];
 
 export { formatVoiceLogNote };
 export type { VoiceAttemptNote, VoiceModelFallbackNote };
@@ -247,6 +258,22 @@ export async function runVoiceWithFallback(
     const safetyAvailable = !safetyTried && !sameVoicePick(data.primary, data.safety);
     let out = await runOnce(model, strip, messages, lastStrip && !safetyAvailable);
     if (out.spoken && !out.failMessage) return ok(out, strip, messages);
+    if (out.result.busy && !out.spoken) {
+      for (const step of BUSY_STEPS) {
+        if (step.waitMs) await new Promise((resolve) => setTimeout(resolve, step.waitMs));
+        const pick = step.other ? voiceBusyPick(model) : model;
+        out = await runOnce(pick, strip, messages, false);
+        if (out.spoken && !out.failMessage) {
+          if (step.other) modelFallback = { from: pickLabel(model), to: pickLabel(pick), reason: "busy" };
+          return ok(out, strip, messages);
+        }
+        if (!out.result.busy) break;
+      }
+      // Done here either way: the dossier and talk retries below are for refusals, and they would run the busy
+      // steps again.
+      const message = out.result.busy ? TALK_FAIL.busy : out.failMessage ?? TALK_FAIL.empty;
+      return giveUp({ ...out, failMessage: message, heldErr: out.result.busy ? { t: "err", m: message } : out.heldErr ?? { t: "err", m: message } }, strip, messages);
+    }
 
     const currentEmpty = emptyRetryable(out.result, out.spoken);
     if (safetyAvailable) {

@@ -316,6 +316,12 @@ export function voiceSafetyPick(): VoiceModelPick {
   return resolveVoiceChat("grok-4.20-0309-reasoning", null);
 }
 
+/** When her model is at capacity: a model with its own capacity, as quick as it gets (grok-4.3 without thinking). */
+export function voiceBusyPick(current: VoiceModelPick): VoiceModelPick {
+  const other = current.model === "grok-4.3" ? "grok-4.20-0309-non-reasoning" : "grok-4.3";
+  return resolveVoiceChat(other, other === "grok-4.3" ? "none" : null);
+}
+
 export function sameVoicePick(a: VoiceModelPick, b: VoiceModelPick): boolean {
   return a.model === b.model && a.effort === b.effort;
 }

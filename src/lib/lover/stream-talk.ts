@@ -89,7 +89,19 @@ export type TalkStreamResult = {
   innerNotes?: string;
   /** Who paid: her SuperGrok subscription or the API key. */
   paidBy?: "sub" | "api";
+  /** xAI said the model is at capacity (resource-exhausted): nothing wrong with the request. */
+  busy?: boolean;
 };
+
+/** xAI sends 「The model is currently at capacity」 as an error event inside a 200 stream (10/10 14:00). */
+function isBusyError(json: unknown): boolean {
+  const err = (json && typeof json === "object" ? (json as { error?: unknown }).error : null) as
+    | { code?: unknown; type?: unknown; message?: unknown }
+    | null
+    | undefined;
+  if (!err || typeof err !== "object") return false;
+  return err.code === "resource-exhausted" || /at capacity/i.test(String(err.message ?? ""));
+}
 
 function emptyResult(partial: Partial<TalkStreamResult> = {}): TalkStreamResult {
   return {
@@ -144,6 +156,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   let usage: TalkStreamResult["usage"] = null;
   let status: number | null = null;
   let finishReason: string | null = null;
+  let busy = false;
   const otherParts: string[] = [];
   let sseBytes = 0;
   let sseChunks = 0;
@@ -319,6 +332,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
     }
     const obj = json as { usage?: TalkStreamResult["usage"] };
     if (obj.usage) usage = obj.usage;
+    if (isBusyError(json)) busy = true;
     const { token, finishReason: nextReason } = takeTalkDelta(json);
     if (nextReason) finishReason = nextReason;
     const described = describeNonTextTalkEvent(json);
@@ -403,6 +417,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
         chars: 0,
         otherEvents,
         innerNotes,
+        busy,
       };
     }
     emit({ t: "text_end", speech });
@@ -421,6 +436,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
       chars: speech.length,
       otherEvents,
       innerNotes,
+      busy,
     };
   }
   emit({ t: "text_end", speech });

@@ -6,7 +6,7 @@
 
 ## 白天：她选的模型回每一句
 
-「设置 → 回复 → 白天谁回你」：Claude 或 Grok 任选一个，加强度；每个模型后面是过去 90 天每句的平均用时。选中的模型没回话时，Grok 推理版补上。Claude 的回复写完一起发、一起念；Opus 5.5 不能关掉思考。
+「设置 → 回复 → 白天谁回你」：Claude 或 Grok 任选一个，加强度；每个模型后面是过去 90 天每句的平均用时。选中的模型没回话时，Grok 推理版补上。xAI 说「model is currently at capacity」（10/10 14:00 起，200 的流里只有一条 error）时不走去掉 dossier / 对话那几次重试（请求本身没问题）：等 0.8 秒再问同一个模型，再问 grok-4.3「不想」（另一份容量；她选的就是 grok-4.3 时换 4.20 不思考），再等 2.5 秒问一次；都挤就告诉她「xAI 这会儿太挤了」（`voice-fallback.ts`）。Claude 的回复写完一起发、一起念；Opus 5.5 不能关掉思考。
 
 每轮发给它的（`src/lib/lover/brain/voice/pack.ts`、`pack-build.ts`、模板 `prompts/templates.ts` 的 voice）：
 

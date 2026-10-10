@@ -5,6 +5,7 @@ export const TALK_FAIL = {
   network: "线路有点不稳",
   empty: "她没说出话（空回复）",
   tts: "声音出不来",
+  busy: "xAI 这会儿太挤了，过一会儿再说",
 } as const;
 
 export type TalkExceptionKind = "timeout" | "network" | "other";
