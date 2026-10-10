@@ -63,6 +63,7 @@ export const brainReplayCompare = createServerFn({ method: "POST" })
   .validator((input: {
     userMsgId?: string;
     persona?: string;
+    intimate?: string;
     placement?: string;
     model?: string;
     effort?: string | null;
@@ -82,6 +83,7 @@ export const brainReplayCompare = createServerFn({ method: "POST" })
     return runReplay({
       userMsgId: String(data.userMsgId ?? ""),
       bPersona: String(data.persona ?? ""),
+      bIntimate: String(data.intimate ?? ""),
       bPlacement: data.placement === "first_user" ? "first_user" : "system",
       bModel: String(data.model ?? ""),
       bEffort: effort,

@@ -31,6 +31,7 @@ export function ReplayPanel({ profile, models, stats }: { profile: Profile; mode
   const [day, setDay] = useState("");
   const [days, setDays] = useState<Array<{ day: string; count: number }>>([]);
   const [persona, setPersona] = useState("");
+  const [intimate, setIntimate] = useState("");
   const [placement, setPlacement] = useState<Profile["personaPlacement"]>(profile.personaPlacement);
   const [model, setModel] = useState(profile.voiceModel);
   const [effort, setEffort] = useState<VoiceEffort>(profile.voiceEffort);
@@ -76,7 +77,7 @@ export function ReplayPanel({ profile, models, stats }: { profile: Profile; mode
     setError(null);
     try {
       const res = await brainReplayCompare({
-        data: { userMsgId, persona, placement, model, effort },
+        data: { userMsgId, persona, intimate, placement, model, effort },
       });
       setA(res.a);
       setB(res.b);
@@ -139,6 +140,15 @@ export function ReplayPanel({ profile, models, stats }: { profile: Profile; mode
           onChange={(e) => setPersona(e.target.value)}
           className="min-h-36 font-mono text-sm"
           placeholder="贴另一份人设。空着就用现在这份。"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-sm">B 的亲密设定</span>
+        <Textarea
+          value={intimate}
+          onChange={(e) => setIntimate(e.target.value)}
+          className="min-h-28 font-mono text-sm"
+          placeholder="贴另一份亲密设定。空着就用现在这份。"
         />
       </label>
       <div className="flex flex-col gap-2">

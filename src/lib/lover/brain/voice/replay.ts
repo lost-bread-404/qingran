@@ -101,6 +101,8 @@ function sideFrom(result: CallModelResult, placement: Profile["personaPlacement"
 export async function runReplay(opts: {
   userMsgId: string;
   bPersona: string;
+  /** Another 亲密设定 for B ("" = the current one). */
+  bIntimate?: string;
   bPlacement: Profile["personaPlacement"];
   bModel: string;
   bEffort: Effort;
@@ -115,7 +117,7 @@ export async function runReplay(opts: {
       userMsgId: opts.userMsgId,
       charter: opts.bPersona.trim() || charter,
       placement: opts.bPlacement,
-      profile,
+      profile: opts.bIntimate?.trim() ? { ...profile, intimateNotes: opts.bIntimate.trim() } : profile,
     }),
   ]);
   // Each side gets an effort its model takes (grok-4.3 「不想」 is none, which other models reject) and the time the
