@@ -43,7 +43,7 @@ const VOICE_NOW = `现在是{clock}。
 
 我上一次说话是 {last_said}，距现在 {since_last}。
 
-这一条回复不超过 {max_chars} 字（旁白和说的话一起算），想好了再说，把最要紧的说完。
+这一条回复不超过 {max_chars} 字（旁白和说的话一起算）。
 
 你写在｛｝里的（括号里是多久以前）：
 {inner}`;
