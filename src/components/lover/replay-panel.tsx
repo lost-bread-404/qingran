@@ -18,6 +18,7 @@ type Side = {
   error: string | null;
   model: string;
   placement: string;
+  cut?: string[];
 };
 
 /**
@@ -221,6 +222,7 @@ function SideCard({ title, side, open }: { title: string; side: Side; open: bool
       </p>
       {side.error ? <p className="text-xs text-live">{side.error}</p> : null}
       <p className="whitespace-pre-wrap text-sm leading-relaxed">{side.speech || "（没有正文）"}</p>
+      {side.cut?.length ? <p className="text-xs text-muted">硬规则去掉了：{side.cut.join(" / ")}</p> : null}
       {open ? (
         <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[10px]">
           {side.innerJson ? side.innerJson : "重放只比较说出来的话。"}

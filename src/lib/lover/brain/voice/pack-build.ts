@@ -1,4 +1,5 @@
 import { HISTORY_WINDOW } from "../config.ts";
+import { applyHardLimit } from "./hard-limit.ts";
 import { fillParagraphs, parsePromptBody, renderPromptMessages, variantMessages } from "../prompts/doc.ts";
 import type { StoredMessage, VoiceChatMessage } from "../types.ts";
 import { modelFacingText } from "../../message-meta.ts";
@@ -102,9 +103,11 @@ export function voiceHistoryMessages(
       };
       return;
     }
+    // His old lines go through her hard rule too (hard-limit.ts): what he said before is what he copies next.
+    const text = modelFacingText(message, f);
     out.push({
       role: message.role === "assistant" ? "assistant" : "user",
-      content: modelFacingText(message, f),
+      content: message.role === "assistant" ? applyHardLimit(text).text || "……" : text,
       ...(images?.length ? { images } : {}),
     });
   });

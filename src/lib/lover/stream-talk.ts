@@ -17,6 +17,7 @@ import {
 import { recordTtsSpend } from "./brain/spend/check";
 import { xaiCreds, xaiFetch, type XaiCred } from "./xai-auth";
 import { BraceCut } from "./brain/voice/brace-cut";
+import { HardLimit } from "./brain/voice/hard-limit";
 import { VoiceLeveler } from "./voice-level";
 import { withPhotos } from "./photos";
 import { claudeBody, claudeFetch, claudeFinish, claudeUsage, isClaudeModel, CLAUDE_TIMEOUT_MS } from "./claude";
@@ -263,6 +264,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   /** Everything shown and spoken (his ｛｝ notes are taken out by `braces`). */
   let spoken = "";
   const braces = new BraceCut();
+  /** Her hard rule (hard-limit.ts): a clause saying she is wet never reaches her. */
+  const limit = new HardLimit();
   /**
    * Claude's words come in bursts with pauses between them; streamed as they came, his voice ran dry between bursts
    * and the words jumped (10/4: 「一卡一卡的」). Its reply is short and quick to finish once it starts, so it goes out
@@ -290,7 +293,7 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
 
   const ingestToken = (token: string) => {
     if (!token) return;
-    const out = braces.push(token);
+    const out = limit.push(braces.push(token));
     if (claude) held += out;
     else emitVisible(out);
   };
@@ -368,7 +371,8 @@ export async function runTalkStream(data: TalkStreamInput, emit: Emit): Promise<
   buf += decoder.decode();
   drainBuf(true);
   braces.finish();
-  if (claude) emitVisible(held);
+  if (claude) emitVisible(held + limit.finish());
+  else emitVisible(limit.finish());
   const speech = spoken.trim();
   const innerNotes = braces.text();
 

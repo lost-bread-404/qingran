@@ -19,6 +19,7 @@ import {
   listUserLinesOfDay,
 } from "../store.ts";
 import { BraceCut } from "./brace-cut.ts";
+import { applyHardLimit } from "./hard-limit.ts";
 import { applyProfilePatch } from "../../profile-patch.ts";
 import { buildVoiceMessages } from "./pack-build.ts";
 
@@ -28,6 +29,8 @@ export type ReplaySide = {
   error: string | null;
   model: string;
   placement: "system" | "first_user";
+  /** What her hard rule took out (hard-limit.ts), so she can see it held. */
+  cut: string[];
 };
 
 type Complete = typeof callModel;
@@ -85,7 +88,8 @@ function emptyReason(raw: unknown): string {
 
 function sideFrom(result: CallModelResult, placement: Profile["personaPlacement"]): ReplaySide {
   const braces = new BraceCut();
-  const speech = braces.push(result.text || "").trim();
+  const limited = applyHardLimit(braces.push(result.text || ""));
+  const speech = limited.text;
   braces.finish();
   return {
     speech,
@@ -94,6 +98,7 @@ function sideFrom(result: CallModelResult, placement: Profile["personaPlacement"
     error: !result.ok ? result.failKind || "error" : speech ? null : `没有正文（${emptyReason(result.raw)}）`,
     model: result.model,
     placement,
+    cut: limited.cut,
   };
 }
 

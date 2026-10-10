@@ -3,6 +3,7 @@ import { callModel } from "../llm.ts";
 import { getProfileData } from "../store.ts";
 import { keepInner } from "../memory.ts";
 import { resolveTalkProfile } from "../../talk-profile.ts";
+import { applyHardLimit } from "./hard-limit.ts";
 import { BraceCut } from "./brace-cut.ts";
 import { buildVoiceMessages } from "./pack-build.ts";
 import { engineOf, type Engine } from "../../claude.ts";
@@ -74,7 +75,7 @@ export async function speakFirst(input: {
     last = { model: result.model, ms: result.ms };
     if (!result.ok) continue;
     const braces = new BraceCut();
-    const text = braces.push(result.text).trim();
+    const text = applyHardLimit(braces.push(result.text)).text;
     braces.finish();
     const engine = engineOf(result.model);
     if (PASS.test(text)) return { text: "", passed: true, model: result.model, ms: result.ms, reason: null, engine };
