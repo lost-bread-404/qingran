@@ -1,6 +1,6 @@
 import { callModel, type CallModelResult } from "./llm.ts";
 import { now } from "./clock.ts";
-import { clampVoiceEffort, type Effort } from "./config.ts";
+import { clampVoiceEffort, DOSSIER_MAX_CHARS_MAX, type Effort } from "./config.ts";
 import { isClaudeModel } from "../claude.ts";
 import { appendInnerLog, getMeta, getProfileData, patchBrainLog, sql } from "./store.ts";
 import { resolveTz } from "./tz.ts";
@@ -172,7 +172,9 @@ export async function runNight(upto: number, jobId?: string, opts: { dossierOnly
   if (grokNext) await setMark(NIGHT_GROK, "", at);
   if (slow) await setMark(NIGHT_SLOW, "", at);
   const day = localDay(from, tz);
-  await publishMemory(dossier.slice(0, profile.dossierMaxChars + 100), "night", upto, { upto, dossierOnly: Boolean(opts.dossierOnly) });
+  // Kept whole: cutting at the limit left it ending mid-sentence (10/10, at 1100 of a 1000 limit). The limit is in the
+  // instruction; a dossier somewhat over it is better than half a line. Only a runaway answer is cut.
+  await publishMemory(dossier.slice(0, DOSSIER_MAX_CHARS_MAX * 2), "night", upto, { upto, dossierOnly: Boolean(opts.dossierOnly) });
   if (legacy) await setMark(LEGACY_FOLDED, String(at), at);
   if (!opts.dossierOnly) {
     const complaints = (tag(result.text, "feedback") ?? "")
