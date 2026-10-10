@@ -1,5 +1,6 @@
 import { parseAcousticTags, stripAcousticTags, type AcousticTags } from "./hearing/tags.ts";
 import { DEFAULT_FORMATS, fmt, type Formats } from "./brain/prompts/formats.ts";
+import { cleanSpeechTags } from "./speech-tags.ts";
 import type { ChatMessage, MessageKind } from "./types";
 
 /**
@@ -141,9 +142,16 @@ export function photoNote(count: number, f: Formats = DEFAULT_FORMATS): string {
   return count ? fmt(f, "photo", { count }) : "";
 }
 
-/** A message as the models read it: her words without hearing marks, with a note when she sent photos. */
-export function modelFacingText(msg: { text: string; meta?: MessageMeta }, f: Formats = DEFAULT_FORMATS): string {
-  return `${photoNote(msg.meta?.images?.length ?? 0, f)}${stripAcousticTags(msg.text).trim()}`;
+/**
+ * A message as the models read it: her words without hearing marks, with a note when she sent photos; his replies
+ * with only the speech tags Eve reads, so a made-up one stored in an old reply is not copied again.
+ */
+export function modelFacingText(
+  msg: { text: string; meta?: MessageMeta; role?: string },
+  f: Formats = DEFAULT_FORMATS,
+): string {
+  const words = msg.role === "assistant" ? cleanSpeechTags(stripAcousticTags(msg.text)) : stripAcousticTags(msg.text);
+  return `${photoNote(msg.meta?.images?.length ?? 0, f)}${words.trim()}`;
 }
 
 /**

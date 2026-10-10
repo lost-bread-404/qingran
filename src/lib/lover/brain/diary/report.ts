@@ -36,7 +36,7 @@ export async function loadMonthDialogue(month: string, f: Formats = DEFAULT_FORM
     .map((row) => ({
       day: String(row.local_day ?? ""),
       role: row.role === "assistant" ? ("assistant" as const) : ("user" as const),
-      text: modelFacingText(fromStored(row.body, row.meta), f).replace(/\s+/g, " ").trim(),
+      text: modelFacingText({ ...fromStored(row.body, row.meta), role: row.role }, f).replace(/\s+/g, " ").trim(),
     }))
     .filter((row) => row.day && row.text);
 }

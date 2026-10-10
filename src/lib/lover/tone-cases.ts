@@ -6,16 +6,10 @@
 const LINE_A = "姐姐抱着你，哪儿都不去。";
 const LINE_B = "睡吧。";
 
+import { INLINE_TAGS as INLINE, WRAP_TAGS as WRAP } from "./speech-tags";
+
 export type ToneCase = { id: string; how: string; mode: "http" | "ws"; parts: string[] };
 
-const INLINE = [
-  "pause", "long-pause", "hum-tune", "laugh", "chuckle", "giggle", "cry",
-  "tsk", "tongue-click", "lip-smack", "breath", "inhale", "exhale", "sigh",
-];
-const WRAP = [
-  "soft", "whisper", "loud", "build-intensity", "decrease-intensity",
-  "higher-pitch", "lower-pitch", "slow", "fast", "sing-song", "singing", "emphasis",
-];
 
 export const TONE_CASES: ToneCase[] = [
   { id: "plain", how: "没有标签", mode: "http", parts: [LINE_A + LINE_B] },

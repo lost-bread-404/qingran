@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import { applyAvailabilityFallback, checkModelAvailability, resolveRoute, VOICE_IO, type Effort } from "./brain/config";
 import { shouldFlushSpoken, ttsSpeed } from "./tts";
+import { cleanSpeechTags, endsInOpenTag } from "./speech-tags";
 import { SpeakerCut, type Cast } from "./cast";
 import { PCM_MIME, speakWhole } from "./speak";
 import type { VoiceChatMessage } from "./brain/types";
@@ -494,7 +495,7 @@ class VoiceChain {
       });
     }
     seg.pending += text;
-    if (shouldFlushSpoken(seg.pending, seg.first)) {
+    if (!endsInOpenTag(seg.pending) && shouldFlushSpoken(seg.pending, seg.first)) {
       seg.tts.push(seg.pending);
       seg.pending = "";
       seg.first = false;
@@ -633,7 +634,7 @@ class LiveTts {
   }
 
   push(text: string) {
-    const spoken = text.replace(/\r/g, "").trim();
+    const spoken = cleanSpeechTags(text.replace(/\r/g, "")).trim();
     if (!spoken || this.failed || this.closed) return;
     this.chars += spoken.length;
     if (!this.opened) {
